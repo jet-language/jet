@@ -198,7 +198,7 @@ struct JetCLIProveStop {
 fn jet_cli_prove_run(target: JetCLIProveTarget, lenses: [String], capture: JetCLIProveCapture?, replay: String?, color: Bool, json: Bool) -> JetDriverVerbOutput {
     cwd :: cli_sys.current_dir() ?? return jet_cli_prove_refused(jet_cli_prove_target_refusal("couldn't resolve the current directory: {jet_cli_io_error_text(err)}"), color, json)
     members :: jet_cli_prove_members(target) ?? return jet_cli_prove_refused(err, color, json)
-    groups :: jet_cli_prove_groups(members, color) ?? return err.output
+    groups :: jet_cli_prove_groups(members, color, json) ?? return err.output
     identity :: jet_cli_prove_identity(target, members, groups) ?? return jet_cli_prove_refused(err, color, json)
     if jet_cli_prove_artifact_folders_safe(identity.authority_root, jet_cli_prove_artifact_parts(identity)) == .Err(refusal) -> return jet_cli_prove_refused(refusal, color, json)
     front :: jet_cli_prove_front(identity, members, groups, cwd)
@@ -331,7 +331,8 @@ fn jet_cli_prove_budgets(identity: JetCLIProveIdentity, members: [JetCLIProveMem
 
 // One check compile per member no earlier compile covered. A compile covers
 // every member its source snapshot authorized, so a package compiles once.
-fn jet_cli_prove_groups(members: [JetCLIProveMember], color: Bool) -> [JetCLIProveGroup] JetCLIProveStop! {
+// A member that lowers its Package root's claims floor stops the run.
+fn jet_cli_prove_groups(members: [JetCLIProveMember], color: Bool, json: Bool) -> [JetCLIProveGroup] JetCLIProveStop! {
     groups := [JetCLIProveGroup]{}
     owned := loop _ in members -> false
     loop (index, member) in members {
@@ -356,7 +357,12 @@ fn jet_cli_prove_groups(members: [JetCLIProveMember], color: Bool) -> [JetCLIPro
                     owned[other] = true
                     if jet_cli_prove_collect_tests(candidate, parse_source(candidate.source.bytes()).program.items, &sites) -> has_tests = true
                 }
-                &groups.push(JetCLIProveGroup{entry: index, diagnostics: diagnostics, files: files, has_tests: has_tests, sites: sites, floor: jet_cli_test_claims_floor(snapshot.roots[0])})
+                floor := ClaimsGrade?{None}
+                if jet_cli_test_claims_floor(snapshot.roots[0]) == {
+                    .Ok(found) -> floor = found
+                    .Err(error) -> return Err(JetCLIProveStop{output: jet_cli_diagnostics_output(member.path, member.source, error.diagnostic, color, json, "")})
+                }
+                &groups.push(JetCLIProveGroup{entry: index, diagnostics: diagnostics, files: files, has_tests: has_tests, sites: sites, floor: floor})
             }
         }
     }

@@ -5,7 +5,7 @@
 use {
     jet_foundation.[evidence_report_read, sha256_hex]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_pkg_model.[ClaimsGrade, ClaimsProjection, PackageFacts, WorkspaceDeclarationCache]
+    jet_pkg_model.[ClaimsGrade, ClaimsProjection, ManifestError, PackageFacts, WorkspaceDeclarationCache]
     cli_files :: core.files
     cli_sys :: core.sys
     claims_crypto :: core.crypto
@@ -28,13 +28,10 @@ struct JetCLIClaimsGradeView {
     }
 }
 
-// `file`'s claims grade. Evidence is indexed by the SHA-256 of the source
-// it ran, so a report of an older source never grades the current one.
-fn jet_cli_inspect_claims_grade(file: String, root: String) -[FS, Env, Time]> JetCLIClaimsGradeView Never! {
-    floor := ClaimsGrade?{None}
-    if cli_files.read("{root}/package.jet") == .Ok(text) {
-        if PackageFacts.parse_uncomposed(text, "{root}/package.jet") == .Ok(facts) -> floor = facts.policy.claims_min.copy()
-    }
+// `file`'s claims grade against `floor`. Evidence is indexed by the SHA-256
+// of the source it ran, so a report of an older source never grades the
+// current one.
+fn jet_cli_inspect_claims_grade(file: String, floor: ClaimsGrade?) -[FS, Env, Time]> JetCLIClaimsGradeView Never! {
     view :: JetCLIClaimsGradeView{grade: ClaimsGrade.Unchecked, failed: false, report: None, floor: floor.copy()}
     bytes :: cli_files.read_bytes(file) ?? return view
     revision :: claims_crypto.sha256(bytes).hex()
@@ -54,6 +51,14 @@ fn jet_cli_inspect_claims_grade(file: String, root: String) -[FS, Env, Time]> Je
     report :: evidence_report_read(jet_cli_entry_join(project, entry.path)) ?? return view
     projection :: ClaimsProjection.from_records(report.records)
     JetCLIClaimsGradeView{grade: projection.grade.copy(), failed: projection.failed, report: Val(entry.artifact_id.copy()), floor: floor}
+}
+
+// The package's `policy.claims.min`, held to its Package root's as `jet test`
+// holds it.
+fn jet_cli_inspect_claims_floor(root: String) -[FS, Env]> ClaimsGrade? ManifestError! {
+    text :: cli_files.read("{root}/package.jet") ?? return Ok(None)
+    facts :: PackageFacts.parse_uncomposed(text, "{root}/package.jet") ?? return Ok(None)
+    jet_cli_member_claims_floor(cli_files.realpath(root) ?? root, facts)
 }
 
 fn jet_cli_claims_grade_json(view: JetCLIClaimsGradeView) -> JetCLIStatusValue Never! {
@@ -486,7 +491,12 @@ fn jet_cli_inspect_claims_manifest(file: String, json: Bool, color: Bool) -[FS, 
     relation_status :: jet_cli_status_string(jet_cli_status_get(relation, "status")) ?? "unavailable"
     relation_ready :: relation_status == "available" && jet_cli_claim_candidate_evidence(relation)
     release_ready :: JET_CLI_RELEASE_POLICY_ACTIVE && JET_CLI_RELEASE_READINESS == "ready" && relation_ready
-    grade :: jet_cli_inspect_claims_grade(file, root)
+    floor := ClaimsGrade?{None}
+    if jet_cli_inspect_claims_floor(root) == {
+        .Ok(found) -> floor = found
+        .Err(error) -> return JetCLIPlan.Refused{report: error.diagnostic, color: color, exit_code: JET_DRIVER_EXIT_USER_ERROR, notice: ""}
+    }
+    grade :: jet_cli_inspect_claims_grade(file, floor)
     if json {
         release :: jet_cli_status_object(
         [JetCLIStatusField]{

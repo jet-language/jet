@@ -3,6 +3,7 @@
 // report of the run's test records, the `jet.status/v1` line `--json` writes,
 // and the optional `.jet/evidence` history entry.
 use {
+    cli_files :: core.files
     cli_process :: core.process
     cli_sys :: core.sys
     cli_time :: core.time
@@ -18,7 +19,7 @@ use {
         evidence_record_from_test_codes, evidence_record_new, evidence_record_set_expectation, evidence_report_add_record_with_derivation,
         evidence_report_encode, evidence_report_json, evidence_report_new, evidence_report_write, evidence_stable_token, diagnostic_from_registry, diagnostic_stop_parse,
     ]
-    jet_pkg_model.[ClaimsGrade, ClaimsProjection, WorkspaceDeclarationCache]
+    jet_pkg_model.[ClaimsGrade, ClaimsProjection, ManifestError, PackageFacts, WorkspaceDeclarationCache]
 }
 
 // The first `Stop [CODE]: message` of a failed test's stderr and the
@@ -144,10 +145,35 @@ fn jet_cli_test_claim(test: JetNativeTestCase, facts: [TTestFact], doctests: [Je
     JetCLITestClaim{kind: kind, file: file.copy(), line: U32{0}, mismatch: None}
 }
 
-// The tested root's `policy.claims.min` floor, if it declares one.
-fn jet_cli_test_claims_floor(root: JetDriverAuthorizedSourceRoot) -> ClaimsGrade? Never! {
-    facts :: jet_cli_root_package_facts(root) ?? return None
-    facts.policy.claims_min
+// The tested root's `policy.claims.min` floor (D-GRADE-POLICY1=A). Like
+// `contain` and `harden` it is package-only and only tightens: a member of a
+// Package root with `members:` inherits the root's floor when it sets none and
+// may raise it, and a member that lowers it is E1215.
+fn jet_cli_test_claims_floor(root: JetDriverAuthorizedSourceRoot) -[FS, Env]> ClaimsGrade? ManifestError! {
+    facts :: jet_cli_root_package_facts(root) ?? return Ok(None)
+    jet_cli_member_claims_floor(root.canonical_path, facts)
+}
+
+// The floor of the package `facts` at `dir`, held to its Package root's.
+fn jet_cli_member_claims_floor(dir: String, facts: PackageFacts) -[FS, Env]> ClaimsGrade? ManifestError! {
+    own :: facts.policy.claims_min.copy()
+    // A Package root has no root above it: members cannot nest.
+    if facts.members.len() > 0 -> return Ok(own)
+    // A malformed root is its load's own diagnostic; the floor stays the
+    // member's until that root parses.
+    cache := WorkspaceDeclarationCache.new()
+    owner_dir :: jet_cli_find_workspace_root_checked(&cache, dir) ?? return Ok(own)
+    manifest :: "{owner_dir}/package.jet"
+    text :: cli_files.read(manifest) ?? return Ok(own)
+    owner :: PackageFacts.parse_uncomposed(text, manifest) ?? return Ok(own)
+    if owner.members.len() == 0 -> return Ok(own)
+    prefix :: "{owner_dir}/"
+    relative :: dir.removeprefix(prefix)
+    member :: "{relative}/package.jet"
+    if owner.policy.member_claims_floor(facts.policy) == {
+        .Ok(floor) -> Ok(floor)
+        .Err(error) -> Err(ManifestError{diagnostic: diagnostic_from_registry("E1215", None, "member `{member}` lowers its Package root's claims floor", "{error.message}: the root `package.jet` sets the floor for every member, and a member may raise it but never lower it", "raise this member's `policy.claims.min` to at least the root's, or remove it to inherit the root's floor")})
+    }
 }
 
 // Whether this run hands its report to a `jet prove` parent, which holds the

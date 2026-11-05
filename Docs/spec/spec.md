@@ -3787,6 +3787,13 @@ only when the solver proves every obligation it found; its ProofReport carries
 claims` shows the grade of the newest `.jet/evidence` report for the target's
 current source, the floor, and whether it is met.
 
+Like `contain` and `harden`, the floor is a package-only key with no
+`#Policy` mirror (`#Policy(claims)` is E0355), and it only tightens. A member
+of a Package root with `members:` inherits the root's floor when it sets none
+and may raise it; a member whose `claims.min` is below the root's is E1215 in
+`jet test`, `jet prove` and `jet inspect claims`. No organization scope holds
+a floor.
+
 A fenced ```` ```jet ```` block in a `///` doc comment is a doctest: a claim
 named `doctest at <file>:<fence line>` in the same harness, compiled after the
 file's own items so it can call them. Its lines run in order; each

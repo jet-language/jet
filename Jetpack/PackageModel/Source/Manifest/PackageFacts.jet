@@ -358,6 +358,16 @@ struct PackagePolicy {
         }
     }
 
+    // The claims floor a member of this root runs under (D-GRADE-POLICY1):
+    // the root's when the member sets none, the member's when it meets or
+    // raises the root's. A member may never lower the root's floor.
+    fn member_claims_floor(self, member: PackagePolicy) -> ClaimsGrade? PolicyTightenError! {
+        current :: self.claims_min ?? return Ok(member.claims_min)
+        candidate :: member.claims_min ?? return Ok(Val(current))
+        if !candidate.meets(current) -> return Err(PolicyTightenError{message: "`policy.claims.min` cannot weaken from `{current.render()}` to `{candidate.render()}`"})
+        Ok(Val(candidate))
+    }
+
     // The effective fenced set for the package dependency graph.
     fn contained_dependencies(self, dependencies: [String]) -> [String] Never! {
         if !self.harden -> return self.contain

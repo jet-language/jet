@@ -138,6 +138,7 @@ use {
     jet_plugin.[jet_plugin_link]
     jet_sema.[SemaCheckedForeignFunction, sema_no_run_diagnostic, sema_user_template_ct_value]
     jet_pkg_model.[
+        ClaimsGrade,
         ManifestEntry,
         PackageFacts,
         pkg_format_source,
@@ -1637,6 +1638,15 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing the tests of `{file}`")
     root :: snapshot.roots[0].canonical_path
     if jet_cli_build_option_gate_refusal(root, options.build, color) == .Val(refused) -> return refused
+    // A member that lowers its Package root's claims floor stops before the
+    // harness builds. A `jet prove` child leaves the floor to its parent.
+    floor := ClaimsGrade?{None}
+    if measure == None && !jet_cli_test_handoff() {
+        if jet_cli_test_claims_floor(snapshot.roots[0]) == {
+            .Ok(found) -> floor = found
+            .Err(error) -> return jet_cli_diagnostics_output(file, source, error.diagnostic, color, options.json, "")
+        }
+    }
     build_dir :: "{root}/.jet/build"
     cli_files.create_dir_all(build_dir) ?? return jet_cli_build_failed("couldn't create the build directory {build_dir}: {err}", jet_cli_why("E2105"), "check that the project directory is writable", color)
     // Process-private: concurrent `jet test` runs of one file never replace
@@ -1736,7 +1746,6 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     stdout :: if show -> ran.output else -> ran.receipt.output
     stderr :: if show -> ran.errors else -> ran.receipt.errors
     if measure == None {
-        floor :: if jet_cli_test_handoff() -> None else -> jet_cli_test_claims_floor(snapshot.roots[0])
         outcome :: jet_cli_test_outcome(file, source, options.build, wires, claims, run.contracts, passed, floor) ?? return jet_cli_ice(err.message)
         notice :: jet_cli_test_persist(outcome.report)
         below := ""
