@@ -1687,7 +1687,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             member :: ir_member_of(&m, p, b, base, field.name) ?? return ir_fail_slot(&b, span, "field {field.name} of {ir_type_name(receiver_type)}")
             read :: ir_member_read(&m, &b, base, member)
             ir_close_note(&m, p, &b, read, base, IRPartStep{selector: -1, offset: member.offset})
-            return read
+            return ir_end_field_receiver(&m, p, &b, base, read, span)
         }
         .SharedGuardValue(guard) -> return ir_shared_guard_value(&m, p, &b, expression_ty, guard, span)
         .SharedGuardMap(guard, path, _) -> return ir_shared_guard_map(&m, p, &b, expression_ty, guard, path, span)

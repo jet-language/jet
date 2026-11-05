@@ -1395,6 +1395,28 @@ fn ir_close_temporary(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span
     ir_hold_statement_guard(&b, slot, glue, drops)
 }
 
+// `read` is a field of `base`, a fresh temporary (`make().rows.len()`), and
+// the temporary ends once the field is read. At the top level of the
+// statement being built it is held until the statement ends (ir_stmt) or an
+// early exit leaves it (ir_exit_statement_guards). Anywhere else the field
+// is copied out (ir_copy_value) and the temporary dropped now. A temporary
+// that closes, and a field with a drop and no clone, which a read moves
+// out, are not ended here.
+fn ir_end_field_receiver(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, read: Int, span: Span) -> Int Never! {
+    if read < 0 || !b.fresh[base] || !ir_has_drop(m, b, base) || b.views.get(base) != None || ir_lent(b, base) -> return read
+    if ir_has_drop(m, b, read) && ir_row_lacks_clone(&m, p, b.f.slot_type[read]) -> return read
+    if ir_close_glue(&m, p, &b, b.f.slot_type[base], false, span) >= 0 || ir_failed(b) -> return read
+    if b.statement_depth >= 0 && b.f.open.len() == b.statement_depth {
+        b.fresh[base] = false
+        ir_hold_statement_guard(&b, base, -1, true)
+        return read
+    }
+    copied :: ir_copy_value(&m, p, &b, read, span)
+    ir_release(&m, &b, base)
+    b.fresh[copied] = true
+    copied
+}
+
 // A fresh value ended in place (`close(^make("x"))`, `consume(make("x"))`):
 // when its value closes it closes now, once, before its drop. A lent value
 // or an allocator view closes nothing. False when the build failed.
