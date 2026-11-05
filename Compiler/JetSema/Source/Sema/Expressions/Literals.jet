@@ -1133,6 +1133,37 @@ fn sema_expression_interpolation_derived(ty: Type, environment: SemaScopeEnviron
     false
 }
 
+// A nominal type of the program that bare `{value}` shows only through its
+// auto-derived `Printable`: no `#Printable`/`#Display` marker and no authored
+// `Display` or `Printable` implementation. Display has no default, so the
+// interpolation is flagged for the explicit debug selector (L0520). Core
+// types are not flagged: their display is the library's, not the caller's.
+fn sema_expression_interpolation_auto_printable(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if program.registration_graph == .Val(graph) {
+    name :: sema_type_graph_base_name(ty) ?? return false
+    resolved :: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Type || resolved.target_module_identity.starts_with("<corelib>") -> return false
+    if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
+        if sema_serde_has_name(program.checked_types[checked_row].derives, "Printable") || sema_serde_has_name(program.checked_types[checked_row].derives, "Display") -> return false
+    }
+    if sema_call_reflection_bound(ty, "Display", environment, program) -> return false
+    module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
+    row :: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
+    // Matched in place: a pattern on the indexed path copies the whole item.
+    nominal :: graph.modules[row.module_index].nominals[row.row]
+    if nominal.source == .SourceAST(item) {
+        declared :: graph.modules[module_index].declared_trait_impls
+        if !sema_type_metadata_auto_derives(item, declared).printable -> return false
+        if item == {
+            .Struct(value) -> return !sema_type_metadata_has_trait_block(value.trait_impls, "Display") && !sema_type_metadata_has_explicit_impl(declared, value.name, "Display")
+            .Enum(value) -> return !sema_type_metadata_has_trait_block(value.trait_impls, "Display") && !sema_type_metadata_has_explicit_impl(declared, value.name, "Display")
+            else -> return false
+        }
+    }
+    }
+    false
+}
+
 // (Rust `is_displayable`): bare `{value}` needs a value whose
 // type can be shown through `Display`. The shared reflection gate owns the
 // structural rules; a nominal type also counts when it derives its display
@@ -1212,7 +1243,14 @@ fn sema_expression_one_pass_fix(ty: Type) -> String Never! {
 // it was granted instead (E0138). Returns whether the value can be shown.
 fn sema_expression_interpolation_display(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     ty :: value.ty
-    if sema_expression_displayable(ty, environment, program) -> return true
+    if sema_expression_displayable(ty, environment, program) {
+        if sema_expression_interpolation_auto_printable(ty, environment, program) {
+            shown :: sema_type_show(ty)
+            written :: sema_expression_interpolation_text(value.span, environment, program)
+            &diagnostics.push(sema_lint("L0520", value.span, "{shown} has no `Display` impl; use the explicit debug selector for this interpolation.", "Bare interpolation is moving to the explicit `Display` hook; the canonical migration edit keeps the value user-owned.", "Replace `{written}` with `{{{written}:Debug}}`."))
+        }
+        return true
+    }
     if sema_call_reflection_secret_bearing(ty) {
         &diagnostics.push(sema_error("E0915", value.span, "secret-bearing `{type_name(ty)}` has no `Display` implementation", "cryptographic secrets cannot enter logs or strings through interpolation", "remove the interpolation; log a public operation label or key identifier instead"))
         return false
@@ -1231,5 +1269,20 @@ fn sema_expression_interpolation_display(value: TExpr, environment: SemaScopeEnv
     shown :: sema_type_show(ty)
     &diagnostics.push(sema_error("E0915", value.span, "`{shown}` has no `Display` implementation", "bare `{{value}}` interpolation calls `Display` — there is no default for user types", "add `impl {shown}.Display {{ fn display(self) -> String {{ … }} }}`, or use `{{value:Debug}}` for debug output"))
     false
+}
+
+// The source text of the interpolated expression at `span`, or `value` when
+// the module source does not hold it.
+fn sema_expression_interpolation_text(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String {
+    if program.registration_graph == .Val(graph) {
+        if sema_scope_caller_index(environment, graph) == .Val(caller) {
+            raw :: graph.modules[caller].source.bytes()
+            if span.start >= 0 && span.end <= raw.len() && span.start < span.end {
+                text :: String.from_bytes(raw[span.start..<span.end]) ?? ""
+                if text != "" -> return text
+            }
+        }
+    }
+    "value"
 }
 

@@ -416,6 +416,19 @@ fn sema_effect_comptime_nondeterministic(fact: SemaCallSiteFact, diagnostics: &[
     }
 }
 
+// A compile-time value's call into `core.net`: only the pinned
+// `fetch(url, sha256:)` is a compile-time network operation, so any other
+// `core.net` method is refused by name (E3412). True when it was refused.
+fn sema_effect_comptime_net_unavailable(fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) -> Bool {
+    callee :: fact.callee ?? return false
+    owner :: sema_effect_symbol_module(callee.key) ?? return false
+    if owner != "<corelib>/core.net" && !owner.starts_with("<corelib>/core.net.") -> return false
+    method :: sema_effect_symbol_leaf(callee.key)
+    if method == "fetch" -> return false
+    &diagnostics.push(sema_error("E3412", fact.span, "`core.net.{method}()` is not available at comptime.", "Only `core.net.fetch(url, sha256:)` is supported at compile time as a Tier-1 hermetic effect.", "Use `core.net.fetch(url, sha256: \"…\")` for content-hash-pinned downloads."))
+    true
+}
+
 // Rust `memory_control_multiplier`: one execution, or None inside a loop.
 fn sema_effect_memory_executions(node: SemaEffectNode, span: Span) -> Int? {
     loop loop_span in node.loop_spans {

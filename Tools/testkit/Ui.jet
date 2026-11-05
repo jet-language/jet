@@ -19,10 +19,12 @@ fn kit_ui_directives() -> [KitUIDirective] {
         {name: "run_cli", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
         {name: "complexity_cli", argv: ["lint", "--complexity", "$file", "--max=$max"], parent: false, exit: "any", streams: "both", capability: ""},
         {name: "repl_deny", argv: ["repl", "--deny=FS"], parent: false, exit: "nonzero", streams: "stderr", capability: ""},
+        {name: "command_override_conflict", argv: ["run"], parent: true, exit: "nonzero", streams: "both", capability: ""},
+        {name: "gate", argv: ["check", "--gate", "$arg", "$file"], parent: false, exit: "any", streams: "rendered", capability: ""},
         {name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""},
         {name: "runtime_ffi", argv: [], parent: false, exit: "any", streams: "", capability: ""}
     }
-    loop name in ["lint_policy_config", "env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "command_override_conflict", "parent_control_cancel", "ambiguous_call", "generated_source", "no-os", "gate", "build_grants", "build_locked", "jetpack_hangar_digest_mismatch", "jetpack_retired_environment_flag", "jetpack_retired_store_verbs", "programmable_build", "target", "cost_cli"] {
+    loop name in ["lint_policy_config", "env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "parent_control_cancel", "ambiguous_call", "generated_source", "no-os", "build_grants", "build_locked", "jetpack_hangar_digest_mismatch", "jetpack_retired_environment_flag", "jetpack_retired_store_verbs", "programmable_build", "target", "cost_cli"] {
         &rows.push(KitUIDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
     }
     rows
@@ -82,7 +84,8 @@ fn kit_ui_invocation(source: String, file: String, lint: Bool) -> KitUICall {
             call.refused = "complexity_cli requires a metric and maximum"
             return call
         }
-        loop arg in row.argv -> &call.argv.push(arg.replace("$file", file).replace("$base", files.basename(file)).replace("$max", if maximum.len() >= 2 -> maximum[1] else -> ""))
+        argument :: kit_ui_arg(source, row.name) ?? ""
+        loop arg in row.argv -> &call.argv.push(arg.replace("$file", file).replace("$base", files.basename(file)).replace("$arg", argument).replace("$max", if maximum.len() >= 2 -> maximum[1] else -> ""))
         call.parent = row.parent
         call.exit = row.exit
         call.streams = if lint -> "lint" else -> row.streams

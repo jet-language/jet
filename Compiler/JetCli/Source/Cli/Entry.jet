@@ -41,6 +41,7 @@ use {
     TOKEN_DOT,
     TOKEN_EOF,
     TOKEN_FALSE,
+    TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_KW_MODULE,
     TOKEN_KW_USE,
@@ -825,8 +826,10 @@ fn jet_cli_command_role_file(command: String) -> String? Never! {
 
 // main.rs `command_override_entry` over Package/mod.rs
 // `resolve_command_entry_checked` for `run`, `dev`,
-// `build`, and `test`, the package-root role home declaring the command's
-// function, else one root file, else one `src/` file.
+// `build`, and `test`: the command function the package scope declares. The
+// scope is the package-root role home, then the other root files, or the
+// `src/` files when the root declares none. One declaring function is the
+// override; more than one is ambiguous (E3540), listed home first.
 fn jet_cli_command_override(root_path: String, command: String, color: Bool) -[FS, Env]> JetCLIEntryFound Never! {
     role :: jet_cli_command_role_file(command) ?? return JetCLIEntryFound.Absent
     root :: cli_files.realpath(root_path) ?? root_path
@@ -848,26 +851,32 @@ fn jet_cli_command_override(root_path: String, command: String, color: Bool) -[F
             else -> {}
         }
     }
-    loop file in role_files {
-        if jet_cli_top_level_function_lines(file.source, command).len() > 0 {
-            return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: file.path, callable: Val(command)}}
+    paths := [String]{}
+    locations := [String]{}
+    loop file in role_files -> jet_cli_command_override_lines(file, command, &paths, &locations)
+    loop file in root_files -> jet_cli_command_override_lines(file, command, &paths, &locations)
+    if paths.len() == 0 {
+        loop file in src_files -> jet_cli_command_override_lines(file, command, &paths, &locations)
+    }
+    if paths.len() == 0 -> return JetCLIEntryFound.Absent
+    if paths.len() > 1 {
+        listed := locations[0].copy()
+        loop index in 1..<locations.len() {
+            separator :: if index == locations.len() - 1 -> " and " else -> ", "
+            listed = "{listed}{separator}{locations[index]}"
         }
+        return JetCLIEntryFound.Refused{plan: jet_cli_fail("E3540", "One {command} command has multiple overrides: {listed}.", "A command scope can select one override or the stock default, but multiple overrides are ambiguous.", "Keep one fn {command} in the package scope, or remove the other command override.", color, JET_DRIVER_EXIT_USER_ERROR)}
     }
-    entries := [String]{}
-    levels :: [[JetDriverAuthorizedSourceFile]]{root_files, src_files}
-    loop level in levels {
-        loop file in level {
-            loop line in jet_cli_top_level_function_lines(file.source, command) {
-                &entries.push("{file.path}:{line}")
-            }
-        }
-        if entries.len() > 0 -> break
+    JetCLIEntryFound.Entry{entry: JetCLIEntry{path: paths[0], callable: Val(command)}}
+}
+
+// Each top-level `fn <command>` of `file`: its path, and its location as the
+// package-relative `file:line`.
+fn jet_cli_command_override_lines(file: JetDriverAuthorizedSourceFile, command: String, paths: &[String], locations: &[String]) Never! {
+    loop line in jet_cli_top_level_function_lines(file.source, command) {
+        &paths.push(file.path.copy())
+        &locations.push("`{file.relative_path}:{line}`")
     }
-    if entries.len() > 1 {
-        return JetCLIEntryFound.Refused{plan: jet_cli_entry_not_ported(command, "package with two `{command}` command overrides", color)}
-    }
-    if entries.len() == 0 -> return JetCLIEntryFound.Absent
-    JetCLIEntryFound.Entry{entry: JetCLIEntry{path: entries[0].split(":").to_list()[0], callable: Val(command)}}
 }
 
 // main.rs `find_command_entry_with_callable`.
@@ -899,6 +908,22 @@ fn jet_cli_declares_workspace_module(source: String) -> Bool Never! {
         if kind == TOKEN_KW_MODULE && depth == 0 && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[index + 1]) == "workspace" {
             return true
         }
+    }
+    false
+}
+
+// A top-level `#Target(Web)` marker: the program builds for the browser.
+fn jet_cli_declares_web_target(source: String) -> Bool Never! {
+    lexed :: lex(source.bytes())
+    tokens :: jet_cli_significant_tokens(lexed.tokens)
+    depth := 0
+    loop index in 0..<tokens.len() {
+        kind :: tokens[index].kind
+        if kind == TOKEN_LBRACE -> depth += 1
+        if kind == TOKEN_RBRACE -> depth -= 1
+        if kind != TOKEN_HASH || depth != 0 || index + 4 >= tokens.len() -> next
+        if tokens[index + 1].kind != TOKEN_IDENT || token_decoded(lexed.tables, tokens[index + 1]) != "Target" || tokens[index + 2].kind != TOKEN_LPAREN -> next
+        if tokens[index + 3].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[index + 3]) == "Web" && tokens[index + 4].kind == TOKEN_RPAREN -> return true
     }
     false
 }

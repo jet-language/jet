@@ -4901,14 +4901,17 @@ struct TailCallBlocked {
 }
 
 struct SoftPublicUse {
+    name: String
+
     impl Diagnostic {
         code :: "L0601"
         severity :: .Lint
         lint_name :: "soft_public_use"
+        meaning :: "Outside use of a soft-public `_name`; callable but not a minor-version compatibility promise"
         no_fix :: .Behavior
-        fn what(self) -> String { "Outside use of a soft-public `_name`; callable but not a minor-version compatibility promise" }
-        fn why(self) -> String { "The registered sema rule applies here" }
-        fn fix(self) -> String { "Rename the soft-public item or expose it through its supported public API." }
+        fn what(self) -> String { "`{self.name}` is a soft-public API" }
+        fn why(self) -> String { "A leading underscore allows outside use but carries no compatibility promise across minor releases." }
+        fn fix(self) -> String { "Use a public name without a leading underscore when callers need a stable API." }
     }
 }
 
@@ -7185,16 +7188,13 @@ struct DebugTraceInRelease {
 }
 
 struct ReplFuelExhausted {
-    n: String
-
     impl Diagnostic {
         code :: "E1801"
-        stage :: [.Repl]
-        meaning :: "Per-input fuel cap hit — snippet ran more than ~10M interpreter steps"
-        detail :: true
-        fn what(self) -> String { "This snippet ran more than `{self.n}` interpreter steps without finishing." }
-        fn why(self) -> String { "The REPL interpreter caps each input to avoid hanging your session; this almost always means a loop that never ends. A `jet repl` run reports this interpreter limitation." }
-        fn fix(self) -> String { "Check any loops for a condition that never becomes false. Use `:run` to allow unbounded execution (compiles and runs instead of interpreting)." }
+        status :: .Retired
+        no_fix :: None
+        fn what(self) -> String { "*Retired* (was: a REPL snippet ran more than its interpreter step cap)" }
+        fn why(self) -> String { "The REPL does not interpret: each turn is built and run by a child `jet`, as `jet run` runs a program, so there is no step cap to exhaust; a turn that never ends is stopped with Ctrl-C" }
+        fn fix(self) -> String { "Do not use E1801" }
     }
 }
 
@@ -10638,10 +10638,9 @@ struct ReservedStorePathComponent {
     impl Diagnostic {
         code :: "E1299"
         stage :: [.Jetpack]
-        status :: .Reserved
         meaning :: "Hangar Store v2 path law rejected a store path component (case-fold collision, reserved Windows name, trailing `.`/` `, absolute/dot components) (E4-JP1)"
         detail :: true
-        no_fix :: None
+        no_fix :: .Ambiguous
         fn what(self) -> String { "Store path rejected: `{self.path}`" }
         fn why(self) -> String { "Hangar Store v2 path law (E4-JP1) records POSIX byte names and rejects Windows reserved names, trailing `.`/` ` aliases, `.`/`..`, and ASCII case-fold collisions among siblings. Unicode normalization is never applied implicitly." }
         fn fix(self) -> String { "Rename the entry to a portable store path with no reserved names, no trailing `.`/` `, and no case-fold collision with a sibling." }

@@ -1159,6 +1159,11 @@ fn jet_cli_run_entry(jet_argv: [String], args: [String], passthrough: [String]?,
     entry :: jet_cli_check(jet_argv, args, command, color, quiet, threads, false)
     if entry == {
         .Check(file, source, _, _, _, _, notice, _, _) -> {
+            // A web-targeted program builds browser artifacts; only an
+            // explicit `--target` asks for a native run of it.
+            if !watch && jet_cli_target_flag(jet_argv) == .Absent && jet_cli_declares_web_target(source) {
+                return jet_cli_fail("E-WEB-RUN", "`jet run` cannot execute a web-targeted program natively", "The web target produces browser artifacts, not a native console executable", "Use `jet dev <file.jet>` for the live browser loop, or `jet build --target=web <file.jet>` for web artifacts", color, JET_DRIVER_EXIT_USER_ERROR)
+            }
             program_args :: passthrough ?? jet_cli_tail(args, 2)
             selects_dev :: watch && !jet_argv.contains("--show-default") && jet_cli_top_level_function_lines(source, "dev").len() > 0
             function :: if selects_dev -> String?{Val("dev")} else -> String?{None}

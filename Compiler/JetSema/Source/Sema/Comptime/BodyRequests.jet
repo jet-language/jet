@@ -251,6 +251,7 @@ fn sema_comptime_body_capture(
         span: source_span,
         site_span: site_span,
         prepared: sema_comptime_body_prepared_locals(environment, scopes),
+        impure: sema_scope_inside_impure(scopes),
     }
     loop previous in context.comptime_body_sources {
         if previous.module_identity == source.module_identity && previous.key == source.key -> return previous
@@ -314,6 +315,7 @@ fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptim
         dependencies: [String]{},
         checked_text: None,
         prepared: source.prepared,
+        impure: source.impure,
     }
 }
 

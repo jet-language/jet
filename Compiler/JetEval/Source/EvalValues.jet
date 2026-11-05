@@ -100,6 +100,9 @@ struct JetEvalConfig {
     // refuses it (E3401, jet_eval_effect_fail), not as a comptime effect a
     // gate admits (E3410).
     eval_entry: Bool{false}
+    // The evaluated item sits inside an `#Impure` block: a Tier-2 effect is
+    // refused for the missing invocation gate (E3411), not the block (E3410).
+    impure: Bool{false}
 }
 
 fn jet_eval_default_config() -> JetEvalConfig Never! {

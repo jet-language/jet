@@ -416,6 +416,8 @@ struct SemaComptimeBodySource {
     span: Span
     site_span: Span
     prepared: [SemaComptimePreparedLocal]
+    // The site is lexically inside an `#Impure` block.
+    impure: Bool{false}
 }
 
 struct SemaComptimeBodyValue {
@@ -1649,6 +1651,16 @@ fn sema_scope_function_owner_key(table: SemaScopeTable) -> String Never! {
     frame := table.current
     loop table.frames[frame].parent > 0 -> frame = table.frames[frame].parent
     table.frames[frame].owner
+}
+
+// Whether the current scope is lexically inside an `#Impure` block.
+fn sema_scope_inside_impure(table: SemaScopeTable) -> Bool Never! {
+    frame := table.current
+    loop frame > 0 {
+        if table.frames[frame].owner.starts_with("impure@") -> return true
+        frame = table.frames[frame].parent
+    }
+    false
 }
 
 // A local identity is rooted at its enclosing function/lambda and includes
