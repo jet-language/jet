@@ -113,6 +113,7 @@ fn kit_steps_await(step: KitStep, context: KitStepCtx, previous: KitStepState) -
         if key == "capture" -> capture = tokens[cursor + 1].text
         cursor += 2
     }
+    timeout = kit_steps_answer_deadline(context.env, timeout)
     started :: time.instant()
     if kind == "process" {
         pid :: Int.parse(raw) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "process PID is not an integer")}

@@ -214,7 +214,8 @@ fn kit_test_core_scratch(label: String) -> String {
     files.remove_all(root) ?? panic("remove fixture .jet scratch")
 }
 
-#Test("timeout options refuse invalid or out-of-range durations before discovery") {
+#Test("the step timeout is a minute unless set, and options refuse invalid or out-of-range durations before discovery") {
+    assert_eq(kit_parse_options(["golden"]).timeout, 60)
     assert(kit_parse_options(["golden", "--timeout", "invalid"]).error != "")
     assert(kit_parse_options(["golden", "--timeout", "0"]).error != "")
     assert(kit_parse_options(["golden", "--timeout", "-1"]).error != "")

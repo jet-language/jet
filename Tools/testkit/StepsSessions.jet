@@ -173,7 +173,7 @@ fn kit_steps_session_read(step: KitStep, context: KitStepCtx, previous: KitStepS
     if index < 0 -> return kit_steps_action_error(state, "session label unavailable")
     pending :: state.children[index]
     unit :: if pending.step.session_mode == "content-length" -> "frame" else if form.line || pending.step.session_mode == "line" -> "line" else -> "raw"
-    limit :: if form.deadline > 0 -> form.deadline else -> context.env.timeout.ns
+    limit :: kit_steps_answer_deadline(context.env, if form.deadline > 0 -> form.deadline else -> context.env.timeout.ns)
     interval :: if form.every > 0 -> form.every else -> 5000000
     check := context
     check.bless.all = false
@@ -341,8 +341,9 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
         }
         if step.duration > 0 {
             started :: time.instant()
+            deadline :: kit_steps_answer_deadline(context.env, step.duration)
             loop !(pending.child.exited() ?? return kit_steps_action_error(state, "wait status: {err}")) {
-                if started.elapsed().ns >= step.duration -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "wait deadline exceeded")}
+                if started.elapsed().ns >= deadline -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "wait deadline exceeded")}
                 time.sleep(1ms)
             }
         }

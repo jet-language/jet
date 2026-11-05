@@ -152,8 +152,14 @@ entry's own claim and never above that room; a case's `limit: resident=`
 tightens it. Each entry's verdict diffs and rows
 print as soon as it finishes; the results file stays in corpus order and
 records every entry's `wall_ms` and `peak_kib`.
-Timeouts must be positive seconds within `Duration`'s representable range;
-out-of-range values are refused before corpus discovery with exit code 2.
+`--timeout SEC` is each child's step timeout, 60 s by default; a step that
+needs longer declares `limit: time=SEC`, which also makes the overrun a
+failure of that step. Timeouts must be positive seconds within `Duration`'s
+representable range; out-of-range values are refused before corpus discovery
+with exit code 2. A known-failing case waits at most 10 s for each answer
+(`recv`, `poll`, `await`, `wait` with a deadline, `repeat while`), so a
+product that never answers fails fast, and one that now answers still shows
+as an unexpected pass.
 
 UI comparison uses the corpus-relative source ID for the primary diagnostic
 location header, whether the compiler printed that ID or just its basename.

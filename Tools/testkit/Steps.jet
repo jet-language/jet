@@ -1001,6 +1001,11 @@ fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, 
     Ok(KitProcessInput{argv: argv, cwd: cwd, stdin: stdin, env: policy, overlay: environment})
 }
 
+// A wait for an answer, in nanoseconds, under the case's answer cap.
+fn kit_steps_answer_deadline(env: KitEnv, deadline: Int) -> Int {
+    if env.answer_limit > 0 && deadline > env.answer_limit -> env.answer_limit else -> deadline
+}
+
 fn kit_steps_policy(step: KitStep, env: KitEnv) -> KitEnv? {
     policy := env
     policy.env_clear = step.env_clear

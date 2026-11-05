@@ -126,6 +126,9 @@ struct KitEnv {
     peaks: String{""}
     // The FFI cache children share across runs; "" keeps one per run under `scratch`.
     ffi_cache: String{""}
+    // A cap in nanoseconds on each wait for an answer (recv, poll, await, a
+    // wait with a deadline, repeat while); 0 is none. A known-failing case sets it.
+    answer_limit: Int{0}
 }
 
 struct KitEnvVar {
@@ -647,8 +650,9 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
                 activity :: kit_steps_repeat_check(opening, context, state)
                 if activity.status != "PASS" && activity.status != "FAIL" -> return kit_steps_finish(state, activity)
                 if activity.status == "PASS" {
-                    if frame.started.elapsed().ns >= (kit_steps_duration_ns(opening.argv[6]) ?? 0) -> return kit_steps_finish(state, kit_expect_verdict("FAIL", opening.argv[10]))
-                    remaining :: (kit_steps_duration_ns(opening.argv[6]) ?? 0) - frame.started.elapsed().ns
+                    deadline :: kit_steps_answer_deadline(context.env, kit_steps_duration_ns(opening.argv[6]) ?? 0)
+                    if frame.started.elapsed().ns >= deadline -> return kit_steps_finish(state, kit_expect_verdict("FAIL", opening.argv[10]))
+                    remaining :: deadline - frame.started.elapsed().ns
                     interval :: kit_steps_duration_ns(opening.argv[8]) ?? 0
                     time.sleep(time.duration_ns(if interval < remaining -> interval else -> remaining))
                     cursor = frame.start + 1

@@ -70,12 +70,13 @@ fn kit_steps_poll(step: KitStep, index: Int, context: KitStepCtx, previous: KitS
     rules := context.plan.json_normalize
     loop rule in step.json_normalize -> &rules.push(rule)
     interval :: Int.parse(step.instruction) ?? return kit_steps_action_error(state, "invalid polling interval")
+    deadline :: kit_steps_answer_deadline(context.env, step.duration)
     started :: time.instant()
     attempt_context := context
     attempt_context.bless.all = false
     attempt_context.bless.ids = []
     loop {
-        remaining_before :: step.duration - started.elapsed().ns
+        remaining_before :: deadline - started.elapsed().ns
         if remaining_before <= 0 -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded")}
         policy :: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "poll policy unavailable")
         attempt.duration = if remaining_before < policy.timeout.ns -> remaining_before else -> policy.timeout.ns
@@ -105,7 +106,7 @@ fn kit_steps_poll(step: KitStep, index: Int, context: KitStepCtx, previous: KitS
             state.last.elapsed_ns = started.elapsed().ns
             return KitStepResult{state: state, verdict: verdict}
         }
-        remaining :: step.duration - started.elapsed().ns
+        remaining :: deadline - started.elapsed().ns
         if remaining <= 0 -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded: {verdict.detail}")}
         time.sleep(time.duration_ns(if interval < remaining -> interval else -> remaining))
     }

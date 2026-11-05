@@ -1,4 +1,7 @@
-use files :: core.files
+use {
+    files :: core.files
+    time :: core.time
+}
 
 #Test("raw and line sessions send messages and close stdin before collecting the unread remainder") {
     root :: cases_test_root("session-send-close")
@@ -10,6 +13,22 @@ use files :: core.files
         assert_eq(cases_test_advanced(root, "wrong-{mode}", failed).verdict.status, "FAIL")
     }
     files.remove_all(root) ?? panic("remove session scratch")
+}
+
+#Test("a known-failing case waits a short time for an answer, and an answer still shows as an unexpected pass") {
+    root :: cases_test_root("session-known")
+    // The session outlives the answer cap, so only the cap can end its recv.
+    context := cases_test_context(root, files.join(root, "scratch-silent"))
+    context.env.timeout = 30s
+    cases_test_source(root, "silent", "# KNOWN-FAILING the peer never answers\nsession peer raw: cat\nrecv peer until ~ \"never\" timeout 600s # waits for absent output\nclose peer\n")
+    started :: time.instant()
+    silent :: kit_cases_run(cases_test_entry("silent"), context)[0]
+    assert_eq(silent.verdict.status, "KNOWN-FAILING")
+    assert(silent.verdict.detail.contains("recv deadline exceeded"), silent.verdict.detail)
+    assert(started.elapsed().ns < 2 * KIT_KNOWN_ANSWER_LIMIT)
+    answered :: cases_test_advanced(root, "answered", "# KNOWN-FAILING the peer never answers\nsession peer raw: cat\nsend peer: \"ready\"\nrecv peer until = \"ready\" timeout 600s\nclose peer\n")
+    assert_eq(answered.verdict.status, "UNEXPECTED-PASS")
+    files.remove_all(root) ?? panic("remove known-failing session scratch")
 }
 
 #Test("recv reads lines, frames and raw bytes and close reports only the unread remainder") {

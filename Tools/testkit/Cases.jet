@@ -51,12 +51,22 @@ fn kit_cases_run(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     // Steps owns the single grammar, host requirements, fixture state staging,
     // token expansion, process policy, assertions and snapshot blessing.
     // CLI scenarios run once, independent of the golden tier selection.
-    steps :: kit_steps_context(plan, entry.path, context.env, work, context.scratch,
+    annotation :: kit_cases_known_failure(entry, context.known, source)
+    env := context.env
+    if annotation != "" -> env.answer_limit = KIT_KNOWN_ANSWER_LIMIT
+    steps :: kit_steps_context(plan, entry.path, env, work, context.scratch,
         files.join(context.root, entry.project), context.bless)
-    [kit_cases_known_verdict(kit_steps_execute(steps, kit_steps_hooks()), kit_cases_known_failure(entry, context.known, source))]
+    [kit_cases_known_verdict(kit_steps_execute(steps, kit_steps_hooks()), annotation)]
 }
 
-// An annotation changes the verdict, not execution or the underlying receipt.
+// How long a known-failing case waits for each answer (recv, poll, await, a
+// wait with a deadline, repeat while): a product that still never answers
+// fails at this deadline, not the case's own, and one that now answers still
+// shows as an unexpected pass.
+KIT_KNOWN_ANSWER_LIMIT :: 10000000000
+
+// An annotation changes the verdict, and caps the case's waits for an answer
+// at KIT_KNOWN_ANSWER_LIMIT; it never changes the steps or their receipts.
 // Header ownership wins over the central ledger for the same case. Besides FAIL,
 // an annotation owns a crashed process (ICE exit 101 or a signal), keeping its
 // ERROR detail. Other ERRORs and TIMEOUT are never owned.
