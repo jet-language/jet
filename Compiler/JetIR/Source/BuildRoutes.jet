@@ -2671,9 +2671,9 @@ fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
     close_glue :: if by_key -> ir_close_glue(&m, p, &b, key_row, false, span) else -> -1
     if ir_failed(b) -> return -1
     // A comparator value of a `Ordering Never!` function hands back its
-    // Result carrier (ir_function_value); the order is its Ok payload.
+    // Result carrier (ir_function_value); ir_call_callback hands its Ok
+    // payload over and frees the carrier.
     order_ty :: ir_never_carrier_success(ret) ?? ret
-    carried :: !by_key && ir_never_carrier_success(ret) != None
     order_row :: ir_value_type(&m, p, order_ty) ?? return ir_type_fail(&b, span, order_ty)
     less_index := 0
     if !by_key {
@@ -2807,14 +2807,7 @@ fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
         left_address :: ir_element_address(&m, &b, data, left_at, stride)
         right_item :: ir_load_at(&m, &b, right_address, 0, element)
         left_item :: ir_load_at(&m, &b, left_address, 0, element)
-        verdict :: ir_call_closure(&m, &b, callback, [Int]{right_item, left_item}, ret_row)
-        decided := verdict
-        if carried {
-            decided = ir_adapt(&m, p, &b, verdict, order_row, span)
-            shell_bytes :: ir_result_box_bytes(&m, p, ret)
-            shell :: ir_word_const(&m, &b, shell_bytes)
-            ir_free(&m, &b, verdict, shell)
-        }
+        decided :: ir_call_callback(&m, p, &b, callback, closure_ty, [Int]{right_item, left_item}, order_row, span)
         verdict_tag :: ir_enum_tag_of(&m, &b, decided)
         less :: ir_temp_like(&m, &b, verdict_tag)
         ir_emit(&b.f, IROp.Const, less, less_index, -1, -1, b.line)
