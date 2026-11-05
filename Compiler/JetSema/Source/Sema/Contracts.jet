@@ -42,6 +42,8 @@ use jet_foundation.[
 struct SemaContractDeclaration {
     complete: Bool
     post: [TContract]
+    // The checked `#Pre` clauses; only the solver reads them (FnBody.pre).
+    pre: [TContract]{[TContract]{}}
     result: TContractResult
 }
 
@@ -146,6 +148,7 @@ fn sema_contract_merge_context_delta(source: SemaCheckContext, call_start: Int, 
     // A snapshot starts with no goal rows and no incomplete reasons, so every
     // row it holds is this condition's; a condition left incomplete keeps why.
     loop index in 0..<source.typed_goals.len() -> &destination.typed_goals.push(source.typed_goals[index])
+    loop index in 0..<source.index_proofs.len() -> &destination.index_proofs.push(source.index_proofs[index])
     loop reason in source.incomplete_reasons -> &destination.incomplete_reasons.push(reason)
     sema_check_context_merge_expr_ids(source, &destination)
     if source.exact_int_reachable -> destination.exact_int_reachable = true
@@ -695,6 +698,7 @@ fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, p
     result :: sema_contract_result_for_function(declared_return, func.name_span, environment, program, sema_scope_function_owner_key(scopes))
     complete := true
     post := [TContract]{}
+    pre := [TContract]{}
     // A parameter a condition reads is used (L0102).
     reads := [String:Bool]{}
     loop clause in func.pre {
@@ -702,6 +706,10 @@ fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, p
         if condition == None -> complete = false
         message :: sema_contract_check_expr(clause.message_expr, Type.String, "Pre", false, false, environment, program, scopes, state, &reads, &tail_store, &context, &diagnostics)
         if message == None -> complete = false
+        if condition == .Val(condition_value) && message == .Val(message_value) {
+            site :: sema_contract_site(environment.source_segments, environment.source_file, environment.source_origin, environment.module_identity, expr_span(clause.cond))
+            &pre.push(sema_contract_make(TContractKind.Pre, condition_value, message_value, environment, program, clause.span, clause.span, site, context))
+        }
     }
     if func.post.len() > 0 {
         post_scopes := sema_scope_snapshot(scopes)
@@ -731,7 +739,7 @@ fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, p
         sema_scope_leave(&post_scopes, &post_state)
     }
     loop (key, _) in reads -> state.used_keys[key] = true
-    SemaContractDeclaration{complete: complete, post: post, result: result}
+    SemaContractDeclaration{complete: complete, post: post, pre: pre, result: result}
 }
 
 fn sema_contract_method_function_for_item(item: Item, target: SymbolID, module_identity: String) -> Func? {

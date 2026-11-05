@@ -81,10 +81,9 @@ fn jet_cli_prove(words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPla
     if request.replay != None -> form = "prove --replay"
     if request.save != None -> form = "prove --save"
     if request.unsave != None -> form = "prove --unsave"
-    // Lenses only choose what the human report shows. `solver` is the one
-    // producer lens; it waits for the solver producer.
-    if form == "prove" && !request.lenses.contains("solver") -> return JetCLIPlan.Prove{target: target, lenses: request.lenses.copy(), color: color, json: json}
-    if form == "prove" -> form = "prove --lens solver"
+    // Lenses only choose what the human report shows; `solver` is the one
+    // producer lens, and it runs inside the same report.
+    if form == "prove" -> return JetCLIPlan.Prove{target: target, lenses: request.lenses.copy(), color: color, json: json}
     jet_cli_not_ported(form, color)
 }
 

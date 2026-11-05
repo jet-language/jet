@@ -1,11 +1,13 @@
 // The contract sites a native test run observed: `jet prove`'s contract
 // evidence. In a test image every checked `#Pre`/`#Post` clause reports each
 // hold and each failure with its static site text (IR BuildContracts.jet
-// ir_contract). The first hold and the first failure of a site append
+// ir_contract). The first hold of a site, and every failure, append
 // `JET_NATIVE_CONTRACT <held> <length>\n<site>\n` to the records file the
 // harness opened (BuildTests.jet), so a child that later dies keeps what it
-// saw; later observations of the same site cost one table probe under the
-// lock. Tasks a test spawns may check clauses on other threads.
+// saw. A failure stops its test or region, so failures are few; each is
+// written so the parent can tie a serial test's stop to the clause that made
+// it (NativeTests.jet). A later hold of the same site costs one table probe
+// under the lock. Tasks a test spawns may check clauses on other threads.
 // Root40: lock0, path8 (owned String), sites16 ([site data address, seen bits]
 // pairs, open addressing), capacity24 (a power of two), count32.
 test_contract_root := I64{0}
@@ -31,15 +33,15 @@ test_contract_root := I64{0}
 #Export(c) fn jet_rt_test_contract(data: I64, length: I64, held: Bool) {
     root :: test_contract_root
     if (root == I64{0}) -> return
-    bit :: if held -> I64{1} else -> I64{2}
     sync_mutex_lock(root)
-    entry :: test_contract_entry(root, data)
-    seen :: trap_word(wrapping(entry + I64{8}))
-    if (seen.bit_and(bit) != I64{0}) {
-        sync_mutex_unlock(root)
-        return
+    if held {
+        entry :: test_contract_entry(root, data)
+        if (trap_word(wrapping(entry + I64{8})) != I64{0}) {
+            sync_mutex_unlock(root)
+            return
+        }
+        trap_store(wrapping(entry + I64{8}), I64{1})
     }
-    trap_store(wrapping(entry + I64{8}), seen.bit_or(bit))
     test_contract_append(trap_word(wrapping(root + I64{8})), data, length, held)
     sync_mutex_unlock(root)
 }

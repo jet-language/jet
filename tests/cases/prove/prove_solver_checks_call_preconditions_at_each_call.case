@@ -1,0 +1,15 @@
+# Each call's callee `#Pre` is one call_precondition obligation at the call:
+# the caller's own `#Pre` and the pinned argument are the assumptions. A call
+# the caller can't guard is disproved with a caller-side value.
+fixture: prove_solver_checks_call_preconditions_at_each_call.fixture
+step: jet prove calls.jet --lens solver --json
+limit: time=120
+exit: 1
+stdout: ~ "\"obligationKind\":\"call_precondition\",\"reason\":null,\"status\":\"proved\"" # the guarded call is proved
+stdout: ~ "\"source\":{\"column\":5,\"line\":12,\"path\":\"calls.jet\"}" # at the guarded call
+stdout: ~ "\"counterexample\":[{\"name\":\"x\"," # the unguarded call fails for some x
+stdout: ~ "\"source\":{\"column\":5,\"line\":7,\"path\":\"calls.jet\"}" # at the unguarded call
+stdout: ~ "\"solver\":{\"disproved\":1,\"proved\":1,\"selected\":2,\"unavailable\":0,\"unknown\":0}" # one obligation per call
+step: jet prove calls.jet --lens solver
+exit: 1
+stderr: ~ "Solver found a counterexample to call precondition `checked`" # names the callee

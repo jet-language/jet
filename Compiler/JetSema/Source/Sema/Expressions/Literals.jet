@@ -16,6 +16,7 @@ use jet_foundation.[
     StrPart,
     SymbolKind,
     TBinaryOp,
+    TIndexProof,
     TupleField,
     Type,
     TypeTupleField,
@@ -878,6 +879,8 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
                         return None
                     }
                     resolved_kind = IndexKind.FixedListProof
+                    // The claim is the whole `base[index]`, as the source shows it.
+                    &context.index_proofs.push(TIndexProof{span: Span{start: expr_span(base).start, end: span.end}, lo: bounds.lo, hi: bounds.hi, len: length})
                 }
                 else -> {
                     resolved_kind = if ast_kind == IndexKind.FixedListProof -> IndexKind.FixedListProof else -> IndexKind.List

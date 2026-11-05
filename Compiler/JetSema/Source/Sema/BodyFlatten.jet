@@ -72,6 +72,7 @@ fn body_flat_function(value: TFunc, arena: BodyTree) -> FnBody Never! {
     flat := BodyFlat{tree: body_tree_new(), arena: arena, into_arena: false}
     params :: body_flat_list_parameter(value.params, &flat)
     body :: body_flat_list_stmt(value.body, &flat)
+    pre :: body_flat_list_contract(value.pre, &flat)
     tree := ^flat.tree
     body_tree_finish(&tree)
     sema_body_fact_types(&tree, params, value.ret, value.kind, value.failure_carrier)
@@ -116,6 +117,8 @@ fn body_flat_function(value: TFunc, arena: BodyTree) -> FnBody Never! {
         kind: value.kind,
         origin_facts: value.origin_facts,
         typed_goals: value.typed_goals,
+        index_proofs: value.index_proofs,
+        pre: pre,
         tree: tree,
     }
 }

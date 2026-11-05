@@ -2265,6 +2265,8 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         kind: function_kind,
         origin_facts: context.origin_facts.copy(),
         typed_goals: context.typed_goals.copy(),
+        index_proofs: context.index_proofs.copy(),
+        pre: if contract.complete -> contract.pre.copy() else -> [TContract]{},
     }
     // The checker's tree ends here, as the function's flat body; nodes the
     // checker gave no id take flat-local ones.

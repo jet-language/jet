@@ -99,15 +99,13 @@ struct JetCLIProveFront {
 }
 
 // One declared `#Pre`/`#Post` clause (Rust `ContractDeclaration`): its
-// marker and the member line and column its condition starts at. `text` is
-// its message when that is a plain string literal, else "". The test
+// marker and the member line and column its condition starts at. The test
 // producers settle `state`: -1 not reached, 0 held, 1 failed, 2 failed only
 // where a test expected it to; `evidence` is the test record that observed
 // it, and `message` a failure's stop text.
 struct JetCLIProveContract {
     id: String
     marker: String
-    text: String
     path: String
     line: Int
     column: Int
@@ -223,20 +221,27 @@ fn jet_cli_prove_run(target: JetCLIProveTarget, lenses: [String], color: Bool, j
     loop fact in budgets.facts {
         if fact.outcome == "fail" -> budget_failed = true
     }
-    exit_code := if failed > 0 || test_failed > 0 || budget_failed -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
+    // The solver is the one producer lens: it runs only when selected.
+    solver := [JetCLISolverRow]{}
+    if lenses.contains("solver") {
+        searched :: jet_cli_prove_solver(identity, members, groups, cwd, color) ?? return err.output
+        solver = searched
+    }
+    solver_failed :: jet_cli_solver_count(solver, "disproved") > 0
+    exit_code := if failed > 0 || test_failed > 0 || budget_failed || solver_failed -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
     if jet_cli_prove_exit_rank(tests.exit_code) > jet_cli_prove_exit_rank(exit_code) -> exit_code = tests.exit_code
     grade :: jet_cli_prove_grade(proved, failed, tests.items, tests.contracts)
-    report :: jet_cli_prove_report(identity, members, front, tests.items, tests.contracts, budgets, proved, failed, grade, exit_code) ?? return jet_cli_ice(err.message)
+    report :: jet_cli_prove_report(identity, members, front, tests.items, tests.contracts, budgets, solver, proved, failed, grade, exit_code) ?? return jet_cli_ice(err.message)
     // Rust `run_prove`: an internal compiler error produces no evidence artifact.
     if exit_code != JET_CLI_EXIT_ICE {
         jet_cli_prove_write(identity, report, tests.consumed) ?? return jet_cli_prove_refused(err, color, json)
     }
     if json {
-        reports :: jet_cli_prove_status_reports(members, front, tests.items, tests.contracts)
+        reports :: jet_cli_prove_status_reports(members, front, tests.items, tests.contracts, solver)
         status :: jet_cli_status_render_with_reports("prove", exit_code == JET_DRIVER_EXIT_OK, reports, [JetCLIStatusField]{jet_cli_status_field("proof", JetCLIStatusValue.Float{text: report})})
         return JetDriverVerbOutput{stdout: "{status}\n", stderr: "", exit_code: exit_code}
     }
-    jet_cli_prove_human(members, front, tests, budgets, lenses, proved, failed, grade, jet_cli_prove_result(exit_code, tests.items, tests.contracts, budgets), color, exit_code)
+    jet_cli_prove_human(members, front, tests, budgets, solver, lenses, proved, failed, grade, jet_cli_prove_result(exit_code, tests.items, tests.contracts, budgets, solver), color, exit_code)
 }
 
 // --- target members and identity -------------------------------------------
@@ -567,16 +572,9 @@ fn jet_cli_prove_func_facts(identity: JetCLIProveIdentity, member: JetCLIProveMe
 // runtime names when it checks the clause (JetSema Contracts.jet).
 fn jet_cli_prove_contract(identity: JetCLIProveIdentity, member: JetCLIProveMember, function: String, marker: String, clause: ContractClause, contracts: &[JetCLIProveContract]) Never! {
     span :: expr_span(clause.cond)
-    text := ""
-    if clause.message_expr == .Str(parts, _, _) {
-        if parts.len() == 1 {
-            if parts[0] == .Lit(literal) -> text = literal.copy()
-        }
-    }
     &contracts.push(JetCLIProveContract{
         id: jet_cli_prove_evidence_id(identity, "contract", member.path, jet_cli_prove_span_text(member.source, span), "{function} #{marker}"),
         marker: marker,
-        text: text,
         path: member.path.copy(),
         line: diagnostic_line_at(member.source, span.start),
         column: diagnostic_column_at(member.source, span.start),
@@ -668,7 +666,7 @@ fn jet_cli_prove_tests(identity: JetCLIProveIdentity, members: [JetCLIProveMembe
         artifact :: prove_crypto.sha256(bytes).hex()
         jet_cli_evidence_persist_at(identity.authority_root, report, bytes, artifact, report.revision.source, true) ?? return Err(jet_cli_prove_evidence_refusal("couldn't record the test evidence of `{entry.path}`: {err.message}"))
         &consumed.push(JetCLIRecordLink{kind: "evidence", artifact_id: artifact})
-        stopped :: jet_cli_prove_test_items(identity, members, entry, group.sites, report.records, cwd, seed, declared, &items, &observed)
+        stopped :: jet_cli_prove_test_items(identity, members, entry, group.sites, report.records, cwd, seed, &items, &observed)
         if stopped && jet_cli_prove_exit_rank(JET_CLI_EXIT_RUNTIME_STOP) > jet_cli_prove_exit_rank(exit_code) -> exit_code = JET_CLI_EXIT_RUNTIME_STOP
     }
     Ok(JetCLIProveTests{items: items, contracts: jet_cli_prove_contracts_settle(declared, observed), consumed: consumed, exit_code: exit_code, errors: errors})
@@ -711,30 +709,6 @@ fn jet_cli_prove_input_seed(input_sha256: String) -> Int Never! {
     assert_eq(jet_cli_prove_seed("+5"), None)
 }
 
-#Test("prove ties a contract stop to its own clause") {
-    clause :: (marker: String, text: String) -> JetCLIProveContract{id: "", marker: marker, text: text, path: "a.jet", line: 1, column: 6, state: -1, evidence: "", message: ""}
-    stop :: (message: String) -> JetCLIProveStopRecord{code: "E3005", message: message, path: "a.jet", line: 3, caught: false, expected: false, used: false}
-    declared :: [JetCLIProveContract]{clause("Pre", "positive"), clause("Pre", "small"), clause("Pre", ""), clause("Post", "positive")}
-    assert(jet_cli_prove_contract_stop_exact(declared[0], stop("#Pre contract failed: positive")))
-    assert(!jet_cli_prove_contract_stop_exact(declared[0], stop("#Pre contract failed: small")))
-    assert(!jet_cli_prove_contract_stop_exact(declared[3], stop("#Pre contract failed: positive")))
-    assert(!jet_cli_prove_contract_stop_exact(declared[2], stop("#Pre contract failed: ")))
-    // A `#Post` stop is at its clause: its place names it, and its text too
-    // when it has a literal one.
-    post :: (line: Int, message: String) -> JetCLIProveStopRecord{code: "E3005", message: message, path: "a.jet", line: line, caught: false, expected: false, used: false}
-    assert(jet_cli_prove_contract_stop_exact(declared[3], post(1, "#Post contract failed: positive")))
-    assert(!jet_cli_prove_contract_stop_exact(declared[3], post(3, "#Post contract failed: positive")))
-    assert(!jet_cli_prove_contract_stop_exact(declared[3], post(1, "#Post contract failed: other")))
-    computed :: JetCLIProveContract{id: "", marker: "Post", text: "", path: "a.jet", line: 1, column: 6, state: -1, evidence: "", message: ""}
-    assert(jet_cli_prove_contract_stop_exact(computed, post(1, "#Post contract failed: limit 3")))
-    assert(!jet_cli_prove_contract_stop_exact(computed, post(1, "#Pre contract failed: limit 3")))
-    // A computed message matches any stop of its marker but another literal clause's.
-    assert(jet_cli_prove_contract_stop_of(declared, 2, stop("#Pre contract failed: limit 3")))
-    assert(!jet_cli_prove_contract_stop_of(declared, 2, stop("#Pre contract failed: small")))
-    assert(!jet_cli_prove_contract_stop_of(declared, 3, stop("#Pre contract failed: limit 3")))
-    assert(!jet_cli_prove_contract_stop_of(declared, 2, JetCLIProveStopRecord{code: "E3001", message: "#Pre contract failed: limit 3", path: "a.jet", line: 3, caught: false, expected: false, used: false}))
-}
-
 // The value of a record's attachment `name`, or "".
 fn jet_cli_prove_attachment(record: EvidenceRecord, name: String) -> String Never! {
     loop attachment in record.attachments {
@@ -760,7 +734,7 @@ fn jet_cli_prove_exit_rank(code: Int) -> Int Never! {
 // property's seed is its failure's, else the run's `seed`. Contract records
 // join `observed`. True when a test ended at an uncaught runtime stop it
 // didn't expect.
-fn jet_cli_prove_test_items(identity: JetCLIProveIdentity, members: [JetCLIProveMember], entry: JetCLIProveMember, sites: [JetCLIProveTestSite], records: [EvidenceRecord], cwd: String, seed: Int, declared: [JetCLIProveContract], items: &[JetCLIProveTestItem], observed: &[JetCLIProveObserved]) -> Bool Never! {
+fn jet_cli_prove_test_items(identity: JetCLIProveIdentity, members: [JetCLIProveMember], entry: JetCLIProveMember, sites: [JetCLIProveTestSite], records: [EvidenceRecord], cwd: String, seed: Int, items: &[JetCLIProveTestItem], observed: &[JetCLIProveObserved]) -> Bool Never! {
     stops := [JetCLIProveStopRecord]{}
     stopped := false
     loop record in records {
@@ -778,11 +752,13 @@ fn jet_cli_prove_test_items(identity: JetCLIProveIdentity, members: [JetCLIProve
             used: false,
         })
     }
-    // A failed declared clause's stops are its row's: the runtime records a
-    // clause's first failure once, though later tests may stop on it too. A
-    // failure no test stopped on unexpectedly (an expected failure, or one an
-    // `expect_fail` region caught) is the expectation met, not a failure.
-    failed_stops := [String]{}
+    // A serial run ties each clause failure to the test it happened in
+    // (TestOutcome.jet `test`, `last`). A test's final failure is the clause
+    // failing when that test then failed on a stop of that marker it didn't
+    // expect; any other tied failure was caught or expected, so the
+    // expectation is met. The tie is by test, never by message text, so two
+    // clauses with one text stay apart. An untied failure counts as failed.
+    contract_tests := [String]{}
     loop record in records {
         if record.kind != EvidenceKind.Contract -> next
         held :: record.outcome == EvidenceOutcome.Passed
@@ -797,20 +773,19 @@ fn jet_cli_prove_test_items(identity: JetCLIProveIdentity, members: [JetCLIProve
             evidence: record.identity.evidence_id.copy(),
             message: "",
         }
-        clause :: jet_cli_prove_contract_index(declared, seen)
-        if !held && clause >= 0 {
-            // A failure's text is its stop's (`#Pre contract failed: …`).
-            named :: loop stop in stops -> if jet_cli_prove_contract_stop_exact(declared[clause], stop) -> 1 else -> 0
-            loop stop in stops {
-                ours :: if named.sum() > 0 -> jet_cli_prove_contract_stop_exact(declared[clause], stop) else -> jet_cli_prove_contract_stop_of(declared, clause, stop)
-                if !ours -> next
-                if seen.message == "" -> seen.message = stop.message.copy()
-                if stop.expected -> next
-                if seen.expected {
-                    seen.expected = false
-                    seen.message = stop.message.copy()
-                }
-                if !failed_stops.contains(stop.message) -> &failed_stops.push(stop.message.copy())
+        if !held {
+            prefix :: "#{marker} contract failed"
+            test :: jet_cli_prove_attachment(record, "test")
+            last :: jet_cli_prove_attachment(record, "last") == "true"
+            seen.message = prefix.copy()
+            if test == "" -> seen.expected = false
+            loop other in records {
+                if test == "" || other.kind == EvidenceKind.Runtime || other.kind == EvidenceKind.Contract || other.identity.claim_id != test -> next
+                if !last || !other.detail.starts_with(prefix) -> next
+                seen.message = other.detail.copy()
+                if other.outcome != EvidenceOutcome.Failed || other.expectation == EvidenceExpectation.ExpectedFailure -> next
+                seen.expected = false
+                if !contract_tests.contains(test) -> &contract_tests.push(test.copy())
             }
         }
         &observed.push(seen)
@@ -844,7 +819,7 @@ fn jet_cli_prove_test_items(identity: JetCLIProveIdentity, members: [JetCLIProve
                 path = stops[index].path.copy()
                 line = stops[index].line
                 if diagnostic_registry_row(stops[index].code) != None -> code = stops[index].code.copy()
-                contract_stop = stops[index].code == "E3005" && !stops[index].caught && !stops[index].expected && failed_stops.contains(stops[index].message)
+                contract_stop = stops[index].code == "E3005" && !stops[index].caught && !stops[index].expected && contract_tests.contains(record.identity.claim_id)
                 break
             }
         }
@@ -945,36 +920,6 @@ fn jet_cli_prove_contract_observes(declared: [JetCLIProveContract], index: Int, 
     true
 }
 
-// The declared clause `seen` observes, or -1.
-fn jet_cli_prove_contract_index(declared: [JetCLIProveContract], seen: JetCLIProveObserved) -> Int Never! {
-    loop index in 0..<declared.len() {
-        if jet_cli_prove_contract_observes(declared, index, seen) -> return index
-    }
-    -1
-}
-
-// Whether `stop` is a failure of the clause `contract`. The stop of a failed
-// clause is E3005 with `#{marker} contract failed: {message}`. A `#Post`
-// stop is placed at its clause (JetIR BuildContracts.jet), so its place names
-// it, with its literal text when two clauses share a line. A `#Pre` stop is
-// placed at the call, so only a plain literal message names its clause.
-fn jet_cli_prove_contract_stop_exact(contract: JetCLIProveContract, stop: JetCLIProveStopRecord) -> Bool Never! {
-    if stop.code != "E3005" -> return false
-    if contract.marker == "Post" -> return stop.path == contract.path && stop.line == contract.line && (contract.text == "" || stop.message == "#Post contract failed: {contract.text}") && stop.message.starts_with("#Post contract failed")
-    contract.text != "" && stop.message == "#{contract.marker} contract failed: {contract.text}"
-}
-
-// Whether `stop` may be a failure of declared clause `index` when no stop
-// names it exactly (a computed message): any E3005 stop of its marker but
-// one whose text is another literal clause's.
-fn jet_cli_prove_contract_stop_of(declared: [JetCLIProveContract], index: Int, stop: JetCLIProveStopRecord) -> Bool Never! {
-    if stop.code != "E3005" || !stop.message.starts_with("#{declared[index].marker} contract failed") -> return false
-    loop (other, peer) in declared {
-        if other != index && jet_cli_prove_contract_stop_exact(peer, stop) -> return false
-    }
-    true
-}
-
 // A record's path as a member path (`source_paths_match`), or as written.
 fn jet_cli_prove_record_path(path: String, members: [JetCLIProveMember], entry: JetCLIProveMember, cwd: String) -> String Never! {
     if path == "" -> return entry.path.copy()
@@ -1018,7 +963,7 @@ fn jet_cli_prove_grade(proved: Int, failed: Int, tests: [JetCLIProveTestItem], c
 // A pass with unavailable tests, a declared contract no test reached, or a
 // budget whose report or evidence is unavailable is incomplete: nothing
 // failed, but not everything was observed.
-fn jet_cli_prove_result(exit_code: Int, tests: [JetCLIProveTestItem], contracts: [JetCLIProveContract], budgets: JetCLIBudgetProjection) -> String Never! {
+fn jet_cli_prove_result(exit_code: Int, tests: [JetCLIProveTestItem], contracts: [JetCLIProveContract], budgets: JetCLIBudgetProjection, solver: [JetCLISolverRow]) -> String Never! {
     if exit_code != JET_DRIVER_EXIT_OK -> return "fail"
     loop item in tests {
         if (item.kind == 0 || item.kind == 2) && item.state == 3 -> return "pass_incomplete"
@@ -1030,6 +975,8 @@ fn jet_cli_prove_result(exit_code: Int, tests: [JetCLIProveTestItem], contracts:
     loop fact in budgets.facts {
         if fact.evidence == "unavailable" -> return "pass_incomplete"
     }
+    // An unknown obligation is incomplete under allow_incomplete.
+    if jet_cli_solver_count(solver, "unknown") > 0 -> return "pass_incomplete"
     "pass"
 }
 
@@ -1065,7 +1012,7 @@ fn jet_cli_prove_budget_json(count: JetCLIProveBudgetCount) -> String Never! {
 // `render_report`, canonicalized (A-canonical JSON: sorted keys, no
 // whitespace). The exact bytes are the `--json` proof and the artifact's
 // `proofReport`.
-fn jet_cli_prove_report(identity: JetCLIProveIdentity, members: [JetCLIProveMember], front: JetCLIProveFront, tests: [JetCLIProveTestItem], contracts: [JetCLIProveContract], budgets: JetCLIBudgetProjection, proved: Int, failed: Int, grade: String, exit_code: Int) -[FS, Env]> String JetCLIReadError! {
+fn jet_cli_prove_report(identity: JetCLIProveIdentity, members: [JetCLIProveMember], front: JetCLIProveFront, tests: [JetCLIProveTestItem], contracts: [JetCLIProveContract], budgets: JetCLIBudgetProjection, solver: [JetCLISolverRow], proved: Int, failed: Int, grade: String, exit_code: Int) -[FS, Env]> String JetCLIReadError! {
     diagnostics := [String]{}
     rows := [JetCLIProveRow]{}
     loop item in front.items {
@@ -1177,6 +1124,17 @@ fn jet_cli_prove_report(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
         body :: "{{\"attachment\":null,\"budget\":null,\"contract\":null,\"count\":1,\"diagnosticIndexes\":[],\"facet\":\"budgets\",\"id\":{foundation_json_quote(id)},\"kind\":\"deterministic_budget\",\"outcome\":\"unavailable\",\"producer\":\"jet-budget\",\"property\":null,\"reason\":{foundation_json_quote(reason)},\"solver\":null,\"source\":{root_source},\"state\":\"unavailable\""
         &rows.push(JetCLIProveRow{id: id, kind: "deterministic_budget", producer: "jet-budget", outcome: "unavailable", state: "unavailable", body: body})
     }
+    // A solver row is the checked search of one obligation; a disproof
+    // carries its E2950.
+    loop row in solver {
+        indexes := "[]"
+        if jet_cli_solver_diagnostic(row) == .Val(diagnostic) {
+            indexes = "[{diagnostics.len()}]"
+            &diagnostics.push(jet_cli_solver_diagnostic_json(row, diagnostic))
+        }
+        outcome :: jet_cli_solver_status(row)
+        &rows.push(JetCLIProveRow{id: row.id.copy(), kind: "solver", producer: JET_CLI_SOLVER_BACKEND, outcome: outcome, state: "checked", body: jet_cli_solver_row_body(row, indexes)})
+    }
     deterministic := JetCLIProveBudgetCount{}
     statistical := JetCLIProveBudgetCount{}
     loop fact in budgets.facts {
@@ -1215,13 +1173,13 @@ fn jet_cli_prove_report(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
         }
     }
     quoted_grade :: foundation_json_quote(grade)
-    summaries :: "{{\"claims\":{{\"grade\":{quoted_grade}}},\"contract\":{{\"declared\":{contract_declared},\"failed\":{contract_failed},\"notObserved\":{contract_unreached},\"observed\":{contract_passed + contract_failed},\"passed\":{contract_passed},\"selected\":{contract_declared},\"skipped\":0}},\"deterministicBudget\":{jet_cli_prove_budget_json(deterministic)},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_passed + doctest_failed + doctest_skipped},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{proved + failed},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{property_passed + property_failed + property_skipped},\"shrunkFailures\":{property_shrunk},\"skipped\":{property_skipped}}},\"solver\":{{\"disproved\":0,\"proved\":0,\"selected\":0,\"unavailable\":0,\"unknown\":0}},\"statisticalBudget\":{jet_cli_prove_budget_json(statistical)},\"unit\":{{\"failed\":{unit_failed},\"passed\":{unit_passed},\"selected\":{unit_passed + unit_failed + unit_skipped},\"skipped\":{unit_skipped}}}}}"
+    summaries :: "{{\"claims\":{{\"grade\":{quoted_grade}}},\"contract\":{{\"declared\":{contract_declared},\"failed\":{contract_failed},\"notObserved\":{contract_unreached},\"observed\":{contract_passed + contract_failed},\"passed\":{contract_passed},\"selected\":{contract_declared},\"skipped\":0}},\"deterministicBudget\":{jet_cli_prove_budget_json(deterministic)},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_passed + doctest_failed + doctest_skipped},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{proved + failed},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{property_passed + property_failed + property_skipped},\"shrunkFailures\":{property_shrunk},\"skipped\":{property_skipped}}},\"solver\":{jet_cli_solver_summary_json(solver)},\"statisticalBudget\":{jet_cli_prove_budget_json(statistical)},\"unit\":{{\"failed\":{unit_failed},\"passed\":{unit_passed},\"selected\":{unit_passed + unit_failed + unit_skipped},\"skipped\":{unit_skipped}}}}}"
     target_members :: loop member in identity.members -> "{{\"path\":{foundation_json_quote(member.path)},\"sha256\":{foundation_json_quote(member.digest)}}}"
     target :: "{{\"inputSha256\":{foundation_json_quote(identity.input_sha256)},\"kind\":{foundation_json_quote(identity.kind)},\"members\":[{target_members.join(",")}],\"mir\":{identity.mir_json},\"root\":{foundation_json_quote(identity.root)}}}"
     triple :: foundation_json_quote(jet_cli_prove_triple())
     tool :: "{{\"jet\":{foundation_json_quote(JET_CLI_VERSION)},\"proofProducer\":\"jet-prove\",\"targetTriple\":{triple}}}"
     candidate :: "{{\"source\":{{\"sha256\":{jet_cli_prove_digest_json(identity.source_digest)},\"contentSha256\":{jet_cli_prove_digest_json(identity.source_digest)},\"inputSha256\":{jet_cli_prove_digest_json(identity.input_sha256)}}},\"compiler\":{{\"sha256\":{jet_cli_prove_digest_json(identity.build_digest)},\"version\":{foundation_json_quote(JET_CLI_VERSION)}}},\"configuration\":{{\"coreAbi\":{foundation_json_quote(identity.core_abi)},\"lockSha256\":{jet_cli_prove_digest_json(identity.lock_digest)},\"profile\":\"dev\"}},\"generatedArtifact\":{{\"semanticMirSha256\":{jet_cli_prove_digest_json(identity.mir_hash)},\"optimizedMirSha256\":{jet_cli_prove_digest_json(identity.mir_hash)},\"mir\":{identity.mir_json}}},\"targetTool\":{{\"triple\":{triple},\"adapter\":\"mir-v1\"}},\"proofModel\":{{\"id\":\"jet-prove-v1\"}},\"proofChecker\":{{\"id\":\"jet-prove-v1\"}}}}"
-    result :: jet_cli_prove_result(exit_code, tests, contracts, budgets)
+    result :: jet_cli_prove_result(exit_code, tests, contracts, budgets, solver)
     text :: "{{\"derivations\":[{derivations.join(",")}],\"diagnostics\":[{diagnostics.join(",")}],\"evidence\":[{evidence.join(",")}],\"evidencePolicy\":\"allow_incomplete\",\"grade\":{quoted_grade},\"exitCode\":{exit_code},\"result\":\"{result}\",\"schemaVersion\":1,\"candidateIdentity\":{candidate},\"summaries\":{summaries},\"target\":{target},\"tool\":{tool}}}"
     jet_cli_prove_canonical(text)
 }
@@ -1326,8 +1284,9 @@ fn jet_cli_prove_width(line: String?) -> Int Never! {
 // --- output ----------------------------------------------------------------------
 
 // `--json` reports: each front-end error as a `jet.report/v3` object, then
-// each failed test's stop, then each failed contract's.
-fn jet_cli_prove_status_reports(members: [JetCLIProveMember], front: JetCLIProveFront, tests: [JetCLIProveTestItem], contracts: [JetCLIProveContract]) -[FS, Env]> [String] Never! {
+// each failed test's stop, then each failed contract's, then each solver
+// counterexample.
+fn jet_cli_prove_status_reports(members: [JetCLIProveMember], front: JetCLIProveFront, tests: [JetCLIProveTestItem], contracts: [JetCLIProveContract], solver: [JetCLISolverRow]) -[FS, Env]> [String] Never! {
     reports := [String]{}
     loop item in front.items {
         if item.diagnostic == .Val(diagnostic) {
@@ -1352,6 +1311,11 @@ fn jet_cli_prove_status_reports(members: [JetCLIProveMember], front: JetCLIProve
         // The stop happened while a test ran, not while compiling.
         stop.moment = DiagnosticMoment.Test
         &reports.push(jet_cli_report_json(stop, jet_cli_report_base(item.path), item.path, source, 0))
+    }
+    loop row in solver {
+        if jet_cli_solver_diagnostic(row) == .Val(diagnostic) {
+            loop report in jet_cli_reports_json(jet_cli_report_base(row.path), row.path, "", [Diagnostic]{diagnostic}) -> &reports.push(report)
+        }
     }
     reports
 }
@@ -1379,7 +1343,7 @@ fn jet_cli_prove_line_span(source: String, line: Int) -> Span? Never! {
 // front-end errors (facet `all`) and every stop always show, anything else
 // failed or incomplete is listed outside the selection, and the exit and
 // the report never change.
-fn jet_cli_prove_human(members: [JetCLIProveMember], front: JetCLIProveFront, tests: JetCLIProveTests, budgets: JetCLIBudgetProjection, lenses: [String], proved: Int, failed: Int, grade: String, result: String, color: Bool, exit_code: Int) -[FS]> JetDriverVerbOutput Never! {
+fn jet_cli_prove_human(members: [JetCLIProveMember], front: JetCLIProveFront, tests: JetCLIProveTests, budgets: JetCLIBudgetProjection, solver: [JetCLISolverRow], lenses: [String], proved: Int, failed: Int, grade: String, result: String, color: Bool, exit_code: Int) -[FS]> JetDriverVerbOutput Never! {
     stdout := if lenses.len() > 0 -> "LENSES   {jet_cli_prove_lens_names(lenses).join(", ")}\n" else -> ""
     stdout = "{stdout}CLAIMS   grade: {grade}\n"
     if failed > 0 || jet_cli_prove_lens_checked(lenses) -> stdout = "{stdout}CHECKED  front end: {proved} proved, {failed} failed\n"
@@ -1426,6 +1390,14 @@ fn jet_cli_prove_human(members: [JetCLIProveMember], front: JetCLIProveFront, te
             if fact.outcome != "pass" || fact.evidence == "unavailable" -> stdout = "{stdout}  budget {fact.budget_id}: {fact.outcome} ({fact.evidence})\n"
         }
         loop reason in budgets.rejected -> stdout = "{stdout}  unavailable: {reason}\n"
+    }
+    // The solver section shows only when the solver lens ran; each verified
+    // counterexample is an E2950 on stderr.
+    if lenses.contains("solver") {
+        stdout = "{stdout}{jet_cli_solver_human(solver)}"
+        loop row in solver {
+            if jet_cli_solver_diagnostic(row) == .Val(diagnostic) -> stderr = "{stderr}{diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)}"
+        }
     }
     stdout = "{stdout}RESULT   {result}\n"
     JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}

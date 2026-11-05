@@ -34,6 +34,7 @@ use jet_foundation.[
     TEXPR_FIRST_LOCAL_ID,
     TOriginProjection,
     TTypedGoal,
+    TIndexProof,
     TFailureCarrier,
     TGenericParam,
     TIntegerBounds,
@@ -689,6 +690,8 @@ struct SemaCheckContext {
     origin_facts: [TOriginProjection]{[TOriginProjection]{}}
     // The body's `todo` goals, with the card naming each one's expected type.
     typed_goals: [TTypedGoal]{[TTypedGoal]{}}
+    // The fixed-list indexes the body proved in range (TIndexProof).
+    index_proofs: [TIndexProof]{[TIndexProof]{}}
     // The source node ids this check gave its nodes (sema_check_record_expr_id),
     // in filing order and as a set, and the next function-local id for a node
     // whose source id is generated or already filed (a desugared copy). A
@@ -1222,6 +1225,7 @@ struct SemaCheckContextMark {
     incomplete_reasons: Int
     origin_facts: Int
     typed_goals: Int
+    index_proofs: Int
     filed_expr_ids: Int
     next_expr_id: Int
     saved: SemaCheckContext
@@ -1256,6 +1260,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
         incomplete_reasons: context.incomplete_reasons.len(),
         origin_facts: context.origin_facts.len(),
         typed_goals: context.typed_goals.len(),
+        index_proofs: context.index_proofs.len(),
         filed_expr_ids: context.filed_expr_ids.len(),
         next_expr_id: context.next_expr_id,
         saved: SemaCheckContext{
@@ -1355,6 +1360,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     loop context.copy_events.len() > mark.copy_events -> _ := &context.copy_events.pop()
     loop context.origin_facts.len() > mark.origin_facts -> _ := &context.origin_facts.pop()
     loop context.typed_goals.len() > mark.typed_goals -> _ := &context.typed_goals.pop()
+    loop context.index_proofs.len() > mark.index_proofs -> _ := &context.index_proofs.pop()
     loop context.filed_expr_ids.len() > mark.filed_expr_ids {
         dropped := &context.filed_expr_ids.pop()
         if dropped == .Val(id) -> _ := &context.filed_expr_id_set.remove(id)

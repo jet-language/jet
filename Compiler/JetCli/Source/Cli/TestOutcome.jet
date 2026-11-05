@@ -298,7 +298,9 @@ fn jet_cli_test_outcome(file: String, source: String, build_options: BuildOption
 // A contract outcome as a Contract record: the clause's marker (`Pre` or
 // `Post`) at its declared site, passed when it held and failed (E3005) when
 // it didn't. The outcome word is its detail, so a clause that both held and
-// failed is two records. A site the runtime didn't name falls on `file`.
+// failed is two records. A site the runtime didn't name falls on `file`. A
+// failure a serial run tied to a test carries `test` (its name), and `last`
+// when it was that test's final failure; each tie is its own record.
 fn jet_cli_test_contract_record(contract: JetNativeTestContract, file: String, report_id: String, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceRecord Err! {
     fields :: contract.site.split("\t").to_list()
     if fields.len() < 4 || (fields[0] != "Pre" && fields[0] != "Post") -> return Err("native contract site `{contract.site}` is malformed")
@@ -316,6 +318,12 @@ fn jet_cli_test_contract_record(contract: JetNativeTestContract, file: String, r
     record := evidence_record_new(identity, EvidenceKind.Contract, EvidenceProducerKind.Test, if contract.held -> EvidenceOutcome.Passed else -> EvidenceOutcome.Failed, U64{1}, source.copy(), build, revision)
     record.detail = detail
     if !contract.held -> &record.diagnostics.push(EvidenceDiagnostic{code: "E3005", message: "#{fields[0]} contract failed", source: Val(source)})
+    if !contract.held && contract.test != "" {
+        last :: if contract.last -> "true" else -> "false"
+        &record.attachments.push(EvidenceAttachment{name: "test", value: contract.test.copy()})
+        &record.attachments.push(EvidenceAttachment{name: "last", value: last})
+        record.identity.evidence_id = evidence_stable_token([String]{record.identity.evidence_id.copy(), "test", contract.test.copy(), last})
+    }
     Ok(record)
 }
 

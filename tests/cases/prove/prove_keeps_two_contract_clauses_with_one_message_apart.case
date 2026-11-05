@@ -1,0 +1,14 @@
+# Two `#Pre` clauses share one message. A test expects the first to fail; the
+# second stops another test it doesn't expect. Each failure is tied to the test
+# it ran in, never to its message text, so the first clause's row is the
+# expectation met and only the second fails (proof-replay-decisions.md:116-119).
+fixture: prove_keeps_two_contract_clauses_with_one_message_apart.fixture
+step: jet prove . --json
+limit: time=120
+exit: 70
+json: stdout doc $.proof.evidence has {"kind":"contract","outcome":"passed","source":{"column":6,"line":1,"path":"./a_ranges.jet"}}
+json: stdout doc $.proof.evidence has {"kind":"contract","outcome":"failed","source":{"column":6,"line":2,"path":"./a_ranges.jet"}}
+json: stdout doc $.proof.summaries.contract.failed = 1
+json: stdout doc $.proof.summaries.contract.passed = 1
+json: stdout doc $.proof.summaries.unit.failed = 0
+stderr: empty

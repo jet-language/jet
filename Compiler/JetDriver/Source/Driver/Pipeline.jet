@@ -3913,6 +3913,17 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
         result.rust_foreign = if jet_driver_rust_foreign_present(registration_graph) -> jet_driver_rust_foreign_facts(registration_graph) else -> jet_driver_rust_foreign_empty()
         result.foreign_link = jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
+        // `jet prove --lens solver` reads every checked function, unpruned,
+        // with the declaration table their direct calls name.
+        if capture.stop_before_lowering {
+            sources := [String:String]{}
+            loop file in load.source_files {
+                if sources.get(file.path) == None -> sources[file.path] = file.source
+            }
+            decls := ^registration_graph.decls
+            registration_graph.decls = DeclTable{}
+            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^checked_functions, modules: ^runtime_semantic_modules, decls: ^decls, sources: ^sources, entry_module_identity: load.entry_module_identity, entry_key: check_entry.copy()})
+        }
         return result
     }
 
