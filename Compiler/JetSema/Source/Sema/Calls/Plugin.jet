@@ -16,6 +16,7 @@ use jet_foundation.[
     TFailureCarrier,
     TTypeDef,
     Type,
+    owned_trait_codec_names,
     type_name,
 ]
 
@@ -104,7 +105,9 @@ fn sema_plugin_component_descriptor(graph: SemaRegistrationGraph, environment: S
         }
         .Named(name) | .Apply(name, _) -> {
             if sema_plugin_forbidden_component_name(name) -> return None
-            if sema_type_bound_satisfied(graph, ty, "Encode", environment.module_identity) != (Val(true)) || sema_type_bound_satisfied(graph, ty, "Decode", environment.module_identity) != (Val(true)) -> return None
+            loop codec in owned_trait_codec_names() {
+                if sema_type_bound_satisfied(graph, ty, codec, environment.module_identity) != (Val(true)) -> return None
+            }
             nominal_row :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
             nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
             definition :: sema_plugin_checked_type_definition(environment, program, nominal) ?? return None

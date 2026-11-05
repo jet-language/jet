@@ -9,7 +9,7 @@
 // must not use `Browser` (E-WEB-TARGET-BROWSER), and a call must stay in its
 // bucket unless it is the JS-to-`#WasmExport` bridge (E-WEB-CROSS-PARTITION).
 // The bucket is stamped onto each FnBody (`web_bucket`).
-use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, Func, Item, NamedSpan, Span, StructDef, Type, VariantPayload, WebBucket, WebPartitionMarker, type_name]
+use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, Func, Item, NamedSpan, Span, StructDef, Type, VariantPayload, WebBucket, WebPartitionMarker, owned_trait_codec_names, owned_trait_family, type_name]
 
 // One function's partition inputs, read from its declaration and its checked
 // body (`slot`/`row` in the module results; row -1 when it has none).
@@ -313,15 +313,19 @@ fn sema_web_codable_named(name: String, args: [Type], types: SemaWebTypes) -> Bo
     false
 }
 
+// Whether the derives give the type every codec trait: each one named, or a
+// family marker (`Codable`) that derives them.
 fn sema_web_codable(derives: [NamedSpan]) -> Bool Never! {
-    encode := false
-    decode := false
+    covered := [String]{}
     loop marker in derives {
-        if marker.name == "Codable" -> return true
-        if marker.name == "Encode" -> encode = true
-        if marker.name == "Decode" -> decode = true
+        family :: owned_trait_family(marker.name, false)
+        if family.len() == 0 -> &covered.push(marker.name.copy())
+        loop member in family -> &covered.push(member.copy())
     }
-    encode && decode
+    loop codec in owned_trait_codec_names() {
+        if !covered.contains(codec) -> return false
+    }
+    true
 }
 
 // Rust `type_show`: source spellings for the common types; any other type

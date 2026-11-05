@@ -1,0 +1,263 @@
+// The protocol traits the compiler owns, declared here and nowhere else.
+//
+// Each trait is an ordinary Jet declaration: its methods and its associated
+// types. Tools/agent/OwnedTraitRows.jet renders the file
+// into OWNED_TRAITS (Compiler/JetFoundation/Source/Registry/OwnedTraitRows.jet),
+// the one table the parser, sema and the CLI read; `--check` keeps it
+// current. A trait or a fact written anywhere else is a second list.
+//
+// The columns are facts about the trait itself, each `false` or empty unless
+// written:
+//
+//   local             the orphan rule counts the trait as declared by every program
+//   bare_bound        a generic bound may name it bare, with no declaring module
+//   raw_return        its impl methods return their declared type as written,
+//                     never through the implicit failure carrier
+//   any_receiver      the impl may take `self` with any access
+//   operators         the source operators its one method implements; the
+//                     result is free when the method returns an associated type
+//   commutative       `#Commutative` on a typed impl also answers the swapped
+//                     operands (`2 * v` from `v * 2`)
+//   codec             the one method is a hand codec (`encode` or `decode`)
+//   derived           the compiler derives it from the type; an impl adds no
+//                     method the compiler reads
+//   checked_text      the contract of `trait CheckedText` in core/prelude.jet
+//   auto_derive       `#Name` on a struct or enum derives it structurally, and
+//                     `!Name` or `#Name :: false` refuses it
+//   auto_derive_family a marker that derives it with the family's other traits
+//   bundle            `#Name` on a distinct type re-exposes it from the base
+//   bundle_family     a distinct-type marker that bundles the family
+//   through_elements  a list, map, option or union has it when its elements do
+//   requires          the traits every type with this one also has
+//   shares            the trait whose impl on the same type binds the
+//                     associated types these methods use
+//
+// `module Literal` holds the literal capabilities, named `Literal.Int` and
+// `Literal.Float`; each one's `from_literal` parameter is the literal's source,
+// and an impl writes it `comptime fn`.
+
+// `a + b`.
+trait Add {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    operators: String{"+"}
+    commutative: Bool{true}
+    type Rhs
+    type Output
+    fn add(self, rhs: Rhs) -> Output Never!
+}
+
+// `a - b`.
+trait Sub {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    operators: String{"-"}
+    type Rhs
+    type Output
+    fn sub(self, rhs: Rhs) -> Output Never!
+}
+
+// `a * b`.
+trait Mul {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    operators: String{"*"}
+    commutative: Bool{true}
+    type Rhs
+    type Output
+    fn mul(self, rhs: Rhs) -> Output Never!
+}
+
+// `a / b`.
+trait Div {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    operators: String{"/"}
+    type Rhs
+    type Output
+    fn div(self, rhs: Rhs) -> Output Never!
+}
+
+// `a == b` and `a != b`.
+trait Equatable {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    operators: String{"== !="}
+    auto_derive: Bool{true}
+    type Rhs
+    fn equal(self, rhs: Rhs) -> Bool Never!
+}
+
+// `a <=> b` and the orderings `<`, `>`, `<=`, `>=`.
+trait Comparable {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    operators: String{"<=> < > <= >="}
+    auto_derive: Bool{true}
+    bundle: Bool{true}
+    type Rhs
+    fn compare(self, rhs: Rhs) -> Ordering Never!
+}
+
+// The value as its dynamic encoding tree.
+trait Encode {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    codec: Bool{true}
+    auto_derive: Bool{true}
+    auto_derive_family: String{"Codable"}
+    bundle_family: String{"CodableAsBase"}
+    through_elements: Bool{true}
+    fn encode(self) -> Dyn Never!
+}
+
+// A value read back from its dynamic encoding tree.
+trait Decode {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    raw_return: Bool{true}
+    codec: Bool{true}
+    auto_derive: Bool{true}
+    auto_derive_family: String{"Codable"}
+    bundle_family: String{"CodableAsBase"}
+    through_elements: Bool{true}
+    fn decode(tree: Dyn) -> Self [FieldError]!
+}
+
+module Literal {
+    // A nominal type written as an integer literal, built while compiling.
+    trait Int {
+        fn from_literal(value: Int) -> Self Never!
+    }
+
+    // A nominal type written as a float literal, built from its digits.
+    trait Float {
+        fn from_literal(value: String) -> Self Never!
+    }
+}
+
+// A `distinct String` type whose text is checked (core/prelude.jet).
+trait CheckedText {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    checked_text: Bool{true}
+}
+
+// The value inside `{}` interpolation, derived from the type.
+trait Printable {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    derived: Bool{true}
+    auto_derive: Bool{true}
+    bundle: Bool{true}
+}
+
+// The value in a wire format, derived from the type.
+trait Serialize {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    derived: Bool{true}
+    through_elements: Bool{true}
+}
+
+// The value as a view, derived from the type.
+trait Renderable {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    derived: Bool{true}
+}
+
+// User-facing text for `{}` interpolation.
+trait Display {
+    local: Bool{true}
+    raw_return: Bool{true}
+    fn display(self) -> String Never!
+}
+
+// Developer-facing text for `{value:Debug}` interpolation.
+trait Debug {
+    local: Bool{true}
+    raw_return: Bool{true}
+    any_receiver: Bool{true}
+    auto_derive: Bool{true}
+    fn debug(self) -> String Never!
+}
+
+// Consuming, infallible cleanup.
+trait Close {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    fn close(^self) Never!
+}
+
+// Arithmetic with a zero and a one; a `#Numeric` distinct type has it.
+trait Numeric {
+    local: Bool{true}
+    requires: String{"Add Sub Mul Comparable"}
+    bare_bound: Bool{true}
+    bundle: Bool{true}
+    fn zero() -> Self Never!
+    fn one() -> Self Never!
+}
+
+// The typed-SQL driver contract of `core.db`.
+trait Driver {
+    local: Bool{true}
+    fn query(&self, sql: SQL) -> [[String: DBValue]] DBError!
+    fn query_one(&self, sql: SQL) -> [String: DBValue]? DBError!
+    fn execute(&self, sql: SQL) -> Int DBError!
+    fn begin(&self) -> Bool Never!
+    fn commit(&self) -> Bool Never!
+    fn rollback(&self) -> Bool Never!
+}
+
+// The byte-stream read contract of `core.term`.
+trait Reader {
+    fn read(&self, limit: Int) -> [U8] IOError!
+}
+
+// The byte-stream write contract of `core.term`.
+trait Writer {
+    fn write(&self, bytes: [U8]) -> Int IOError!
+    fn write_all(&self, bytes: [U8]) IOError!
+}
+
+// A value a transaction restores on rollback.
+trait Rollback {
+    type Snapshot
+    fn snapshot(self) -> Snapshot Never!
+    fn restore(&self, snap: Snapshot) Never!
+}
+
+// A cursor: `loop x in cursor`.
+trait Iterator {
+    type Item
+    fn next(&self) -> Item? Never!
+}
+
+// Zero-copy `loop x in value`.
+trait Iterable {
+    raw_return: Bool{true}
+    type Iter
+    fn iter(^self) -> Iter Never!
+}
+
+// `value[key]`.
+trait Index {
+    type Key
+    type Value
+    fn get(self, k: Key) -> Value? Never!
+}
+
+// `value[key] = v`, with the key and value types of the type's `Index`.
+trait IndexMut {
+    shares: String{"Index"}
+    fn set(&self, k: Key, v: Value) Never!
+}

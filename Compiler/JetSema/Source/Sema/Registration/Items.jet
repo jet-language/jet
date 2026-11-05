@@ -99,6 +99,8 @@ use {
         name_rows_remove,
         name_rows_set,
         name_text,
+        owned_trait_codec,
+        owned_trait_codec_marker,
         owned_trait_is_operator,
         sema_reserved_type_name,
         symbol_id,
@@ -3162,7 +3164,7 @@ fn sema_registration_cli_items(items: [Item], diagnostics: &[Diagnostic]) {
             }
             codable := false
             loop derive_item in definition.derives {
-                if derive_item.name == "Codable" || derive_item.name == "Encode" || derive_item.name == "Decode" -> codable = true
+                if owned_trait_codec_marker(derive_item.name) -> codable = true
             }
             if command_count > 0 && codable {
                 &diagnostics.push(sema_error("E1346", definition.name_span, "callable CLI members cannot be declared on a Codable struct", "CLI commands are behavior, while Codable structs contain only serializable data fields.", "split the command program struct from the Codable data struct"))
@@ -3414,10 +3416,10 @@ fn sema_registration_serde_any_explicit(items: [Item]) -> Bool Never! {
     loop item in items {
         if item == {
             .Struct(definition) -> {
-                if sema_registration_serde_derives(definition.derives, "Encode") || sema_registration_serde_derives(definition.derives, "Decode") -> return true
+                if sema_registration_serde_derives_codec(definition.derives) -> return true
             }
             .Enum(definition) -> {
-                if sema_registration_serde_derives(definition.derives, "Encode") || sema_registration_serde_derives(definition.derives, "Decode") -> return true
+                if sema_registration_serde_derives_codec(definition.derives) -> return true
             }
             else -> {}
         }
@@ -3482,6 +3484,13 @@ fn sema_registration_deprecated_markers(markers: [Marker], is_public: Bool, diag
 fn sema_registration_serde_derives(derives: [NamedSpan], name: String) -> Bool Never! {
     loop derive_item in derives {
         if derive_item.name == name -> return true
+    }
+    false
+}
+
+fn sema_registration_serde_derives_codec(derives: [NamedSpan]) -> Bool Never! {
+    loop derive_item in derives {
+        if owned_trait_codec(derive_item.name) -> return true
     }
     false
 }

@@ -1,10 +1,12 @@
-// The traits the compiler owns; this file is their only home. No source file
-// declares them, so each row of OWNED_TRAITS is that trait's declaration, and
-// every reader asks the table: the orphan rule (`local`), a bare generic
-// bound (`bare_bound`), the raw protocol return (`raw_return`), operator
-// identity and hooks, the type-parameter method fallback, and the impl
-// contract check (E0906, E0907, E0913). A trait the compiler knows has a row,
-// and the row names its contract, so no compiler-owned trait goes unchecked.
+// The shape of OWNED_TRAITS, the traits the compiler owns, and the questions
+// every reader asks it. Compiler/Prelude/Traits.jet declares the traits;
+// Tools/agent/OwnedTraitRows.jet renders the declarations into
+// OwnedTraitRows.jet, so each row is one trait's declaration: the orphan rule
+// (`local`), a bare generic bound (`bare_bound`), the raw protocol return
+// (`raw_return`), operator identity and hooks, the derive and bundle markers,
+// the type-parameter method fallback, and the impl contract check (E0906,
+// E0907, E0913). A trait the compiler knows has a row, and the row names its
+// contract, so no compiler-owned trait goes unchecked.
 
 // How an owned trait's method takes its receiver.
 enum OwnedReceiver {
@@ -59,67 +61,22 @@ struct OwnedTrait {
     // the implicit failure carrier.
     raw_return: Bool
     contract: OwnedContract
-}
-
-OWNED_TRAITS :: [OwnedTrait]{
-    OwnedTrait{name: "Add", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Operator{hook: "add", result: None}},
-    OwnedTrait{name: "Sub", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Operator{hook: "sub", result: None}},
-    OwnedTrait{name: "Mul", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Operator{hook: "mul", result: None}},
-    OwnedTrait{name: "Div", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Operator{hook: "div", result: None}},
-    OwnedTrait{name: "Equatable", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Operator{hook: "equal", result: Val(Type.Bool)}},
-    OwnedTrait{name: "Comparable", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Operator{hook: "compare", result: Val(Type.Named{name: "Ordering"})}},
-    OwnedTrait{name: "Encode", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Codec{verb: "encode"}},
-    OwnedTrait{name: "Decode", local: true, bare_bound: true, raw_return: true, contract: OwnedContract.Codec{verb: "decode"}},
-    OwnedTrait{name: "Literal.Int", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Literal{source: Type.Int}},
-    OwnedTrait{name: "Literal.Float", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Literal{source: Type.String}},
-    OwnedTrait{name: "CheckedText", local: true, bare_bound: true, raw_return: false, contract: OwnedContract.CheckedText},
-    OwnedTrait{name: "Printable", local: true, bare_bound: true, raw_return: false, contract: OwnedContract.Derived},
-    OwnedTrait{name: "Serialize", local: true, bare_bound: true, raw_return: false, contract: OwnedContract.Derived},
-    OwnedTrait{name: "Renderable", local: true, bare_bound: true, raw_return: false, contract: OwnedContract.Derived},
-    OwnedTrait{name: "Display", local: true, bare_bound: false, raw_return: true, contract: OwnedContract.Methods{methods: [OwnedMethod]{
-        OwnedMethod{name: "display", receiver: OwnedReceiver.Fixed{access: AccessConvention.Read}, params: [OwnedParam]{}, returns: Val(Type.String)},
-    }, associated: [String]{}, shares: None}},
-    OwnedTrait{name: "Debug", local: true, bare_bound: false, raw_return: true, contract: OwnedContract.Methods{methods: [OwnedMethod]{
-        OwnedMethod{name: "debug", receiver: OwnedReceiver.Any, params: [OwnedParam]{}, returns: Val(Type.String)},
-    }, associated: [String]{}, shares: None}},
-    OwnedTrait{name: "Close", local: true, bare_bound: true, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
-        OwnedMethod{name: "close", receiver: OwnedReceiver.Fixed{access: AccessConvention.Move}, params: [OwnedParam]{}, returns: None},
-    }, associated: [String]{}, shares: None}},
-    OwnedTrait{name: "Numeric", local: true, bare_bound: true, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
-        OwnedMethod{name: "zero", receiver: OwnedReceiver.Static, params: [OwnedParam]{}, returns: Val(Type.Named{name: "Self"})},
-        OwnedMethod{name: "one", receiver: OwnedReceiver.Static, params: [OwnedParam]{}, returns: Val(Type.Named{name: "Self"})},
-    }, associated: [String]{}, shares: None}},
-    OwnedTrait{name: "Driver", local: true, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
-        OwnedMethod{name: "query", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "sql", ty: Type.Named{name: "SQL"}}}, returns: Val(Type.Result{ok: Type.List{element: Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "DBValue"}}}, err: Type.Named{name: "DBError"}})},
-        OwnedMethod{name: "query_one", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "sql", ty: Type.Named{name: "SQL"}}}, returns: Val(Type.Result{ok: Type.Option{inner: Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "DBValue"}}}, err: Type.Named{name: "DBError"}})},
-        OwnedMethod{name: "execute", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "sql", ty: Type.Named{name: "SQL"}}}, returns: Val(Type.Result{ok: Type.Int, err: Type.Named{name: "DBError"}})},
-        OwnedMethod{name: "begin", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{}, returns: Val(Type.Bool)},
-        OwnedMethod{name: "commit", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{}, returns: Val(Type.Bool)},
-        OwnedMethod{name: "rollback", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{}, returns: Val(Type.Bool)},
-    }, associated: [String]{}, shares: None}},
-    OwnedTrait{name: "Reader", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
-        OwnedMethod{name: "read", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "limit", ty: Type.Int}}, returns: Val(Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "IOError"}})},
-    }, associated: [String]{}, shares: None}},
-    OwnedTrait{name: "Writer", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
-        OwnedMethod{name: "write", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "bytes", ty: Type.List{element: Type.IntN{signed: false, bits: 8}}}}, returns: Val(Type.Result{ok: Type.Int, err: Type.Named{name: "IOError"}})},
-        OwnedMethod{name: "write_all", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "bytes", ty: Type.List{element: Type.IntN{signed: false, bits: 8}}}}, returns: Val(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "IOError"}})},
-    }, associated: [String]{}, shares: None}},
-    OwnedTrait{name: "Rollback", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
-        OwnedMethod{name: "snapshot", receiver: OwnedReceiver.Fixed{access: AccessConvention.Read}, params: [OwnedParam]{}, returns: Val(Type.Named{name: "Snapshot"})},
-        OwnedMethod{name: "restore", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "snap", ty: Type.Named{name: "Snapshot"}}}, returns: None},
-    }, associated: [String]{"Snapshot"}, shares: None}},
-    OwnedTrait{name: "Iterator", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
-        OwnedMethod{name: "next", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{}, returns: Val(Type.Option{inner: Type.Named{name: "Item"}})},
-    }, associated: [String]{"Item"}, shares: None}},
-    OwnedTrait{name: "Iterable", local: false, bare_bound: false, raw_return: true, contract: OwnedContract.Methods{methods: [OwnedMethod]{
-        OwnedMethod{name: "iter", receiver: OwnedReceiver.Fixed{access: AccessConvention.Move}, params: [OwnedParam]{}, returns: Val(Type.Named{name: "Iter"})},
-    }, associated: [String]{"Iter"}, shares: None}},
-    OwnedTrait{name: "Index", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
-        OwnedMethod{name: "get", receiver: OwnedReceiver.Fixed{access: AccessConvention.Read}, params: [OwnedParam]{OwnedParam{name: "k", ty: Type.Named{name: "Key"}}}, returns: Val(Type.Option{inner: Type.Named{name: "Value"}})},
-    }, associated: [String]{"Key", "Value"}, shares: None}},
-    OwnedTrait{name: "IndexMut", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Methods{methods: [OwnedMethod]{
-        OwnedMethod{name: "set", receiver: OwnedReceiver.Fixed{access: AccessConvention.Write}, params: [OwnedParam]{OwnedParam{name: "k", ty: Type.Named{name: "Key"}}, OwnedParam{name: "v", ty: Type.Named{name: "Value"}}}, returns: None},
-    }, associated: [String]{}, shares: Val("Index")}},
+    // The source operators its hook implements: `==` and `!=` for `Equatable`.
+    operators: [String]
+    // `#Commutative` on a typed impl also answers the swapped operands.
+    commutative: Bool
+    // The traits every type with this one also has.
+    requires: [String]
+    // `#Name` on a struct or enum derives it structurally; `!Name` refuses it.
+    auto_derive: Bool
+    // The marker that derives it with the family's other traits (`Codable`).
+    auto_derive_family: String?
+    // `#Name` on a distinct type re-exposes it from the base type.
+    bundle: Bool
+    // The distinct-type marker that bundles the family (`CodableAsBase`).
+    bundle_family: String?
+    // A list, map, option or union has it when its elements do.
+    through_elements: Bool
 }
 
 fn owned_trait(name: String) -> OwnedTrait? Never! {
@@ -170,9 +127,139 @@ fn owned_trait_arithmetic(trait_name: String) -> Bool Never! {
     false
 }
 
+// The arithmetic operator traits for a reader, in table order:
+// "Add, Sub, Mul, and Div".
+fn owned_trait_arithmetic_listed() -> String Never! {
+    names := [String]{}
+    loop owned in OWNED_TRAITS {
+        if owned_trait_arithmetic(owned.name) -> &names.push(owned.name.copy())
+    }
+    owned_trait_listed(names)
+}
+
+// The traits `trait_name` requires, for a reader: "Add, Sub, Mul, and
+// Comparable" for `Numeric`.
+fn owned_trait_requires_listed(trait_name: String) -> String Never! {
+    owned :: owned_trait(trait_name) ?? return ""
+    owned_trait_listed(owned.requires)
+}
+
+fn owned_trait_listed(names: [String]) -> String Never! {
+    joined :: names.join(", ")
+    last :: joined.rpartition(", ")
+    if last.sep == "" -> return joined
+    "{last.head}, and {last.tail}"
+}
+
+// An operator trait whose typed impl `#Commutative` may mark: `Add`, `Mul`.
+fn owned_trait_commutative(trait_name: String) -> Bool Never! {
+    owned :: owned_trait(trait_name) ?? return false
+    owned.commutative
+}
+
 // An operator hook with a fixed result: `==` and ordering.
 fn owned_trait_structural(trait_name: String) -> Bool Never! {
     owned :: owned_trait(trait_name) ?? return false
     if owned.contract == .Operator(_, result) -> return result != None
     false
+}
+
+// The structural traits in table order: `Equatable`, `Comparable`.
+fn owned_trait_structural_names() -> [String] Never! {
+    names := [String]{}
+    loop owned in OWNED_TRAITS {
+        if owned_trait_structural(owned.name) -> &names.push(owned.name.copy())
+    }
+    names
+}
+
+// A codec trait: `Encode`, `Decode`.
+fn owned_trait_codec(trait_name: String) -> Bool Never! {
+    owned :: owned_trait(trait_name) ?? return false
+    if owned.contract == .Codec(_) -> return true
+    false
+}
+
+// The codec traits in table order: `Encode`, `Decode`.
+fn owned_trait_codec_names() -> [String] Never! {
+    names := [String]{}
+    loop owned in OWNED_TRAITS {
+        if owned_trait_codec(owned.name) -> &names.push(owned.name.copy())
+    }
+    names
+}
+
+// A literal capability: `Literal.Int`, `Literal.Float`.
+fn owned_trait_literal(trait_name: String) -> Bool Never! {
+    owned :: owned_trait(trait_name) ?? return false
+    if owned.contract == .Literal(_) -> return true
+    false
+}
+
+// The operator trait a source operator calls: `Equatable` for `!=`.
+fn owned_trait_for_operator(symbol: String) -> OwnedTrait? Never! {
+    loop owned in OWNED_TRAITS {
+        if owned.operators.contains(symbol) -> return Val(owned)
+    }
+    None
+}
+
+// Whether a type with `trait_name` also has `other`: the trait itself or one
+// it requires (`Numeric` requires `Add`).
+fn owned_trait_implies(trait_name: String, other: String) -> Bool Never! {
+    if trait_name == other -> return true
+    owned :: owned_trait(trait_name) ?? return false
+    owned.requires.contains(other)
+}
+
+// The traits a family marker derives (`auto_derive_family`, `Codable`) or
+// bundles (`bundle_family`, `CodableAsBase`), in table order; empty when
+// `marker` names no such family.
+fn owned_trait_family(marker: String, bundle: Bool) -> [String] Never! {
+    members := [String]{}
+    loop owned in OWNED_TRAITS {
+        family :: if bundle -> owned.bundle_family else -> owned.auto_derive_family
+        if family == .Val(name) && name == marker -> &members.push(owned.name.copy())
+    }
+    members
+}
+
+// Whether `#{marker}` on a struct or enum is a structural auto-derive
+// control: a trait it derives, or a family of them. `!{marker}` refuses it.
+fn owned_trait_auto_derive_marker(marker: String) -> Bool Never! {
+    if owned_trait(marker) == .Val(owned) && owned.auto_derive -> return true
+    owned_trait_family(marker, false).len() > 0
+}
+
+// The traits `#{marker}` on a distinct type re-exposes from its base type:
+// the trait itself when it bundles, or the members of a bundle family.
+fn owned_trait_bundle(marker: String) -> [String] Never! {
+    if owned_trait(marker) == .Val(owned) && owned.bundle -> return [String]{marker.copy()}
+    owned_trait_family(marker, true)
+}
+
+// The distinct-type marker that grants `trait_name`: the trait itself when
+// it bundles, else its bundle family (`CodableAsBase` for `Encode`).
+fn owned_trait_bundle_marker(trait_name: String) -> String? Never! {
+    owned :: owned_trait(trait_name) ?? return None
+    if owned.bundle -> return Val(owned.name.copy())
+    if owned.bundle_family == .Val(family) -> return Val(family.copy())
+    None
+}
+
+// Whether the derive or marker `marker` gives a type a codec: a codec trait
+// or a family whose members are codec traits (`Codable`, `Encode`).
+fn owned_trait_codec_marker(marker: String) -> Bool Never! {
+    names := owned_trait_family(marker, false)
+    if names.len() == 0 -> return owned_trait_codec(marker)
+    loop name in names {
+        if !owned_trait_codec(name) -> return false
+    }
+    true
+}
+
+// Whether a list, map, option or union has `trait_name` when its elements do.
+fn owned_trait_through_elements(trait_name: String) -> Bool Never! {
+    owned :: owned_trait(trait_name) ?? return false
+    owned.through_elements
 }

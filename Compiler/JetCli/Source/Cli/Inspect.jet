@@ -40,6 +40,10 @@ use {
         diagnostic_from_registry,
         diagnostic_registry_rows,
         diagnostic_render_all,
+        owned_trait,
+        owned_trait_arithmetic,
+        owned_trait_commutative,
+        owned_trait_operator_hook,
         type_name,
         DIAGNOSTIC_ERROR,
     ]
@@ -1134,28 +1138,19 @@ fn jet_cli_inspect_plain_number(name: String) -> Bool Never! {
     name == "Int" || name == "Float" || name == "Decimal"
 }
 
-// CmdInspect.rs `operator_symbol`.
+// CmdInspect.rs `operator_symbol`: the source operator of an arithmetic
+// operator trait, `+` for `Add`.
 fn jet_cli_inspect_operator_symbol(trait_name: String) -> String? Never! {
-    if trait_name == {
-        "Add" -> return Val("+")
-        "Sub" -> return Val("-")
-        "Mul" -> return Val("*")
-        "Div" -> return Val("/")
-        else -> {}
-    }
-    None
+    if !owned_trait_arithmetic(trait_name) -> return None
+    owned :: owned_trait(trait_name) ?? return None
+    if owned.operators.len() == 0 -> return None
+    Val(owned.operators[0].copy())
 }
 
 // The hook method an arithmetic operator trait names, or "".
 fn jet_cli_inspect_operator_method(trait_name: String) -> String Never! {
-    if trait_name == {
-        "Add" -> return "add"
-        "Sub" -> return "sub"
-        "Mul" -> return "mul"
-        "Div" -> return "div"
-        else -> {}
-    }
-    ""
+    if !owned_trait_arithmetic(trait_name) -> return ""
+    owned_trait_operator_hook(trait_name) ?? ""
 }
 
 // Traits.rs `impl_owner_type`: the owner applied to its own type parameters.
@@ -1311,7 +1306,7 @@ fn jet_cli_inspect_types(programs: [Program], json: Bool) -> JetDriverVerbOutput
         source :: "{left}.{implementation.trait_name}({rhs})"
         kind :: if implementation.explicit_rhs -> "explicit hook" else -> "hook"
         rows := [String]{"{left} {symbol} {rhs} -> {implementation.result}  {kind} {source}"}
-        if jet_cli_inspect_plain_number(rhs) && !jet_cli_inspect_plain_number(left) && (implementation.trait_name == "Add" || implementation.trait_name == "Mul") {
+        if jet_cli_inspect_plain_number(rhs) && !jet_cli_inspect_plain_number(left) && owned_trait_commutative(implementation.trait_name) {
             explicit_reverse := false
             loop candidate in registered {
                 if candidate.explicit_rhs && candidate.left == rhs && candidate.trait_name == implementation.trait_name && candidate.rhs == left -> explicit_reverse = true

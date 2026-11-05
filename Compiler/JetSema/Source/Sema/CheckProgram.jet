@@ -95,6 +95,7 @@ use jet_foundation.[
     TraitImplBlock,
     FactDecl,
     compiler_threads_heaviest_first,
+    owned_trait_codec_marker,
 ]
 
 // Exact registered APIs without a browser host provider. The compiler witness
@@ -7137,7 +7138,7 @@ fn sema_comptime_add_module_item_sources(sources: &SemaComptimeSourceList, graph
 // field from its compile-time default value.
 fn sema_comptime_struct_bakes_defaults(derives: [NamedSpan]) -> Bool Never! {
     loop marker in derives {
-        if marker.name == "Codable" || marker.name == "Decode" || marker.name == "Encode" || marker.name == "CLI" -> return true
+        if owned_trait_codec_marker(marker.name) || marker.name == "CLI" -> return true
     }
     false
 }

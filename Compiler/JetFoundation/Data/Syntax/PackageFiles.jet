@@ -139,17 +139,6 @@ BINPAT_ENDIAN_BIG :: "be"
 /// Multi-byte little-endian read suffix — `{len:U16le}`.
 BINPAT_ENDIAN_LITTLE :: "le"
 
-/// (formerly):
-/// `#Numeric` marker enables same-type arithmetic on a distinct type.
-/// Written `#Numeric` on the same line before the distinct-type name (the
-/// sole `#` rule prefix). This is the single merged
-/// spelling for what used to be two markers doing the same job — the
-/// `#Numeric` distinct-type marker and the formerly-`@numeric`
-/// capability bundle — folded per (I8: one
-/// way to mean it). `MARKER_BUNDLE_NUMERIC` no longer exists as a separate
-/// constant; use this one.
-MARKER_NUMERIC :: "Numeric"
-
 /// (ratified 2026-06-24): `#UnitFamily(Currency) { usd, eur, gbp }` —
 /// declares a family of units. Each member mints one distinct `#Numeric` type
 /// (`usd` → `Usd`) that erases to `Float`, so signatures read plain English
@@ -406,29 +395,7 @@ LAYOUT_ALIGN :: "align"
 /// E1107.
 LAYOUT_COLUMNAR :: "columnar"
 
-// ── Serde derive markers + attributes (–8 bracket form) ──
-// Derive markers (PascalCase per written `#[…]` before a struct/enum,
-// Formerly): `#[Codable]` derives BOTH
-// directions (sugar for `#[Encode, Decode]`); `#[Encode]` is write-only;
-// `#[Decode]` is read-only. Owner (= B, modified): the
-// collapsed umbrella is `Codable`, with `Encode`/`Decode` as the one-way markers.
-MARKER_CODABLE :: "Codable"
-
 MARKER_RECEIPT :: "Receipt"
-
-MARKER_ENCODE :: "Encode"
-
-MARKER_DECODE :: "Decode"
-
-                                          // (formerly B, ratified 2026-07-02): the
-                                          // other built-in derive markers that join Codable/Encode/Decode — all on
-                                          // `#`, the sole rule prefix.
-                                          // All six structural
-                                          // auto-derive controls accept the same leading `!` refusal, including
-                                          // `#!Codable`. User derives (`derive T.Wire { … }`, applied as
-                                          // `#[Wire]`) also stay `#` — built-in and user derives share the
-                                          // same prefix; only the derive name tells them apart.
-MARKER_COMPARABLE :: "Comparable" // (formerly)
 
                                                   // Per-field attributes (= A), written `#[…]` before a field.
 MARKER_RENAME :: "Rename" // #[Rename("wire_key")]

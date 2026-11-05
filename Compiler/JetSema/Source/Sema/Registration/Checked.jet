@@ -96,7 +96,10 @@ use {
         jet_target_layout_from_machine,
         owned_trait,
         owned_trait_arithmetic,
+        owned_trait_commutative,
         owned_trait_is_operator,
+        owned_trait_literal,
+        owned_trait_structural_names,
         symbol_kind_name,
         type_identity_equal,
         type_name,
@@ -230,8 +233,9 @@ fn sema_checked_derive_names(derives: [NamedSpan]) -> [String] Never! {
 fn sema_checked_type_derive_names(derives: [NamedSpan], definition: Item, auto_debug: Bool) -> [String] Never! {
     names := sema_checked_derive_names(derives)
     if auto_debug && !sema_checked_has_name(names, "Debug") -> &names.push("Debug")
-    if sema_checked_has_generated_block(definition, "Equatable") && !sema_checked_has_name(names, "Equatable") -> &names.push("Equatable")
-    if sema_checked_has_generated_block(definition, "Comparable") && !sema_checked_has_name(names, "Comparable") -> &names.push("Comparable")
+    loop structural in owned_trait_structural_names() {
+        if sema_checked_has_generated_block(definition, structural) && !sema_checked_has_name(names, structural) -> &names.push(structural.copy())
+    }
     names
 }
 
@@ -3193,7 +3197,7 @@ fn sema_checked_coherence_rhs_local(state: SemaCheckedCoherence, rhs: Type) -> B
 fn sema_checked_coherence_operator_marker(marker: OperatorMarker?, trait_name: String?, operator_rhs: Type?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if marker == None -> return true
     name :: trait_name ?? "the impl"
-    if (name == "Add" || name == "Mul") && trait_name != None && operator_rhs != None -> return true
+    if owned_trait_commutative(name) && trait_name != None && operator_rhs != None -> return true
     &diagnostics.push(sema_error("E0907", span, "`#Commutative` is not valid on `{name}`", "`#Commutative` derives a reverse lookup only for a typed Add or Mul hook", "use `impl Type.Add(Other) #Commutative` or `impl Type.Mul(Other) #Commutative`"))
     false
 }
@@ -3295,7 +3299,7 @@ fn sema_checked_coherence_impl(graph: SemaRegistrationGraph, module_row: SemaReg
     definition :: implementation.declaration
     if !sema_checked_coherence_operator_marker(definition.operator_marker, definition.trait_name, definition.operator_rhs, definition.type_span, &diagnostics) -> return
     trait_name :: definition.trait_name ?? return
-    literal_capability :: trait_name == "Literal.Int" || trait_name == "Literal.Float"
+    literal_capability :: owned_trait_literal(trait_name)
     if definition.delegation_field != None && !literal_capability {
         key :: "{definition.type_name}::{trait_name}"
         state.trait_keys[key] = true

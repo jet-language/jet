@@ -39,7 +39,10 @@ use jet_foundation.[
     foundation_named_type,
     owned_trait,
     owned_trait_arithmetic,
+    owned_trait_codec,
+    owned_trait_implies,
     owned_trait_structural,
+    owned_trait_through_elements,
     sema_reserved_type_name,
     typed_head_kind_of,
     boundary_head_carrier_module,
@@ -1439,7 +1442,7 @@ fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
         .Tagged(_, inner) -> return sema_type_bound_satisfied_at(graph, inner, bound_name, caller, generic_params)
         .Named(name) -> {
             if sema_type_name_is_generic(generic_params, name) -> return None
-            if (name == "Decimal" || name == "Fraction") && (bound_name == "Numeric" || bound_name == "Add" || bound_name == "Sub" || bound_name == "Mul" || bound_name == "Comparable") -> return Val(true)
+            if (name == "Decimal" || name == "Fraction") && owned_trait_implies("Numeric", bound_name) -> return Val(true)
             // `Duration` is the compiler-owned time carrier: its `==` and
             // ordering are built in, and it has no nominal row to carry an impl.
             if name == "Duration" && structural -> return Val(true)
@@ -1509,10 +1512,10 @@ fn sema_type_bound_satisfied_with_generics(graph: SemaRegistrationGraph, actual:
 fn sema_type_bound_satisfied_at(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
     actual_resolved :: sema_type_resolve_declared_recursive(graph, actual, caller, generic_params)
     // Demand: a checked codec bound requires the codecs of the
-    // types it is met at, so their generated bodies are checked; an
-    // Equatable/Comparable bound, their demand-checked derived methods.
-    if bound_name == "Encode" || bound_name == "Decode" -> sema_codec_demand_type(graph, bound_name, actual_resolved)
-    if bound_name == "Equatable" || bound_name == "Comparable" -> sema_derive_demand_type(graph, actual_resolved)
+    // types it is met at, so their generated bodies are checked; a
+    // structural bound, their demand-checked derived methods.
+    if owned_trait_codec(bound_name) -> sema_codec_demand_type(graph, bound_name, actual_resolved)
+    if owned_trait_structural(bound_name) -> sema_derive_demand_type(graph, actual_resolved)
     structural :: sema_type_codec_structural_bound(graph, actual_resolved, bound_name, caller, generic_params)
     if structural != None -> return structural
     generic_satisfied := sema_type_generic_bound_satisfied(graph, actual_resolved, bound_name, caller, generic_params)
@@ -1539,7 +1542,7 @@ fn sema_type_bound_satisfied_at(graph: SemaRegistrationGraph, actual: Type, boun
 // every member is (it codes through its structural enum); the dynamic `Dyn` is
 // the codec tree itself (Rust `TraitRegistry::type_implements_trait`).
 fn sema_type_codec_structural_bound(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
-    if bound_name != "Encode" && bound_name != "Decode" && bound_name != "Serialize" -> return None
+    if !owned_trait_through_elements(bound_name) -> return None
     if actual_resolved == {
         .List(inner) | .Option(inner) | .FixedList(inner, _) -> return sema_type_bound_satisfied_at(graph, inner, bound_name, caller, generic_params)
         .Map(key, _, value) -> {

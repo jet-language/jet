@@ -74,6 +74,7 @@ use jet_foundation.[
     foundation_named_type,
     integer_bounds_exact,
     measure_literal_value,
+    owned_trait_arithmetic,
     symbol_id,
     checked_generated_local,
     checked_symbol_local,
@@ -6267,14 +6268,8 @@ fn sema_stmt_pure_place(place: TExpr, context: SemaCheckContext) -> Bool {
 }
 
 fn sema_stmt_compound_nested_hook(op: BinOp, base: Expr, field_ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    trait_name :: if op == {
-        .Add -> "Add"
-        .Sub -> "Sub"
-        .Mul -> "Mul"
-        .Div -> "Div"
-        else -> ""
-    }
-    if trait_name == "" -> return false
+    trait_name :: sema_expr_operator_trait(op) ?? return false
+    if !owned_trait_arithmetic(trait_name) -> return false
     if field_ty == {
         .Int | .Float | .IntN(_, _) | .Float32 -> return false
         else -> {}

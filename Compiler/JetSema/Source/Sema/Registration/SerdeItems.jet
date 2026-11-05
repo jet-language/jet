@@ -63,6 +63,7 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     ast_func,
     expr_span,
+    owned_trait_codec,
     type_name,
 ]
 
@@ -251,7 +252,7 @@ fn sema_serde_items_generated(flags: Int) -> Bool Never! {
 // declaration name's (the only authored location of an automatic codec).
 fn sema_serde_items_derive_span(derives: [NamedSpan], name_span: Span) -> Span Never! {
     loop entry in derives {
-        if entry.name == "Encode" || entry.name == "Decode" -> return entry.span
+        if owned_trait_codec(entry.name) -> return entry.span
     }
     // copy: two Ints; the returned span is the caller's own, while `name_span` (a read
     // parameter) stays on the declaration.

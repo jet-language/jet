@@ -1155,8 +1155,7 @@ fn unit_family_distinct_defs(family: UnitFamilyDef) -> [DistinctDef] Never! {
             derives := [NamedSpan]{NamedSpan{name: if point -> "Comparable" else -> "Numeric", span: member.name_span}}
             quantity := QuantityInfo?{None}
             if family.resolved_dimension == .Val(dimension) {
-                &derives.push(NamedSpan{name: "Encode", span: member.name_span})
-                &derives.push(NamedSpan{name: "Decode", span: member.name_span})
+                loop codec in owned_trait_codec_names() -> &derives.push(NamedSpan{name: codec.copy(), span: member.name_span})
                 kind :: if {
                     !affine -> QuantityKind.Linear
                     point -> QuantityKind.Point

@@ -79,6 +79,7 @@ use {
         marker_registered,
         marker_registered_accepts_arguments,
         owned_trait_arithmetic,
+        owned_trait_arithmetic_listed,
     ]
     jet_lexer.[
         TOKEN_AMP,
@@ -2578,11 +2579,11 @@ fn parser_parse_operator_rhs(state: &JetParserState, trait_name: String?) -> Typ
     }
     parser_expect(&state, TOKEN_RPAREN, "`)` after the operator right-hand type")
     name :: trait_name ?? {
-        parser_add_error(&state, rhs.span, "type arguments on an impl need an operator trait", "only Add, Sub, Mul, and Div accept an explicit right-hand operand type", "write a dotted operator impl such as `impl Money.Mul(Int)`")
+        parser_add_error(&state, rhs.span, "type arguments on an impl need an operator trait", "only {owned_trait_arithmetic_listed()} accept an explicit right-hand operand type", "write a dotted operator impl such as `impl Money.Mul(Int)`")
         return None
     }
     if !owned_trait_arithmetic(name) {
-        parser_add_error(&state, rhs.span, "`{name}` does not accept an operator right-hand type", "only Add, Sub, Mul, and Div have a typed right-hand operand", "remove the type arguments or use an arithmetic operator trait")
+        parser_add_error(&state, rhs.span, "`{name}` does not accept an operator right-hand type", "only {owned_trait_arithmetic_listed()} have a typed right-hand operand", "remove the type arguments or use an arithmetic operator trait")
         return None
     }
     Val(rhs.ty)

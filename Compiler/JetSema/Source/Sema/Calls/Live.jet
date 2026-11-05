@@ -26,6 +26,7 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     ast_empty_lambda_meta,
     expr_span,
+    owned_trait_codec_names,
 ]
 
 struct SemaLiveSource {
@@ -254,12 +255,9 @@ fn sema_live_reads_only(name: String, effect_bound: [EffectRowEntry]?, span: Spa
 }
 
 fn sema_live_codable(graph: SemaRegistrationGraph, name: String, role: String, ty: Type, environment: SemaScopeEnvironment, span: Span, diagnostics: &[Diagnostic]) -> Bool {
-    missing := ""
-    if sema_type_bound_satisfied(graph, ty, "Encode", environment.module_identity) != (Val(true)) {
-        missing = "Encode"
-    } else if sema_type_bound_satisfied(graph, ty, "Decode", environment.module_identity) != (Val(true)) {
-        missing = "Decode"
-    }
+    missing :: loop codec in owned_trait_codec_names() {
+        if sema_type_bound_satisfied(graph, ty, codec, environment.module_identity) != (Val(true)) -> break codec.copy()
+    } ?? ""
     if missing == "" -> return true
     &diagnostics.push(sema_error("E0112", span, "`{name}`'s {role} type {sema_type_show(ty)} isn't `{missing}`", "a live binding stores and sends its source's result and error as encoded data", "derive `Encode` and `Decode` for {sema_type_show(ty)}"))
     false

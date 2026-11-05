@@ -233,69 +233,10 @@ TXN_ON_COMMIT :: "on_commit"
 /// form, I7 untouched).
 TXN_ON_ROLLBACK :: "on_rollback"
 
-/// (ratified 2026-06-25, layer 2): the trait a type may derive/impl
-/// to customize how a mutated value is snapshotted and restored inside a `#Transact`
-/// block (e.g. a cheap diff instead of a full deep copy). When a mutated value's
-/// type implements `Rollback`, the auto-snapshot (layer 1) uses it instead of a
-/// generic clone. A user-derivable trait name (I7).
-TRAIT_ROLLBACK :: "Rollback"
-
-/// User-facing string rendering for `{}` interpolation.
-TRAIT_DISPLAY :: "Display"
-
-/// Developer-facing debug rendering for `{value:Debug}` interpolation.
-TRAIT_DEBUG :: "Debug"
-
-/// Expert opt-in hook enabling zero-copy `loop x in mytype`.
-TRAIT_ITERABLE :: "Iterable"
-
-/// Cursor type for `Iterable::iter`.
-TRAIT_ITERATOR :: "Iterator"
-
-/// Expert opt-in hook enabling `mytype[key]` read syntax.
-TRAIT_INDEX :: "Index"
-
-/// Expert opt-in hook enabling `mytype[key] = v` write syntax.
-TRAIT_INDEX_MUT :: "IndexMut"
-
-/// Expert operator hooks. Existing symbols and precedence only.
-TRAIT_ADD :: "Add"
-
-TRAIT_SUB :: "Sub"
-
-TRAIT_MUL :: "Mul"
-
-TRAIT_DIV :: "Div"
-
-TRAIT_EQUATABLE :: "Equatable"
-
-TRAIT_COMPARABLE :: "Comparable"
-
 TYPE_ORDERING :: "Ordering"
-
-/// The prelude `Numeric` trait. It builds on the
-/// operator hooks with the right side fixed to `Self` plus ordering, and adds
-/// two static members. `/` and unary minus are deliberately outside it.
-/// Built-in numbers (Int, Float, F32, sized integers, Decimal, Fraction) and
-/// every `#Numeric` distinct type implement it; structs may `impl T.Numeric`.
-TRAIT_NUMERIC :: "Numeric"
-
-NUMERIC_SUPERTRAITS :: [String]{TRAIT_ADD, TRAIT_SUB, TRAIT_MUL, TRAIT_COMPARABLE}
-
-NUMERIC_STATIC_MEMBERS :: [String]{"zero", "one"}
 
 /// Variant order is the shared scalar carrier order for the built-in enum.
 ORDERING_VARIANTS :: [String]{"Less", "Equal", "Greater"}
-
-/// Nominal byte-stream read contract in `core.term`.
-TRAIT_IO_READER :: "Reader"
-
-/// Nominal byte-stream write contract in `core.term`.
-TRAIT_IO_WRITER :: "Writer"
-
-/// Backend-neutral typed-SQL driver
-/// contract in `core.db`.
-TRAIT_DRIVER :: "Driver"
 
 INTERPOLATION_UNIT_STYLES :: [String]{"name", "bare"}
 

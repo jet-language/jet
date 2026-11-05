@@ -18,6 +18,7 @@ use {
         diagnostic_from_registry,
         diagnostic_with_alternative_edit,
         diagnostic_with_edit,
+        owned_trait_auto_derive_marker,
     ]
     jet_lexer.[
         TOKEN_COLON_COLON,
@@ -102,7 +103,7 @@ fn parser_parse_inbody_marker(state: &JetParserState) -> Marker? {
     } else if value.kind == TOKEN_FALSE {
         parser_bump(&state)
         negated = true
-        if !parser_marker_is_signed_auto_derive(marker_name) {
+        if !owned_trait_auto_derive_marker(marker_name) {
             parser_add_fatal_code(&state, "E0931", parser_cover(hash.span, value.span), "`#{marker_name} :: false` is not a signed auto-derive trait", "`false` rejects compiler generation only for structurally auto-derived traits", "write `#{marker_name} :: true`, or use `false` with an auto-derived trait")
         }
     } else if value.kind == TOKEN_LPAREN {

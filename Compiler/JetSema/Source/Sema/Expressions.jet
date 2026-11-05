@@ -71,6 +71,7 @@ use {
         dimension_multiply,
         expr_source_start,
         expr_span,
+        owned_trait_for_operator,
         owned_trait_for_operator_hook,
         symbol_id,
         checked_symbol_local,
@@ -515,28 +516,18 @@ fn sema_expr_precise_complex(value: TExpr, span: Span, line: Int, context: &Sema
     Val(sema_tree_node(Type.Named{name: "Complex"}, TExprKind.PreciseBuiltin{type_name: "Complex", function: "from_parts", args: [TExpr]{real, imaginary}}, span))
 }
 
+// The owned operator trait a binary operator calls (`Equatable` for `!=`),
+// read from the operator symbols OWNED_TRAITS declares.
 fn sema_expr_operator_trait(op: BinOp) -> String? {
-    if op == {
-        .Add -> return Val("Add")
-        .Sub -> return Val("Sub")
-        .Mul -> return Val("Mul")
-        .Div -> return Val("Div")
-        .Eq | .Ne -> return Val("Equatable")
-        .Compare | .Lt | .Gt | .Le | .Ge -> return Val("Comparable")
-        else -> None
-    }
+    owned :: owned_trait_for_operator(sema_expr_binary_name(op)) ?? return None
+    Val(owned.name.copy())
 }
 
+// The hook method of that trait: `equal` for `!=`.
 fn sema_expr_operator_method(op: BinOp) -> String? {
-    if op == {
-        .Add -> return Val("add")
-        .Sub -> return Val("sub")
-        .Mul -> return Val("mul")
-        .Div -> return Val("div")
-        .Eq | .Ne -> return Val("equal")
-        .Compare | .Lt | .Gt | .Le | .Ge -> return Val("compare")
-        else -> None
-    }
+    owned :: owned_trait_for_operator(sema_expr_binary_name(op)) ?? return None
+    if owned.contract == .Operator(hook, _) -> return Val(hook.copy())
+    None
 }
 
 fn sema_expr_operator_commutative(op: BinOp) -> Bool Never! {
@@ -642,7 +633,7 @@ fn sema_expr_check_operator(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs:
     // hook itself, the operator on a value of the hook's own receiver type
     // dispatches back to the same hook.
     relational :: op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge
-    hook_method :: if relational -> "compare" else -> sema_expr_operator_method(op) ?? ""
+    hook_method :: sema_expr_operator_method(op) ?? ""
     if (relational || op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && environment.function_name == hook_method {
         self_index :: sema_scope_resolve_index(scopes, "self")
         if self_index == .Val(index) {

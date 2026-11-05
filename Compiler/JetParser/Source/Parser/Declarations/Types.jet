@@ -17,6 +17,7 @@ use {
         UnitFamilyMember,
         UnitRatio,
         UnitScaleProvenance,
+        owned_trait_bundle,
     ]
     jet_lexer.[
         TOKEN_COLON,
@@ -128,17 +129,11 @@ fn parser_unit_family_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_value_at(&state, 1) == "UnitFamily" && parser_kind_at(&state, 2) == TOKEN_LPAREN
 }
 
+// The traits a distinct type's bundle markers re-expose from its base type.
 fn parser_distinct_marker_derives(markers: [Marker]) -> [NamedSpan] Never! {
     derives := [NamedSpan]{}
     loop marker in markers {
-        if marker.name == {
-            "Numeric" | "Comparable" | "Printable" -> &derives.push(NamedSpan{name: marker.name, span: marker.name_span})
-            "CodableAsBase" -> {
-                &derives.push(NamedSpan{name: "Encode", span: marker.name_span})
-                &derives.push(NamedSpan{name: "Decode", span: marker.name_span})
-            }
-            else -> {}
-        }
+        loop name in owned_trait_bundle(marker.name) -> &derives.push(NamedSpan{name: name, span: marker.name_span})
     }
     derives
 }

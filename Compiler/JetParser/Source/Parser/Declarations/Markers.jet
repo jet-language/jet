@@ -20,6 +20,7 @@ use {
         Type,
         diagnostic_from_registry,
         diagnostic_with_structured_edit,
+        owned_trait_auto_derive_marker,
     ]
     jet_lexer.[
         TOKEN_BANG,
@@ -384,7 +385,7 @@ fn parser_parse_marker_group_entries(state: &JetParserState, declaration: Bool) 
 // structural auto-derive engine can provide, bare or inside `#[…]`.
 fn parser_check_signed_marker(state: &JetParserState, bang_start: Int, name: Token) {
     marker_name :: parser_value(state, name)
-    if parser_marker_is_signed_auto_derive(marker_name) -> return
+    if owned_trait_auto_derive_marker(marker_name) -> return
     parser_add_fatal_code(&state, "E0931", Span{start: bang_start, end: name.span.end}, "`!{marker_name}` is not a signed auto-derive trait", "`!` rejects compiler generation only for structurally auto-derived traits", "remove `!` from `#{marker_name}`, or use it with an auto-derived trait")
 }
 
