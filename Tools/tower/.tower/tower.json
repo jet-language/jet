@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6569,
-    "rev": 92425,
+    "rev": 92429,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22999,6 +22999,11 @@
       "assignee": "Main",
       "log": [
         {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea): the games.frame lane (Tools/gauntlet/entries/game-frame/entry.json) shows Jet ahead (0.0386 s vs Rust 0.0443, Zig 0.0493, C 0.0766), but Jet runs its built-in runtime rasterizer while the peers run hand-written rasterizers, so the cell measures the runtime and not Jet code. The ceiling reference is filed on #6461; the codegen gap on Doom kernels on #6414."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 3 criteria from archived #2954, #4055: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -24001,10 +24006,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T10:47:46.080Z",
-      "updated": "2026-11-04T23:49:13.828Z",
+      "updated": "2026-11-05T14:23:23.327Z",
       "updatedBy": "Main",
       "probe": null,
-      "claimedAt": "2026-11-04T23:49:13.828Z",
+      "claimedAt": "2026-11-05T14:23:23.327Z",
       "visualMedia": [],
       "goals": [
         "G23"
@@ -72641,6 +72646,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T20:05:26.088Z"
+        },
+        {
+          "n": 15,
+          "text": "Definite initialization accepts a fixed array `[T#N]{ uninit }` that a counted loop fully writes before any read; today it reports E0420. The census covers each fill shape (counted loop, while with index, fill call) and each lands as a case. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:23:21.359Z"
         }
       ],
       "refs": [
@@ -72654,7 +72668,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-04T20:05:26.088Z",
+      "updated": "2026-11-05T14:23:21.359Z",
       "updatedBy": "Main",
       "goals": [
         "G5",
@@ -84016,6 +84030,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:43:34.843Z"
+        },
+        {
+          "n": 53,
+          "text": "On the Doom renderer kernels (R_DrawColumn, R_DrawSpan, FixedMul/FixedDiv, recursive BSP walk) with matching checksums, jet build --release is measurably faster than --optimize=none and reaches the peer floor against gcc -O2 and clang -O2. Measured on 2026-11-05: Jet O2 is 8.6x, 7.1x, 8.3x and 2.5x slower than gcc -O2; O0 and O2 run at nearly the same speed; #Inline(Always) and wrapping arithmetic make no measurable difference; --bounds=off only halves the column kernel. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:23:22.032Z"
         }
       ],
       "refs": [],
@@ -84027,7 +84050,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-04T23:43:35.581Z",
+      "updated": "2026-11-05T14:23:22.032Z",
       "updatedBy": "Main"
     },
     {
@@ -87486,6 +87509,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T18:52:20.942Z"
+        },
+        {
+          "n": 9,
+          "text": "The games area has a machine-ceiling reference built from Jet-written renderer kernels (column, span, fixed-point, BSP), with a matching asm-parity cell and a required gauntlet cell. Today Tools/gauntlet/matrix.json lists games with \"required\": false and no cells, Tools/perf/asm-parity has no game cell, and the game-frame entry compares Jet's built-in runtime rasterizer with hand-written rasterizers in other languages, so it measures the runtime, not Jet code generation. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:23:22.674Z"
         }
       ],
       "refs": [],
@@ -87494,7 +87526,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T18:51:36.927Z",
-      "updated": "2026-11-02T22:57:35.554Z",
+      "updated": "2026-11-05T14:23:22.674Z",
       "updatedBy": "Main"
     },
     {
@@ -173028,6 +173060,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T14:23:23.327Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hs3czc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T14:23:22.674Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0j6lwuh",
+      "note": "#9 The games area has a machine-ceiling reference built from Je"
+    },
+    {
+      "at": "2026-11-05T14:23:22.032Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0i891tv",
+      "note": "#53 On the Doom renderer kernels (R_DrawColumn, R_DrawSpan, Fixe"
+    },
+    {
+      "at": "2026-11-05T14:23:21.359Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0r02x8n",
+      "note": "#15 Definite initialization accepts a fixed array `[T#N]{ uninit"
+    },
     {
       "at": "2026-11-05T14:23:20.496Z",
       "by": "Main",
