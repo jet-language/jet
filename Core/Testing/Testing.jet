@@ -378,6 +378,39 @@ fn fake_city(state: &U64, locale: Int) -> String Never! {
 /// The Prelude `Test` carrying the current harness iteration and result.
 fn test_suite() -> Test Never! { __suite_snapshot() }
 
+/// A code suite's row sink (D-TEST-SUITE2=A). `t.suite("perf", perf_rows)` in
+/// `fn test(t: Test)` hands one to `perf_rows` when a `jet test --profile` run
+/// selects the `perf` suite. Each call appends one row line to the file the
+/// profile runner named, so the rows written before a panic survive it.
+struct TestRows {
+    suite: String
+    path: String
+
+    /// Record the row `id` as passing.
+    fn pass(self, id: String) -[FS.Write]> { suite_row_write(self, id, "passed", "") }
+    /// Record the row `id` as failing, with what went wrong.
+    fn fail(self, id: String, detail: String) -[FS.Write]> { suite_row_write(self, id, "failed", detail) }
+    /// Record the row `id` as skipped, with why.
+    fn skip(self, id: String, reason: String) -[FS.Write]> { suite_row_write(self, id, "skipped", reason) }
+}
+
+// One row line: `id<TAB>state<TAB>detail`, each field kept to one column.
+fn suite_row_write(rows: TestRows, id: String, state: String, detail: String) -[FS.Write]> {
+    line :: "{suite_row_field(id)}\t{state}\t{suite_row_field(detail)}\n"
+    files.append_all(rows.path, line) ?? panic("the `{rows.suite}` suite can't record its row `{id}` in {rows.path}: {err}")
+}
+
+fn suite_row_field(text: String) -> String Never! { text.replace("\r", " ").replace("\n", " ").replace("\t", " ") }
+
+/// `t.suite(name, body)`: run `body` when this run is the profile child of
+/// the code suite `name` (JET_TEST_SUITE), recording its rows in
+/// JET_TEST_SUITE_ROWS; any other run skips it.
+fn __suite_run(name: String, body: fn(TestRows)) -[FS, Env]> {
+    if (sys.get("JET_TEST_SUITE") ?? "") != name -> return
+    path :: sys.get("JET_TEST_SUITE_ROWS") ?? panic("the `{name}` suite runs without JET_TEST_SUITE_ROWS")
+    body(TestRows{suite: name, path: path})
+}
+
 // The public history records project the Foundation history data, not
 // another wire format. Identities are logical numbers, never host
 // pointers.

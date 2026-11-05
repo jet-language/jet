@@ -5278,6 +5278,17 @@ struct EffectCaseWithPayload {
     }
 }
 
+struct SuiteNameNotLiteral {
+    impl Diagnostic {
+        code :: "E0635"
+        meaning :: "A `Test.suite` name is computed instead of written as a string literal"
+        detail :: true
+        fn what(self) -> String { "the suite name passed to `Test.suite` is computed" }
+        fn why(self) -> String { "`jet test --profile` lists a package's code suites by reading their names, without running `fn test`" }
+        fn fix(self) -> String { "write the suite name as a string literal, as in `t.suite(\"perf\", perf_rows)`" }
+    }
+}
+
 struct MissingCrateVersion {
     impl Diagnostic {
         code :: "E0701"

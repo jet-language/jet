@@ -692,14 +692,16 @@ struct ReportSites {
 }
 
 // The `.jet` and `.S` files under `directory`, outside test, fixture and
-// hidden directories, each directory's entries sorted by name.
+// hidden directories and the test kit (JetTestKit matches the reports a
+// compiler under test prints; it builds none), each directory's entries sorted
+// by name.
 fn report_sources(directory: String) -[FS]> [String] DiagnosticRowsError! {
     children := files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
     &children.sort_by(child -> child.name)
     found := [String]{}
     loop child in children {
         if child.is_dir {
-            skipped :: child.name.starts_with(".") || child.name == "Tests" || child.name == "tests" || child.name == "Fixtures" || child.name == "fixtures" || child.name.ends_with(".fixture")
+            skipped :: child.name.starts_with(".") || child.name == "Tests" || child.name == "tests" || child.name == "Fixtures" || child.name == "fixtures" || child.name.ends_with(".fixture") || child.name == "JetTestKit"
             if skipped -> next
             loop path in (report_sources(child.path) ?? return Err(err)) -> &found.push(path)
         } else if child.name.ends_with(".jet") || child.name.ends_with(".S") {

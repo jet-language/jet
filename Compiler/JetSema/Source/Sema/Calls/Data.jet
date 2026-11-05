@@ -670,6 +670,39 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
                 value := sema_tree_node(Type.Int, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.TestSuiteRun, args: [TExpr]{}}, span)
                 return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
             }
+            // `t.suite("name", body)` (D-TEST-SUITE2=A) declares a code suite:
+            // the name is a literal, so `jet test --profile` lists every suite
+            // without running code. It is the Core source body
+            // `core.testing.__suite_run`, which calls `body` with a `TestRows`
+            // only in the profile child that runs that suite.
+            if name == "Test" && method == "suite" {
+                if args.len() != 2 {
+                    sema_data_arity_diagnostic("Test.suite", 2, args.len(), span, &diagnostics)
+                    sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                    return SemaMethodSpecialCheck{handled: true, value: None}
+                }
+                if type_args.len() != 0 -> sema_data_check_explicit_type_args("Test.suite", type_args, 0, span, &diagnostics)
+                route :: sema_call_core_resolve_route(environment, program, "core.testing", "__suite_run", [Type]{}, 2, false, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                target :: if route == {
+                    .Source(source) -> source
+                    .Core(_) | .SharedSite(_) -> panic("Test.suite must resolve its canonical Jet source body")
+                }
+                // `fn(TestRows)`, as `__suite_run` declares its body.
+                rows_type :: if target.signature == .Fn(params, _, _, _, _, _) && params.len() == 2 -> params[1].copy() else -> panic("core.testing.__suite_run must take a name and a body")
+                suite_name :: sema_data_check_argument("Test.suite", 0, args[0], Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                body :: sema_data_check_argument("Test.suite", 1, args[1], rows_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                checked_name :: suite_name ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                if sema_plugin_literal_text(checked_name) == None {
+                    &diagnostics.push(sema_error("E0635", args[0].span, "the suite name passed to `Test.suite` is computed", "`jet test --profile` lists a package's code suites by reading their names, without running `fn test`", "write the suite name as a string literal, as in `t.suite(\"perf\", perf_rows)`"))
+                    return SemaMethodSpecialCheck{handled: true, value: None}
+                }
+                checked_body :: body ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+                if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "Test.suite", span, [EffectRowEntry]{EffectRowEntry{name: "FS", span: span}, EffectRowEntry{name: "Env", span: span}}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+                callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+                value :: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(checked_name), sema_value_method_source_arg(checked_body)}}, span)
+                return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
+            }
         }
         .Apply(name, parameters) -> {
             if name == "DataStream" && parameters.len() == 1 && method == "next" {
