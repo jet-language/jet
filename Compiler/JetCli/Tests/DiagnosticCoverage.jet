@@ -1,0 +1,139 @@
+// #6035 c45: repair coverage of the diagnostic registry. Every active row
+// offers an edit or a typed no-fix reason, never both. The edit and reason
+// counts are kept apart per plane. The checked-in floor
+// (tests/diagnostics_coverage_baseline.txt) guards the registry: coverage may
+// grow but never shrink, and a new row with neither an edit nor a reason fails.
+use {
+    jet_foundation.[DiagnosticRegistryStatus, diagnostic_registry_rows]
+    jet_cli.[
+        JetCLICoverageBaseline, JetCLICoverageBaselineRow, JetCLICoverageFact, JetCLICoverageFacts,
+        jet_cli_coverage_baseline, jet_cli_coverage_facts, jet_cli_coverage_validate, jet_cli_toolchain_root,
+    ]
+    cli_files :: core.files
+}
+
+fn coverage_facts() -> [JetCLICoverageFact] Never! {
+    if jet_cli_coverage_facts() == {
+        .Facts(facts) -> facts
+        .Invalid(message) -> panic("registry coverage facts: {message}")
+    }
+}
+
+fn coverage_rows(text: String) -> [JetCLICoverageBaselineRow] Never! {
+    if jet_cli_coverage_baseline(text) == {
+        .Rows(rows) -> rows
+        .Invalid(message) -> panic("coverage baseline: {message}")
+    }
+}
+
+fn coverage_baseline_error(text: String) -> String Never! {
+    if jet_cli_coverage_baseline(text) == {
+        .Rows(_) -> panic("coverage baseline `{text}` must be refused")
+        .Invalid(message) -> message
+    }
+}
+
+fn coverage_fact(plane: String, edit: Int, reason: Int, uncovered: Int) -> JetCLICoverageFact Never! {
+    JetCLICoverageFact{plane: plane, rows: edit + reason + uncovered, edit_covered: edit, reason_covered: reason, behavior_reasons: reason, design_reasons: 0, ambiguous_reasons: 0, uncovered: uncovered}
+}
+
+#Test("diagnostic coverage: every active row has an edit or a typed reason, never both") {
+    loop row in diagnostic_registry_rows() {
+        if row.status != DiagnosticRegistryStatus.Active -> next
+        edit := row.structured_fix != None
+        if row.structured_fix == .Val(fix) {
+            if fix == .CryptoMisuse -> edit = false
+        }
+        if edit && row.no_fix_reason != None -> panic("`{row.code}` carries both an edit and a no-fix reason")
+        if row.no_fix_reason == .Val(reason) {
+            if reason.next.trim() == "" -> panic("`{row.code}` has a no-fix reason without a next step")
+        }
+    }
+}
+
+#Test("diagnostic coverage: edit and reason counts stay apart and add up per plane") {
+    facts :: coverage_facts()
+    assert(facts.len() > 0)
+    loop (index, fact) in facts {
+        if index > 0 -> assert(facts[index - 1].plane < fact.plane)
+        assert_eq(fact.rows, fact.edit_covered + fact.reason_covered + fact.uncovered)
+        assert_eq(fact.reason_covered, fact.behavior_reasons + fact.design_reasons + fact.ambiguous_reasons)
+    }
+    // Recount from the registry itself: each projection matches its own rows.
+    edits := 0
+    reasons := 0
+    behavior := 0
+    design := 0
+    ambiguous := 0
+    active := 0
+    loop row in diagnostic_registry_rows() {
+        if row.status != DiagnosticRegistryStatus.Active -> next
+        active += 1
+        edit := row.structured_fix != None
+        if row.structured_fix == .Val(fix) {
+            if fix == .CryptoMisuse -> edit = false
+        }
+        if edit {
+            edits += 1
+        } else if row.no_fix_reason == .Val(reason) {
+            reasons += 1
+            if reason.kind == {
+                .Behavior -> behavior += 1
+                .Design -> design += 1
+                .Ambiguous -> ambiguous += 1
+            }
+        }
+    }
+    total_rows := 0
+    total_edits := 0
+    total_reasons := 0
+    total_behavior := 0
+    total_design := 0
+    total_ambiguous := 0
+    loop fact in facts {
+        total_rows += fact.rows
+        total_edits += fact.edit_covered
+        total_reasons += fact.reason_covered
+        total_behavior += fact.behavior_reasons
+        total_design += fact.design_reasons
+        total_ambiguous += fact.ambiguous_reasons
+    }
+    assert_eq(total_rows, active)
+    assert_eq(total_edits, edits)
+    assert_eq(total_reasons, reasons)
+    assert_eq([Int]{total_behavior, total_design, total_ambiguous}, [Int]{behavior, design, ambiguous})
+}
+
+#Test("diagnostic coverage: the registry meets its checked-in floor") {
+    root :: if jet_cli_toolchain_root(cli_files.cwd() ?? ".") == {
+        .Found(found) -> found
+        .Missing(what, fix) -> panic("{what}; {fix}")
+    }
+    text :: cli_files.read("{root}/tests/diagnostics_coverage_baseline.txt") ?? panic("read the coverage baseline: {err}")
+    baseline :: coverage_rows(text)
+    assert(baseline.len() > 0)
+    if jet_cli_coverage_validate(baseline, coverage_facts()) == .Val(message) -> panic("registry coverage fell below its floor: {message}")
+}
+
+#Test("diagnostic coverage: the guard refuses every kind of regression") {
+    floor :: coverage_rows("# plane edit reason total\nsema 2 3 6\nparse 1 1 2\n")
+    assert_eq(floor.len(), 2)
+    assert_eq(floor[0].plane, "parse")
+    // The same counts, more edits, or a new row that is covered all pass.
+    assert(jet_cli_coverage_validate(floor, [JetCLICoverageFact]{coverage_fact("parse", 1, 1, 0), coverage_fact("sema", 2, 3, 1)}) == None)
+    assert(jet_cli_coverage_validate(floor, [JetCLICoverageFact]{coverage_fact("parse", 2, 1, 0), coverage_fact("sema", 2, 4, 1)}) == None)
+    // Fewer edits, fewer reasons, or fewer rows: coverage shrank.
+    assert_eq(jet_cli_coverage_validate(floor, [JetCLICoverageFact]{coverage_fact("parse", 0, 2, 0), coverage_fact("sema", 2, 3, 1)}), Val("coverage baseline decreased for plane `parse`"))
+    assert_eq(jet_cli_coverage_validate(floor, [JetCLICoverageFact]{coverage_fact("parse", 1, 1, 0), coverage_fact("sema", 3, 2, 1)}), Val("coverage baseline decreased for plane `sema`"))
+    // A new row with neither an edit nor a reason, in a known plane or a new one.
+    assert_eq(jet_cli_coverage_validate(floor, [JetCLICoverageFact]{coverage_fact("parse", 1, 1, 0), coverage_fact("sema", 2, 3, 2)}), Val("new row in open coverage plane `sema` has neither fix_edits nor no_fix_reason"))
+    assert_eq(jet_cli_coverage_validate(floor, [JetCLICoverageFact]{coverage_fact("lex", 0, 0, 1), coverage_fact("parse", 1, 1, 0), coverage_fact("sema", 2, 3, 1)}), Val("new coverage plane `lex` has a row with neither fix_edits nor no_fix_reason"))
+    assert(jet_cli_coverage_validate(floor, [JetCLICoverageFact]{coverage_fact("lex", 0, 1, 0), coverage_fact("parse", 1, 1, 0), coverage_fact("sema", 2, 3, 1)}) == None)
+    // A plane that leaves the registry.
+    assert_eq(jet_cli_coverage_validate(floor, [JetCLICoverageFact]{coverage_fact("sema", 2, 3, 1)}), Val("coverage plane `parse` disappeared"))
+    // The floor file itself is checked.
+    assert_eq(coverage_baseline_error("parse 1 1\n"), "coverage baseline line 1 must contain plane, edit count, reason count, and total")
+    assert_eq(coverage_baseline_error("parse 2 1 2\n"), "coverage baseline line 1 counts more covered rows than total")
+    assert_eq(coverage_baseline_error("parse 1 1 2\nparse 1 1 2\n"), "duplicate coverage baseline plane `parse`")
+    assert_eq(coverage_baseline_error("parse x 1 2\n"), "invalid edit count on coverage baseline line 1")
+}
