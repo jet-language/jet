@@ -174358,6 +174358,171 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-31",
       "retiredAt": "2026-11-04T20:05:25.273Z"
+    },
+    {
+      "id": "D-DEPRECATE-INLINE1",
+      "cardId": "c0xu0gx9",
+      "group": "other",
+      "title": "How `jet fix` moves callers off an old function when the new one takes different arguments",
+      "situation": "Libraries retire functions with a deprecation marker that names the replacement. Callers get a warning, and `jet fix` edits their code, but only by renaming the call. When the replacement takes different arguments, the rename breaks the caller, and the only safe path is a hand edit in every program. The owner decides how `jet fix` should handle that case. We recommend three steps in order: inline a wrapper, else use the author's pattern, else print the exact edit.",
+      "gist": "When a library retires a function whose replacement takes different arguments, how should `jet fix` update the callers?",
+      "lesson": "A library marks an old function as deprecated and names its replacement. Callers get a warning, and `jet fix` edits their code. Today that edit can only rename the call, so any change in arguments needs a hand edit in every program that uses the library.",
+      "explainer": "",
+      "story": "Sam's charting package replaces `double(x)` with `scaled(x, 2)`. Two hundred programs call `double`. Each owner sees the warning and runs `jet fix`, which should leave every program building without a hand edit.",
+      "inWild": "// Go 1.26 (go.dev/doc/go1.26): go fix inlines a marked wrapper at every call\n//go:fix inline\nfunc Double(a int) int { return Scaled(a, 2) }\n// before: y := Double(4)\n// after:  y := Scaled(4, 2)",
+      "detail": "Source: card #6376, report Docs/research/language-release-notes-2026-10-30.md. Probe $JET_SCRATCH_ROOT/lanes/MemDesign-4/probes/rel/r11_deprecated.jet on jet 03c64ad0c4: `jet fix` applied 2 fixes, and the fixed copy fails with E0766 because `double(4)` became `scaled(4)`. That misapplied rename is card #6405, a defect under any option.\n\nRelated law: D-STRUCT-LIFE1=A (#2052, `#Deprecated(since:, use:)`, rename-only fix), #6068 (every break ships a `jet fix` rewrite). Go 1.26 release notes, Tools section: go fix is the home of modernizers and a source-level inliner driven by `//go:fix inline`.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Inline, else a pattern, else an exact step",
+          "detail": "First, if the old function's body is one returned expression, `jet fix` puts that expression at each call with the caller's arguments. A plain rename is the simplest such body, so today's markers keep working.\n\nSecond, for any other body, the author may add a call pattern to the marker, and `jet fix` fills it in.\n\nOtherwise `jet fix` leaves the call alone. The warning then prints the exact edit, such as which new argument `scaled` needs.",
+          "technical": "Step 1 needs no new marker word: `use:` plus a body of `return <expr>` whose names are all visible to callers. The rewrite works on the checked call and binds an argument to a local first when it is used other than exactly once, in order.\n\nStep 2 is `rewrite: \"scaled({a}, 2)\"`, checked against the old signature when the library builds. A pattern on a wrapper body is refused with a registered error, so there is never a second copy.\n\nStep 3: L2001 names the replacement's signature and each parameter without a default. `jet fix` re-checks every edited file and rolls back a failing edit.",
+          "code": "#Deprecated(since: \"1.2\", use: \"scaled\")\nfn double(a: Int) -> Int {\n    return scaled(a, 2)\n}\n// jet fix: double(next()) becomes scaled(next(), 2)\n\n#Deprecated(since: \"1.2\", use: \"plot\", rewrite: \"plot({data}, Style{})\")\nfn draw(data: [Float]) {\n    check_size(data)\n    plot(data, Style{})\n}\n// jet fix: draw(xs) becomes plot(xs, Style{})"
+        },
+        {
+          "key": "B",
+          "name": "Rename only",
+          "detail": "The marker keeps `use:` for renames. `jet fix` applies it only when the replacement accepts the old call's arguments unchanged. Otherwise the warning says to edit the call by hand.",
+          "technical": "No new marker form. The fix engine checks that the renamed call type-checks before applying it, and the L2001 text stops promising automatic migration when it would not.",
+          "code": "#Deprecated(since: \"1.2\", use: \"scaled\")\nfn double(a: Int) -> Int {\n    return scaled(a, 2)\n}\n// warn: `double` is deprecated; edit this call by hand to use `scaled`"
+        },
+        {
+          "key": "C",
+          "name": "Pattern only",
+          "detail": "Every automatic migration is written as a text pattern in the marker, with holes named after the old parameters. `jet fix` fills the holes with each caller's arguments. Without a pattern, only plain renames are applied.",
+          "technical": "Marker `#Deprecated(since: \"1.2\", rewrite: \"scaled({a}, 2)\")`. The pattern is parsed and checked against the old signature when the library builds. Argument binding follows A's evaluate-once rule. The checker does not compare the pattern with the body.",
+          "code": "#Deprecated(since: \"1.2\", rewrite: \"scaled({a}, 2)\")\nfn double(a: Int) -> Int {\n    return scaled(a, 2)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go 1.26",
+          "note": "`go fix` gained a source-level inliner; authors mark wrappers with `//go:fix inline` to migrate their own users.",
+          "code": "//go:fix inline\nfunc Double(a int) int { return Scaled(a, 2) }"
+        },
+        {
+          "lang": "Mojo 1.0",
+          "note": "Breaking changes shipped with deprecated aliases and compiler fix-its, so code moved forward without hand edits.",
+          "code": "# old name kept as a deprecated alias; the compiler suggests the new spelling"
+        },
+        {
+          "lang": "Rust",
+          "note": "`#[deprecated(since, note)]` prints free text; stable Rust has no automatic rewrite for library deprecations.",
+          "code": "#[deprecated(since = \"1.2.0\", note = \"use scaled(x, 2)\")]\npub fn double(x: i32) -> i32 { scaled(x, 2) }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Most retirements are thin wrappers, so inlining the checked body handles them with nothing new to write. A pattern covers the rest, and an exact step covers what no tool can.",
+        "gains": [
+          "Package upgrades need no hand edits whenever a wrapper or pattern exists.",
+          "`jet fix` never leaves a broken call behind."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It leaves every argument change as a hand edit in every program that uses the library."
+          },
+          {
+            "key": "C",
+            "reason": "It makes authors restate each wrapper as text, which can then disagree with the real body."
+          }
+        ],
+        "tradeoff": "A gives each case its best tool: the body when it is a wrapper, the author's pattern when given, and an exact instruction otherwise."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": "Owner batch on card #6376 (five years of language release notes), routed by Main on 2026-10-30",
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When a library retires a function whose replacement takes different arguments, how should `jet fix` update the callers?",
+        "lesson": "A library marks an old function as deprecated and names its replacement. Callers get a warning, and `jet fix` edits their code. Today that edit can only rename the call, so any change in arguments needs a hand edit in every program that uses the library.",
+        "trio": {
+          "current": {
+            "note": "Today `jet fix` renames the call even when the arguments differ, and the fixed program stops building.",
+            "code": "#Deprecated(since: \"1.2\", use: \"scaled\")\nfn double(a: Int) -> Int {\n    return scaled(a, 2)\n}\n\nprint(double(4))\n// after jet fix: print(scaled(4))\n// error E0766: This call to `scaled` is missing `by`"
+          },
+          "wild": {
+            "lang": "Go 1.26",
+            "note": "A marked one-line wrapper is inlined at every call by `go fix`.",
+            "code": "//go:fix inline\nfunc Double(a int) int { return Scaled(a, 2) }\n// go fix: Double(4) becomes Scaled(4, 2)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Inline, else a pattern, else an exact step",
+            "gist": "`jet fix` inlines a one-line wrapper, uses the author's pattern otherwise, and else prints the exact edit.",
+            "gains": [
+              "Wrapper-shaped changes migrate with no hand edits and no new word.",
+              "Authors can still automate bigger changes with a pattern.",
+              "No call is ever broken; every remaining step is spelled out."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "#Deprecated(since: \"1.2\", use: \"scaled\")\nfn double(a: Int) -> Int {\n    return scaled(a, 2)\n}\nprint(double(4))\n// after jet fix: print(scaled(4, 2))"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Rename only",
+            "gist": "`jet fix` edits a call only when the replacement takes the same arguments.",
+            "gains": [
+              "No change to the fix engine beyond the safety check."
+            ],
+            "losses": [
+              "Every argument change needs a hand edit in every caller."
+            ],
+            "proposed": {
+              "code": "#Deprecated(since: \"1.2\", use: \"scaled\")\nfn double(a: Int) -> Int {\n    return scaled(a, 2)\n}\n// warn: `double` is deprecated; edit this call by hand to use `scaled`"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Pattern only",
+            "gist": "Every migration is written as a call pattern in the marker.",
+            "gains": [
+              "One rule for every kind of change."
+            ],
+            "losses": [
+              "Authors copy each wrapper body into a pattern by hand.",
+              "The pattern can drift from the body it copies."
+            ],
+            "proposed": {
+              "code": "#Deprecated(since: \"1.2\", rewrite: \"scaled({a}, 2)\")\nfn double(a: Int) -> Int {\n    return scaled(a, 2)\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Most retirements are thin wrappers, so inlining the checked body handles them with nothing new to write. A pattern covers the rest, and an exact step covers what no tool can.",
+          "gains": [
+            "Package upgrades need no hand edits whenever a wrapper or pattern exists.",
+            "`jet fix` never leaves a broken call behind."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It leaves every argument change as a hand edit in every program that uses the library."
+            },
+            {
+              "key": "C",
+              "reason": "It makes authors restate each wrapper as text, which can then disagree with the real body."
+            }
+          ],
+          "tradeoff": "A gives each case its best tool: the body when it is a wrapper, the author's pattern when given, and an exact instruction otherwise."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T21:43:27.501Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-31",
+      "retiredAt": "2026-11-05T23:01:04.023Z"
     }
   ],
   "cards": [
@@ -578494,6 +578659,91 @@
       "completedAt": "2026-11-01T20:01:08.078Z",
       "questions": [],
       "retiredAt": "2026-11-04T20:05:25.272Z"
+    },
+    {
+      "id": "c0xu0gx9",
+      "num": 6405,
+      "title": "`jet fix` applies a deprecation rename that breaks the call, and the warning promises an automatic migration",
+      "body": "Found by MemDesign-5 for #6376 (release-notes research: Go 1.26 `go fix` inliner, Mojo 1.0 fix-its, Zig 0.15 hand migrations). Repro $JET_SCRATCH_ROOT/lanes/MemDesign-4/probes/rel/r11_deprecated.jet on jet 03c64ad0c4: `#Deprecated(since: \"1.2\", use: \"scaled\") fn double(a: Int) -> Int { return scaled(a, 2) }` where `scaled(a: Int, by: Int)`. `jet check` prints L2001 with Fix \"Use `scaled` instead, or run `jet fix` to migrate automatically.\" `jet fix` on a copy prints \"applied 2 fixes\", and the fixed file then fails with E0766 \"This call to `scaled` is missing `by`\" at `print(scaled(4))`. D-STRUCT-LIFE1=A says `jet fix` applies the replacement only \"when the replacement is a plain rename\". The owner choice about non-rename migrations is ballot D-DEPRECATE-INLINE1; this card is the defect under any outcome.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-02",
+          "by": "Main",
+          "text": "CardClose-64 adds the L2001 UI snapshot, tests/ui_lint/deprecated_replacement_needs_hand_edit.{jet,warn}. It uses r11's shape: `double` is deprecated for `scaled(a, by)`. L2001's Fix for `double(4)` reads \"Edit this use by hand to use `scaled`, which doesn't take the same arguments, so `jet fix` can't rename it.\" with no `jet fix` offer, while the plain rename `add`→`total` still offers `jet fix` (Edition.jet:168-177). testkit ui --filter deprecated_ o0: PASS 4/4 on dev 360e470044. Together with c1 and c3, which are already met, this closes #6405. Landed in wave 33 as dev 190f826022 (CardClose-64)."
+        },
+        {
+          "at": "2026-11-02",
+          "by": "Main",
+          "text": "IrTypes-62: JetCli #Test(\"fix_recheck_rolls_back\") (Compiler/JetCli/Tests/SourceTransaction.jet) passes. Real jet_cli_fix_checked rolls back a fix that stops the file checking, keeps the other, and jet_cli_fix_log records the skipped row with \"reason\":\"the edited file no longer checks: …\". Landed in wave 32 as dev f251c88891 (IrTypes-62)."
+        },
+        {
+          "at": "2026-11-02",
+          "by": "Main",
+          "text": "IrTypes-61+62: L2001 offers no `jet fix` edit where it wouldn't apply: changed call (double→scaled), shadowed replacement name, unresolved replacement name. The Fix says to edit by hand. UI snapshot tests/ui_lint/deprecated_fix_offers_jet_fix_only_for_a_same_call_rename.warn PASS; cases ui_fixes/deprecated_rename_applies_only_where_the_call_still_checks PASS (s1 d62f4528ba90c672). Landed in wave 32 as dev f251c88891 (IrTypes-62)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "wave 22 landed as dev 163d4852ad (wave s2 FIXED_POINT; goldens 1203=1203 0 lost; ui +1 0 lost; cases 2335 -> 2458, 1 lost = blocks_shared_by_two_tasks_are_freed_once E2105 build-write error under suite load, PASS alone via suite.sh --filter on the same s2). CardClose-52 landed. Criterion 3 met. Criterion 1: jet fix renames only where the rename checks and rolls back failing edits (the new case proves it), but the criterion names r11_deprecated.jet and a registered golden, which the drop did not add. Criterion 2 is not met: the case's .check.stderr still offers 'run jet fix to migrate automatically' for the shadowed add(total, 1) at run.jet:25, which jet fix then rolls back, so L2001 offers jet fix where it would not apply."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Landed on dev at undefined in CardClose-52 (patch row: criterion/count 52): PASS tests/cases/ui_fixes/deprecated_rename_applies_only_where_the_call_still_checks.case (rename that changes the call gets no edit; shadowing edit rolled back; testkit 14fbedd, tb s1 160ef98c200bb16e); encoding_edition deprecation case plain step passes, its row retagged #5454 (Core cbor.encode carries no #Deprecated); JetCli source_transaction unit test 1 passed"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet fix` applies a `use:` rename only when the renamed call type-checks, and re-checks every file it edits, rolling back an edit that fails. For r11_deprecated.jet it renames `add` and leaves `double(4)` untouched; a `jet check` of the result has 0 errors. Golden registered.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-52 (wave 22, dev 163d4852ad): tests/cases/ui_fixes/deprecated_rename_applies_only_where_the_call_still_checks PASS in cases-w22-wave. Its fixture has r11_deprecated.jet's shape: add is renamed to total, double(4) is left alone (scaled takes other arguments), the shadowed edit is rolled back, and jet check of the result exits 0 with no errors. Its .fixed file and run output (3/8/6) are golden-tested by the case.",
+          "at": "2026-11-01T09:03:19.956Z"
+        },
+        {
+          "n": 2,
+          "text": "L2001's Fix offers `jet fix` only when `jet fix` would apply. For `double` it says the call must be edited by hand to use `scaled`. UI snapshot registered.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-64 landed on dev at eaa5d98a64 (wave 33, HEAD 190f826022): tests/ui_lint/deprecated_replacement_needs_hand_edit.{jet,warn} registers the L2001 snapshot where `double` is deprecated for `scaled(a, by)` and the Fix says to edit the call by hand, not run `jet fix`. Wave 33 suites on f251c88891+wave: ui PASS 1867 -> 1879 (+12, 0 lost), cases 2531 -> 2546 (+15, 0 lost), goldens 1206/1206, chain FIXED_POINT.",
+          "at": "2026-11-02T22:58:03.626Z"
+        },
+        {
+          "n": 3,
+          "text": "The fix log (`.jet/codemods/*.log.json`) records each skipped rewrite with its reason.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-52 (wave 22, dev 163d4852ad): tests/cases/ui_fixes/deprecated_rename_applies_only_where_the_call_still_checks PASS in wave-22 cases; it asserts .jet/codemods/Fix-run.log.json has a \"skipped\" row with \"reason\":\"the edited file no longer checks: ...\" for the rolled-back edit.",
+          "at": "2026-11-01T08:51:59.095Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-30T21:41:24.310Z",
+      "updated": "2026-11-02T22:58:06.530Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-02T22:58:06.530Z",
+      "questions": [],
+      "retiredAt": "2026-11-05T23:01:04.022Z"
     }
   ],
   "events": [
