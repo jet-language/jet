@@ -54,8 +54,11 @@ TESTKIT_ARGS="--filter basics/fizzbuzz --tier o0" JET=/path/to/jet jet test Tool
 JET_CI_EVIDENCE_DIR=/disk/scratch JET=/path/to/jet jet test Tools/testkit "suite golden"  # writes golden.json
 ```
 
-Each suite (`suite golden`, `suite ui`, `suite cases`) is one test; a failing
-test lists every failing case row. `TESTKIT_ARGS` carries the kit flags below, split like
+Each suite (`suite golden`, `suite ui`, `suite cases`) is one test. The suites
+a run selects share one pool sized by cores and free memory, so a filtered run
+runs and reports only its own suite. Rows print as cases finish; the reports
+and each failing test's list of case rows keep suite-then-path order.
+`TESTKIT_ARGS` carries the kit flags below, split like
 `.case` step words.
 
 `o0` runs through `jet run`; `o1` builds an ordinary artifact; `o2`

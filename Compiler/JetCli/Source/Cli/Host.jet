@@ -225,6 +225,81 @@ fn jet_cli_check_workspace(files: [String], sources: [String], color: Bool, quie
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
 }
 
+// One workspace member's `jet test`, as its child process ended.
+struct JetCLITestMemberRun {
+    index: Int
+    done: Bool
+    code: Int
+    output: String
+    errors: String
+}
+
+// `jet test` of a workspace root: each member's `jet test <member>` runs as a
+// child of this jet, as many at once as jet_cli_native_test_width allows (one
+// per core, fewer while free memory can't hold JET_NATIVE_TEST_CHILD_MEMORY
+// for each). The exit status is the most severe member's.
+fn jet_cli_test_workspace(names: [String], member_args: [[String]], quiet: Bool) -> JetDriverVerbOutput {
+    executable :: cli_sys.executable()
+    argvs := [[String]]{}
+    loop args in member_args {
+        argv := [String]{executable.copy()}
+        loop argument in args -> &argv.push(argument.copy())
+        &argvs.push(^argv)
+    }
+    exit_code := JET_DRIVER_EXIT_OK
+    loop run in jet_cli_test_members_run(names, argvs, jet_cli_native_test_width(cli_sys.cpu_count(), jet_cli_memory_available()), quiet) {
+        if run.code > exit_code -> exit_code = run.code
+    }
+    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
+}
+
+// Runs each argv as a child, at most `width` at once, and writes each one's
+// output whole (after a `jet test: member` header on stderr unless quiet)
+// once it and every argv before it have finished, so the streams keep argv
+// order whatever order the children end in. The runs come back in argv order.
+fn jet_cli_test_members_run(names: [String], argvs: [[String]], width: Int, quiet: Bool) -> [JetCLITestMemberRun] {
+    runs := [JetCLITestMemberRun]{}
+    loop index in 0..<argvs.len() -> &runs.push(JetCLITestMemberRun{index: index, done: false, code: 0, output: "", errors: ""})
+    started := 0
+    running := 0
+    written := 0
+    { sender: done, receiver: finished } :: channel<JetCLITestMemberRun>()
+    task.group members(limit: width) {
+        loop written < runs.len() {
+            if started < argvs.len() && running < width {
+                task jet_cli_test_member_report(started, argvs[started], done.copy())
+                started += 1
+                running += 1
+                next
+            }
+            run := finished.receive() ?? break
+            running -= 1
+            runs[run.index] = run
+            loop written < runs.len() && runs[written].done {
+                if !quiet -> jet_cli_write_notice("jet test: member `{names[written]}`\n")
+                jet_cli_write_output(JetDriverVerbOutput{stdout: runs[written].output, stderr: runs[written].errors, exit_code: runs[written].code})
+                written += 1
+            }
+        }
+    }
+    runs
+}
+
+// Runs one member's child in its own task, so a task that stops still
+// reports its member, as a failure.
+fn jet_cli_test_member_report(index: Int, argv: [String], done: Sender<JetCLITestMemberRun>) {
+    member :: task jet_cli_test_member(index, argv.copy())
+    run := ^member.join() ?? JetCLITestMemberRun{index: index, done: true, code: JET_DRIVER_EXIT_USER_ERROR, output: "", errors: "jet test: the run of `{argv.join(" ")}` stopped before it reported\n"}
+    done.send(^run)
+}
+
+fn jet_cli_test_member(index: Int, argv: [String]) -> JetCLITestMemberRun {
+    receipt :: cli_process.cmd(argv).run() ?? return JetCLITestMemberRun{index: index, done: true, code: JET_DRIVER_EXIT_USER_ERROR, output: "", errors: "jet test: couldn't run `{argv.join(" ")}`: {err}\n"}
+    code := receipt.code
+    if !receipt.success && code <= 0 -> code = JET_DRIVER_EXIT_USER_ERROR
+    JetCLITestMemberRun{index: index, done: true, code: code, output: receipt.output, errors: receipt.errors}
+}
+
 // CmdCompile.rs `emit_check_outcome` under `--json`, on stdout: errors are
 // one failed `diagnostics` status (exit 1); visible warnings alone are a
 // passing one; a clean explicit-file check is one passing `check` status
@@ -2745,6 +2820,7 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
             output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink))
         }
         .Test(file, source, color, verbose, threads, options) -> output = jet_cli_compile_test(file, source, color, verbose, threads, options, trace_sink)
+        .TestWorkspace(names, member_args, quiet) -> output = jet_cli_test_workspace(names, member_args, quiet)
         .New(name, template, annotated, quiet, json, color) -> output = jet_cli_new_project(name, template, annotated, quiet, json, color)
 
         .Doc(file, source, color, json, check) -> output = jet_cli_compile_doc(file, source, color, json, check)

@@ -1126,6 +1126,59 @@ fn jet_cli_workspace_member_entry(member_root: String, scanned: JetCLIEntry, fro
     JetCLIEntryFound.Entry{entry: scanned}
 }
 
+// The members of a workspace that can run `command`, in index order, with
+// the entry each runs and whether its stock entry (not a command override)
+// chose it.
+struct JetCLIWorkspaceRunnable {
+    members: [JetCLIWorkspaceMember]
+    entries: [JetCLIEntry]
+    stocks: [Bool]
+}
+
+enum JetCLIWorkspaceRunnableFound {
+    Found(runnable: JetCLIWorkspaceRunnable)
+    Refused(plan: JetCLIPlan)
+}
+
+// The runnable members of `members` (a workspace rooted at `root`). The
+// stock entry of a member is resolved without the `fn run` member parse:
+// whether it can run needs only that it has an entry file; a selected
+// member's entry is resolved in full (jet_cli_workspace_member_entry).
+fn jet_cli_workspace_runnable(root: String, members: [JetCLIWorkspaceMember], command: String, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIWorkspaceRunnableFound Never! {
+    runnable := [JetCLIWorkspaceMember]{}
+    entries := [JetCLIEntry]{}
+    stocks := [Bool]{}
+    loop member in members {
+        member_root :: jet_cli_entry_join(root, member.path)
+        stock := JetCLIEntry?{None}
+        if jet_cli_find_project_entry_at(member_root, command, color, &notices, false) == {
+            .Entry(entry) -> {
+                if cli_files.is_file(entry.path) -> stock = Val(entry)
+            }
+            .Refused(plan_refused) -> return JetCLIWorkspaceRunnableFound.Refused{plan: plan_refused}
+            .Absent -> {}
+        }
+        entry := stock
+        from_stock := true
+        if use_override {
+            if jet_cli_command_override(member_root, command, color) == {
+                .Entry(found) -> {
+                    entry = Val(found)
+                    from_stock = false
+                }
+                .Refused(plan_refused) -> return JetCLIWorkspaceRunnableFound.Refused{plan: plan_refused}
+                .Absent -> {}
+            }
+        }
+        if entry == .Val(selected) {
+            &runnable.push(member)
+            &entries.push(selected)
+            &stocks.push(from_stock)
+        }
+    }
+    JetCLIWorkspaceRunnableFound.Found{runnable: JetCLIWorkspaceRunnable{members: runnable, entries: entries, stocks: stocks}}
+}
+
 // main.rs `resolve_bare_entry` the entry a bare command, or
 // one aimed at the directory `cwd`, compiles. A workspace with more than one
 // runnable member is ambiguous unless `-p <member>` picks one; otherwise the
@@ -1149,40 +1202,14 @@ fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?
             .Refused(refusal) -> return JetCLIEntryFound.Refused{plan: refusal}
             .Members(members) -> members_plan = members
         }
-        runnable := [JetCLIWorkspaceMember]{}
-        entries := [JetCLIEntry]{}
-        // The stock entry of a member is resolved without the `fn run`
-        // member parse: whether it can run needs only that it has an entry
-        // file; the selected member's entry is resolved in full below.
-        stocks := [Bool]{}
-        loop member in members_plan {
-            member_root :: jet_cli_entry_join(root, member.path)
-            stock := JetCLIEntry?{None}
-            if jet_cli_find_project_entry_at(member_root, command, color, &notices, false) == {
-                .Entry(entry) -> {
-                    if cli_files.is_file(entry.path) -> stock = Val(entry)
-                }
-                .Refused(plan_refused) -> return JetCLIEntryFound.Refused{plan: plan_refused}
-                .Absent -> {}
-            }
-            entry := stock
-            from_stock := true
-            if use_override {
-                if jet_cli_command_override(member_root, command, color) == {
-                    .Entry(found) -> {
-                        entry = Val(found)
-                        from_stock = false
-                    }
-                    .Refused(plan_refused) -> return JetCLIEntryFound.Refused{plan: plan_refused}
-                    .Absent -> {}
-                }
-            }
-            if entry == .Val(selected) {
-                &runnable.push(member)
-                &entries.push(selected)
-                &stocks.push(from_stock)
-            }
+        found := JetCLIWorkspaceRunnable{members: [JetCLIWorkspaceMember]{}, entries: [JetCLIEntry]{}, stocks: [Bool]{}}
+        if jet_cli_workspace_runnable(root, members_plan, command, use_override, color, &notices) == {
+            .Refused(refusal) -> return JetCLIEntryFound.Refused{plan: refusal}
+            .Found(scanned) -> found = scanned
         }
+        runnable :: found.members
+        entries :: found.entries
+        stocks :: found.stocks
         if member_flag == .Val(want) {
             loop (index, member) in runnable {
                 if member.name == want -> return jet_cli_workspace_member_entry(jet_cli_entry_join(root, member.path), entries[index], stocks[index], command, color)
@@ -1257,6 +1284,43 @@ fn jet_cli_workspace_check_entries(dir: String, color: Bool, notices: &[String])
     }
     if !found -> return JetCLIWorkspaceCheck.Absent
     JetCLIWorkspaceCheck.Members{entries: entries}
+}
+
+// `jet test` of a workspace root tests every member that can run it
+// (Host.jet `jet_cli_test_workspace`): their names and directories, in
+// index order. Absent when the directory is not a workspace index or at
+// most one member can run, which resolves as a bare `jet test` does.
+enum JetCLIWorkspaceTest {
+    Absent
+    Members(names: [String], directories: [String])
+    Refused(plan: JetCLIPlan)
+}
+
+fn jet_cli_workspace_test_members(dir: String, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIWorkspaceTest Never! {
+    root :: cli_files.realpath(dir) ?? return JetCLIWorkspaceTest.Absent
+    index_path := ""
+    if jet_cli_workspace_source(root, color) == {
+        .Index(path) -> index_path = path
+        else -> return JetCLIWorkspaceTest.Absent
+    }
+    members := [JetCLIWorkspaceMember]{}
+    if jet_cli_workspace_members(root, index_path, "test", color) == {
+        .Refused(refusal) -> return JetCLIWorkspaceTest.Refused{plan: refusal}
+        .Members(found) -> members = found
+    }
+    runnable := [JetCLIWorkspaceMember]{}
+    if jet_cli_workspace_runnable(root, members, "test", use_override, color, &notices) == {
+        .Refused(refusal) -> return JetCLIWorkspaceTest.Refused{plan: refusal}
+        .Found(scanned) -> runnable = scanned.members
+    }
+    if runnable.len() < 2 -> return JetCLIWorkspaceTest.Absent
+    names := [String]{}
+    directories := [String]{}
+    loop member in runnable {
+        &names.push(member.name)
+        &directories.push(jet_cli_entry_join(root, member.path))
+    }
+    JetCLIWorkspaceTest.Members{names: names, directories: directories}
 }
 
 // main.rs `missing_bare_entry`: no file and no project (E2104).

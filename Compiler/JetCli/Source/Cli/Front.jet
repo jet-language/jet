@@ -94,6 +94,10 @@ enum JetCLIPlan {
     // `jet test <file>`: compile the checked test harness and run it under
     // `options` (native O0 unless its build options say otherwise).
     Test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions)
+    // `jet test` of a workspace root with several runnable members:
+    // `member_args` holds each member's `jet test <member>` words, in
+    // member order (Host.jet `jet_cli_test_workspace`).
+    TestWorkspace(names: [String], member_args: [[String]], quiet: Bool)
     // `jet new <name>`: write the project folder (Source/CmdCompile.rs
     // `run_new`); `template` is "" for the print-only starter. `json` prints
     // the created files as one `new` status line instead of the human recap.
@@ -1181,6 +1185,8 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
     fresh := false
     show_default := false
     positionals := [String]{}
+    // Where the target positional is in jet_argv (-1: none).
+    target_at := -1
     index := 0
     loop index < jet_argv.len() {
         argument :: jet_argv[index]
@@ -1242,7 +1248,10 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
                 options.shuffle_seed = Val("{seed}")
             }
             argument.starts_with("-") -> {}
-            else -> &positionals.push(argument)
+            else -> {
+                if positionals.len() == 0 -> target_at = index
+                &positionals.push(argument)
+            }
         }
         index += 1
     }
@@ -1259,7 +1268,8 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
     // A bare `jet test` or `jet test <dir>` tests the package: the directory's own
     // `fn test(t: Test)` file when it declares one (also for a workspace root), otherwise
     // its stock entry. The entry file loads the whole package, and the harness collects
-    // every #Test of every package file.
+    // every #Test of every package file. A workspace root without its own `fn test`
+    // tests each member that can run `jet test`, as its own child `jet test <member>`.
     if positionals.len() == 0 || cli_files.is_dir(positionals[0]) {
         directory :: if positionals.len() == 0 -> cli_files.cwd() ?? "." else -> positionals[0]
         if positionals.len() == 0 && !jet_cli_has_manifest_above(directory) {
@@ -1271,6 +1281,14 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
                 .Refused(plan) -> return ^plan
                 .Absent -> {}
             }
+        }
+        workspace_notices := [String]{}
+        if jet_cli_workspace_test_members(directory, !show_default, color, &workspace_notices) == {
+            // Each child resolves its member, and writes the notices, itself.
+            .Members(names, directories) -> return jet_cli_test_workspace_plan(jet_argv, target_at, names, directories, color, quiet)
+            .Refused(plan) -> return jet_cli_with_notices(workspace_notices, ^plan)
+            // Resolution below writes its own notices.
+            .Absent -> {}
         }
         if positionals.len() == 0 {
             notices := [String]{}
@@ -1290,6 +1308,26 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
     file := target
     if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
     jet_cli_test_file(jet_argv, file, color, verbose, threads, options, fresh, quiet)
+}
+
+// Each member's `jet test` words for a workspace `jet test`: `test`, the
+// member directory in place of the workspace target, then every other word
+// of `jet_argv` as written (flags, the filter, words after `--`). A child's
+// streams are captured, so a colored run asks for color.
+fn jet_cli_test_workspace_plan(jet_argv: [String], target_at: Int, names: [String], directories: [String], color: Bool, quiet: Bool) -> JetCLIPlan Never! {
+    rest := [String]{}
+    loop (index, argument) in jet_argv {
+        if (index == 0 && argument == "test") || index == target_at -> next
+        &rest.push(argument)
+    }
+    if color && !rest.any(argument -> argument == "--color" || argument.starts_with("--color=")) -> &rest.push("--color=always")
+    member_args := [[String]]{}
+    loop directory in directories {
+        args := [String]{"test", directory}
+        loop argument in rest -> &args.push(argument)
+        &member_args.push(args)
+    }
+    JetCLIPlan.TestWorkspace{names: names, member_args: member_args, quiet: quiet}
 }
 
 // One test file (or a package entry file): the harness collects every #Test the file and

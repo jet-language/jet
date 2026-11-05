@@ -2165,8 +2165,12 @@ The canonical [Jet testkit](../../Tools/testkit/run.jet) owns diagnostic
 snapshots (`ui`), executable examples and runtime fixtures (`golden`), and CLI
 scenarios (`cases`). Its package test entry is the fixture gate:
 `JET=/absolute/path/to/jet jet test Tools/testkit` runs each suite as one test
-(`suite golden`, `suite ui`, `suite cases`; a positional filter selects them),
-and a failing test names every failing case. `TESTKIT_ARGS` passes testkit flags such as `--filter` or
+(`suite golden`, `suite ui`, `suite cases`; a positional filter selects them).
+The selected suites share one pool sized by cores and free memory, so a
+filtered run (`"suite ui"`) runs and reports only its own suite. Rows print as
+cases finish; each suite's report and failure list keep suite-then-path
+order, whatever the pool's size, and a failing test names every failing case
+of its suite. `TESTKIT_ARGS` passes testkit flags such as `--filter` or
 `--tier`; scratch stays disk-backed outside the checkout. O0, O1 and O2 compare the real exit
 and exact streams; diagnostic text remains a product surface, not a blessable
 implementation accident.

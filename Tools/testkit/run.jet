@@ -815,16 +815,39 @@ fn kit_suite_run(suite: String, entry: KitEntry, context: KitCtx) -> [KitOutcome
     }
 }
 
-// A suite run's exit code (kit_report_exit_code) and the report row of every case or
-// selection problem that makes it nonzero, so a caller can name every failure at once.
+// A run's exit code (kit_report_exit_code) and the report row of every case or selection
+// problem that makes it nonzero, so a caller can name every failure at once.
 struct KitExecution {
     code: Int
-    failures: [String]
+    failures: [KitFailure]
+}
+
+// One blocking report row and the suite it belongs to; a selection, report or cleanup row
+// belongs to the whole run (suite "" or "kit").
+struct KitFailure {
+    suite: String
+    row: String
 }
 
 fn kit_execution_refused(row: String) -> KitExecution {
     print(row)
-    KitExecution{code: 2, failures: [row]}
+    KitExecution{code: 2, failures: [KitFailure{suite: "", row: row}]}
+}
+
+// The suites a `<suite>` argument names: that one, or every suite for `all`.
+fn kit_named_suites(suite: String) -> [String] {
+    named := [String]{}
+    loop name in kit_suites() {
+        if suite == "all" || suite == name -> &named.push(name)
+    }
+    named
+}
+
+// The corpus in report order: by suite, then path. The pool runs entries in schedule
+// order and rows stream as entries finish; reports and failure lists keep this order
+// whatever the pool's size.
+fn kit_execute_corpus_order(corpus: &[KitSelected]) {
+    &corpus.sort_by(item -> "{item.suite}\n{item.entry.path}")
 }
 
 // The disk-backed scratch directory a run uses without --scratch: JET_TEST_SCRATCH_DIR,
@@ -842,12 +865,11 @@ fn kit_case_blocks(status: String) -> Bool {
     kit_expect_named(["FAIL", "UNEXPECTED-PASS", "REFUSED", "ERROR", "TIMEOUT"], status)
 }
 
-fn kit_execute_suites(options: KitOptions, root: String) -> KitExecution {
-    selected_suites := [String]{}
-    loop suite in kit_suites() {
-        if options.suite == "all" || options.suite == suite -> &selected_suites.push(suite)
-    }
-    if selected_suites.len() == 0 -> return kit_execution_refused("REFUSED\tselection\t\tsuite not installed: {options.suite}")
+// Runs `selected_suites` in one pool. `reports` None writes one report of every row to
+// options.results; Val(paths) finishes each suite on its own, its rows and summary to
+// paths[suite] ("" prints the summary only), as each gate test reports its suite.
+fn kit_execute_suites(options: KitOptions, root: String, selected_suites: [String], reports: [String: String]?) -> KitExecution {
+    if selected_suites.len() == 0 || selected_suites.any(suite -> !kit_expect_named(kit_suites(), suite)) -> return kit_execution_refused("REFUSED\tselection\t\tsuite not installed: {options.suite}")
     timeout :: Duration.seconds(options.timeout) ?? return kit_execution_refused("REFUSED\tselection\t\ttimeout: {err}")
     discovery_env :: KitEnv{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: timeout, memory_limit: 0}
     discovery_ctx :: KitCtx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless, known: [String: String]{}}
@@ -855,7 +877,7 @@ fn kit_execute_suites(options: KitOptions, root: String) -> KitExecution {
     loop suite in selected_suites {
         loop entry in kit_suite_discover(suite, discovery_ctx) -> &corpus.push(KitSelected{entry: entry, suite: suite})
     }
-    &corpus.sort_by(item -> item.entry.path)
+    kit_execute_corpus_order(&corpus)
     selection :: kit_exec_select_ids(corpus.map(item -> item.entry.path), options)
     if selection.error != "" -> return kit_execution_refused("REFUSED\tselection\t\t{selection.error}")
     entries :: corpus.filter(item -> kit_expect_named(selection.ids, item.entry.path))
@@ -871,7 +893,7 @@ fn kit_execute_suites(options: KitOptions, root: String) -> KitExecution {
     canonical :: kit_execute_disk_dir(base, root) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     // What outlives a run: each suite's measurements and the FFI cache.
     state :: kit_execute_disk_dir(sys.get("JET_TEST_STATE_DIR") ?? files.join(kit_scratch_root() ?? canonical, "state"), root) ?? return kit_execution_refused("ERROR\tselection\t\tstate: {err}")
-    run_scratch :: files.join(canonical, "testkit-{process.current_pid()}-{options.suite}")
+    run_scratch :: files.join(canonical, "testkit-{process.current_pid()}-{selected_suites.join("-")}")
     if files.exists(run_scratch) -> return kit_execution_refused("ERROR\tselection\t\tscratch already exists: {run_scratch}")
     files.create_dir_all(run_scratch) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: files.join(state, "ffi")}
@@ -910,12 +932,33 @@ fn kit_execute_suites(options: KitOptions, root: String) -> KitExecution {
             false
         }
     }
-    failures := [String]{}
+    kit_execute_finish(jet, results, ran_suites, selected_suites, reports, options.results)
+}
+
+// The run's failures and exit code once every row is in: one report of every row to
+// `results_path` (reports None), or each suite's rows and summary to reports[suite].
+// The rows keep corpus order (kit_execute_corpus_order).
+fn kit_execute_finish(jet: String, results: [KitCaseResult], ran_suites: [String], suites: [String], reports: [String: String]?, results_path: String) -> KitExecution {
+    failures := [KitFailure]{}
     loop result in results {
-        if kit_case_blocks(result.status) -> &failures.push("{result.status}\t{result.case}\t{result.tier}\t{result.detail}")
+        if kit_case_blocks(result.status) -> &failures.push(KitFailure{suite: result.suite, row: "{result.status}\t{result.case}\t{result.tier}\t{result.detail}"})
     }
-    code :: kit_report_finish(jet, results, options.results, ran_suites)
-    if code != 0 && failures.len() == 0 -> &failures.push("ERROR\tresults\t\tthe {options.suite} report could not be written to {options.results}")
+    if reports == .Val(paths) {
+        code := if failures.any(failure -> !kit_expect_named(suites, failure.suite)) -> 2 else -> 0
+        loop suite in suites {
+            path :: paths.get(suite) ?? ""
+            // Each lambda captures its own copy: a capture moves the name it reads.
+            in_suite :: suite.copy()
+            ran_suite :: suite.copy()
+            failed_suite :: suite.copy()
+            suite_code :: kit_report_finish(jet, results.filter(result -> result.suite == in_suite), path, ran_suites.filter(name -> name == ran_suite))
+            if suite_code != 0 && !failures.any(failure -> failure.suite == failed_suite) -> &failures.push(KitFailure{suite: suite, row: "ERROR\tresults\t\tthe {suite} report could not be written to {path}"})
+            if suite_code > code -> code = suite_code
+        }
+        return KitExecution{code: code, failures: failures}
+    }
+    code :: kit_report_finish(jet, results, results_path, ran_suites)
+    if code != 0 && failures.len() == 0 -> &failures.push(KitFailure{suite: "", row: "ERROR\tresults\t\tthe {suites.join(",")} report could not be written to {results_path}"})
     KitExecution{code: code, failures: failures}
 }
 
@@ -1052,6 +1095,13 @@ struct KitEntryRun {
     results: [KitCaseResult]
 }
 
+// Whether the pool starts an entry claiming `weight` bytes beside `running` entries that
+// claim `claimed` together: fewer than `jobs` run and the claims fit under the budget
+// (0 is unknown: no memory gate). The first always starts.
+fn kit_execute_admits(schedule: KitSchedule, running: Int, claimed: Int, weight: Int) -> Bool {
+    running < schedule.jobs && (running == 0 || schedule.budget == 0 || claimed + weight <= schedule.budget)
+}
+
 // Runs the corpus in schedule order: an entry starts once fewer than `jobs` run and its
 // memory claim fits beside the running ones' (the first always starts). As each entry
 // finishes, its verdict diffs and rows print at once. Returns one run per entry in corpus
@@ -1065,9 +1115,9 @@ fn kit_execute_entries(entries: [KitSelected], schedule: KitSchedule, options: K
         running := 0
         claimed := 0
         loop started < schedule.order.len() || running > 0 {
-            if started < schedule.order.len() && running < schedule.jobs {
+            if started < schedule.order.len() {
                 index :: schedule.order[started]
-                if running == 0 || schedule.budget == 0 || claimed + schedule.weights[index] <= schedule.budget {
+                if kit_execute_admits(schedule, running, claimed, schedule.weights[index]) {
                     task kit_execute_report(index, entries[index], options, env, known, root, run_scratch, schedule.guards[index], done.copy())
                     started += 1
                     running += 1
@@ -1151,9 +1201,52 @@ fn kit_gate_root() -> String Err! {
     Ok(root)
 }
 
-// One suite through the testkit engine: every blocking case row, one per line, or "".
-// TESTKIT_ARGS adds testkit flags, split as `.case` step words (quote a value with spaces);
-// JET_CI_EVIDENCE_DIR receives <suite>.json case verdicts.
+// The suites one `jet test Tools/testkit [<filter>]` run selects: each whose test name,
+// `suite <name>`, contains the run's filter (JET_TEST_FILTER, the harness's own rule);
+// every suite unfiltered.
+fn kit_gate_selected(filter: String?) -> [String] {
+    kit_suites().filter(suite -> if filter == .Val(needle) -> "suite {suite}".contains(needle) else -> true)
+}
+
+// One suite test's blocking rows, one per line, from a run of `suites`: the rows of its
+// own suite and every whole-run row (selection, report, cleanup).
+fn kit_gate_rows(execution: KitExecution, suites: [String], suite: String) -> String {
+    rows := [String]{}
+    loop failure in execution.failures {
+        if failure.suite == suite || !kit_expect_named(suites, failure.suite) -> &rows.push(failure.row)
+    }
+    rows.join("\n")
+}
+
+// Where one harness process's suite tests meet: `<scratch>/gate-<pid>`, its lock file
+// beside it. The first suite test to take the lock runs every selected suite in one pool
+// and leaves each other suite's rows there as `<suite>.rows`; each later test takes its
+// own file, and the last removes the directory and the lock file.
+fn kit_gate_handoff(base: String) -> String { files.join(base, "gate-{process.current_pid()}") }
+
+// The rows another suite test of this process left for `suite`, removed once read; None
+// when no suite test has run the pool yet.
+fn kit_gate_take(handoff: String, suite: String) -> String? {
+    if !files.is_dir(handoff) -> return None
+    path :: files.join(handoff, "{suite}.rows")
+    rows :: files.read(path) ?? return Val("ERROR\tselection\t\tthe shared suite pool left no rows for suite {suite}: {err}")
+    files.remove(path) ?? return Val("ERROR\tselection\t\tremove {path}: {err}")
+    kit_gate_close(handoff)
+    Val(rows)
+}
+
+// Removes the handoff directory and its lock file once no suite's rows wait there.
+fn kit_gate_close(handoff: String) {
+    files.remove_dir(handoff) ?? return
+    files.remove("{handoff}.lock").drop("the lock file only marks the handoff")
+}
+
+// A suite test through the testkit engine: every blocking case row, one per line, or "".
+// The tests of one harness run share one pool: the first to start runs every suite the
+// run's filter selects (kit_gate_selected) and hands the others their rows
+// (kit_gate_handoff). A test the harness reruns alone (JET_NATIVE_TEST_ID) runs its own
+// suite. TESTKIT_ARGS adds testkit flags, split as `.case` step words (quote a value with
+// spaces); JET_CI_EVIDENCE_DIR receives <suite>.json case verdicts.
 fn kit_gate_suite(suite: String) -> String {
     args := [String]{suite}
     words :: kit_steps_words(sys.get("TESTKIT_ARGS") ?? "") ?? return "REFUSED\tselection\t\tTESTKIT_ARGS has an unterminated quote"
@@ -1167,14 +1260,38 @@ fn kit_gate_suite(suite: String) -> String {
         return ""
     }
     options.opt_in = true
-    evidence :: sys.get("JET_CI_EVIDENCE_DIR") ?? ""
-    if options.results == "" && evidence != "" -> options.results = files.join(evidence, "{suite}.json")
     root :: kit_gate_root() ?? return "ERROR\tselection\t\t{err}"
-    kit_execute_suites(options, root).failures.join("\n")
+    base :: if options.scratch != "" -> options.scratch else -> kit_scratch_root() ?? ""
+    if sys.get("JET_NATIVE_TEST_ID") != None || base == "" -> return kit_gate_rows(kit_gate_execute(options, root, [suite]), [suite], suite)
+    files.create_dir_all(base) ?? return "ERROR\tselection\t\tscratch: {err}"
+    handoff :: kit_gate_handoff(base)
+    pool_lock :: files.lock("{handoff}.lock") ?? return "ERROR\tselection\t\tsuite pool lock: {err}"
+    if kit_gate_take(handoff, suite) == .Val(rows) -> return rows
+    selected :: kit_gate_selected(sys.get("JET_TEST_FILTER"))
+    suites :: if kit_expect_named(selected, suite) -> selected else -> [suite]
+    files.create_dir_all(handoff) ?? return "ERROR\tselection\t\tsuite pool handoff: {err}"
+    execution :: kit_gate_execute(options, root, suites)
+    loop name in suites {
+        if name == suite -> next
+        path :: files.join(handoff, "{name}.rows")
+        files.write_atomic(path, kit_gate_rows(execution, suites, name).bytes()) ?? return "ERROR\tselection\t\tsuite pool handoff {path}: {err}"
+    }
+    kit_gate_close(handoff)
+    kit_gate_rows(execution, suites, suite)
+}
+
+// `suites` in one pool, each finishing its own report: TESTKIT_ARGS --results, else
+// <JET_CI_EVIDENCE_DIR>/<suite>.json, else only its summary.
+fn kit_gate_execute(options: KitOptions, root: String, suites: [String]) -> KitExecution {
+    evidence :: sys.get("JET_CI_EVIDENCE_DIR") ?? ""
+    reports := [String: String]{}
+    loop name in suites -> reports[name] = if options.results == "" && evidence != "" -> files.join(evidence, "{name}.json") else -> options.results
+    kit_execute_suites(options, root, suites, Val(reports))
 }
 
 // `jet test Tools/testkit [<filter>]`: the repository's fixture gate. Each suite is one test;
-// a failing test lists every failing case.
+// the suites the filter selects run in one pool, so a filtered run (`"suite ui"`) runs and
+// reports only that suite, and a failing test lists every failing case of its suite.
 //   JET                  the compiler under test (unset: each suite test reports SKIP-HOST)
 //   TESTKIT_ARGS         testkit flags for every suite, as `.case` step words: --filter SUBSTR,
 //                        --cases FILE, --tier o0,o1,o2, --timeout SEC, --jobs N, --shard I/N,
@@ -1224,6 +1341,6 @@ fn run() {
         return
     }
     root :: files.canonicalize(cwd) ?? panic("checkout root: {err}")
-    code :: kit_execute_suites(options, root).code
+    code :: kit_execute_suites(options, root, kit_named_suites(options.suite), None).code
     if code != 0 -> process.exit(code)
 }

@@ -221,7 +221,7 @@ fn kit_test_core_scratch(label: String) -> String {
     assert(kit_parse_options(["golden", "--timeout", "-1"]).error != "")
     options :: kit_parse_options(["golden", "--timeout", "9223372036854775807"])
     assert_eq(options.error, "")
-    assert_eq(kit_execute_suites(options, "").code, 2)
+    assert_eq(kit_execute_suites(options, "", ["golden"], None).code, 2)
 }
 
 #Test("jobs option refuses non-positive counts and the pool sizes itself from cores and memory") {
@@ -269,6 +269,101 @@ fn kit_test_core_scratch(label: String) -> String {
     assert_eq((loaded.get(kit_history_key("cases", "c")) ?? KitHistory{wall_ms: 0, peak_kib: 0}).peak_kib, 8 * 1048576)
     assert_eq(loaded.get(kit_history_key("ui", "a")) == None, true)
     files.remove_all(root) ?? panic("remove history scratch")
+}
+
+#Test("the pool admits an entry only while fewer than jobs run and its claim fits the budget") {
+    gib :: 1073741824
+    schedule :: KitSchedule{order: [0, 1, 2], weights: [gib, gib, gib], guards: [gib, gib, gib], budget: 2 * gib, jobs: 3}
+    // The first entry always starts, even one that claims more than the whole budget.
+    assert(kit_execute_admits(schedule, 0, 0, 4 * gib))
+    assert(kit_execute_admits(schedule, 1, gib, gib))
+    assert(!kit_execute_admits(schedule, 2, 2 * gib, gib), "a claim past the budget waits")
+    narrow :: KitSchedule{order: [0, 1, 2], weights: [gib, gib, gib], guards: [gib, gib, gib], budget: 0, jobs: 2}
+    assert(kit_execute_admits(narrow, 1, 64 * gib, gib), "an unknown budget gates nothing")
+    assert(!kit_execute_admits(narrow, 2, 0, gib), "the pool never runs more than jobs")
+}
+
+fn kit_test_selected(suite: String, path: String) -> KitSelected {
+    KitSelected{entry: KitEntry{path: path, expected: path, project: "", suite: suite, mode: ""}, suite: suite}
+}
+
+#Test("pool rows keep corpus order, suite then path, whatever the pool's size") {
+    mixed := [kit_test_selected("ui", "b"), kit_test_selected("cases", "z"), kit_test_selected("golden", "a"), kit_test_selected("cases", "a")]
+    kit_execute_corpus_order(&mixed)
+    assert_eq(mixed.map(item -> "{item.suite} {item.entry.path}"), ["cases a", "cases z", "golden a", "ui b"])
+    root :: cases_test_root("pool-order")
+    names :: ["a", "b", "c", "d", "e"]
+    // Earlier entries sleep longer, so a wider pool finishes them out of order.
+    loop (index, name) in names -> cases_test_source(root, name, "step: jet -c 'sleep 0.{names.len() - 1 - index}'\nstdout: empty\nstderr: empty\n")
+    corpus :: names.map(name -> KitSelected{entry: cases_test_entry(name), suite: "cases"})
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    loop jobs in [1, 2, 5] {
+        run_scratch :: files.join(root, "run-{jobs}")
+        files.create_dir_all(run_scratch) ?? panic("pool run scratch: {err}")
+        schedule :: kit_execute_schedule(corpus, [String: KitHistory]{}, jobs, 0, 0)
+        rows := [String]{}
+        loop run in kit_execute_entries(corpus, schedule, context.options, context.env, context.known, root, run_scratch) {
+            loop result in run.results -> &rows.push("{result.case} {result.status}")
+        }
+        assert_eq(rows, corpus.map(item -> "{item.entry.path} PASS"))
+    }
+    files.remove_all(root) ?? panic("remove pool order scratch")
+}
+
+#Test("a gate filter selects only the suites whose test names contain it") {
+    assert_eq(kit_gate_selected(None), ["golden", "ui", "cases"])
+    assert_eq(kit_gate_selected(Val("suite ui")), ["ui"])
+    assert_eq(kit_gate_selected(Val("suite")), ["golden", "ui", "cases"])
+    assert_eq(kit_gate_selected(Val("cases")), ["cases"])
+    assert_eq(kit_gate_selected(Val("pool")).len(), 0)
+    assert_eq(kit_named_suites("all"), ["golden", "ui", "cases"])
+    assert_eq(kit_named_suites("ui"), ["ui"])
+    assert_eq(kit_execute_suites(kit_parse_options(["golden"]), "", ["golden", "nope"], None).code, 2)
+}
+
+#Test("each suite finishes its own report and rows, and a filtered run writes only its own") {
+    root :: cases_test_root("suite-reports")
+    ui_report :: files.join(root, "ui.json")
+    cases_report :: files.join(root, "cases.json")
+    passed :: KitCaseResult{suite: "cases", case: "tests/cases/a.case", tier: "-", status: "PASS", detail: "", exit: 0}
+    failed :: KitCaseResult{suite: "ui", case: "tests/ui/b.jet", tier: "-", status: "FAIL", detail: "snapshot", exit: 1}
+    reports := [String: String]{}
+    reports["ui"] = ui_report
+    only_ui :: kit_execute_finish("jet", [failed], ["ui"], ["ui"], Val(reports), "")
+    assert_eq(only_ui.code, 1)
+    assert(files.exists(ui_report))
+    assert(!files.exists(cases_report), "a filtered run writes no other suite's report")
+    reports["cases"] = cases_report
+    both :: kit_execute_finish("jet", [passed, failed], ["cases", "ui"], ["cases", "ui"], Val(reports), "")
+    assert_eq(both.code, 1)
+    ui_text :: files.read(ui_report) ?? panic("read ui report: {err}")
+    cases_text :: files.read(cases_report) ?? panic("read cases report: {err}")
+    assert(ui_text.contains("tests/ui/b.jet") && !ui_text.contains("tests/cases/a.case"))
+    assert(cases_text.contains("tests/cases/a.case") && !cases_text.contains("tests/ui/b.jet"))
+    assert_eq(kit_gate_rows(both, ["cases", "ui"], "cases"), "")
+    assert_eq(kit_gate_rows(both, ["cases", "ui"], "ui"), "FAIL\ttests/ui/b.jet\t-\tsnapshot")
+    // A selection or cleanup row fails every suite of the run.
+    whole :: KitExecution{code: 2, failures: [KitFailure{suite: "", row: "ERROR\tselection\t\tx"}, KitFailure{suite: "kit", row: "ERROR\tcleanup\t-\ty"}]}
+    assert_eq(kit_gate_rows(whole, ["ui"], "ui"), "ERROR\tselection\t\tx\nERROR\tcleanup\t-\ty")
+    files.remove_all(root) ?? panic("remove suite report scratch")
+}
+
+#Test("suite tests take the rows the shared pool left them, and the last removes the handoff") {
+    root :: cases_test_root("gate-handoff")
+    handoff :: kit_gate_handoff(root)
+    assert(kit_gate_take(handoff, "ui") == None, "before the pool runs there is nothing to take")
+    kit_exec_write(files.join(handoff, "ui.rows"), "FAIL\ttests/ui/b.jet\t-\tsnapshot")
+    kit_exec_write(files.join(handoff, "cases.rows"), "")
+    kit_exec_write("{handoff}.lock", "")
+    assert_eq(kit_gate_take(handoff, "ui") ?? "<none>", "FAIL\ttests/ui/b.jet\t-\tsnapshot")
+    assert(files.is_dir(handoff), "another suite's rows still wait")
+    assert_eq(kit_gate_take(handoff, "cases") ?? "<none>", "")
+    assert(!files.exists(handoff))
+    assert(!files.exists("{handoff}.lock"))
+    // A pool that left nothing for a suite is an error row, never a second run.
+    files.create_dir_all(handoff) ?? panic("handoff scratch: {err}")
+    assert((kit_gate_take(handoff, "golden") ?? "<none>").starts_with("ERROR\tselection\t\tthe shared suite pool left no rows for suite golden"))
+    files.remove_all(root) ?? panic("remove handoff scratch")
 }
 
 #Test("the pool's memory is the room under the cgroup caps, not the whole host") {

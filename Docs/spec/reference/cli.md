@@ -727,9 +727,15 @@ the claims with a `.measure` member, serially and under the release profile
 unless `--profile` names one. It prints one record per claim, as a `measure
 NAME:` line or, with `--json`, as one JSON object line with the same fields.
 It also evaluates the claim's `.Test(name)` budgets against that record
-(D-CLAIM-BENCH1). Directory and package
-targets, a `fn test` override, a bare `--shuffle`, and the other test flags are
-refused with E2104 until they are ported. The test-result cache, the evidence
+(D-CLAIM-BENCH1). A directory target (or none, inside a package) tests the
+package through its own `fn test(t: Test)` when it declares one, else through
+its stock entry. At a workspace root without its own `fn test`, each member
+that can run `jet test` runs as its own child `jet test <member>` with the
+same flags, one child per core, fewer while free memory can't hold 1 GiB for
+each; each member's output is written whole, in member order, after a
+`jet test: member <name>` line on stderr (muted by `--quiet`), and the exit is
+the worst member's. A bare `--shuffle` and the other test flags are refused
+with E2104 until they are ported. The test-result cache, the evidence
 report, and the package claims
 floor are not ported yet: every run compiles fresh, and the outcome is the
 harness exit (the outcome for a package without a claims floor).
