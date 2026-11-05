@@ -1,0 +1,53 @@
+card	crit	verdict	size	evidence	proposed board line
+6035	c19	W	L	No candidate identity record binds source, toolchain, artifacts, signatures and tests; relates to 6564 c4 and 6035 c47	Build one release-candidate record that names source, toolchain, artifacts, signatures, tests and support matrix
+6035	c20	W	M	No release gate test for missing runner, flaky/skipped check, stale artifact, signing failure or partial publish	Release gate refuses on missing runner, skipped check, stale artifact, signing failure or partial publish, keeping evidence (after c19)
+6035	c21	W	L	probe (scratch probe) jet prove gives E2104 "jet prove is not built yet", exit 2	Build jet prove replay, parity and divergence through the production path
+6035	c22	W	L	probe (scratch probe) jet prove gives E2104 "not built yet", exit 2	Build jet prove finite and Presburger solver certificates
+6035	c23	W	L	probe (scratch probe) jet prove gives E2104 "not built yet", exit 2	Build jet prove presentation-only proof lenses
+6035	c24	D		Duplicate of 6035 c7 and c14: owner 2026-11-04 set a 60 s suite and a 30-60 s step timeout, replacing the 900 s watchdog	Close into 6035 c7/c14
+6035	c25	W	M	Results, goldens, budgets and API snapshots are stored in different shapes; D-DEVR-CLAIM1=A and D-RECORD1=B (.jet/records index) are unbuilt	Store test results, goldens, budgets and API snapshots as one receipt kind in the .jet/records index
+6035	c26	W	S	Depends on c25; no ledger check for absent or stale receipts	Ledger refuses a claim whose receipt is absent or stale (after c25)
+6035	c27	W	S	probe (scratch probe) jet test bench.jet --measure --json prints mean_ns rows and the fixture filter passes; jet build main.jet leaves no binary in cwd; Examples/features/expected/tooling/bench.out shows run output, not measurement	Fix the built-binary step of the measured-test case and make bench.out show the measurement
+6035	c28	W	M	Hardening manifest is produced by Node (Tools/tower/app/hardening.mjs); InspectClaims.jet:62,334 only reads .jet/hardening-manifest.json	Port hardening-manifest membership to Jet, derived from source registries and dispatch facts, with fake-row negative tests
+6035	c29	W	S	No validator rejects bind-and-discard, compile-only or opaque rows	Hardening manifest rows need a typed observable sink; discard and compile-only rows fail (after c28)
+6035	c30	W	M	jet.hardening.repro.v1 exists only in Node (Tools/tower/app/hardening.mjs)	Port jet.hardening.repro.v1 bundles to Jet with source, oracle, tier commands, channels, exit, seed, commit and binary identity
+6035	c31	W	S	No byte-identity or snapshot-hash staleness test	Two manifest generations from one tree are byte-identical; registry changes mark old evidence stale (after c28)
+6035	c32	O		80GiB target ceiling was the Rust/cargo build era; "80GiB" appears only in tower history JSON, no Jet source	Close: Rust target ceilings retired with the Rust crates
+6035	c33	D		Duplicate of 6035 c40: D-CLAIM1=C replaces the fuzz catalog with generated-grade eligibility and not-generated reasons	Close into 6035 c40
+6035	c34	W	M	No inverted-behavior regression seeds produce finding bundles today	Add the five regression seeds and prove each yields a finding bundle when inverted
+6035	c35	D		Duplicate of 6035 c3 (one Jet runner, no second ledger or non-Jet tool)	Close into 6035 c3
+6035	c36	W	L	No typed program generator for tier self-diff exists	Build a typed, bounded generator of valid programs across the listed constructs
+6035	c37	W	M	Depends on c36	Negative controls for the generator layer fail as required (after c36)
+6035	c38	W	M	Depends on c36	Fixed seed gives stable bundles; minimization keeps construct and mismatch (after c36)
+6035	c39	W	M	Compiler/JetFoundation/Source/Evidence/*.jet exists; solver producer waits on jet prove (c21-c23)	Test and solver producers share typed evidence records and claim projection (after prove)
+6035	c40	W	M	No generated-grade eligibility or accepted/executed counts; D-GRADE-POLICY1=A unbuilt	Generated contracts use canonical eligibility and real accepted/executed counts
+6035	c41	W	M	probe (scratch probe) jet fuzz gives E2104 "use jet test --grade=generated", exit 2 (retired-fuzz half holds); claim routes and solver lens unbuilt	Integrate test/prove claim routes and the solver lens (retired fuzz route already holds)
+6035	c42	W	M	No claims floor or below-floor diagnostic code (D-GRADE-POLICY1=A unbuilt)	Reports show canonical evidence grades and tighten-only package floors with a registered below-floor error
+6035	c43	D		Duplicate of c39-c42 (it lists their tests as mandatory)	Close into 6035 c39-c42
+6035	c44	W	M	probe (scratch probe) jet check --json prints jet.status/v1; jet test --json ignores --json and prints text	Every --json command, including jet test and prove failures, prints one jet.status/v1 envelope
+6035	c45	W	S	no_fix_reason exists (Diagnostic.jet, Report.jet); Tools/testkit/Tests/StepsMachine.jet:49-55 rejects fix_edits plus no_fix_reason together; no registry coverage guard or split edit/reason projection	Add the registry coverage guard and separate edit/reason coverage projections for no-fix reasons
+6035	c46	W	M	No rights-conflict scenario test; needs-review skip exists at Compiler/JetCli/Source/Cli/FixCommands.jet:165	Add the rights-conflict emit/fix/manual-decision/recheck scenario, keeping needs-review grants out of auto-fix
+6035	c47	D		Duplicate of 6035 c19/c20 (one candidate record consumed by release path)	Close into 6035 c19/c20
+6035	c48	W	S	Core/Testing/Testing.jet:33,678-681 has empty, all-discarded, invalid_oracle and contaminated statuses and universal_proof false; no timed-out or cancelled status; no test covers them	Add timed-out and cancelled statuses to testing.compare and tests for every non-pass status
+6035	c49	W	S	Shrinking exists (Testing.jet:662 testing_history_shrink); no test proves the same mismatch survives reduction or detects contamination	Test that testing.compare reduction keeps the mismatch and flags contamination
+6035	c50	W	S	probe (scratch probe) Examples/features/tooling/test_compare matches its golden under jet run and jet build (matched, true); interpreter and web modes not checked	Run the test_compare golden on interpreter and web modes as well
+6035	c51	D		Duplicate of 6035 c7 (owner 60 s suite budget sets the test-economics target)	Close into 6035 c7
+6035	c52	H		probe (scratch probe) jet test prints 2 passed, 1 failed with Stop [E3001] expected 5, got 4, exit 1. Defect: location prints internal identity module:14:source-root:0::t01_assert.jet::test::double fails@149..202 (D-DIAG-CORE-NAME1)	Holds; open a card for the internal test identity in the failure location
+6035	c53	W	S	jet test --json has no expectedFailures/unexpectedPasses fields	Expected-fail filter exits 0 and unfiltered exits 1, with text and JSON agreeing
+6035	c54	W	S	probe (scratch probe) two fresh runs gave no E2105; agreement of text/JSON/evidence waits on c53	Repeated runs keep distinct report identities and agree on expected-fail (after c53)
+6035	c55	H		probe (scratch probe) jet run Examples/features/io/testing_projection.jet prints corpus:2 fixture:286 golden:true, matching expected/io/testing_projection.out	Holds
+6035	c56	O		Rust parity premise gone (Rust crates deleted at cutover); #Test .measure scope works in t01	Close: Rust parity retired
+6035	c57	O		git grep finds no harness-assembly refusal in Compiler; fuzz folds into jet test --grade=generated (D-CLAIM1=C)	Close: Rust MIR parity retired; fuzz route covered by c41
+6564	c9	D		Duplicate of 6035 c19/c47 (one candidate) and 6035 c7 (time floors)	Close into 6035 c19 and c7
+6564	c10	W	M	No red-team quota run on a final commit; AGENTS.md names no such pass	Run the fresh-context red-team quota on the final candidate commit
+6564	c11	H		Runner half: Tools/testkit/Exec.jet:373 kit_exec_stop_strays with test Tools/testkit/Tests/CasesSuite.jet:174; dashboard half duplicates 6035 c47	Holds for the runner; dashboard part closes into 6035 c47
+6564	c12	W	S	.agents/skills/_shared/skill-sources.md maps 78 rows; mine-for-jet-v2 is missing	Add mine-for-jet-v2 to skill-sources.md and a check that every SKILL.md is mapped
+6564	c13	O		AGENTS.md:287-289: no harness-specific configuration; agent tools use their own global settings	Close: no harness configuration in repo
+6564	c14	W	S	No check for contradictory rules across AGENTS.md and skills	Add a contradiction check over AGENTS.md and skill roots
+6564	c15	O		AGENTS.md:287-289: no harness-specific configuration, adapters or managed precedence in repo	Close: no harness configuration in repo
+6564	c16	O		Composed-workflow skills were replaced by .agents/skills/JetSkillsRouter.md routing; AGENTS.md:287-289 leaves host invocation to tools	Close: routing table replaces composed workflows
+6564	c17	H		.agents/skills/pulse/SKILL.md:4,13 (bars|table|bullets; done, active, blocked, unstarted), registered at JetSkillsRouter.md:11	Holds
+6564	c18	O		Layout rewritten: JetSkillsRouter.md, 48 .agents/skills plus 6 Tools/tower/skills, not 30	Close: skill layout rewritten
+6564	c19	D		Duplicate of 6564 c14 (contradiction check)	Close into 6564 c14
+6564	c20	O		AGENTS.md:287-289: no OMP loader or managed-route configuration in repo	Close: no harness configuration in repo
+6564	c21	O		Astra appears nowhere in AGENTS.md or skills; Luna/Sol linger in .agents/skills/gauntlet/references/{build,run,shared}.md	Close; open a small card to drop Luna/Sol from gauntlet references
