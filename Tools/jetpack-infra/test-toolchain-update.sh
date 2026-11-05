@@ -6,7 +6,10 @@ set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 jet=${JET:?JET must name the admitted native jet compiler}
 scratch=$(printenv JET_TEST_SCRATCH 2>/dev/null || true)
-if [ -z "$scratch" ]; then scratch="$HOME/.cache/jet-dev/scratch"; fi
+if [ -z "$scratch" ]; then
+  JET_DEV_WORKTREE=${JET_DEV_WORKTREE:-$repo} . "$repo/Tools/agent/roots.sh"
+  scratch="$JET_SCRATCH_ROOT"
+fi
 work="$scratch/toolchain-update-$$"
 stage="$work/site"
 root="$work/root"

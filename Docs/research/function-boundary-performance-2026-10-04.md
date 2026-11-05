@@ -142,7 +142,7 @@ ms) is 1.9× slower than its reuse spelling (224 ms) and 4.4× slower than C's
 exact-size `malloc`; Rust's `temp-collection` (heap `Vec`, 828 ms) is 5.3× C's
 stack array (156 ms). Those are the places where Jet can beat Rust on the Rust
 tier once slices 7 and 8 land. Raw rows:
-`~/.cache/jet-dev/scratch/function-boundary/results-1.tsv` (not committed).
+`$JET_STATE_ROOT/scratch/function-boundary/results-1.tsv` (not committed).
 
 ## 3. Where Jet loses (per cell, from emitted Rust and profiles)
 
@@ -608,7 +608,7 @@ each rule lands in both emitters with the same name (`MIRRust.rs` and
   already says it. `out = ""` (or `out = [T]{}`) on a place that always
   holds a value (a `&` parameter, or a field of a local) emits `.clear()` and
   keeps the buffer. `string-reuse/main.jet` now exists and uses it. Draft
-  ballot: `~/.cache/jet-dev/ballots/READY/D-STRING-EMPTY1.json` (keep
+  ballot: `$JET_STATE_ROOT/ballots/READY/D-STRING-EMPTY1.json` (keep
   `out = ""` as the one spelling; not reviewed).
 - **Slice 8 step 1, loop capacity hints.** `MoveFacts::loop_reserves` /
   `JetRustEmitMoveFacts.loop_reserves` (`plan_loop_reserves` /

@@ -1,6 +1,6 @@
 # Probe area-embedded — Embedded and hardware
 
-Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `$JET_STATE_ROOT/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -18,8 +18,8 @@ A firmware program as one Jet package for a Cortex-M target (cross build; run wh
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-dev/dx2/embedded-iot/`, `~/.cache/jet-dev/dx2/hardware-drivers/`, `~/.cache/jet-dev/dx2/real-time-safety-critical/`, `~/.cache/jet-dev/dx2/automotive-embedded/`, `~/.cache/jet-dev/dx2/robotics/`, `~/.cache/jet-dev/dx2/plc-industrial/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
+Domain census and reports: `$JET_STATE_ROOT/dx2/embedded-iot/`, `$JET_STATE_ROOT/dx2/hardware-drivers/`, `$JET_STATE_ROOT/dx2/real-time-safety-critical/`, `$JET_STATE_ROOT/dx2/automotive-embedded/`, `$JET_STATE_ROOT/dx2/robotics/`, `$JET_STATE_ROOT/dx2/plc-industrial/` (report.md, census.json, claims.json). Deleted ballots with worked code: `$JET_STATE_ROOT/dx2/ballots/` (grep the mechanism name). Family syntheses: `$JET_STATE_ROOT/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-dev/dx3/area-embedded/probe.md`, `gaps.json`, `batteries.json`, and the code under `~/.cache/jet-dev/dx3/area-embedded/pkg/`. Gap ids start with `area-embedded-G`.
+`$JET_STATE_ROOT/dx3/area-embedded/probe.md`, `gaps.json`, `batteries.json`, and the code under `$JET_STATE_ROOT/dx3/area-embedded/pkg/`. Gap ids start with `area-embedded-G`.

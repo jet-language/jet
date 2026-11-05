@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { assertPinnedSource, proofTargetDirectory } from './proof-source.mjs';
+import { scratchRoot as sharedScratchRoot } from './roots.mjs';
 
-const scratchRoot = process.env.JET_SCRATCH_ROOT || join(homedir(), '.cache/jet-dev/scratch');
+const scratchRoot = sharedScratchRoot();
 
 function fixture(t) {
     const directory = mkdtempSync(join(tmpdir(), 'jet-proof-source-'));

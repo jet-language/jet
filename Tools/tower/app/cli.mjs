@@ -1293,25 +1293,29 @@ function cmdRepair(store, { pos, flags }) {
 }
 
 // #6564 c5: without --apply this is a dry run that changes nothing. The rule
-// table comes from this machine (personal-info.mjs); run it where the board's
-// text was written, with JET_SCRATCH_ROOT set, so every rule maps as shown.
+// table comes from this machine (personal-info.mjs, the table the guard reads);
+// run it where the board's text was written, with JET_SCRATCH_ROOT set, so
+// every rule maps as shown. --apply on a board with nothing to redact writes
+// nothing, so the rev and the event log stay as they were.
 function cmdRedact(store, { flags }) {
   const matcher = machinePersonalInfo();
   const table = matcher.rules.map(rule => `  ${rule.label}: ${rule.kind === 'word' ? 'word ' : ''}${rule.find} → ${rule.replace}`);
   const show = (report, head) => [
     head,
     `rule table ${report.ruleTable}:`, ...table,
+    'spans per file:', ...Object.entries(report.files).map(([name, n]) => `  ${name}: ${n}`),
     'spans per section:', ...Object.entries(report.sections).map(([name, n]) => `  ${name}: ${n}`),
     'spans per rule:', ...Object.entries(report.rules).map(([label, n]) => `  ${label}: ${n}`),
   ].join('\n');
-  if (!flags.apply) {
-    const { state, history } = store.loadPair();
-    const report = db.redactBoardCopy(state, history, matcher);
+  if (flags.apply && (!flags.by || flags.by === true)) throw new TowerError('E_USAGE', 'redact --apply needs --by <agent>');
+  const { state, history } = store.loadPair();
+  const report = db.redactBoardCopy(state, history, matcher);
+  if (!flags.apply)
     return out(flags, show(report, `dry run: ${report.total} spans would be redacted; rerun with --apply --by X to write`), { ...report, applied: false });
-  }
-  if (!flags.by || flags.by === true) throw new TowerError('E_USAGE', 'redact --apply needs --by <agent>');
-  const { result, state } = store.mutate((s, cfg, history) => db.applyRedaction(s, history, flags.by, matcher), { expectRev: flags.expectRev });
-  return out(flags, show(result, `redacted ${result.total} spans at rev ${state.meta.rev}`), { ...result, applied: true, rev: state.meta.rev });
+  if (!report.total)
+    return out(flags, show(report, `nothing to redact; the board is unchanged at rev ${state.meta.rev}`), { ...report, applied: false, rev: state.meta.rev });
+  const { result, state: after } = store.mutate((s, cfg, h) => db.applyRedaction(s, h, flags.by, matcher), { expectRev: flags.expectRev });
+  return out(flags, show(result, `redacted ${result.total} spans at rev ${after.meta.rev}`), { ...result, applied: true, rev: after.meta.rev });
 }
 
 function cmdEvents(store, { flags }) {

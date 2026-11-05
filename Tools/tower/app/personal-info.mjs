@@ -8,12 +8,15 @@
 // personal data: the home directory, the login name, the host name, the
 // scratch root and other mounts, and git's user.email and user.name. Each rule
 // names its neutral replacement, so a redaction keeps the text's meaning.
+// Two more rules hold for every machine: the dev tool roots. Tools read their
+// state from $JET_STATE_ROOT and their queues and locks from $JET_RUN_ROOT
+// (Tools/agent/roots.sh), so no committed file names one machine's copy.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { homedir, hostname, userInfo } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-export const RULE_TABLE = 'personal-info/v1';
+export const RULE_TABLE = 'personal-info/v2';
 
 // Names too common to be personal; a machine using one is not flagged by it.
 const GENERIC_NAMES = new Set([
@@ -90,6 +93,17 @@ export function personalInfoRules(identity) {
   if (handle) word(handle, 'owner', 'git name');
   if (login) word(login, 'user', 'user name');
   if (host) word(host, 'devhost', 'host name');
+  // Every spelling of the state root, the machine's home first, then the bare
+  // cache-relative form that code joins to homedir(). Both roots are joined
+  // from parts so this file does not match its own rules.
+  const toolRoot = (forms, replace, label) => {
+    forms = [...new Set(forms)];
+    rules.push({ kind: 'path', label, find: forms[0], replace, source: `(?:${forms.map(escapeRegExp).join('|')})(?![\\w-])` });
+  };
+  const stateRoot = ['.cache', 'jet-dev'].join('/');
+  const homes = [home && home !== '/' ? home : '', login ? `/home/${login}` : '', login ? `/Users/${login}` : '', '${HOME}', '$HOME', '~'];
+  toolRoot([...homes.filter(Boolean).map(prefix => `${prefix}/${stateRoot}`), stateRoot], '$JET_STATE_ROOT', 'state root');
+  toolRoot([['', 'tmp', 'tdev'].join('/')], '$JET_RUN_ROOT', 'run root');
   const order = (rule) => (rule.kind === 'path' ? 0 : 1);
   rules.sort((a, b) => order(a) - order(b) || b.find.length - a.find.length);
   return rules;
@@ -241,12 +255,13 @@ export function personalInfoAdded(matcher, before, after, limit = 3) {
 
 // `tower redact`: rewrite every matched span in the live board and the
 // archive, ratified decisions, briefings and papercuts included, and count the
-// spans per store section and per rule. Only matched spans change.
+// spans per file, per store section and per rule. Only matched spans change.
 export function redactBoard(state, history, matcher) {
+  const files = {};
   const sections = {};
   const rules = {};
   let total = 0;
-  const redactSection = (name, holder, key) => {
+  const redactSection = (file, name, holder, key) => {
     let n;
     if (typeof holder[key] === 'string') {
       const before = Object.values(rules).reduce((a, b) => a + b, 0);
@@ -255,20 +270,23 @@ export function redactBoard(state, history, matcher) {
     } else {
       n = redactValue(holder[key], matcher, rules);
     }
-    if (n) sections[name] = (sections[name] || 0) + n;
+    if (n) {
+      files[file] = (files[file] || 0) + n;
+      sections[name] = (sections[name] || 0) + n;
+    }
     total += n;
   };
   for (const [file, doc] of [['tower.json', state], ['history.json', history]]) {
     for (const key of Object.keys(doc)) {
       if (key === 'decisions' && Array.isArray(doc.decisions)) {
         doc.decisions.forEach((decision, i) =>
-          redactSection(`${file} decisions${decision?.status === 'ratified' ? ' (ratified)' : ''}`, doc.decisions, i));
+          redactSection(file, `${file} decisions${decision?.status === 'ratified' ? ' (ratified)' : ''}`, doc.decisions, i));
       } else {
-        redactSection(`${file} ${key}`, doc, key);
+        redactSection(file, `${file} ${key}`, doc, key);
       }
     }
   }
-  return { ruleTable: RULE_TABLE, total, sections, rules };
+  return { ruleTable: RULE_TABLE, total, files, sections, rules };
 }
 
 // `node personal-info.mjs patterns` prints one rule per line for the shell

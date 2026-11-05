@@ -36,11 +36,11 @@ no ratified or open decision already answers?
 |---|---|
 | Claims read | 2,275 |
 | Distinct owner-choice candidates (claims pass C01-C22, API comparisons C23-C33) | 33 |
-| Candidates with a validated ballot in `~/.cache/jet-dev/ballots/READY/` | 15 |
+| Candidates with a validated ballot in `$JET_STATE_ROOT/ballots/READY/` | 15 |
 | Candidates excluded because a decision already answers them | 19 |
 | Card or card-note leads from the claims pass (implementation under existing law) | 21 |
 | API comparison rows (7 miners, all 50 sources) | 400 |
-| New cards, card notes and reopen flags in `~/.cache/jet-dev/ballots/CARDS-TO-POST.json` | 36 / 22 / 2 |
+| New cards, card notes and reopen flags in `$JET_STATE_ROOT/ballots/CARDS-TO-POST.json` | 36 / 22 / 2 |
 
 ## Owner-choice candidates
 
@@ -168,8 +168,8 @@ are in `$JET_SCRATCH_ROOT/mine/apicomp/<Name>.tsv`, with probes under
 | Jet is missing the API | 29 |
 
 Every improvable, repeated or missing row became a ballot (C23-C33 above), a
-new card or a card note in `~/.cache/jet-dev/ballots/CARDS-TO-POST.json`, or a
-proven-defect row in `~/.cache/jet-dev/ballots/FIX-WAVES.md`. Two done cards
+new card or a card note in `$JET_STATE_ROOT/ballots/CARDS-TO-POST.json`, or a
+proven-defect row in `$JET_STATE_ROOT/ballots/FIX-WAVES.md`. Two done cards
 still reproduce and are flagged for reopening: #4374 (two `Mul` hooks on one
 type) and #4285 (about 25 alias spellings still ship). The headline rows:
 
@@ -211,7 +211,7 @@ The claim-level comparisons made before the miners reported:
 
 ## Ballots drafted
 
-All 15 pass `node ~/.cache/jet-dev/ballots/READY/validate.mjs <file>` with no
+All 15 pass `node $JET_STATE_ROOT/ballots/READY/validate.mjs <file>` with no
 gaps. Recommended option is A in each.
 
 | Ballot file | Card | Candidate |

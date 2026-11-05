@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { scratchRoot } from "./roots.mjs";
 
 import {
   collectGoldenEntries,
@@ -114,7 +114,7 @@ function fakeCompilers(dir, script) {
 // A compiler that cannot run in its scrubbed side environment fails every
 // case exactly as the other side does; that must never compare as a match.
 test("a compiler that fails the readiness probe is unavailable, never a match", () => {
-  const base = process.env.JET_TEST_SCRATCH_DIR || join(homedir(), ".cache/jet-dev/scratch");
+  const base = process.env.JET_TEST_SCRATCH_DIR || scratchRoot();
   mkdirSync(base, { recursive: true });
   const dir = mkdtempSync(join(base, "compiler-diff-test-"));
   try {
@@ -144,7 +144,7 @@ for (const [mutation, script] of [
   ["replaced", `${READY}printf "#!/bin/sh\\necho replaced\\n" > "$0"\necho "no problems"\n`],
 ]) {
   test(`a compiler ${mutation} mid-run is unavailable, never a match`, () => {
-    const base = process.env.JET_TEST_SCRATCH_DIR || join(homedir(), ".cache/jet-dev/scratch");
+    const base = process.env.JET_TEST_SCRATCH_DIR || scratchRoot();
     mkdirSync(base, { recursive: true });
     const dir = mkdtempSync(join(base, "compiler-diff-test-"));
     try {

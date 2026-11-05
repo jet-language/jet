@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 # personal-info-guard.sh [DIR]: refuse personal or machine information in a checkout (#6564 c5).
-# Committed files name no home path, user name, host name, personal email or
-# machine mount. Write a neutral placeholder instead: ~ or $HOME, $USER,
-# $JET_SCRATCH_ROOT, $JET_STATE_ROOT, or an example account such as `user` on
-# `devhost`. There is no allowlist: recorded evidence, the Tower board
-# included, is redacted the same way (`tower redact`).
+# Committed files name no home path, user name, host name, personal email,
+# machine mount or dev tool root. Write a neutral placeholder instead: ~ or
+# $HOME, $USER, $JET_SCRATCH_ROOT, $JET_STATE_ROOT, $JET_RUN_ROOT, or an
+# example account such as `user` on `devhost`; tools read the roots through
+# Tools/agent/roots.sh and roots.mjs. There is no allowlist: recorded evidence,
+# the Tower board included, is redacted the same way (`tower redact`).
 #
 # The patterns come from the machine running the check, through the rule table
 # Tower uses (Tools/tower/app/personal-info.mjs), so neither file holds personal
 # data and a leak is caught on the machine that would write it: the home
 # directory, /home/$USER, /Users/$USER, /etc/profiles/per-user/$USER,
-# $JET_SCRATCH_ROOT and every mount under /mnt, /media and /run/media, git's
-# user.email, and, as whole words in any case, git's user.name, the GitHub
-# handle in a noreply email, the login name and the host name (generic names
-# such as `runner` are skipped).
+# $JET_SCRATCH_ROOT and every mount under /mnt, /media and /run/media, the
+# state root (the jet-dev dir of the user cache, under any home spelling or
+# bare) and the run root (the tdev dir of /tmp), git's user.email, and, as
+# whole words in any case, git's user.name, the GitHub handle in a noreply
+# email, the login name and the host name (generic names such as `runner` are
+# skipped).
 # Every file in DIR (default: this checkout) is searched except .git, paths the
 # checkout's .gitignore excludes, and chain build state (.chain*).
 # Exit 0 when clean, 65 with the offending files when not, 64 when it cannot run.
@@ -52,7 +55,7 @@ files="$(printf '%s\n' "$files" | awk 'NF && !seen[$0]++')"
 
 count="$(printf '%s\n' "$files" | awk 'END { print NR }')"
 echo "personal-info-guard: $count file(s) name this machine's home, user, host, email or mounts." >&2
-echo "Write ~ or \$HOME, \$USER, \$JET_SCRATCH_ROOT, \`user\` or \`devhost\` instead (#6564 c5). First hits:" >&2
+echo "Write ~ or \$HOME, \$USER, \$JET_SCRATCH_ROOT, \$JET_STATE_ROOT, \$JET_RUN_ROOT, \`user\` or \`devhost\` instead (#6564 c5). First hits:" >&2
 printf '%s\n' "$files" | awk 'NR <= 20' | while IFS= read -r file; do
   line=""
   [ "${#path_args[@]}" -gt 0 ] && line="$(git grep --no-index -I -P -n -m 1 "${path_args[@]}" -- "$file" 2>/dev/null | awk 'NR == 1')"

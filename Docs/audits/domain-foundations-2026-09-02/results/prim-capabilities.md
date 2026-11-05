@@ -26,7 +26,7 @@ Files:
 - Malformed and out-of-root modules fail cleanly: the host printed `plugin:malformed-rejected no plugin loaded for this handle` and `plugin:outside-rejected no plugin loaded for this handle`.
 - No-follow protection works: a temporary `link.wasm` symlink caused `E1334: Authority path .../link.wasm is a symlink`; the fixture was removed after the check.
 - Service lifecycle works: the host printed `service:started`, `service:exited-before=false`, `service:stopped`, `service:exited-after=true`, and `service:exit-success=false`.
-- ABI freeze works: `$HOME/Projects/Github/jet/scripts/agent/jet-env jet build $HOME/.cache/jet-dev/dx3/prim-capabilities/version_guest_pkg/run.jet --target=sandbox` after removing export `two` returned `E1257` and named `export two was removed`.
+- ABI freeze works: `$HOME/Projects/Github/jet/scripts/agent/jet-env jet build $JET_STATE_ROOT/dx3/prim-capabilities/version_guest_pkg/run.jet --target=sandbox` after removing export `two` returned `E1257` and named `export two was removed`.
 
 Important host run:
 

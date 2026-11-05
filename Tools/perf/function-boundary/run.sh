@@ -7,7 +7,7 @@
 # usage: Tools/perf/function-boundary/run.sh [--jet PATH] [--runs N] [--cpu N]
 #            [--out DIR] [--levels O1,O2] [cell ...]
 # Defaults: --jet target-rel4/release/jet, --runs 7, --cpu 31,
-#           --out ~/.cache/jet-dev/scratch/function-boundary, all cells.
+#           --out $JET_SCRATCH_ROOT/function-boundary, all cells.
 # Builds and timings wait until MemAvailable >= FB_MEM_GATE_GB (default 30 GiB,
 # the AGENTS memory rule); Jet builds run in the capped small lane (laneS.sh)
 # with FB_LANE_MEM (default 8G), one at a time.
@@ -17,7 +17,8 @@ root=$(cd "$here/../../.." && pwd)
 jet=$root/target-rel4/release/jet
 runs=7
 cpu=31
-out=$HOME/.cache/jet-dev/scratch/function-boundary
+. "$root/Tools/agent/roots.sh"
+out=$JET_SCRATCH_ROOT/function-boundary
 levels=O1,O2
 cells=()
 while [ $# -gt 0 ]; do

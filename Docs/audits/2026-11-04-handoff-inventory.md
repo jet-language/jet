@@ -18,9 +18,9 @@ needs only a seed.
 
 | Variable | Meaning | Generic default | This machine |
 |---|---|---|---|
-| `JET_STATE_ROOT` | per-user dev state: agent scratch, caches, release work | `$XDG_CACHE_HOME/jet-dev` | `~/.cache/jet-dev` |
+| `JET_STATE_ROOT` | per-user dev state: agent scratch, caches, release work | `$XDG_CACHE_HOME/jet-dev` | `$JET_STATE_ROOT` |
 | `JET_SCRATCH_ROOT` | large shared scratch: snapshots, stage store, suite output | `$JET_STATE_ROOT` | `$JET_SCRATCH_ROOT` |
-| `JET_RUN_ROOT` | coordination state: land queue, locks, slot ledger | `$JET_SCRATCH_ROOT/run` | `/tmp/tdev` (kept: the live lander uses it) |
+| `JET_RUN_ROOT` | coordination state: land queue, locks, slot ledger | `$JET_SCRATCH_ROOT/run` | `$JET_RUN_ROOT` (kept: the live lander uses it) |
 | `JET_BASE_ROOT` | published compilers, one dir per landed batch | `$JET_SCRATCH_ROOT/discovery/base` | same |
 | `JET_TARGET_ROOT` | build target dirs | `$JET_SCRATCH_ROOT/targets` | same |
 | `JET_SEEDS` | seed store (`current`, `a0_NNN`) | `$XDG_DATA_HOME/jet-seeds` | `~/.local/share/jet-seeds` |
@@ -36,7 +36,7 @@ specs and `run_all`, `core.files` locks, `Path`, `core.crypto` hasher, JSON).
 
 | # | Path (outside the repo) | Used by | Kind | Repo home (Jet, via jet-env) | Root vars | Gap |
 |---|---|---|---|---|---|---|
-| 1 | `~/.cache/jet-dev/scratch/Main/lander.sh` | Main's landing loop (queue, stacked prescreen, bisecting batches) | tooling | `Tools/agent/Land.jet serve` | RUN, DEV_WORKTREE | #5072 c2 (bounded worker pool) for parallel prescreens; serial works now |
+| 1 | `$JET_STATE_ROOT/scratch/Main/lander.sh` | Main's landing loop (queue, stacked prescreen, bisecting batches) | tooling | `Tools/agent/Land.jet serve` | RUN, DEV_WORKTREE | #5072 c2 (bounded worker pool) for parallel prescreens; serial works now |
 | 2 | `…/Main/batch-land.sh` | lander: apply, generators, precommit, private-index commit chain, CAS update-ref | tooling | `Land.jet batch` | RUN, DEV_WORKTREE, SEED | none found |
 | 3 | `…/Main/prescreen.sh` | lander admission (`jet check Compiler/JetCli` on an archived HEAD) | tooling | `Land.jet prescreen` | SCRATCH, SEED | none found |
 | 4 | `…/Main/precommit.sh` | lander and manual commits: collect-all census | tooling | `Land.jet precommit` | SCRATCH, RUN | none found |
@@ -52,12 +52,12 @@ specs and `run_all`, `core.files` locks, `Path`, `core.crypto` hasher, JSON).
 | 14 | `$JET_SCRATCH_ROOT/lanes/Main/q.mjs` | every lane: enqueue with Pareto gate | tooling | `Land.jet queue` | RUN | none found |
 | 15 | `…/lanes/Main/stackcheck.sh` | q.mjs: stack applies on HEAD (temp index under /tmp) | tooling | `Land.jet queue` | RUN | none found |
 | 16 | `…/lanes/Main/pareto-approved.txt` | q.mjs speed-lane gate | config | `Tools/agent/land/pareto-approved.tsv` | — | — |
-| 17 | `/tmp/tdev/{land-queue,land-results,lander.log,batch-land.log,lander.stop,commit.lock,precommit-census.lock}` | lander | state | `$JET_RUN_ROOT/…` | RUN | — |
-| 18 | `/tmp/tdev/{slot-queue,build-slot-*.lock,slot-ledger.tsv}`, `…/Main/.slot-key` | build-slot | state | `$JET_RUN_ROOT/slots` | RUN | — |
+| 17 | `$JET_RUN_ROOT/{land-queue,land-results,lander.log,batch-land.log,lander.stop,commit.lock,precommit-census.lock}` | lander | state | `$JET_RUN_ROOT/…` | RUN | — |
+| 18 | `$JET_RUN_ROOT/{slot-queue,build-slot-*.lock,slot-ledger.tsv}`, `…/Main/.slot-key` | build-slot | state | `$JET_RUN_ROOT/slots` | RUN | — |
 | 19 | `$JET_SCRATCH_ROOT/discovery/r14/{snap,census}` | census and chain canonical build root | output | `$JET_SCRATCH_ROOT/discovery/r14` | SCRATCH | — |
 | 20 | `$JET_SCRATCH_ROOT/discovery/b2/install-latest` | published install | output | `$JET_BASE_ROOT/../b2` | BASE | — |
 | 21 | `$JET_SCRATCH_ROOT/discovery/base/<sha>` | published compilers; the fresh-clone seed today | output/seed | `$JET_BASE_ROOT` | BASE | — |
-| 22 | `~/.cache/jet-dev/release` | release train state | state | `$JET_STATE_ROOT/release` | STATE | — |
+| 22 | `$JET_STATE_ROOT/release` | release train state | state | `$JET_STATE_ROOT/release` | STATE | — |
 | 23 | `…/Main/chain.sh` | lanes: export / check / s1 / full / seed-published | tooling | `Tools/agent/Chain.jet` | SCRATCH, RUN, SEED, MUSL | none found |
 | 24 | `…/Main/chain-lib.mjs` | chain: diff, plan, input hashing, eviction | tooling | `Chain.jet` | — | none found |
 | 25 | `…/Main/trapscan.mjs` | chain: ELF scan for `todo` traps | tooling | `Chain.jet trapscan` | — | none found |
@@ -66,27 +66,27 @@ specs and `run_all`, `core.files` locks, `Path`, `core.crypto` hasher, JSON).
 | 28 | `…/SeedRotate/gsel.mjs` | publish-base, suite: golden selection | tooling | `Suite.jet` | — | none found |
 | 29 | `…/SeedRotate/rotate.sh`, `cmp.mjs` | cited by chain.sh and CHAIN.md; missing | dead | none (release-compiler.mjs replaced them) | — | — |
 | 30 | `…/lanes/Main/CHAIN.md` | lane guide for chain levels and bases | doc | the `Chain.jet` header and AGENTS.md | — | — |
-| 31 | `$JET_SCRATCH_ROOT/stagestore` (fallback `/tmp/tdev/stagestore`) | chain stage store | output | `$JET_SCRATCH_ROOT/stagestore` | SCRATCH | — |
-| 32 | `/tmp/tdev/{chain-ns,chain-work}` | chain mount namespace and work | state | `$JET_RUN_ROOT` | RUN | — |
+| 31 | `$JET_SCRATCH_ROOT/stagestore` (fallback `$JET_RUN_ROOT/stagestore`) | chain stage store | output | `$JET_SCRATCH_ROOT/stagestore` | SCRATCH | — |
+| 32 | `$JET_RUN_ROOT/{chain-ns,chain-work}` | chain mount namespace and work | state | `$JET_RUN_ROOT` | RUN | — |
 | 33 | `~/.local/share/jet-seeds/{current,a0_NNN,current.env}` | the seed launcher, release-compiler | seed | outside by design; source decided by D-SEED-DIST1 (A: publish the proven compiler) | SEEDS, SEED | — |
 | 34 | `~/.local/share/jet-seeds/bin/jet` | seed launcher: toolchain root, identity, musl, stack | tooling | `Tools/agent/jet-env` (sets the same from `$JET_SEED`) | SEED | — |
 | 35 | `/nix/store/wrng0x…-musl-static-…-1.2.5/lib` | chain, census, launcher | config | `jet-env` (from the Nix shell) | MUSL | — |
 | 36 | `$JET_SCRATCH_ROOT/lanes/Main/q/sg/suite.sh` | suite slices on a snapshot | tooling | `Tools/agent/Suite.jet` | SCRATCH, BASE | #5072 c2 for its parallel shards (it uses `--jobs`; serial works now) |
 | 37 | `$JET_SCRATCH_ROOT/lanes/TestGreen/tk-build.sh` | suite: cached testkit build | tooling | `Suite.jet testkit` | STATE | none found |
-| 38 | `~/.cache/jet-dev/scratch/TestGreen/tk/<key>` | testkit cache | output | `$JET_STATE_ROOT/testkit` | STATE | — |
-| 39 | `$JET_SCRATCH_ROOT/lanes/Main/q/sg/*.txt`, `~/.cache/jet-dev/scratch/Main/sgfs` | suite output and snapshot | output | `$JET_SCRATCH_ROOT/suite` | SCRATCH | — |
+| 38 | `$JET_STATE_ROOT/scratch/TestGreen/tk/<key>` | testkit cache | output | `$JET_STATE_ROOT/testkit` | STATE | — |
+| 39 | `$JET_SCRATCH_ROOT/lanes/Main/q/sg/*.txt`, `$JET_STATE_ROOT/scratch/Main/sgfs` | suite output and snapshot | output | `$JET_SCRATCH_ROOT/suite` | SCRATCH | — |
 | 40 | `$JET_SCRATCH_ROOT/lanes/Main/ballots/validate.mjs` | ballot gate before `decision add` | tooling | Tower CLI `decision validate` (one gate, in Tower) | — | — |
-| 41 | `~/.cache/jet-dev/ballots/{gates,READY,…}`, `lanes/Main/ballots/*` | ballot drafts | evidence | Tower decision drafts (#6563 c2) | — | — |
-| 42 | `~/.cache/jet-dev/scratch/Main/preflight.mjs`, `preflight-gate.mjs` | nothing live (Rust-era stage0; its compilers are gone; last receipt Oct 21) | dead | retire to held/; `Land.jet census` + `Chain.jet --dry-run` replace it | — | — |
-| 43 | `~/.cache/jet-dev/scratch/DevGreenLead/prepare-sharded-chain.mjs` | nothing live (Oct 11) | dead | retire to held/ | — | — |
-| 44 | `~/.cache/jet-dev/cheap.sh`, `cheap*.lock`, `cheap-heavy.pause` | check-runtime.mjs, safety-schedule.mjs: check slots | tooling | `Tools/agent/lane-check.sh` slots | STATE | — |
+| 41 | `$JET_STATE_ROOT/ballots/{gates,READY,…}`, `lanes/Main/ballots/*` | ballot drafts | evidence | Tower decision drafts (#6563 c2) | — | — |
+| 42 | `$JET_STATE_ROOT/scratch/Main/preflight.mjs`, `preflight-gate.mjs` | nothing live (Rust-era stage0; its compilers are gone; last receipt Oct 21) | dead | retire to held/; `Land.jet census` + `Chain.jet --dry-run` replace it | — | — |
+| 43 | `$JET_STATE_ROOT/scratch/DevGreenLead/prepare-sharded-chain.mjs` | nothing live (Oct 11) | dead | retire to held/ | — | — |
+| 44 | `$JET_STATE_ROOT/cheap.sh`, `cheap*.lock`, `cheap-heavy.pause` | check-runtime.mjs, safety-schedule.mjs: check slots | tooling | `Tools/agent/lane-check.sh` slots | STATE | — |
 | 45 | `$JET_SCRATCH_ROOT/held/<date>/…`, `held/LOG.tsv` | AGENTS.md "Never delete work" | evidence | `$JET_SCRATCH_ROOT/held` | SCRATCH | — |
-| 46 | `~/.cache/jet-dev/proofq/{queue,PAUSE,bin/pq-preflight.mjs}` | safety-schedule, safety-gate-job, s5/make-jobs | tooling/state | `$JET_STATE_ROOT/proofq`; pq-preflight is the dead preflight family | STATE | — |
-| 47 | `~/.cache/jet-dev/scratch/{RtPlot1b,RtL6b3,RtCrypto1}/…` frozen inputs | `Tools/agent/s5/stage-frozen-inputs.mjs` origins | evidence | recorded origins; the sha256 pins the bytes | — | — |
+| 46 | `$JET_STATE_ROOT/proofq/{queue,PAUSE,bin/pq-preflight.mjs}` | safety-schedule, safety-gate-job, s5/make-jobs | tooling/state | `$JET_STATE_ROOT/proofq`; pq-preflight is the dead preflight family | STATE | — |
+| 47 | `$JET_STATE_ROOT/scratch/{RtPlot1b,RtL6b3,RtCrypto1}/…` frozen inputs | `Tools/agent/s5/stage-frozen-inputs.mjs` origins | evidence | recorded origins; the sha256 pins the bytes | — | — |
 
 ## Committed files that hard-code a machine path
 
-Found with `git grep -E '$JET_SCRATCH_ROOT|\.cache/jet-dev|/tmp/tdev'` outside
+Found with `git grep -E '$JET_SCRATCH_ROOT|\$JET_STATE_ROOT|$JET_RUN_ROOT'` outside
 `Docs/audits` and `Docs/research` (about 270 files). The `lane-check.sh` guard
 rejects new ones; the allowlist covers only `Tools/agent/jet-env` and the
 evidence rows marked **keep**.

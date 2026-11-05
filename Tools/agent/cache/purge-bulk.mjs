@@ -2,7 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-const ROOT = path.join(process.env.HOME, '.cache/jet-dev');
+import { stateRoot } from '../roots.mjs';
+const ROOT = stateRoot();
 const apply = process.argv.includes('--apply');
 const KEEP = new Set(['Stage1Driver', 'SpeedHost', 'FixL5-KeepGoing', 'EndToEndQA']);
 for (const arg of process.argv.slice(2)) if (arg.startsWith('--keep=')) KEEP.add(arg.slice(7));

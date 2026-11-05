@@ -84,7 +84,7 @@ best boundary."
 | Per-system OS door; Jet-written allocator | Ratified | D-OS-FLOOR1=A, D-ALLOC-DEFAULT1=A |
 | `core ⊂ alloc ⊂ hosted` layering; closed target fact menu | Ratified | D-RINGLAYER1=A, D-FREESTAND-PRELUDE1=A, D-FREESTAND-FACTS1=A |
 | String keeps a built-in value; `Core/text/string.jet` owns methods; compiler supplies typed storage operations | Ratified | D-CORE-STRING-HOME1=A |
-| Precompiled, memory-mapped Core interface record; startup ≤ 30 ms | Speed plan SP12 (implementation) | `~/.cache/jet-dev/speed/SPEED-PLAN.md:245,355` |
+| Precompiled, memory-mapped Core interface record; startup ≤ 30 ms | Speed plan SP12 (implementation) | `$JET_STATE_ROOT/speed/SPEED-PLAN.md:245,355` |
 | **Where hardware knowledge lives; whether a Core pull request can add it without a compiler release** | **Open** | this report, ballot D-CORE-BOUNDARY1 |
 | **Whether Core ships and versions as its own bundle, separate from the compiler binary** | **Open** (changes D-EXEC1's "for each Jet version" to "for each Core bundle") | this report |
 

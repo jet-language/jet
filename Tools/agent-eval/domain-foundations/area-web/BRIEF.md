@@ -1,6 +1,6 @@
 # Probe area-web — Web, full stack
 
-Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `$JET_STATE_ROOT/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -18,8 +18,8 @@ An "Orders" full-stack app as one Jet package: typed routes (list, detail, creat
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-dev/dx2/web-frameworks/`, `~/.cache/jet-dev/dx2/cms-ecommerce/`, `~/.cache/jet-dev/dx2/serverless-edge/`, `~/.cache/jet-dev/dx2/browser-extensions/`, `~/.cache/jet-dev/dx2/documentation-static-sites/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
+Domain census and reports: `$JET_STATE_ROOT/dx2/web-frameworks/`, `$JET_STATE_ROOT/dx2/cms-ecommerce/`, `$JET_STATE_ROOT/dx2/serverless-edge/`, `$JET_STATE_ROOT/dx2/browser-extensions/`, `$JET_STATE_ROOT/dx2/documentation-static-sites/` (report.md, census.json, claims.json). Deleted ballots with worked code: `$JET_STATE_ROOT/dx2/ballots/` (grep the mechanism name). Family syntheses: `$JET_STATE_ROOT/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-dev/dx3/area-web/probe.md`, `gaps.json`, `batteries.json`, and the code under `~/.cache/jet-dev/dx3/area-web/pkg/`. Gap ids start with `area-web-G`.
+`$JET_STATE_ROOT/dx3/area-web/probe.md`, `gaps.json`, `batteries.json`, and the code under `$JET_STATE_ROOT/dx3/area-web/pkg/`. Gap ids start with `area-web-G`.

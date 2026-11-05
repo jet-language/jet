@@ -3,7 +3,7 @@ import test from 'node:test';
 import { SHAPES, corpus } from './corpora.mjs';
 import { concurrent, floors, growth, judge, metricPhase, options, parseCounters, parseCompiler, resumeReceipt, run } from './harness.mjs';
 import fs from 'node:fs';
-import os from 'node:os';
+import { scratchRoot } from '../../agent/roots.mjs';
 import path from 'node:path';
 import { report } from './report.mjs';
 import { queuePlan } from './enqueue.mjs';
@@ -50,7 +50,7 @@ test('growth against N log N names the phase and its dominating counter', () => 
 });
 
 test('timing resume preserves a timeout and attempts every remaining rung without retrying it', async () => {
-  const scratch = path.join(os.homedir(), '.cache/jet-dev/scratch');
+  const scratch = scratchRoot();
   fs.mkdirSync(scratch, { recursive: true });
   const dir = fs.mkdtempSync(path.join(scratch, 'scaling-resume-'));
   try {
@@ -81,7 +81,7 @@ test('timing resume preserves a timeout and attempts every remaining rung withou
 });
 
 test('resumed counter failures retain the last open phase without claiming a timeout', async () => {
-  const scratch = path.join(os.homedir(), '.cache/jet-dev/scratch');
+  const scratch = scratchRoot();
   fs.mkdirSync(scratch, { recursive: true });
   const dir = fs.mkdtempSync(path.join(scratch, 'scaling-crash-phase-'));
   try {

@@ -16,7 +16,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readdir, readFile, realpath, stat, writeFile, mkdir, rm, copyFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { stateRoot } from "../../Tools/agent/roots.mjs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compilerSliceDrift } from "./compiler-slice.mjs";
@@ -48,7 +48,7 @@ const rootTag = createHash("sha256")
   .digest("hex")
   .slice(0, 10);
 const scratchDir = resolve(
-  process.env.JETPACK_BOOTSTRAP_SCRATCH ?? resolve(homedir(), ".cache/jet-dev/jetpack-bootstrap", `${workerName}-${rootTag}`),
+  process.env.JETPACK_BOOTSTRAP_SCRATCH ?? resolve(stateRoot(), "jetpack-bootstrap", `${workerName}-${rootTag}`),
   mode,
 );
 const projectDir = resolve(scratchDir, "project");

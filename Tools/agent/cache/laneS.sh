@@ -3,7 +3,8 @@
 # usage: laneS.sh <command...>
 set -u
 systemctl --user reset-failed 2>/dev/null
-d=$HOME/.cache/jet-dev/laneS; mkdir -p "$d"
+. "$(dirname "${BASH_SOURCE[0]}")/../roots.sh"
+d=$JET_STATE_ROOT/laneS; mkdir -p "$d"
 while :; do
   for i in 1 2 3 4; do
     if flock -n "$d/$i" true 2>/dev/null; then

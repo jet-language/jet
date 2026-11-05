@@ -33,7 +33,8 @@ fn publication_tuf_test_checkpoint(sequence: Int, root: String) -> PublicationCh
     PublicationCheckpoint{sequence: sequence, root: root, public_key: "aa", signature: "sig"}
 }
 fn publication_tuf_test_root(label: String) -[FS, Env]> String Never! {
-    root :: files.join(sys.get("HOME") ?? panic("HOME"), ".cache/jet-dev/scratch/publication-tuf-{label}-{sys.pid()}")
+    scratch :: sys.get("JET_SCRATCH_ROOT") ?? (sys.get("JET_STATE_ROOT") ?? files.join(sys.get("XDG_CACHE_HOME") ?? files.join(sys.get("HOME") ?? panic("HOME"), ".cache"), "jet-dev"))
+    root :: files.join(scratch, "publication-tuf-{label}-{sys.pid()}")
     files.remove_all(root).drop("a stale fixture may be absent")
     files.create_dir_all(root) ?? panic("create TUF fixture")
     root

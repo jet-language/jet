@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFile
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hash } from "./safety-gate.mjs";
+import { scratchRoot, stateRoot } from "./roots.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export const INTERVAL_MS = 6 * 60 * 60 * 1000;
 export function due(state, artifactHash, now) {
@@ -72,14 +73,14 @@ export function tick({ artifacts, stateDir, queueRoot, scratchRoot, preflight, c
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const home = process.env.HOME;
+  const state = stateRoot();
   const options = {
-    artifacts: process.env.SAFETY_ARTIFACTS ?? join(home, ".cache/jet-dev/dev-artifacts.json"),
-    stateDir: process.env.SAFETY_STATE ?? join(home, ".cache/jet-dev/scratch/SafetyNet8/standing"),
-    queueRoot: process.env.PQ_ROOT ?? join(home, ".cache/jet-dev/proofq"),
-    scratchRoot: process.env.SAFETY_SCRATCH ?? join(process.env.JET_SCRATCH_ROOT || join(home, ".cache/jet-dev/scratch"), "candidates/SafetyNet8"),
-    preflight: join(home, ".cache/jet-dev/proofq/bin/pq-preflight.mjs"),
-    cheap: join(home, ".cache/jet-dev/cheap.sh"),
+    artifacts: process.env.SAFETY_ARTIFACTS ?? join(state, "dev-artifacts.json"),
+    stateDir: process.env.SAFETY_STATE ?? join(state, "scratch/SafetyNet8/standing"),
+    queueRoot: process.env.PQ_ROOT ?? join(state, "proofq"),
+    scratchRoot: process.env.SAFETY_SCRATCH ?? join(scratchRoot(), "candidates/SafetyNet8"),
+    preflight: join(state, "proofq/bin/pq-preflight.mjs"),
+    cheap: join(state, "cheap.sh"),
     count: Number(process.env.SAFETY_COUNT ?? 50),
   };
   // Kernel-released singleton lock: a killed/restarted watcher cannot leave a

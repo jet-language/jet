@@ -5,7 +5,7 @@
 //        [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]
 //
 // COMMIT is a commit on dev. The current release is `SEEDS/current` (default
-// ~/.local/share/jet-seeds, or $JET_SEEDS). The tool runs every check and
+// $JET_SEEDS, Tools/agent/roots.mjs). The tool runs every check and
 // reports all of them; it does not stop at the first failure:
 //   chain     chain.sh builds s1, s2 and s3 of COMMIT from the current release, every stage
 //             under norust.sh, and must reach the fixed point (s2 == s3).
@@ -40,9 +40,9 @@
 // the suites for dry runs of the tool itself: such a
 // run is never a release (RELEASE.json scope `filtered`, which jet-use refuses).
 //
-// Environment: JET_SEEDS, JET_RELEASE_WORK (default ~/.cache/jet-dev/release),
-// JET_RELEASE_CHAIN (default ~/.cache/jet-dev/scratch/Main/chain.sh), JET_RELEASE_SLOT
-// (default ~/.cache/jet-dev/scratch/Main/build-slot.sh; empty runs without a slot),
+// Environment: the roots of Tools/agent/roots.mjs, JET_RELEASE_WORK (default
+// $JET_STATE_ROOT/release), JET_RELEASE_CHAIN (default Tools/agent/chain/chain.sh),
+// JET_RELEASE_SLOT (default Tools/agent/chain/build-slot.sh; empty runs without a slot),
 // JET_PACK_MUSL_LIB.
 // Exit: 0 released, 1 a check failed (nothing released), 2 the run could not start.
 import { createHash } from 'node:crypto';
@@ -53,8 +53,8 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { seedsRoot, stateRoot } from './roots.mjs';
 
-const HOME = process.env.HOME;
 const SCRIPT = fileURLToPath(import.meta.url);
 const REPO = resolve(dirname(SCRIPT), '../..');
 const SUITES = ['golden', 'ui', 'cases'];
@@ -291,9 +291,9 @@ function releaseInfo(seeds) {
 
 function preconditions(options) {
     const errors = [...options.errors];
-    const seeds = resolve(options.seeds || process.env.JET_SEEDS || join(HOME, '.local/share/jet-seeds'));
-    const workRoot = resolve(options.work || process.env.JET_RELEASE_WORK || join(HOME, '.cache/jet-dev/release'));
-    const chain = process.env.JET_RELEASE_CHAIN ?? join(HOME, '.cache/jet-dev/scratch/Main/chain.sh');
+    const seeds = resolve(options.seeds || seedsRoot());
+    const workRoot = resolve(options.work || process.env.JET_RELEASE_WORK || join(stateRoot(), 'release'));
+    const chain = process.env.JET_RELEASE_CHAIN ?? join(REPO, 'Tools/agent/chain/chain.sh');
     const musl = process.env.JET_PACK_MUSL_LIB ?? MUSL_DEFAULT;
     let sha = '';
     if (options.commit) {
@@ -389,7 +389,7 @@ async function packStage(ctx, gate) {
 }
 
 function bootstrapScratch(worker) {
-    const root = join(HOME, '.cache/jet-dev/jetpack-bootstrap');
+    const root = join(stateRoot(), 'jetpack-bootstrap');
     return existsSync(root) ? readdirSync(root).filter(name => name.startsWith(`${worker}-`)).map(name => join(root, name)) : [];
 }
 
@@ -731,7 +731,7 @@ async function main() {
         }
     }
     try {
-        const slot = process.env.JET_RELEASE_SLOT ?? join(HOME, '.cache/jet-dev/scratch/Main/build-slot.sh');
+        const slot = process.env.JET_RELEASE_SLOT ?? join(REPO, 'Tools/agent/chain/build-slot.sh');
         if (slot && existsSync(slot) && !process.env.SLOT_CPUS) {
             const inner = spawnSync('bash', [slot, process.execPath, SCRIPT, ...process.argv.slice(2)], { stdio: 'inherit', env: { ...process.env, JET_RELEASE_LOCK_HELD: '1' } });
             return inner.status ?? 1;

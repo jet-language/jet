@@ -11,12 +11,12 @@ node Tools/perf/scaling/generate.mjs web 125000 NEW_DIR     # one corpus
 node --test Tools/perf/scaling/scaling.test.mjs
 Tools/agent/jet-env node Tools/perf/scaling/run-gate.mjs --compiler "rust=jet:$RUST_JET" \
   --compiler "jet=bootstrap:$JETC0" --mode counters --jobs 2 \
-  --memory-max 8G --timeout 25 --work-dir $HOME/.cache/jet-dev/scratch/ScalingGate2/landing
+  --memory-max 8G --timeout 25 --work-dir $JET_STATE_ROOT/scratch/ScalingGate2/landing
 node Tools/perf/scaling/report.mjs --runs-dir RUNS_DIR --output report.md
 ```
 
 Set `RUST_JET` and `JETC0` to the current dev head's shared pair recorded in
-`~/.cache/jet-dev/dev-artifacts.json`, after that head includes these counters.
+`$JET_STATE_ROOT/dev-artifacts.json`, after that head includes these counters.
 Changing compiler binaries requires fresh receipt roots. Older candidates may
 be additional explicitly labelled historical comparisons, not the current gate.
 

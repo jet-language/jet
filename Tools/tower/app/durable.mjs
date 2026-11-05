@@ -10,7 +10,7 @@ export const CLOSURE_KINDS = ['code', 'decision', 'duplicate', 'obsolete'];
 
 // Paths that hold only throwaway output: machine scratch mounts and the scratch
 // root variables that name them, per-user caches and tmpfs.
-export const SCRATCH_PATH_RE = /\/mnt\/[^\s/]+\/|\$\{?JET_(?:SCRATCH|STATE)_ROOT\}?\/|(?:~|\$HOME|\/home\/[^\s/]+)\/\.cache\/|(?:^|[\s"'`(=:])\/tmp\//;
+export const SCRATCH_PATH_RE = /\/mnt\/[^\s/]+\/|\$\{?JET_(?:SCRATCH|STATE|RUN)_ROOT\}?\/|(?:~|\$HOME|\/home\/[^\s/]+)\/\.cache\/|(?:^|[\s"'`(=:])\/tmp\//;
 const COMMIT_TOKEN_RE = /\b[0-9a-f]{7,40}\b/g;
 
 // Git must look at the project root, not at a repository a hook or a caller

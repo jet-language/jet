@@ -5,7 +5,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BASELINE="$ROOT/Tools/perf/web-bundle-baseline.tsv"
 JET_ENV="$ROOT/Tools/agent/jet-env"
-SCRATCH_ROOT="${TMPDIR:-$HOME/.cache/jet-dev/scratch}"
+. "$ROOT/Tools/agent/roots.sh"
+SCRATCH_ROOT="${TMPDIR:-$JET_SCRATCH_ROOT}"
 
 fail() {
   echo "web bundle gate: $*" >&2

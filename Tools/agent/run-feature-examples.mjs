@@ -14,13 +14,13 @@ import {
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { scratchRoot } from "./roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const FEATURES = join(ROOT, "Examples/features");
 const EXPECTED = join(FEATURES, "expected");
 const JET = process.env.JET;
-const SCRATCH_BASE = process.env.JET_TEST_SCRATCH_DIR
-  ?? (process.env.HOME ? join(process.env.HOME, ".cache/jet-dev/scratch") : null);
+const SCRATCH_BASE = process.env.JET_TEST_SCRATCH_DIR ?? scratchRoot();
 const EXPECTED_FAIL_EXITS = new Set([1, 70]);
 const KNOWN_FAILING_LEDGER = join(ROOT, "Tools/testkit/known-failing.tsv");
 

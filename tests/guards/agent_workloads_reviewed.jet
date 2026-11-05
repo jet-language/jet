@@ -561,7 +561,9 @@ fn s4_review_closure_error(root: String, sums: String) -> String {
 // Port of tests/agent_workloads.rs:2340-2416.
 #Test("checksum_closure_rejects_drift_and_hostile_sums") {
     home :: s4_review_sys.get("HOME") ?? panic("HOME required")
-    root :: "{home}/.cache/jet-dev/scratch/agent-workloads-{s4_review_process.current_pid()}-checksum-closure"
+    cache :: s4_review_sys.get("XDG_CACHE_HOME") ?? "{home}/.cache"
+    scratch :: s4_review_sys.get("JET_SCRATCH_ROOT") ?? (s4_review_sys.get("JET_STATE_ROOT") ?? "{cache}/jet-dev")
+    root :: "{scratch}/agent-workloads-{s4_review_process.current_pid()}-checksum-closure"
     s4_review_files.remove_all(root).drop("a previous run may have left no scratch")
     s4_review_files.create_dir_all("{root}/inputs") ?? panic("create inputs: {err}")
     s4_review_files.create_dir_all("{root}/expected") ?? panic("create expected: {err}")

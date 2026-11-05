@@ -1,6 +1,6 @@
 # Probe area-games — Games
 
-Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `$JET_STATE_ROOT/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -18,8 +18,8 @@ A small 2D game as one Jet package: a window with a fixed-timestep loop and inte
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-dev/dx2/rendering-graphics/`, `~/.cache/jet-dev/dx2/creative-coding/`, `~/.cache/jet-dev/dx2/audio-music-production/`, `~/.cache/jet-dev/dx2/ar-vr-xr/`, `~/.cache/jet-dev/dx2/simulation-modeling/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
+Domain census and reports: `$JET_STATE_ROOT/dx2/rendering-graphics/`, `$JET_STATE_ROOT/dx2/creative-coding/`, `$JET_STATE_ROOT/dx2/audio-music-production/`, `$JET_STATE_ROOT/dx2/ar-vr-xr/`, `$JET_STATE_ROOT/dx2/simulation-modeling/` (report.md, census.json, claims.json). Deleted ballots with worked code: `$JET_STATE_ROOT/dx2/ballots/` (grep the mechanism name). Family syntheses: `$JET_STATE_ROOT/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-dev/dx3/area-games/probe.md`, `gaps.json`, `batteries.json`, and the code under `~/.cache/jet-dev/dx3/area-games/pkg/`. Gap ids start with `area-games-G`.
+`$JET_STATE_ROOT/dx3/area-games/probe.md`, `gaps.json`, `batteries.json`, and the code under `$JET_STATE_ROOT/dx3/area-games/pkg/`. Gap ids start with `area-games-G`.

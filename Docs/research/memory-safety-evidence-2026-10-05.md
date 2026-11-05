@@ -22,7 +22,7 @@ on these Tower cards:
 
 Scratch record (not committed): `$JET_SCRATCH_ROOT/scratch/memcorpus/`
 (`RESULTS.md`, `AUDIT.md`, `HANDOFF.md`, `cases/`, `out/`, `results.tsv`,
-`emit-cases.tsv`), and `~/.cache/jet-dev/scratch/SafetyNet/` (`HANDOFF.md`,
+`emit-cases.tsv`), and `$JET_STATE_ROOT/scratch/SafetyNet/` (`HANDOFF.md`,
 `PLAN-3-4.md`, `proto.mjs`). The SafetyNet code is on branch
 `safety/mir-lint` at `507cf8ef3`.
 

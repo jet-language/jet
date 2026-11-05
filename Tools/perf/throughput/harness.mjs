@@ -9,7 +9,7 @@
 // `--help` prints the options; README.md explains the lanes.
 
 import fs from 'node:fs';
-import os from 'node:os';
+import { scratchRoot } from '../../agent/roots.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -47,7 +47,7 @@ const USAGE = `Usage: node Tools/perf/throughput/harness.mjs --compiler jet=PATH
   --compiler-profile TEXT  build profile when it cannot be read from the build
   --memory-max SIZE        systemd scope cap per measured command (default 12G)
   --timeout SECONDS        per measured command (default 14400)
-  --work-dir DIR           (default ~/.cache/jet-dev/scratch/throughput)
+  --work-dir DIR           (default $JET_SCRATCH_ROOT/throughput)
   --receipt FILE           (default <work-dir>/<run>/receipt.json)
   --baseline FILE          quick-lane baseline (default Tools/perf/throughput/quick-baseline.json)
   --write-baseline FILE    write this run's quick-lane baseline instead of comparing`;
@@ -56,7 +56,7 @@ function options(args) {
   const config = {
     lane: 'quick', compiler: null, programs: null, sourceTree: REPO, samples: null, warmups: 1,
     arms: ['default', 'single'], singleControl: null, profile: null,
-    memoryMax: '12G', timeoutMs: 14400 * 1000, workDir: path.join(os.homedir(), '.cache/jet-dev/scratch/throughput'),
+    memoryMax: '12G', timeoutMs: 14400 * 1000, workDir: path.join(scratchRoot(), 'throughput'),
     receipt: null, baseline: path.join(here, 'quick-baseline.json'), writeBaseline: null,
   };
   for (let i = 0; i < args.length; i++) {

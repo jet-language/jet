@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 // Assemble only the runtime's explicit source manifest. The E2 object driver
 // consumes the same unit; neither bootstrap nor backend harnesses include it.
-// A default invocation runs the narrow jet check through the single cheap slot,
-// with $JET_CHECKER, else the admitted `jet` that Tools/agent/jet-env resolves.
+// A default invocation runs the narrow jet check through the single cheap slot
+// ($JET_STATE_ROOT/cheap.sh), with $JET_CHECKER, else the admitted `jet` that
+// Tools/agent/jet-env resolves.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { unblockUses } from "../../../Tools/agent/compiler-packages.mjs";
+import { stateRoot } from "../../../Tools/agent/roots.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const args = process.argv.slice(2);
@@ -55,7 +57,7 @@ const packageSource = test !== null
 writeFileSync(join(out, "package.jet"), packageSource);
 console.log(unit);
 if (!assembleOnly) {
-  const check = spawnSync(join(process.env.HOME, ".cache/jet-dev/cheap.sh"), [
+  const check = spawnSync(join(stateRoot(), "cheap.sh"), [
     join(root, "Tools/agent/jet-env"), process.env.JET_CHECKER ?? "jet", "check", unit,
   ], { cwd: out, stdio: "inherit" });
   if (check.error) throw check.error;

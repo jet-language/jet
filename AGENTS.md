@@ -299,15 +299,14 @@ in one pass:
 
 - **Expensive launches are gated, never bypassed.** A stage0, self-hosting
   chain, release build or any other run costing more than about 15 minutes
-  starts only through tooling that refuses to launch without a collect-all
-  preflight receipt for that exact commit
-  (`~/.cache/jet-dev/scratch/Main/preflight.mjs`, enforced by
-  `prepare-sharded-chain.mjs`). The receipt runs every later stage's cheap
-  probe on the new sources (parse, generators, comptime-host count, and the
-  last good factory's keep-going censuses of every unit through every phase it
-  can reach). Every row is clean or carries a written disposition naming the
-  commit in this launch that fixes it. Launching to "see what fails next" is
-  forbidden.
+  starts only after a clean collect-all preflight of that exact commit:
+  `Tools/agent/land/census-snap.sh` (the seed's keep-going `jet check` and
+  `jet build` of the compiler, the runtime pack and the self-check, every row
+  of every phase in one report; the lander runs it through `precommit.sh`
+  before every compiler commit) and `Tools/agent/chain/chain.sh TREE LEVEL
+  --dry-run`, which names every stage the launch would build. Every row is
+  clean or carries a written disposition naming the commit in this launch that
+  fixes it. Launching to "see what fails next" is forbidden.
 - **Every compiler phase has a collect-all mode, or that is the first defect.**
   Parse, imports, sema, comptime, codegen lowering, backend lowering, machine
   emission, object, link and run must each record a failing item as a census
@@ -364,6 +363,19 @@ proof the criteria name. Broad suites, unfiltered censuses, and
 `Tools/agent/verify-full.sh` are milestone or release operations and need the
 required token. A worker's type-check is not proof of runtime behavior, tier
 parity, goldens, snapshots, or generated artifacts.
+
+Agent tooling lives in the repository: `Tools/agent/chain/` (the self-host
+chain and the machine build slots), `Tools/agent/land/` (the lander, batch
+landing, the census preflight, publishing, and `q.mjs`, which queues a land
+job), `Tools/agent/suite/` (suite runs and the testkit build) and
+`Tools/agent/ballots/validate.mjs` (the ballot validator). Tools find state,
+scratch, queues, published compilers and seeds only through the root variables
+of `Tools/agent/roots.sh` (shell) and `Tools/agent/roots.mjs` (node). Their
+defaults derive from `$HOME` and the XDG directories; a machine sets its own
+values in the environment or in `${XDG_CONFIG_HOME:-~/.config}/jet/env`. No
+committed file spells one machine's home, user, mounts or tool roots:
+`personal-info-guard.sh`, which `lane-check.sh` runs first, refuses them, and
+`tower redact` cleans the board.
 
 Hosted CI runs only the Core source-coverage ratchet
 (`.github/workflows/ci.yml`); until a pinned native seed release exists

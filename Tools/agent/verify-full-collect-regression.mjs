@@ -4,11 +4,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { scratchRoot } from './roots.mjs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const base = process.env.JET_TEST_SCRATCH_DIR ?? join(homedir(), '.cache/jet-dev/scratch');
+const base = process.env.JET_TEST_SCRATCH_DIR ?? scratchRoot();
 mkdirSync(base, { recursive: true });
 const container = mkdtempSync(join(base, 'verify-native-fixture-'));
 const sandbox = join(container, 'source');

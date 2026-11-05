@@ -3,9 +3,10 @@
 # One standing #4619 job. safety-schedule.mjs supplies immutable pins/inputs.
 set -euo pipefail
 : "${WT:?}" "${SHA:?}" "${ARTIFACTS:?}" "${ARTIFACTS_SHA256:?}" "${OUT:?}" "${SEED:?}" "${COUNT:?}"
-[ ! -e "$HOME/.cache/jet-dev/proofq/PAUSE" ] || exit 75
+. "$WT/Tools/agent/roots.sh"
+[ ! -e "$JET_STATE_ROOT/proofq/PAUSE" ] || exit 75
 [ "$(git -C "$WT" rev-parse HEAD)" = "$SHA" ] || exit 2
-export JET_SCRATCH_ROOT="${JET_SCRATCH_ROOT:-$HOME/.cache/jet-dev/scratch}" JET_NIX_TMP_CLEANED=1
+export JET_NIX_TMP_CLEANED=1
 unset CARGO_TARGET_DIR # Artifact consumer: no Cargo build or cold target.
 export TMPDIR="$JET_SCRATCH_ROOT/candidates/SafetyNet8/tmp"
 mkdir -p "$TMPDIR"

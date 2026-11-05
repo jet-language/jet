@@ -26,7 +26,7 @@ const matcher = personalInfoMatcher(personalInfoRules(identity));
 test('the rule table maps each machine fact to its neutral form', () => {
   const cases = [
     ['log at /mnt/scr/lanes/X/run.log', 'log at $JET_SCRATCH_ROOT/lanes/X/run.log'],
-    ['cd /home/zed && ls /home/zed/.cache/jet-dev', 'cd ~ && ls ~/.cache/jet-dev'],
+    ['cd /home/zed && ls /home/zed/src', 'cd ~ && ls ~/src'],
     ['/Users/zed/src', '~/src'],
     ['/etc/profiles/per-user/zed/bin/fish', '/etc/profiles/per-user/$USER/bin/fish'],
     ['copied to /media/usb/backup', 'copied to /mnt/volume/backup'],
@@ -37,9 +37,25 @@ test('the rule table maps each machine fact to its neutral form', () => {
   for (const [input, expected] of cases) assert.equal(matcher.replace(input), expected, input);
 });
 
+// The tool roots are joined from parts so this file does not match the guard.
+const stateRoot = ['.cache', 'jet-dev'].join('/');
+const runRoot = ['', 'tmp', 'tdev'].join('/');
+
+test('every spelling of the dev tool roots becomes its root variable', () => {
+  const cases = [
+    [`ls /home/zed/${stateRoot}/scratch/X`, 'ls $JET_STATE_ROOT/scratch/X'],
+    [`M=$HOME/${stateRoot}/scratch/Main`, 'M=$JET_STATE_ROOT/scratch/Main'],
+    [`M=\${HOME}/${stateRoot}/x and ~/${stateRoot}/y`, 'M=$JET_STATE_ROOT/x and $JET_STATE_ROOT/y'],
+    [`join(homedir(), '${stateRoot}/scratch')`, "join(homedir(), '$JET_STATE_ROOT/scratch')"],
+    [`queue in ${runRoot}/land-queue`, 'queue in $JET_RUN_ROOT/land-queue'],
+    [`${runRoot}-old and ~/${stateRoot}ices stay`, `${runRoot}-old and ~/${stateRoot}ices stay`],
+  ];
+  for (const [input, expected] of cases) assert.equal(matcher.replace(input), expected, input);
+});
+
 test('generic and short names never become rules', () => {
   const rules = personalInfoRules({ home: '/home/runner', user: 'runner', host: 'localhost', scratchRoot: '', mounts: [], email: '', name: '' });
-  assert.deepEqual(rules.map(rule => rule.kind), ['path', 'path', 'path']);
+  assert.deepEqual(rules.map(rule => rule.kind), ['path', 'path', 'path', 'path', 'path']);
   assert.equal(personalInfoMatcher(rules).replace('the runner on localhost'), 'the runner on localhost');
   assert.equal(personalInfoMatcher(rules).replace('/home/runner/work'), '~/work');
 });
@@ -100,15 +116,30 @@ test('a write that adds this machine\'s home path is refused; old text may stay'
 
   const dry = spawnSync(process.execPath, [TOWER, 'redact', '--data', data, '--json'], { encoding: 'utf8' });
   assert.equal(dry.status, 0, dry.stderr);
-  assert.equal(JSON.parse(dry.stdout).applied, false);
+  const dryReport = JSON.parse(dry.stdout);
+  assert.equal(dryReport.applied, false);
+  assert.ok(dryReport.files['tower.json'] >= 1, 'the dry run counts spans per file');
   assert.ok(st.load().cards[0].body.includes(home), 'the dry run writes nothing');
 
   const applied = spawnSync(process.execPath, [TOWER, 'redact', '--apply', '--by', 'main', '--data', data], { encoding: 'utf8' });
   assert.equal(applied.status, 0, applied.stderr);
   assert.match(applied.stdout, /^redacted \d+ spans at rev \d+/);
+  assert.match(applied.stdout, /\nspans per file:\n {2}tower\.json: \d+\n/);
   const s = st.load();
   assert.equal(s.cards[0].body, 'legacy note in ~/old');
   assert.equal(s.events[0].action, 'board.redact');
-  assert.match(s.events[0].note, /^personal-info\/v1: \d+ spans redacted \(tower\.json cards \d+/);
+  assert.match(s.events[0].note, /^personal-info\/v2: \d+ spans redacted \(tower\.json cards \d+/);
   assert.ok(!JSON.stringify(s).includes(home));
+
+  const bytesBefore = readFileSync(join(data, 'tower.json'), 'utf8');
+  const again = spawnSync(process.execPath, [TOWER, 'redact', '--apply', '--by', 'main', '--data', data, '--json'], { encoding: 'utf8' });
+  assert.equal(again.status, 0, again.stderr);
+  const againReport = JSON.parse(again.stdout);
+  assert.equal(againReport.applied, false);
+  assert.equal(againReport.total, 0);
+  assert.equal(againReport.rev, s.meta.rev);
+  const unchanged = st.load();
+  assert.equal(unchanged.meta.rev, s.meta.rev, 'a second apply writes nothing');
+  assert.equal(unchanged.events.length, s.events.length);
+  assert.equal(readFileSync(join(data, 'tower.json'), 'utf8'), bytesBefore);
 });

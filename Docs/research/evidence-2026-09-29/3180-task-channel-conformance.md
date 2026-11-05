@@ -2,8 +2,8 @@
 
 ## Binding (criterion 1)
 
-- Binary: `~/.cache/jet-dev/scratch/jet-debug-snapshot17`, pinned with `JET=`, run through `~/.cache/jet-dev/safe-jet.sh`.
-- Capsule: `~/.cache/jet-dev/scratch/Closer05/t3180/conformance_capsule.jet`, which uses the
+- Binary: `$JET_STATE_ROOT/scratch/jet-debug-snapshot17`, pinned with `JET=`, run through `$JET_STATE_ROOT/safe-jet.sh`.
+- Capsule: `$JET_STATE_ROOT/scratch/Closer05/t3180/conformance_capsule.jet`, which uses the
   package from `Examples/features/concurrency/package.jet`. It was run at the tree state of
   2026-09-29 around 04:45.
 - Existing examples run on the same binary: `Examples/features/concurrency/{bounded_workers,shield_commit,cancel_cleanup,task_all,task_group,select_channel}.jet`

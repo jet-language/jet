@@ -3,7 +3,8 @@
 # Every 2 s: if MemAvailable < 7 GiB, SIGKILL the largest-RSS process among
 # compiler/build/test jobs (jetc0, jet test bins, rustc, cargo, jet, node tools,
 # python runners). Never touches omp, the desktop, the browser or tower-serve.
-LOG=$HOME/.cache/jet-dev/mem-guard.log
+. "$(dirname "${BASH_SOURCE[0]}")/../roots.sh"
+LOG=$JET_STATE_ROOT/mem-guard.log
 LIMIT_KB=$((7 * 1024 * 1024))
 while true; do
   avail=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)

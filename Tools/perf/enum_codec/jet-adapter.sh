@@ -6,7 +6,8 @@
 # that itself takes a jet slot.
 set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
-work=${ENUM_CODEC_JET_WORK:-$HOME/.cache/jet-dev/enum-codec-jet}
+. "$root/Tools/agent/roots.sh"
+work=${ENUM_CODEC_JET_WORK:-$JET_STATE_ROOT/enum-codec-jet}
 bin=$work/.jet/build/adapter
 if [ "${1:-}" = "--build" ]; then
   jet=${JET:?JET must name the admitted native jet compiler}

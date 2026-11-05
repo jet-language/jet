@@ -11,7 +11,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
+import { scratchRoot } from './roots.mjs';
 import { CORE_IMPORT_LINE, unblockUses } from './compiler-packages.mjs';
 import { prepareTransport, runTransport } from './compiler-registry-transports.mjs';
 import { assertPinnedSource } from './proof-source.mjs';
@@ -173,7 +173,7 @@ function nativeRuntime(jet) {
 }
 function generate() {
     if (options.head !== currentHead()) throw Error('manifest requires its pinned committed source SHA');
-    const out = options.out ?? join(homedir(), '.cache/jet-dev/scratch/RegistryRunnerLead', options.head);
+    const out = options.out ?? join(scratchRoot(), 'RegistryRunnerLead', options.head);
     if (out === repo || out.startsWith(repo + '/')) throw Error('registry outputs belong outside the repository');
     if (existsSync(join(out, 'manifest.json'))) throw Error(`manifest output already sealed: ${out}; choose a fresh --out`);
     mkdirSync(out, { recursive: true });

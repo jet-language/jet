@@ -3,13 +3,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import os from 'node:os';
 import {assertPinnedSource} from '../proof-source.mjs';
+import {stateRoot} from '../roots.mjs';
 const [head, source, output] = process.argv.slice(2);
 if (!/^[a-f0-9]{40}$/.test(head ?? '') || !source || !output || process.argv.length !== 5) throw Error('usage: stage-frozen-inputs.mjs FULL_SHA SOURCE_DIRECTORY IMMUTABLE_INPUT_DIRECTORY');
 assertPinnedSource(source, head);
 const table = JSON.parse(fs.readFileSync(path.join(source, 'Compiler/JetRuntime/Tests/AgeV1Fixtures.json'), 'utf8'));
-const scratch = path.join(os.homedir(), '.cache/jet-dev/scratch');
+const scratch = path.join(stateRoot(), 'scratch');
 const files = [
   {path: 'char-debug-goldens.bin', origin: `${scratch}/RtPlot1b/char-debug-goldens.bin`, sha256: '72a498085e0dc43fc6f9b0bc6f29482738c01ab7a35c11d72a1cfaf2504807a5'},
   {path: 'fmt-expected.out', origin: `${scratch}/RtL6b3/fmt-parity/expected.out`, sha256: 'f7c9a21168359f638c75fc031072856f283b5b5da6f9b93d55d618752cf1b54c'},

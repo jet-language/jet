@@ -2573,7 +2573,7 @@ An interrupted lowering batch can resume with `JET_LOWER_RESUME=1`: its original
 issue reports are retained rather than lowered again. Replay runtime linking for
 any object interrupted before its executable/link report was written, then run
 the comparison over fresh working directories. The harness refuses new MIR
-emissions, driver builds and shard processes while `~/.cache/jet-dev/proofq/PAUSE` exists; queue the
+emissions, driver builds and shard processes while `$JET_STATE_ROOT/proofq/PAUSE` exists; queue the
 continuation through proofq after the compile gate, not as a direct heavy run.
 
 Native-vs-Rust differential (#4619): `Tests/run-differential.mjs <outdir>`
@@ -2637,7 +2637,7 @@ Native builds hand the live `MIRProgram` to `lir_lower_entry`, generate the
 object, and use the in-process linker with the packaged runtime pack.
 
 The golden runner also accepts `--front jet`. It invokes the published
-`candidate_jetc0` from `~/.cache/jet-dev/dev-artifacts.json`, or the explicit
+`candidate_jetc0` from `$JET_STATE_ROOT/dev-artifacts.json`, or the explicit
 `JET_FRONT_JETC0` candidate under proof. The bootstrap factory selects
 `JET_FRONT_NATIVE_OUTPUT`, runs `jet_driver_compile_mir`, lowers the live
 checked value and links it with `JET_RUNTIME_PACK` in that same process.
@@ -4340,9 +4340,9 @@ block after appending lowercase hexadecimal.
 `Tests/DataPublicGoldens.h` was frozen by the actual Rust Foundation functions,
 not a reimplementation: rustc 1.97.1 (8bab26f4f 2026-07-14), oracle tool exit 0,
 5.14 seconds. Generator command (one-time development oracle, light lane):
-`Tools/agent/jet-env rustc --edition=2021 ~/.cache/jet-dev/scratch/RtBurn1b/data-public-oracle.rs -o ~/.cache/jet-dev/scratch/RtBurn1b/data-public-oracle`,
+`Tools/agent/jet-env rustc --edition=2021 $JET_STATE_ROOT/scratch/RtBurn1b/data-public-oracle.rs -o $JET_STATE_ROOT/scratch/RtBurn1b/data-public-oracle`,
 then that binary with `Compiler/JetRuntime/Tests/DataPublicGoldens.h`.
-Both invocations ran through `CHEAP_LANE=light ~/.cache/jet-dev/cheap.sh`.
+Both invocations ran through `CHEAP_LANE=light $JET_STATE_ROOT/cheap.sh`.
 SHA-256 receipts:
 
 - fixture: `b084a2de95e5a4154f4c016ccbff708b01a4f89a39884baa0be418df49f99f4a`

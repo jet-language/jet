@@ -4,9 +4,10 @@
 set -euo pipefail
 SHA=${1:-}
 if [[ -n "$SHA" && ! "$SHA" =~ ^[a-f0-9]{40}$ ]]; then echo 'full source SHA required' >&2; exit 2; fi
-ROOT=${JET_SCRATCH_ROOT:-$HOME/.cache/jet-dev/scratch}
+. "$(dirname "${BASH_SOURCE[0]}")/../roots.sh"
+ROOT=$JET_SCRATCH_ROOT
 C=$ROOT/candidates/RuntimeLead12/s5-r4
-Q=$HOME/.cache/jet-dev/proofq/queue
+Q=$JET_STATE_ROOT/proofq/queue
 P=Main-RuntimeLead12-s5
 HOST=${S5_SHARED_HOST_JOB:-Main-DevGreen-host-r2}
 PACK=${S5_SHARED_PACK_JOB:-Main-RuntimePackLead-native-pack-r1}

@@ -1,6 +1,6 @@
 # Probe prim-bridges — Foreign libraries: bridges to C/Rust libraries
 
-Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `$JET_STATE_ROOT/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -17,8 +17,8 @@ Learn the FFI story (Docs/spec/architecture.md "Adding an FFI bridge", Examples/
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-dev/dx2/video-vfx-compositing/`, `~/.cache/jet-dev/dx2/image-processing/`, `~/.cache/jet-dev/dx2/gis-geospatial/`, `~/.cache/jet-dev/dx2/medical-imaging/`, `~/.cache/jet-dev/dx2/climate-weather/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
+Domain census and reports: `$JET_STATE_ROOT/dx2/video-vfx-compositing/`, `$JET_STATE_ROOT/dx2/image-processing/`, `$JET_STATE_ROOT/dx2/gis-geospatial/`, `$JET_STATE_ROOT/dx2/medical-imaging/`, `$JET_STATE_ROOT/dx2/climate-weather/` (report.md, census.json, claims.json). Deleted ballots with worked code: `$JET_STATE_ROOT/dx2/ballots/` (grep the mechanism name). Family syntheses: `$JET_STATE_ROOT/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-dev/dx3/prim-bridges/probe.md`, `gaps.json`, and the code under `~/.cache/jet-dev/dx3/prim-bridges/pkg/`. Gap ids start with `prim-bridges-G`.
+`$JET_STATE_ROOT/dx3/prim-bridges/probe.md`, `gaps.json`, and the code under `$JET_STATE_ROOT/dx3/prim-bridges/pkg/`. Gap ids start with `prim-bridges-G`.

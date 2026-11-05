@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { scratchRoot } from "./roots.mjs";
 import { callSites, census, embeddedPrograms, main, moduleName, publicFunctions, ratchetDecision } from "./core-coverage-census.mjs";
 
 const rows = [
@@ -113,7 +113,7 @@ test("embedded host programs isolate alias environments and ignore host comments
 });
 
 function fixture(t) {
-  const parent = join(homedir(), ".cache/jet-dev/scratch/CardW-CB-CENSUS");
+  const parent = join(scratchRoot(), "CardW-CB-CENSUS");
   mkdirSync(parent, { recursive: true });
   const root = mkdtempSync(join(parent, "census-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

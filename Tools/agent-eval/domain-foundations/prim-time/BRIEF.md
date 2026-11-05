@@ -1,6 +1,6 @@
 # Probe prim-time — Time: calendars, business dates, time scales
 
-Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `$JET_STATE_ROOT/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -16,8 +16,8 @@ Build, as library Jet over the core time types: business-day arithmetic with an 
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-dev/dx2/fintech-payments/`, `~/.cache/jet-dev/dx2/quant-trading/`, `~/.cache/jet-dev/dx2/astronomy-astrophysics/`, `~/.cache/jet-dev/dx2/space-satellite/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
+Domain census and reports: `$JET_STATE_ROOT/dx2/fintech-payments/`, `$JET_STATE_ROOT/dx2/quant-trading/`, `$JET_STATE_ROOT/dx2/astronomy-astrophysics/`, `$JET_STATE_ROOT/dx2/space-satellite/` (report.md, census.json, claims.json). Deleted ballots with worked code: `$JET_STATE_ROOT/dx2/ballots/` (grep the mechanism name). Family syntheses: `$JET_STATE_ROOT/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-dev/dx3/prim-time/probe.md`, `gaps.json`, and the code under `~/.cache/jet-dev/dx3/prim-time/pkg/`. Gap ids start with `prim-time-G`.
+`$JET_STATE_ROOT/dx3/prim-time/probe.md`, `gaps.json`, and the code under `$JET_STATE_ROOT/dx3/prim-time/pkg/`. Gap ids start with `prim-time-G`.

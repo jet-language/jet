@@ -1,6 +1,6 @@
 # Agent runtime and cache maintenance
 
-All mutable development output belongs under `$HOME/.cache/jet-dev`.
+All mutable development output belongs under `$JET_STATE_ROOT`.
 `$HOME/.cache/jet` is reserved for Jet's own cache. Code lives in this repository;
 cache script copies remain temporarily for running agents, not as new tooling homes.
 `JET_REPO` overrides the checkout derived from these tools.

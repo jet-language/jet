@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { ballotGaps, addDecision, updateDecision } from '../../tower/app/store.mjs';
+import { stateRoot } from '../roots.mjs';
 
 const repo = JET_TOOL_REPO;
-const root = path.join(process.env.HOME, '.cache/jet-dev/ballots');
+const root = path.join(stateRoot(), 'ballots');
 const towerRead = (...args) => JSON.parse(execFileSync('node', ['Tools/tower/tower.mjs', ...args, '--json'], {
   cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
 }));

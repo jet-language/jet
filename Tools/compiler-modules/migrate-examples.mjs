@@ -19,12 +19,12 @@
 // and authority (settings, build profiles, outputs, dependencies) or denies a
 // right is reported as MANUAL: its facts must move into the one program that
 // uses them. JET_CMD selects the jet launcher. Computed headers are cached by
-// file content under ~/.cache/jet-dev/compiler-modules/headers.json, so a
+// file content under $JET_STATE_ROOT/compiler-modules/headers.json, so a
 // second run (or the same cutover on another checkout) costs no jet calls.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { stateRoot } from "../agent/roots.mjs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,7 +38,7 @@ const roots = scopes.length > 0 ? scopes : ["Examples", "Tools", "tests"];
 const jetCmd = (process.env.JET_CMD ?? `${repo}/Tools/agent/jet-env jet`).split(/\s+/);
 const SIMPLE_KEYS = new Set(["name", "version", "edition", "authority", "jet", "description", "license", "repository"]);
 const SKIP = new Set(["target", "node_modules", "build", "bin"]);
-const cachePath = join(homedir(), ".cache/jet-dev/compiler-modules/headers.json");
+const cachePath = join(stateRoot(), "compiler-modules/headers.json");
 const cache = existsSync(cachePath) ? JSON.parse(readFileSync(cachePath, "utf8")) : {};
 
 function walk(dir, out = []) {

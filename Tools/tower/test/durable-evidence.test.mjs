@@ -51,7 +51,9 @@ test('meet refuses evidence without a durable commit and accepts a commit on dev
   assert.throws(() => meet(st, 'ran the tests, all green'), refused(/names no commit on dev or master/));
   assert.throws(() => meet(st, 'patch at $JET_SCRATCH_ROOT/lanes/X/fix.patch'), refused(/only scratch output/));
   assert.throws(() => meet(st, 'patch at /mnt/scratch/lanes/X/fix.patch'), refused(/only scratch output/));
-  assert.throws(() => meet(st, 'log in ~/.cache/jet-dev/scratch/X/run.log'), refused(/only scratch output/));
+  assert.throws(() => meet(st, 'log in ~/.cache/jet/scratch/X/run.log'), refused(/only scratch output/));
+  assert.throws(() => meet(st, 'log in $JET_STATE_ROOT/scratch/X/run.log'), refused(/only scratch output/));
+  assert.throws(() => meet(st, 'result in $JET_RUN_ROOT/land-results/X.result'), refused(/only scratch output/));
   assert.throws(() => meet(st, `built ${unlanded.slice(0, 10)}`), refused(new RegExp(`${unlanded.slice(0, 10)} is not on dev or master`)));
   assert.equal(st.load().cards[0].criteria[0].status, 'open', 'a refused meet changes nothing');
 
@@ -104,7 +106,7 @@ test('non-code closures declare their kind and name what settles them', () => {
   assert.equal(st.load().cards[0].criteria[0].closure, 'duplicate');
 
   assert.throws(() => meet(st, '', 'obsolete'), refused(/needs --evidence/));
-  assert.throws(() => meet(st, 'work is in /tmp/tdev/x.patch', 'obsolete'), refused(/scratch output/));
+  assert.throws(() => meet(st, 'work is in /tmp/lane/x.patch', 'obsolete'), refused(/scratch output/));
   meet(st, 'the feature was removed from the plan', 'obsolete');
   const { result } = st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'builder' }, cfg));
   assert.equal(result.phase, 'done', 'a declared non-code closure passes the done gate');

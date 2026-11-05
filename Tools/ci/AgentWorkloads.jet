@@ -365,7 +365,9 @@ fn gate_main(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
     root :: repository_root()
     report :: env_or("JET_AGENT_WORKLOAD_REPORT", "{root}/{DEFAULT_REPORT_PATH}")
     home :: process.env_get("HOME") ?? ""
-    scratch :: env_or("JET_AGENT_WORKLOAD_SCRATCH_DIR", env_or("TMPDIR", "{home}/.cache/jet-dev/scratch"))
+    cache :: env_or("XDG_CACHE_HOME", "{home}/.cache")
+    state :: env_or("JET_STATE_ROOT", "{cache}/jet-dev")
+    scratch :: env_or("JET_AGENT_WORKLOAD_SCRATCH_DIR", env_or("TMPDIR", env_or("JET_SCRATCH_ROOT", state)))
     report_parent :: if report.rfind("/") > 0 -> String.from_bytes_lossy(report.bytes()[0..<report.rfind("/")]) else -> "."
     created :: process.cmd([String]{"mkdir", "-p", scratch.copy(), report_parent}).run() ?? return uncovered("cannot create {scratch}")
     if created.code != 0 {

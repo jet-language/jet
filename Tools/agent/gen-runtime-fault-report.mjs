@@ -7,7 +7,7 @@
 // relocation.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { scratchRoot as sharedScratchRoot } from "./roots.mjs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -27,7 +27,7 @@ const reports = [
 ];
 const targetPath = "Compiler/JetBackend/Source/X64/FaultReport.jet";
 
-const scratchRoot = process.env.JET_SCRATCH_ROOT || join(homedir(), ".cache/jet-dev/scratch");
+const scratchRoot = sharedScratchRoot();
 mkdirSync(scratchRoot, { recursive: true });
 
 // The .text bytes of assembling `sourcePath`.

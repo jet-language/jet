@@ -8,7 +8,7 @@ settles, checks prove or stop), and the
 [greenfield concept](greenfield-memory-system-2026-10-02.md). Work state lives
 on Tower cards #3645 (memory model), #4249 (ownership checker gaps) and #4619
 (the post-Rust safety net). The four owner choices this note raises are ballot
-drafts under `~/.cache/jet-dev/ballots/READY/`; section 6 lists them.
+drafts under `$JET_STATE_ROOT/ballots/READY/`; section 6 lists them.
 
 Evidence. Every "Jet today" verdict below comes from `jet check` on the
 candidate binary `$JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet` (Jet 0.0.1,
@@ -724,10 +724,10 @@ missing (Rust lowers `freeze` to a plain copy; the Jet compiler has no
 | D-LINK-SIBLING1 | May a record hold text and links into that same text? | A: yes, with a `from field` clause on the link field (`keys: [@String] from text`), reusing the provenance word; the named text field is frozen for the record's life |
 | D-MAP-SLOT1 | How do you read-or-create a map entry with one lookup? | A: `counts[w, or: 0] += 1`; the default runs only when the key is missing |
 
-Each ballot is a short-profile draft under `~/.cache/jet-dev/ballots/READY/`
+Each ballot is a short-profile draft under `$JET_STATE_ROOT/ballots/READY/`
 (`D-LINK-ITEM1.json`, `D-METHOD-FOOTPRINT1.json`, `D-LINK-SIBLING1.json`,
 `D-MAP-SLOT1.json`), attached to card #3645. All four pass the read-only
-validator (`node ~/.cache/jet-dev/ballots/READY/validate.mjs …`, exit 0, no
+validator (`node $JET_STATE_ROOT/ballots/READY/validate.mjs …`, exit 0, no
 gaps, dry-run `add`). No reader pass has run on them yet. D-MAP-SLOT1 is
 performance-motivated, so its paired candidate/plain cell must exist before
 ratification.

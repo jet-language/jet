@@ -64,7 +64,7 @@ The Rust `jet-semindex` and parts of sema are being ported to `Compiler/JetSema`
 
 ## Verified defect: complexity ignores nesting
 
-Probe binary: `~/.cache/jet-dev/scratch/jet-debug-snapshot27`, run through `~/.cache/jet-dev/safe-jet.sh`. The repository HEAD at the time was `39b713f09`.
+Probe binary: `$JET_STATE_ROOT/scratch/jet-debug-snapshot27`, run through `$JET_STATE_ROOT/safe-jet.sh`. The repository HEAD at the time was `39b713f09`.
 
 ```
 fn two_loops(n: Int) -> Int   // loop inside loop

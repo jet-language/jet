@@ -122,8 +122,8 @@ The recommended option is `A` first; `whyNot` covers `B`. Apply the
 Use the scaffold as the local authoring file:
 
 ```sh
-mkdir -p ~/.cache/jet-dev
-tower decision scaffold '#12' --id D-CACHE1 --out ~/.cache/jet-dev/ballot.json
+mkdir -p $JET_STATE_ROOT
+tower decision scaffold '#12' --id D-CACHE1 --out $JET_STATE_ROOT/ballot.json
 ```
 
 Complete the fields and required reader evidence before submission, including

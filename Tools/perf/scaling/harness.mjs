@@ -26,6 +26,7 @@ import { LAYOUTS, SHAPES, corpus } from './corpora.mjs';
 import { writeFiles } from './generate.mjs';
 import { phaseTable, readTrace, runMeasured } from '../throughput/measure.mjs';
 import { profileRun } from './profile.mjs';
+import { scratchRoot } from '../../agent/roots.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, '../../..');
@@ -465,8 +466,8 @@ Exit 0 pass, 1 any growth/floor/compile failure, 2 invalid invocation.`;
 
 export function options(args) {
   const config = { compilers: [], shapes: [], bases: {}, ladders: {}, steps: 4, domainLadder: [...DOMAIN_LADDER], memoryMax: '20G', timeoutS: 1800,
-    stopAfterS: Infinity, jetCommand: 'build', seed: 1, profileTop: false, layouts: [], buildRoot: path.join(process.env.JET_SCRATCH_ROOT || path.join(os.homedir(), '.cache/jet-dev/scratch'), 'scaling-gate'), mode: 'timing', jobs: 1,
-    workDir: path.join(os.homedir(), '.cache/jet-dev/scratch/scaling-gate', new Date().toISOString().replace(/[:.]/g, '-')) };
+    stopAfterS: Infinity, jetCommand: 'build', seed: 1, profileTop: false, layouts: [], buildRoot: path.join(scratchRoot(), 'scaling-gate'), mode: 'timing', jobs: 1,
+    workDir: path.join(scratchRoot(), 'scaling-gate', new Date().toISOString().replace(/[:.]/g, '-')) };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     if (flag === '--help') return null;

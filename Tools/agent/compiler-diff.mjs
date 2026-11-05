@@ -32,6 +32,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { copyFeatureProject, featureProjectRoot } from "./run-feature-examples.mjs";
+import { scratchRoot as sharedScratchRoot } from "./roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const FEATURES = join(ROOT, "Examples/features");
@@ -454,9 +455,7 @@ function isWithin(parent, child) {
 }
 
 function scratchRoot(options) {
-  const base = process.env.JET_TEST_SCRATCH_DIR
-    || (process.env.HOME ? join(process.env.HOME, ".cache/jet-dev/scratch") : null);
-  if (!options.root && !base) throw new Unavailable("no scratch root: pass --root or set JET_TEST_SCRATCH_DIR or HOME");
+  const base = process.env.JET_TEST_SCRATCH_DIR || sharedScratchRoot();
   const root = options.root ?? join(base, options.canary ? "compiler-diff-canary" : "compiler-diff");
   if (isWithin("/tmp", root)) throw new Unavailable(`scratch root ${root} is on RAM-backed /tmp; use a disk path`);
   if (isWithin(ROOT, root)) throw new Unavailable(`scratch root ${root} is inside the repository`);

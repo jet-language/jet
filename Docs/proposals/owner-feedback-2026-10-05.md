@@ -23,7 +23,7 @@ only; about 40 live probes on the dev candidate
 comment- and string-stripped censuses of `Examples/`, `Core/` and `Compiler/`
 (287,354 code lines). Primary sources are cited in each part. Claims not
 re-read this session are marked `[INFERENCE]` or `[approx]`. Scripts, probes
-and raw sections are in `~/.cache/jet-dev/scratch/OwnerFeedback/`.
+and raw sections are in `$JET_STATE_ROOT/scratch/OwnerFeedback/`.
 
 ## Executive summary
 
@@ -126,8 +126,8 @@ Dependencies and consistency checks:
 
 ### Ballot list
 
-All 22 drafts are in `~/.cache/jet-dev/ballots/READY/`. Each was re-run
-together through `node ~/.cache/jet-dev/ballots/READY/validate.mjs` on
+All 22 drafts are in `$JET_STATE_ROOT/ballots/READY/`. Each was re-run
+together through `node $JET_STATE_ROOT/ballots/READY/validate.mjs` on
 2026-10-05: exit 0, no gaps, dry-run `add`. No Tower write was made. All use
 the short profile, because research workers cannot start fresh readers.
 
@@ -172,14 +172,14 @@ D-DEADLINE-ONE1, D-HOOK-RUNTIME1 and D-IMAGE-ENCODE1.
 
 ### Checks Main should run
 
-1. `node ~/.cache/jet-dev/ballots/READY/validate.mjs` on the 22 files listed
+1. `node $JET_STATE_ROOT/ballots/READY/validate.mjs` on the 22 files listed
    above. The lead ran it on 2026-10-05: exit 0.
 2. Decide which ballots get the full two-reader profile before posting (column
    above), and open a web-image card for the two item-12 ballots.
 3. Optional reproduction: the probe folders `probes/`, `sem-probes/` and
    `mech-probes/`, and the census scripts `sigil-metrics.mjs`,
    `tilde-classify.mjs`, `semantics-metrics.mjs` and `mech-tools/metrics.mjs`
-   under `~/.cache/jet-dev/scratch/OwnerFeedback/`. Each probe runs under 1 GB.
+   under `$JET_STATE_ROOT/scratch/OwnerFeedback/`. Each probe runs under 1 GB.
 
 ---
 
@@ -189,9 +189,9 @@ Author: FeedbackSigils. Evidence gathered 2026-10-05 from the repository at
 master, Tower decisions (read-only), the dev candidate
 `$JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet` (`jet check`, 1 GB cap), and
 primary sources cited inline. Census scripts:
-`~/.cache/jet-dev/scratch/OwnerFeedback/sigil-metrics.mjs` (token census with
+`$JET_STATE_ROOT/scratch/OwnerFeedback/sigil-metrics.mjs` (token census with
 comments and strings stripped) and `tilde-classify.mjs` (copy-site
-classifier). Probes: `~/.cache/jet-dev/scratch/OwnerFeedback/probes/`.
+classifier). Probes: `$JET_STATE_ROOT/scratch/OwnerFeedback/probes/`.
 
 Corpus measured: every `.jet` file in `Examples/` (1,241 files, 33,506 code
 lines), `Core/` (115 files, 35,122) and `Compiler/` (307 files, 218,726);
@@ -559,9 +559,9 @@ Evidence base:
 
 - **Live probes.** 25 programs on the dev release `$JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet`,
   each run under a 1 GB cgroup. Sources and runner:
-  `~/.cache/jet-dev/scratch/OwnerFeedback/sem-probes/` (`run.sh`, `p01`–`p36`,
+  `$JET_STATE_ROOT/scratch/OwnerFeedback/sem-probes/` (`run.sh`, `p01`–`p36`,
   plus emitted Rust `p01.rs` and `p04.rs`).
-- **Corpus census.** `~/.cache/jet-dev/scratch/OwnerFeedback/semantics-metrics.mjs`
+- **Corpus census.** `$JET_STATE_ROOT/scratch/OwnerFeedback/semantics-metrics.mjs`
   over `Examples/` (1,238 files), `Core/` (115) and `Compiler/` (307). It uses an
   approximate lexer that drops comments and string bodies. Treat the counts as
   ±5%.
@@ -577,7 +577,7 @@ Evidence base:
   language facts are cited by name.
 
 Ballots: six. Each validates with `validate.mjs` (exit 0) and is in
-`~/.cache/jet-dev/ballots/READY/`:
+`$JET_STATE_ROOT/ballots/READY/`:
 
 | Item | Ballot | Card | Recommendation |
 |---|---|---|---|
@@ -997,11 +997,11 @@ style: one-off reads.
 
 ### Checks Main should run
 
-1. `node ~/.cache/jet-dev/ballots/READY/validate.mjs` on the six files.
+1. `node $JET_STATE_ROOT/ballots/READY/validate.mjs` on the six files.
    I ran it; every file returns no gaps and exit 0.
-2. Optional reproduction: `~/.cache/jet-dev/scratch/OwnerFeedback/sem-probes/run.sh`
+2. Optional reproduction: `$JET_STATE_ROOT/scratch/OwnerFeedback/sem-probes/run.sh`
    (1 GB cap per probe; about 30 s total). Then
-   `node ~/.cache/jet-dev/scratch/OwnerFeedback/semantics-metrics.mjs Examples Core Compiler`
+   `node $JET_STATE_ROOT/scratch/OwnerFeedback/semantics-metrics.mjs Examples Core Compiler`
    from the repository root.
 3. Decide whether the four syntax-touching ballots need full-mode fresh
    review before posting.
@@ -1010,7 +1010,7 @@ style: one-off reads.
 
 Author: FeedbackMechanisms, 2026-10-05. This is research only. Nothing here was
 written to Tower or committed. Ballots are listed at the end. Every one passes
-`node ~/.cache/jet-dev/ballots/READY/validate.mjs` (exit 0).
+`node $JET_STATE_ROOT/ballots/READY/validate.mjs` (exit 0).
 
 Following the owner's clarification, the Lua and Neovim principles were applied
 to all of Jet: language surface, Core APIs, CLI, manifests, tooling, runtime,
@@ -1019,8 +1019,8 @@ examples.
 
 Evidence conventions:
 - *Code fact*: checked in the main checkout on 2026-10-05, with a file:line reference.
-- *Probe*: run with the dev release `$JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet` under a 1.2 GB memory cap. Probe files are in `~/.cache/jet-dev/scratch/OwnerFeedback/mech-probes/`.
-- *Metric*: produced by `~/.cache/jet-dev/scratch/OwnerFeedback/mech-tools/metrics.mjs` over Examples/ + Core/ + Compiler/ (1,660 `.jet` files, 328,724 lines).
+- *Probe*: run with the dev release `$JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet` under a 1.2 GB memory cap. Probe files are in `$JET_STATE_ROOT/scratch/OwnerFeedback/mech-probes/`.
+- *Metric*: produced by `$JET_STATE_ROOT/scratch/OwnerFeedback/mech-tools/metrics.mjs` over Examples/ + Core/ + Compiler/ (1,660 `.jet` files, 328,724 lines).
 - *External*: a primary source named inline. `[approx]` marks figures quoted from memory of the documentation that should be re-checked before anything is published.
 
 ### Bottom line
@@ -1423,8 +1423,8 @@ savings arrive later than they would with option B (bridge libwebp now).
 
 ### Ballots (all validated, exit 0)
 
-All are in `~/.cache/jet-dev/ballots/READY/`. They were generated from
-`~/.cache/jet-dev/scratch/OwnerFeedback/mech-tools/ballots.mjs`, so the surface
+All are in `$JET_STATE_ROOT/ballots/READY/`. They were generated from
+`$JET_STATE_ROOT/scratch/OwnerFeedback/mech-tools/ballots.mjs`, so the surface
 and long form cannot drift.
 
 | File | Item | Card | Recommendation (A) |

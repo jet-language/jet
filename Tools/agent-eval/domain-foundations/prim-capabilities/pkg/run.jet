@@ -10,8 +10,8 @@ struct Row {
 }
 
 fn run() {
-    plugin_root :: "$HOME/.cache/jet-dev/dx3/prim-capabilities/pkg/plugin_src"
-    input_root :: "$HOME/.cache/jet-dev/dx3/prim-capabilities/inputs"
+    plugin_root :: "$JET_STATE_ROOT/dx3/prim-capabilities/pkg/plugin_src"
+    input_root :: "$JET_STATE_ROOT/dx3/prim-capabilities/inputs"
     root_policy :: Authority.from_rights(["FS.Read:{plugin_root}", "FS.Read:{input_root}"])
     #FX(FS.Read, IO, Exec) {
         // D-FILES-SCOPE1: the host binds ordinary file access to the same
@@ -26,7 +26,7 @@ fn run() {
             print("host:file:outside-denied {err}")
             ""
         }
-        guest :: plugin.load("$HOME/.cache/jet-dev/dx3/prim-capabilities/pkg/plugin_src/build/run.wasm", root_policy)
+        guest :: plugin.load("$JET_STATE_ROOT/dx3/prim-capabilities/pkg/plugin_src/build/run.wasm", root_policy)
         greeting :: guest.greet("Ada") ?? {
             print("plugin:load-failed")
             return
@@ -56,7 +56,7 @@ fn run() {
             ""
         }
 
-        invalid :: plugin.load("$HOME/.cache/jet-dev/dx3/prim-capabilities/pkg/plugin_src/hostile/run.wasm", root_policy)
+        invalid :: plugin.load("$JET_STATE_ROOT/dx3/prim-capabilities/pkg/plugin_src/hostile/run.wasm", root_policy)
         _invalid_result :: invalid.greet("Ada") ?? {
             print("plugin:malformed-rejected {err}")
             "rejected"

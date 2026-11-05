@@ -11,6 +11,7 @@ import { runMemorySafetyFuzzAxis as runMemorySafetyFuzzAxisAdapter } from "./mem
 import { compileThroughputContractIssues, runCompileThroughputAxisAdapter } from "./compile-throughput.mjs";
 import { buildSystemContractIssues, runBuildSystemAxisAdapter } from "./build-system.mjs";
 import { applyStatusGate, projectStatus, rebuildStatusFromResults } from "./status.mjs";
+import { stateRoot } from "../../agent/roots.mjs";
 const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
 const harnessDir = path.dirname(fileURLToPath(import.meta.url));
@@ -3882,7 +3883,7 @@ async function main() {
     : null;
   const sourceMeasurements = !axisOnly && sourceManifest ? await measureSourceManifest(entriesDir, sourceManifest, matrix) : null;
   const runId = `${dateStamp().replaceAll("-", "")}-${process.pid}-${Date.now().toString(36)}`;
-  const runDir = path.join(process.env.HOME ?? ".", ".cache/jet-dev/gauntlet/work", runId);
+  const runDir = path.join(stateRoot(), "gauntlet/work", runId);
   await fs.mkdir(runDir, { recursive: true });
   const jetBin = await resolveJetBinary(options);
   const toolchains = await toolchainFingerprint(runDir, jetBin);

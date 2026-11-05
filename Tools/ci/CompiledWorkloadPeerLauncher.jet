@@ -369,7 +369,9 @@ fn probe_root() -[FS, Env, Time]> String LaunchError! {
         .Val(configured) -> base = configured
         .None -> {
             home :: process.env_get("HOME") ?? return Err(launch_error("cannot locate a disk-backed capability probe directory"))
-            base = "{home}/.cache/jet-dev/scratch"
+            cache :: process.env_get("XDG_CACHE_HOME") ?? "{home}/.cache"
+            state :: process.env_get("JET_STATE_ROOT") ?? "{cache}/jet-dev"
+            base = process.env_get("JET_SCRATCH_ROOT") ?? state
         }
     }
     files.create_dir_all(base) ?? return Err(launch_error("capability probe root `{base}` cannot be created: {err}"))

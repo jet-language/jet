@@ -2,11 +2,11 @@
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scratchRoot as sharedScratchRoot } from './roots.mjs';
 
-const scratchRoot = process.env.JET_SCRATCH_ROOT || join(homedir(), '.cache/jet-dev/scratch');
+const scratchRoot = sharedScratchRoot();
 const candidates = join(scratchRoot, 'candidates');
 
 export function proofTargetDirectory(commit) {
