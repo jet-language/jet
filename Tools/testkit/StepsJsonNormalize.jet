@@ -109,7 +109,29 @@ fn kit_steps_json_normalize(text: String, stream: String, rules: [KitJSONNormali
         if rule.stream == stream -> applies = true
     }
     if !applies -> return KitJSONResult{text: text, error: ""}
-    tree :: json.parse(text) ?? return KitJSONResult{text: "", error: "JSON normalization parse: {err}"}
+    tree :: json.parse(text) ?? return kit_steps_json_normalize_lines(text, stream, rules, "{err}")
+    kit_steps_json_normalize_document(text, tree, stream, rules)
+}
+
+// JSON Lines output (one document per line, as `jet test --measure --json`
+// prints) normalizes line by line, and every rule must hold on every line.
+fn kit_steps_json_normalize_lines(text: String, stream: String, rules: [KitJSONNormalization], error: String) -> KitJSONResult {
+    if !text.contains("\n") -> return KitJSONResult{text: "", error: "JSON normalization parse: {error}"}
+    pieces := [String]{}
+    loop line in text.split("\n") {
+        if line.trim() == "" {
+            &pieces.push(line.copy())
+            next
+        }
+        tree :: json.parse(line) ?? return KitJSONResult{text: "", error: "JSON normalization parse: {error}"}
+        normalized :: kit_steps_json_normalize_document(line, tree, stream, rules)
+        if normalized.error != "" -> return normalized
+        &pieces.push(normalized.text)
+    }
+    KitJSONResult{text: pieces.join("\n"), error: ""}
+}
+
+fn kit_steps_json_normalize_document(text: String, tree: Dyn, stream: String, rules: [KitJSONNormalization]) -> KitJSONResult {
     bytes :: text.bytes()
     spans := [KitJSONSpan]{}
     start :: kit_steps_json_space(bytes, 0)

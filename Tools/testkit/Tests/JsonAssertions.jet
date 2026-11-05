@@ -87,6 +87,16 @@ use json :: core.encoding.json
     assert_eq(values.text, "{{\"items\":[{{\"time\":\"<<number>>\"}}, {{ \"time\" : \"<<number>>\" }}]}}")
 }
 
+#Test("typed JSON normalizer masks every line of JSON Lines output") {
+    rule :: KitJSONNormalization{stream: "stdout", path: "$.mean_ns", kind: "number"}
+    lines :: "{{\"name\":\"a\",\"mean_ns\":7.2}}\n{{\"name\":\"b\", \"mean_ns\" : 34}}\n"
+    normalized :: kit_steps_json_normalize(lines, "stdout", [rule])
+    assert_eq(normalized.error, "")
+    assert_eq(normalized.text, "{{\"name\":\"a\",\"mean_ns\":\"<<number>>\"}}\n{{\"name\":\"b\", \"mean_ns\" : \"<<number>>\"}}\n")
+    assert(kit_steps_json_normalize("{{\"mean_ns\":1}}\n{{\"name\":\"b\"}}\n", "stdout", [rule]).error.contains("missing"))
+    assert(kit_steps_json_normalize("{{\"mean_ns\":1}}\nnot JSON\n", "stdout", [rule]).error.contains("parse"))
+}
+
 #Test("typed JSON normalizer fails wrong types missing paths and empty wildcards") {
     rule :: KitJSONNormalization{stream: "stdout", path: "$.time", kind: "number"}
     assert(kit_steps_json_normalize("{{\"time\":\"not a number\"}}", "stdout", [rule]).error.contains("type differs"))
