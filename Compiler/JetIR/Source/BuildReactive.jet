@@ -210,9 +210,9 @@ fn ir_reactive_derived(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, exec
     cell
 }
 
-// `reactive.effect(body)`: the Effect handle owning the observer.
+// `reactive.autorun(body)`: the Effect handle owning the observer.
 fn ir_reactive_effect(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: BodyLambda, span: Span) -> Int Never! {
-    if (ir_reactive_kind(p, ty) ?? "") != "Effect" -> return ir_fail_slot(&b, span, "reactive.effect producing {ir_type_name(ty)}")
+    if (ir_reactive_kind(p, ty) ?? "") != "Effect" -> return ir_fail_slot(&b, span, "reactive.autorun producing {ir_type_name(ty)}")
     body :: ir_reactive_body(&m, p, &b, executable, span)
     if body.len() != 3 -> return -1
     row :: ir_reactive_row(&m, p, ty)

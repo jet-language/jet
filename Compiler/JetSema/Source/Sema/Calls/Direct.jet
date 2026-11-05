@@ -984,9 +984,9 @@ fn sema_call_core_direct_checked(call: Call, expected: Type?, environment: SemaS
     if mount.handled -> return mount
     live := sema_call_try_live(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if live.handled -> return live
-    // `reactive.derived/computed/effect` are retained-closure calls with no
+    // `reactive.derived/computed/autorun` are retained-closure calls with no
     // Core call record: they check here, not by route.
-    if module_name == "core.reactive" && (member == "derived" || member == "computed" || member == "effect") {
+    if module_name == "core.reactive" && (member == "derived" || member == "computed" || member == "autorun") {
         return sema_call_try_reactive_core_call(module_name, member, call.args, call.type_args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     sema_call_core_crypto_expert_gate(module_name, member, call.name_span, context, &diagnostics)

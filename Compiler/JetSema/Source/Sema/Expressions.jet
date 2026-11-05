@@ -3334,9 +3334,9 @@ fn sema_expr_core_module_method_checked(receiver: Expr, method: String, method_s
         live := sema_call_try_live(module_name, method, alias, alias_span, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if live.handled -> return SemaMethodSpecialCheck{handled: true, value: live.value}
     }
-    // `reactive.derived/computed/effect` are retained-closure calls with no
+    // `reactive.derived/computed/autorun` are retained-closure calls with no
     // Core call record: they check here, not by route.
-    if module_name == "core.reactive" && (method == "derived" || method == "computed" || method == "effect") {
+    if module_name == "core.reactive" && (method == "derived" || method == "computed" || method == "autorun") {
         reactive := sema_call_try_reactive_core_call(module_name, method, args, type_args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: reactive.handled, value: reactive.value}
     }

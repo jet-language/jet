@@ -11076,8 +11076,8 @@ struct ReactiveArgumentNotLambda {
         meaning :: "`reactive.derived`/`effect` argument isn't a lambda"
         detail :: true
         fn what(self) -> String { "`reactive.{self.kind}` needs a lambda, not {self.type}." }
-        fn why(self) -> String { "`reactive.derived`/`reactive.effect` build a reactive value from a `() -> …` body so it can re-run when a signal changes. A non-lambda argument has nothing to re-run." }
-        fn fix(self) -> String { "Write `reactive.derived(() -> … )` or `reactive.effect(() -> {{ … }})`." }
+        fn why(self) -> String { "`reactive.derived`/`reactive.autorun` build a reactive value from a `() -> …` body so it can re-run when a signal changes. A non-lambda argument has nothing to re-run." }
+        fn fix(self) -> String { "Write `reactive.derived(() -> … )` or `reactive.autorun(() -> {{ … }})`." }
     }
 }
 
@@ -11103,7 +11103,7 @@ struct DerivedReturnsNothing {
         detail :: true
         fn what(self) -> String { "`reactive.derived` must compute and return a value." }
         fn why(self) -> String { "A derived value is recomputed from its signals, so its lambda has to return the new value. A body that returns nothing is a side effect, not a value." }
-        fn fix(self) -> String { "Return a value from the body, or use `reactive.effect(() -> {{ … }})` for a side effect." }
+        fn fix(self) -> String { "Return a value from the body, or use `reactive.autorun(() -> {{ … }})` for a side effect." }
     }
 }
 
@@ -11117,7 +11117,7 @@ struct ReactiveFunctionValue {
         detail :: true
         fn what(self) -> String { "A reactive {self.kind} can't hold a {self.type}." }
         fn why(self) -> String { "Signals and derived values hold ordinary data so it can be copied to dependents. A function value isn't reactive data — wrap behaviour in an effect instead." }
-        fn fix(self) -> String { "Use a data value (number, text, list, struct, …); put behaviour in `reactive.effect`." }
+        fn fix(self) -> String { "Use a data value (number, text, list, struct, …); put behaviour in `reactive.autorun`." }
     }
 }
 
