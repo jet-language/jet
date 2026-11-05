@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6567,
-    "rev": 92332,
+    "rev": 92334,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -71147,7 +71147,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-05T08:29:07.304Z",
+      "updated": "2026-11-05T08:32:02.690Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -169666,6 +169666,189 @@
       "outcome": "A",
       "comment": "Owner, on the ballot (q43o25er), 2026-11-04: A. No teaching of foreign words or retired Jet spellings anywhere; unknown words get the generic error that lists the legal forms.",
       "ratifiedAt": "2026-11-05"
+    },
+    {
+      "id": "D-TEST-SUITE2",
+      "cardId": "c0pgowhn",
+      "group": "project",
+      "title": "How are the ui and cases corpus suites named, and how does a code suite report its rows?",
+      "situation": "D-TEST-PROFILE1=A made test profiles data in package.jet. Its example names one stock suite field, golden_corpus, and says code suites register with Test.suite(name, value) in fn test, without saying what value is. Jet's own ui and cases corpora need field names, and the jetpack, selfhost and perf suites need a signature. Today only golden_corpus is ratified, so the testkit package declares only golden, and ui, cases, jetpack, selfhost and perf are left out. This vote names the two corpus fields and fixes how a code suite reports its rows.",
+      "gist": "What are the ui and cases corpus fields called, and does a code suite return rows or report each one?",
+      "lesson": "A suite is a named set of rows that `jet test --profile` runs and compares. A stock suite is a folder of test files, written as data. A code suite is a function that checks something no folder describes, such as a binary-size budget, and reports one row per check.",
+      "explainer": "",
+      "story": "Sam adds a size budget to CI. Today it is a Node script that prints its own format. With a code suite he writes one Jet function that reports a row per program. `jet test --profile perf` then shows those rows beside the golden rows, compares them with the last run, and fails when a row that passed now fails.",
+      "inWild": "Cargo: [[test]] harness = false points at a binary that prints its own results.\nGo: a TestMain or t.Run(name, fn) reports each subtest as it runs.\nVitest: projects in config name test folders; each test reports as it finishes.\npytest: a plugin's pytest_collect_file turns any file type into reported items.",
+      "detail": "WHAT IS DECIDED ALREADY\n\nD-TEST-PROFILE1=A (2026-10-30) made profiles `test:` records in package.jet, such as `quick: TestProfile{ suites: [tests], time_limit: 60s }`. The suite `tests`, every #Test, is built in. Stock suites are `suites:` data. The ratified example names one field: `golden: TestSuite{ golden_corpus: \"tests/golden\" }`. Code suites register in test.jet's fn test with Test.suite(name, value).\n\nWHAT IS OPEN\n\n1. Field names for the other two corpora Jet runs: the ui corpus (tests/ui, a source file with its expected stdout and stderr) and the cases corpus (tests/cases, step files).\n\n2. What value is in Test.suite(name, value). Today Test has one method, t.run(), which runs the stock suite and returns its exit code (sema THandleOp.TestSuiteRun). There is no Test.suite.\n\nTODAY (dev b032d40638)\n\n- `ui_corpus:` or `cases_corpus:` in package.jet is E1206 \"unknown Package field\" (Jetpack PackageModel apply_field), as `test:` was before D-TEST-PROFILE1.\n- The testkit package's ui and cases runners exist (Tools/testkit, Jet). Moving them under `jet test` is #6035 c3, which needs these names.\n- The perf, selfhost and jetpack checks are shell and Node scripts today (Tools/perf/ci-perf-check.sh, Tools/agent/s5, the Jetpack tests), outside `jet test`.\n\nTHE OPTIONS\n\nA and B both add ui_corpus and cases_corpus beside golden_corpus, and differ only in the code-suite value. C replaces the three corpus fields with one `corpus:` field plus `kind:`. That rewrites the ratified example, and C uses B's code-suite value.\n\nA: the value is a function that receives a row sink, fn(rows: TestRows). It calls rows.pass(id), rows.fail(id, detail) or rows.skip(id, reason) as each check finishes.\n\nB: the value is a function that returns its rows, fn() -> [TestRow]. TestRow is a plain struct: id, outcome (.Pass, .Fail(detail), .Skip(reason)).\n\nC: `TestSuite{ corpus: \"tests/ui\", kind: ui }`, with kind one of golden, ui, cases; code suites as in B.\n\nEDGE CASES (the same under every option unless noted)\n\n- A suite name in both `suites:` and a Test.suite call is an error that names both places.\n\n- Test.suite names are string literals, so `jet check` and `--profile` list every suite without running code. A computed name is an error with a fix to write the name.\n\n- A profile that names an unknown suite is the D-TEST-PROFILE1 error listing the known suites, code suites included.\n\n- Two rows with one id in a suite: the second is a failing row \"duplicate row id\".\n\n- A code suite that panics: under A, rows reported before the panic stay and one failing row \"stopped: <message>\" is added. Under B and C every row of that suite is lost and the suite is one failing row.\n\n- time_limit bounds each corpus row, and each code-suite call as a whole. Under A the rows reported before the limit stay.\n\n- -u rewrites a ui row's expected streams. A code suite has no snapshots; -u accepts its new rows as the stored last result.\n\n- cases_corpus reads .case files only while they exist. When D-TESTKIT1=A's migration moves them to #Test, they join `tests` and the field retires with the corpus.\n\nBEGINNER AND EXPERT\n\nBeginner: nothing changes. `jet test` runs every #Test, with no package.jet fields and no test.jet. Expert: package.jet names the corpora and the profiles, and test.jet registers code suites. `jet test --profile full` runs them all in the c4 pool and prints one row stream.\n\nADVERSARIAL\n\n- Three corpus fields grow by one per new corpus kind; C's one field with a kind never grows the vocabulary.\n\n- C rewrites a ratified example six days after ratification, for a naming gain only.\n\n- B loses every row of a suite when one check panics, which is the failure case suites exist to show.\n\n- A adds a second handle type, TestRows, beside Test, so beginners meet two handle types instead of one.\n\n- Literal-only suite names forbid generating one suite per target in a loop.\n\n- cases_corpus names a format D-TESTKIT1=A already plans to retire.",
+      "options": [
+        {
+          "key": "A",
+          "name": "ui_corpus and cases_corpus; a code suite reports rows to a sink as it goes",
+          "detail": "package.jet gains ui_corpus and cases_corpus beside golden_corpus. Test.suite(name, run) takes a function that receives a TestRows sink and reports each row the moment its check finishes. Long suites stream, and a panic keeps the rows already reported.",
+          "technical": "PackageModel: TestSuite accepts exactly one of golden_corpus, ui_corpus, cases_corpus (a path relative to package.jet, which must exist).\n\nSema: Test.suite(String literal, fn(TestRows)) is a new THandleOp, legal only in fn test, with statically collected names. TestRows is a compiler handle like Test, with pass(id), fail(id, detail) and skip(id, reason). Each call writes one framed record, as #Test records are today, so the runner streams it and keeps it after a trap. The runner calls each code suite in its own child process, one c4 pool slot each.",
+          "code": "// package.jet\nname: \"shop\"\ntest: {\n    quick: TestProfile{ suites: [tests], time_limit: 60s }\n    full: TestProfile{ suites: [tests, golden, ui, cases, perf], optimize: [none, full] }\n}\nsuites: {\n    golden: TestSuite{ golden_corpus: \"examples\" }\n    ui: TestSuite{ ui_corpus: \"tests/ui\" }\n    cases: TestSuite{ cases_corpus: \"tests/cases\" }\n}\ndefaults: { test: quick }\n\n// test.jet\nfn test(t: Test) {\n    t.suite(\"perf\", perf_rows)\n    t.run()\n}\n\n// perf.jet\nfn perf_rows(rows: TestRows) {\n    loop (name, limit) in [(\"hello\", 24_000), (\"collatz\", 46_223)] {\n        size :: built_size(name)\n        if size <= limit -> rows.pass(\"size {name}\") else -> rows.fail(\"size {name}\", \"{size} B > {limit} B\")\n    }\n}\n\n// $ jet test --profile full\n// ... golden, ui and cases rows as each finishes ...\n// perf: size hello: pass                       (printed as soon as hello is measured)\n// perf: size collatz: FAIL 122367 B > 46223 B\n// against the last run: lost 0, changed 1, new 0"
+        },
+        {
+          "key": "B",
+          "name": "ui_corpus and cases_corpus; a code suite returns [TestRow]",
+          "detail": "package.jet gains ui_corpus and cases_corpus beside golden_corpus. Test.suite(name, run) takes a function that returns every row of the suite at once. TestRow is plain data, so a code suite is an ordinary function a #Test can also call.",
+          "technical": "PackageModel: TestSuite accepts exactly one of golden_corpus, ui_corpus, cases_corpus (a path relative to package.jet, which must exist). Sema: Test.suite(String literal, fn() -> [TestRow]) is a new THandleOp, legal only in fn test; the names are collected statically for check and --profile. Core: struct TestRow { id: String, outcome: TestOutcome }, enum TestOutcome { Pass, Fail(detail: String), Skip(reason: String) }. The runner calls each code suite in its own child process, one c4 pool slot each, and prints the rows when the call returns.",
+          "code": "// package.jet\nname: \"shop\"\ntest: {\n    quick: TestProfile{ suites: [tests], time_limit: 60s }\n    full: TestProfile{ suites: [tests, golden, ui, cases, perf], optimize: [none, full] }\n}\nsuites: {\n    golden: TestSuite{ golden_corpus: \"examples\" }\n    ui: TestSuite{ ui_corpus: \"tests/ui\" }\n    cases: TestSuite{ cases_corpus: \"tests/cases\" }\n}\ndefaults: { test: quick }\n\n// test.jet\nfn test(t: Test) {\n    t.suite(\"perf\", perf_rows)\n    t.run()\n}\n\n// perf.jet\nfn perf_rows() -> [TestRow] {\n    loop (name, limit) in [(\"hello\", 24_000), (\"collatz\", 46_223)] -> size_row(name, limit)\n}\n\nfn size_row(name: String, limit: Int) -> TestRow {\n    size :: built_size(name)\n    outcome :: if size <= limit -> TestOutcome.Pass else -> TestOutcome.Fail(\"{size} B > {limit} B\")\n    TestRow{ id: \"size {name}\", outcome: outcome }\n}\n\n// $ jet test --profile full\n// ... golden, ui and cases rows as each finishes ...\n// perf: size hello: pass\n// perf: size collatz: FAIL 122367 B > 46223 B\n// against the last run: lost 0, changed 1, new 0"
+        },
+        {
+          "key": "C",
+          "name": "One corpus field with a kind; a code suite returns [TestRow]",
+          "detail": "A single `corpus:` field names the folder and `kind:` says how to run it: golden, ui or cases. golden_corpus from the ratified example becomes `corpus:` with `kind: golden`. Code suites return rows, as in B.",
+          "technical": "PackageModel: TestSuite{ corpus: String, kind: golden|ui|cases }, both required; golden_corpus becomes an unknown Package field (the generic E1206, with no spelling hint, per D-TEACH-RECONCILE1=A), amending D-TEST-PROFILE1=A's example. A new corpus kind adds an enum case, not a field. Sema and Core as B.",
+          "code": "// package.jet\nname: \"shop\"\ntest: {\n    quick: TestProfile{ suites: [tests], time_limit: 60s }\n    full: TestProfile{ suites: [tests, golden, ui, cases, perf], optimize: [none, full] }\n}\nsuites: {\n    golden: TestSuite{ corpus: \"examples\", kind: golden }\n    ui: TestSuite{ corpus: \"tests/ui\", kind: ui }\n    cases: TestSuite{ corpus: \"tests/cases\", kind: cases }\n}\ndefaults: { test: quick }\n\n// test.jet\nfn test(t: Test) {\n    t.suite(\"perf\", perf_rows)\n    t.run()\n}\n\n// perf.jet\nfn perf_rows() -> [TestRow] {\n    loop (name, limit) in [(\"hello\", 24_000), (\"collatz\", 46_223)] -> size_row(name, limit)\n}\n\nfn size_row(name: String, limit: Int) -> TestRow {\n    size :: built_size(name)\n    outcome :: if size <= limit -> TestOutcome.Pass else -> TestOutcome.Fail(\"{size} B > {limit} B\")\n    TestRow{ id: \"size {name}\", outcome: outcome }\n}\n\n// $ jet test --profile full\n// ... golden, ui and cases rows as each finishes ...\n// perf: size hello: pass\n// perf: size collatz: FAIL 122367 B > 46223 B\n// against the last run: lost 0, changed 1, new 0"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "t.Run reports each subtest as it finishes, the streaming shape of A.",
+          "code": "func TestSizes(t *testing.T) {\n    for _, c := range cases {\n        t.Run(c.name, func(t *testing.T) { check(t, c) })\n    }\n}"
+        },
+        {
+          "lang": "Rust (Cargo)",
+          "note": "harness = false hands a binary the whole run, and it prints rows in its own format.",
+          "code": "[[test]]\nname = \"sizes\"\nharness = false"
+        },
+        {
+          "lang": "TypeScript (Vitest)",
+          "note": "Projects name test folders in config, like the corpus fields.",
+          "code": "export default defineConfig({ test: { projects: [{ test: { include: ['tests/ui/**'] } }] } })"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps the ratified golden_corpus and adds its two siblings. A code suite reports each row when its check ends, so long suites stream and a crash keeps every row already reported.",
+        "gains": [
+          "The ratified example stands; ui_corpus and cases_corpus read like golden_corpus.",
+          "Rows stream from long code suites such as selfhost, as corpus rows already do.",
+          "A panic in a code suite keeps the rows reported before it."
+        ],
+        "losses": [
+          {
+            "loss": "TestRows is a second handle type beside Test.",
+            "mitigation": "It appears only in a code suite's signature; a beginner who writes #Test never sees it."
+          },
+          {
+            "loss": "A code suite is not a plain function that returns data, so a #Test can't simply assert on its result.",
+            "mitigation": "The check itself (size_row) can stay a plain function that a #Test calls; the suite function only reports."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B shows nothing until a whole code suite ends, and a panic in one check loses every row of that suite."
+          },
+          {
+            "key": "C",
+            "reason": "C rewrites the ratified golden_corpus example, for a naming gain only."
+          }
+        ],
+        "tradeoff": "A second handle type for streaming rows that survive a crash."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main. C taught the old golden_corpus spelling, now fixed, and cases_corpus names a format D-TESTKIT1=A plans to retire. Examples call built_size, a user's own measuring function, since Core has no such API."
+      },
+      "checkInstructions": "Use the dev jet with JET_TOOLCHAIN_ROOT set to the dev worktree. Today `suites: { ui: TestSuite{ ui_corpus: \"tests/ui\" } }` in package.jet is E1206, unknown Package field. `fn test(t: Test) { t.suite(\"perf\", f) }` fails, because Test has only run.",
+      "surface": {
+        "gist": "What are the ui and cases corpus fields called, and does a code suite return rows or report each one?",
+        "lesson": "A stock suite is a folder of test files written as data. A code suite is a function that reports one row per check. This vote names the two folder fields and the function's shape.",
+        "trio": {
+          "current": {
+            "note": "Today only golden_corpus is ratified, and a size budget is a script outside jet test.",
+            "code": "// package.jet\nsuites: { golden: TestSuite{ golden_corpus: \"examples\" } }\n\n// Tools/perf/ci-perf-check.sh: a shell script prints its own results\n// test.jet: fn test(t: Test) { t.run() }   // Test has only run()"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "t.Run reports each subtest as it finishes.",
+            "code": "t.Run(\"size hello\", func(t *testing.T) { check(t, \"hello\") })"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Report rows as they finish",
+            "gist": "ui_corpus and cases_corpus; a code suite reports each row to a TestRows sink.",
+            "gains": [
+              "Rows stream.",
+              "A panic keeps earlier rows."
+            ],
+            "losses": [
+              "A second handle type, TestRows."
+            ],
+            "proposed": {
+              "code": "fn test(t: Test) { t.suite(\"perf\", perf_rows) }\nfn perf_rows(rows: TestRows) {\n    rows.pass(\"size hello\")\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Return rows",
+            "gist": "ui_corpus and cases_corpus; a code suite returns [TestRow] when it ends.",
+            "gains": [
+              "Plain data, simple to test.",
+              "No new handle type."
+            ],
+            "losses": [
+              "Nothing shows until the suite ends.",
+              "A panic loses the suite's rows."
+            ],
+            "proposed": {
+              "code": "fn test(t: Test) { t.suite(\"perf\", perf_rows) }\nfn perf_rows() -> [TestRow] {\n    [TestRow{ id: \"size hello\", outcome: .Pass }]\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "One corpus field",
+            "gist": "`corpus:` plus `kind:` for every stock suite; code suites return rows as in B.",
+            "gains": [
+              "New corpus kinds add no fields."
+            ],
+            "losses": [
+              "Rewrites the ratified golden_corpus.",
+              "A's lost rows on panic."
+            ],
+            "proposed": {
+              "code": "suites: { ui: TestSuite{ corpus: \"tests/ui\", kind: ui } }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps golden_corpus as ratified and adds its siblings. Rows stream and survive a crash.",
+          "gains": [
+            "The ratified example stands.",
+            "Long suites stream rows."
+          ],
+          "losses": [
+            {
+              "loss": "A second handle type.",
+              "mitigation": "Only code-suite authors see it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A panic loses a whole suite's rows."
+            },
+            {
+              "key": "C",
+              "reason": "It rewrites a ratified example."
+            }
+          ],
+          "tradeoff": "One more handle type for rows that stream and survive a crash."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-05T08:32:01.885Z"
     }
   ],
   "questions": [
@@ -172439,6 +172622,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T08:32:02.690Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-TEST-SUITE2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-05T08:32:01.885Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-TEST-SUITE2",
+      "note": "How are the ui and cases corpus suites named, and how does a code suite report its rows?"
+    },
     {
       "at": "2026-11-05T08:29:07.304Z",
       "by": "Main",
