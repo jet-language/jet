@@ -270,7 +270,7 @@ fn debug_value(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
                     if !debug_snapshot_math.is_finite(number) -> return Err(debug_evaluation_error(unavailable))
                     // Core to_bits reinterprets the u64 pattern as i64; publish u64.
                     bits := debug_snapshot_math.to_bits(number)
-                    if bits < 0 -> bits = bits + 18446744073709551616
+                    if bits < 0 -> bits += 18446744073709551616
                     return Ok(DebugValue.FloatBits{bits: bits})
                 }
                 else -> { return Err(debug_evaluation_error(unavailable)) }

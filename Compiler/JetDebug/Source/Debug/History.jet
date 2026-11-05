@@ -79,10 +79,13 @@ struct DebugHistory {
         events := [DebugEvent]{}
         loop (index, act) in run.acts {
             writes := [DebugWrite]{}
-            if (last_act.get(act.sequence) ?? -1) == index {
-                if &grouped.remove(act.sequence) == .Val(group) -> writes = ^group
-            } else {
-                if grouped.get(act.sequence) == .Val(group) -> writes = group.copy()
+            if {
+                (last_act.get(act.sequence) ?? -1) == index -> {
+                    if &grouped.remove(act.sequence) == .Val(group) -> writes = ^group
+                }
+                else -> {
+                    if grouped.get(act.sequence) == .Val(group) -> writes = group.copy()
+                }
             }
             &events.push(DebugEvent{
                 sequence: act.sequence,
@@ -200,10 +203,9 @@ fn debug_derive_recorded_writes(run: RecordedRun) -> [DebugIndexedWrite] Never! 
     previous := [String:Int]{}
     loop (index, act) in run.acts {
         after := debug_snapshot_map(act.locals)
-        if index > 0 && run.acts[index - 1].function == act.function {
-            debug_diff_snapshots(&writes, act.sequence, act.line, run.acts[index - 1].locals, previous, act.locals, after)
-        } else {
-            debug_diff_snapshots(&writes, act.sequence, act.line, unbound_values, unbound_slots, act.locals, after)
+        if {
+            index > 0 && run.acts[index - 1].function == act.function -> debug_diff_snapshots(&writes, act.sequence, act.line, run.acts[index - 1].locals, previous, act.locals, after)
+            else -> debug_diff_snapshots(&writes, act.sequence, act.line, unbound_values, unbound_slots, act.locals, after)
         }
         previous = ^after
     }
@@ -223,12 +225,13 @@ fn debug_writes_by_sequence(run: RecordedRun) -> [Int:[DebugWrite]] Never! {
     loop derived.len() > 0 {
         write :: &derived.pop() ?? break
         converted :: DebugWrite{line: write.line, place: write.place, old_value: write.old_value, new_value: write.new_value}
-        if slots.get(write.sequence) == .Val(slot) {
-            &groups[slot].push(^converted)
-        } else {
-            slots[write.sequence] = groups.len()
-            &sequences.push(write.sequence)
-            &groups.push([DebugWrite]{^converted})
+        if slots.get(write.sequence) == {
+            .Val(slot) -> &groups[slot].push(^converted)
+            else -> {
+                slots[write.sequence] = groups.len()
+                &sequences.push(write.sequence)
+                &groups.push([DebugWrite]{^converted})
+            }
         }
     }
     grouped := [Int:[DebugWrite]]{}

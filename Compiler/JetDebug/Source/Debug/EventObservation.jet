@@ -27,19 +27,14 @@ fn render_event_observations(snapshot: String) -> String DebugEventObservationEr
     }
     root :: foundation_parse_protocol_json(snapshot) ?? return Err(debug_event_error("runtime observation is not valid JSON"))
     no_sequence :: "runtime observation has no event sequence"
-    if root == {
-        .Object(fields) -> {
-            if fields.get("event_observations") == {
-                .Val(sequence) -> {
-                    if sequence == {
-                        .Array(rows) -> {
-                            if rows.len() > DEBUG_EVENT_MAX_EVENTS {
-                                return Err(debug_event_error("runtime event observation exceeds the 256-record limit"))
-                            }
-                            return debug_render_event_rows(rows)
-                        }
-                        else -> { return Err(debug_event_error(no_sequence)) }
+    if debug_event_field(root, "event_observations") == {
+        .Val(sequence) -> {
+            if sequence == {
+                .Array(rows) -> {
+                    if rows.len() > DEBUG_EVENT_MAX_EVENTS {
+                        return Err(debug_event_error("runtime event observation exceeds the 256-record limit"))
                     }
+                    return debug_render_event_rows(rows)
                 }
                 else -> { return Err(debug_event_error(no_sequence)) }
             }
@@ -54,15 +49,16 @@ fn debug_render_event_rows(events: [Dyn]) -> String DebugEventObservationError! 
     lines := [String]{}
     loop event in events {
         if event == {
-            .Object(fields) -> {
-                if fields.len() != DEBUG_EVENT_FIELD_COUNT {
+            .Object(entries) -> {
+                if entries.len() != DEBUG_EVENT_FIELD_COUNT {
                     return Err(debug_event_error("runtime event observation contains an unsafe or unknown field"))
                 }
-                loop key in fields.keys() {
-                    if !debug_event_known_field(key) {
+                loop entry in entries {
+                    if !debug_event_known_field(entry.key) {
                         return Err(debug_event_error("runtime event observation contains an unsafe or unknown field"))
                     }
                 }
+                fields :: event
                 sequence :: debug_event_unsigned(fields, "sequence") ?? return Err(err)
                 if sequence <= previous {
                     return Err(debug_event_error("runtime event observation sequence is not strictly increasing"))
@@ -125,35 +121,46 @@ fn debug_event_allowed(key: String, value: String) -> Bool Never! {
     }
 }
 
-// Rust `integer`: a protocol integer.
-fn debug_event_integer(object: [String: Dyn], key: String) -> Int DebugEventObservationError! {
-    if object.get(key) == .Val(value) {
-        if foundation_json_integer(value) == .Val(number) -> return Ok(number)
+// The value an object row holds under `key`.
+fn debug_event_field(object: Dyn, key: String) -> Dyn? Never! {
+    if object == {
+        .Object(entries) -> {
+            loop entry in entries {
+                if entry.key == key -> return Val(entry.value)
+            }
+        }
+        else -> {}
     }
-    Err(debug_event_error("runtime event observation has invalid `{key}`"))
+    None
+}
+
+// Rust `integer`: a protocol integer.
+fn debug_event_integer(object: Dyn, key: String) -> Int DebugEventObservationError! {
+    value :: debug_event_field(object, key) ?? return Err(debug_event_error("runtime event observation has invalid `{key}`"))
+    number :: foundation_json_integer(value) ?? return Err(debug_event_error("runtime event observation has invalid `{key}`"))
+    Ok(number)
 }
 
 // Rust `unsigned`.
-fn debug_event_unsigned(object: [String: Dyn], key: String) -> Int DebugEventObservationError! {
+fn debug_event_unsigned(object: Dyn, key: String) -> Int DebugEventObservationError! {
     value :: debug_event_integer(object, key) ?? return Err(err)
     if value < 0 -> return Err(debug_event_error("runtime event observation has negative `{key}`"))
     Ok(value)
 }
 
 // Rust `count`: -1 is the published "unavailable" count.
-fn debug_event_count(object: [String: Dyn], key: String) -> Int DebugEventObservationError! {
+fn debug_event_count(object: Dyn, key: String) -> Int DebugEventObservationError! {
     value :: debug_event_integer(object, key) ?? return Err(err)
     if value < -1 -> return Err(debug_event_error("runtime event observation has invalid `{key}`"))
     Ok(value)
 }
 
 // Rust `closed`.
-fn debug_event_closed(object: [String: Dyn], key: String) -> String DebugEventObservationError! {
-    if object.get(key) == .Val(value) {
-        if value == .Text(text) {
-            if !debug_event_allowed(key, text) -> return Err(debug_event_error("runtime event observation has unknown `{key}` value"))
-            return Ok(text)
-        }
+fn debug_event_closed(object: Dyn, key: String) -> String DebugEventObservationError! {
+    value :: debug_event_field(object, key) ?? return Err(debug_event_error("runtime event observation has invalid `{key}`"))
+    if value == .Text(text) {
+        if !debug_event_allowed(key, text) -> return Err(debug_event_error("runtime event observation has unknown `{key}` value"))
+        return Ok(text)
     }
     Err(debug_event_error("runtime event observation has invalid `{key}`"))
 }
