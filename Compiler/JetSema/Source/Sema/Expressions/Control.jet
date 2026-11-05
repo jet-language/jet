@@ -2284,6 +2284,11 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
         sema_scope_rollback(&scopes, else_mark)
         else_found :: state.share_found.copy()
         sema_ownership_fork_drop(&state, fork, then_found, else_found)
+        // Both arms are bare `None`: neither gives the other a type, so the
+        // deferred then arm is its own E0308, not hidden by the else arm's.
+        if defer_then && !defer_then_err && !quiet_then && sema_expression_bare_absent_arm(else_value, true) {
+            _ := sema_check_expression(then_value, expected, environment, program, &deferred_then_scopes, &deferred_then_state, &tail_store, &context, &diagnostics)
+        }
         return None
     }
     else_reaches_merge :: !sema_stmt_block_has_no_fallthrough(else_body) && else_checked.ty != Type.Named{name: "Never"}
@@ -2350,7 +2355,11 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
                         // Two numeric producers follow the one widening law, as
                         // an operator's operands do.
                         numeric :: sema_expr_numeric_join(then_checked.ty, else_checked.ty) ?? {
-                            &diagnostics.push(sema_error("E0124", span, "this `if`'s branches produce different types: {sema_type_show(then_checked.ty)} and {sema_type_show(else_checked.ty)}", "an `if` used as a value must give the same type on every path (S68)", "make both branches produce {sema_type_show(then_checked.ty)} (or the same type)"))
+                            if context.collect_item_if == (Val(span)) {
+                                &diagnostics.push(sema_error("E0074", span, "this collecting loop produces incompatible item types", "one collecting loop builds one List, but these paths produce {sema_type_show(then_checked.ty)} and {sema_type_show(else_checked.ty)}", "convert every item to one type, or split the loops"))
+                            } else {
+                                &diagnostics.push(sema_error("E0124", span, "this `if`'s branches produce different types: {sema_type_show(then_checked.ty)} and {sema_type_show(else_checked.ty)}", "an `if` used as a value must give the same type on every path (S68)", "make both branches produce {sema_type_show(then_checked.ty)} (or the same type)"))
+                            }
                             return None
                         }
                         line :: sema_source_line_at(environment.source_segments, span) ?? 0

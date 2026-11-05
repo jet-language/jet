@@ -450,8 +450,9 @@ fn sema_function_header_check_variadic_bound_shape(function: Func, environment: 
     if last.variadic_bound_list == .Val(list) {
         bounded = list.len() > 0
     } else {
-        if last.ty == .Named(trait_name) && trait_name != "" && program.registration_graph == .Val(graph) {
-            bounded = sema_type_graph_trait_symbol(graph, environment.module_identity, trait_name) != None
+        if last.ty == .Named(trait_name) && trait_name != "" {
+            bounded = sema_type_builtin_trait_symbol(trait_name) != None
+            if !bounded && program.registration_graph == .Val(graph) -> bounded = sema_type_graph_trait_symbol(graph, environment.module_identity, trait_name) != None
         }
     }
     if !bounded -> return true

@@ -492,12 +492,16 @@ fn sema_return_value_fix(want: Type, got: Type) -> String Never! {
     // number narrowed into its fixed-width success is taught as the
     // fallible conversion.
     success :: if sema_expr_unwrap_tag(want) == .Result(ok, _) -> sema_expr_unwrap_tag(ok) else -> sema_expr_unwrap_tag(want)
-    if sema_integer_narrowing_fix(success, sema_expr_unwrap_tag(got)) == .Val(narrowing) -> return narrowing
-    if want == Type.Int && got == (Type.Named{name: "Fraction"}) -> return "`/` on whole numbers makes an exact Fraction; divide with `/%` to get a whole number rounded down"
-    if want == .List(item) && item == got -> return "wrap the value in a list: `[value]`"
-    if got == .List(item) && item == want -> return "this is a whole list; hand back one element, or combine the elements into one value"
-    if got == .Option(item) && item == want -> return "the value may be missing; supply a fallback with `?? default`, or leave early when it is `None`"
-    if type_name(want) == "String" -> return "put the value in text with interpolation: \"{{value}}\""
+    offered :: sema_expr_unwrap_tag(got)
+    if sema_integer_narrowing_fix(success, offered) == .Val(narrowing) -> return narrowing
+    // The checker hands over the types as written and as inferred: a written
+    // `Int` may still be the name `Int` and a Core `Fraction` its qualified
+    // name, so the shapes below compare by name, not by representation.
+    if type_name(success) == "Int" && sema_type_nominal_leaf(offered) == "Fraction" -> return "`/` on whole numbers makes an exact Fraction; divide with `/%` to get a whole number rounded down"
+    if success == .List(item) && type_name(item) == type_name(offered) -> return "wrap the value in a list: `[value]`"
+    if offered == .List(item) && type_name(item) == type_name(success) -> return "this is a whole list; hand back one element, or combine the elements into one value"
+    if offered == .Option(item) && type_name(item) == type_name(success) -> return "the value may be missing; supply a fallback with `?? default`, or leave early when it is `None`"
+    if type_name(success) == "String" -> return "put the value in text with interpolation: \"{{value}}\""
     hint :: sema_type_fix_hint(want, got)
     if hint.starts_with("use ") && hint.ends_with(" here") -> return "hand back a {type_name(want)} value: convert this value to {type_name(want)}, or return the value you meant"
     hint

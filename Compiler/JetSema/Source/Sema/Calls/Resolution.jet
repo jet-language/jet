@@ -155,7 +155,7 @@ fn sema_call_not_callable(name: String, ty: Type, span: Span) -> Diagnostic {
 
 // Parentheses call functions and lambdas only. A value binding
 // of another type names its type and the instance methods its own
-// declaration body writes, as Rust `not_callable_value_diagnostic` does.
+// declaration body writes; methods a derive generates are not written there.
 fn sema_call_not_callable_value(name: String, ty: Type, program: SemaProgramTables, span: Span) -> Diagnostic {
     shown :: type_name(ty)
     nominal :: if ty == {
@@ -170,7 +170,7 @@ fn sema_call_not_callable_value(name: String, ty: Type, program: SemaProgramTabl
         loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
             loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
                 receiver :: function.parameters.len() > 0 && function.parameters[0].symbol.name == "self"
-                if receiver && !methods.contains(function.symbol.name) -> &methods.push(function.symbol.name.copy())
+                if receiver && !function.declaration.compiler_generated && !methods.contains(function.symbol.name) -> &methods.push(function.symbol.name.copy())
             }
         }
     }

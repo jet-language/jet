@@ -41,7 +41,11 @@ fn sema_loop_value_check_collecting_item(value: Expr, span: Span, environment: S
     expected := sema_loop_value_collecting_type(context)
     checked_expected := expected
     if expected == .Val(expected_type) && sema_expr_is_numeric(expected_type) -> checked_expected = None
-    checked :: sema_check_expression(value, checked_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    outer_item_if :: context.collect_item_if
+    context.collect_item_if = if value == .If(_, _, _, _, _, _, _) -> Val(span) else -> None
+    checked_value :: sema_check_expression(value, checked_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.collect_item_if = outer_item_if
+    checked :: checked_value ?? return None
     if checked.ty == (Type.Named{name: "Unit"}) {
         &diagnostics.push(sema_error("E0073", span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
         return None

@@ -78,7 +78,17 @@ fn sema_inline_note_variadic_arity(rewrite: &SemaInlineRewrite, name: String, ar
 // The variadic parameter a slot's generated type parameter stands for
 // (`items__Va0` -> `items`), so diagnostics name the parameter the user wrote.
 fn sema_variadic_bound_slot_parameter(type_name: String) -> String? Never! {
-    parts :: type_name.split("__Va").to_list()
+    sema_variadic_bound_stem(type_name, "__Va")
+}
+
+// The function an arity function specializes (`log_all__va2` -> `log_all`),
+// so diagnostics name the function the user called.
+fn sema_variadic_bound_callee(name: String) -> String Never! {
+    sema_variadic_bound_stem(name, "__va") ?? name.copy()
+}
+
+fn sema_variadic_bound_stem(name: String, marker: String) -> String? Never! {
+    parts :: name.split(marker).to_list()
     if parts.len() != 2 || parts[0] == "" || parts[1] == "" -> return None
     loop byte in parts[1].bytes() {
         code :: Int.from_u8(byte)

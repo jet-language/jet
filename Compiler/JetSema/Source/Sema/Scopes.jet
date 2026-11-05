@@ -608,6 +608,9 @@ struct SemaCheckContext {
     loop_break_flows: [SemaLoopBreakFlows]
     pending_loop_value: SemaPendingLoopValue?
     collect_item_types: [Type?]
+    // The value-if a collecting loop yields as its item, while it is checked:
+    // its arms are the loop's item paths, so their mismatch is E0074.
+    collect_item_if: Span?
     last_loop_result_type: Type?
     arrow_loop_body: Bool
     reactive_upgrades: [String]
@@ -1093,6 +1096,7 @@ fn sema_check_context_init() -> SemaCheckContext Never! {
         loop_break_flows: [SemaLoopBreakFlows]{},
         pending_loop_value: None,
         collect_item_types: [Type?]{},
+        collect_item_if: None,
         last_loop_result_type: None,
         reactive_upgrades: [String]{},
         reactive_upgrade_names: [String]{},
@@ -1159,6 +1163,7 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         loop_break_flows: sema_loop_break_flows_snapshot(source.loop_break_flows),
         pending_loop_value: source.pending_loop_value,
         collect_item_types: source.collect_item_types.copy(),
+        collect_item_if: source.collect_item_if,
         last_loop_result_type: source.last_loop_result_type,
         arrow_loop_body: source.arrow_loop_body,
         reactive_upgrades: source.reactive_upgrades.copy(),
@@ -1304,6 +1309,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             loop_break_flows: sema_loop_break_flows_snapshot(context.loop_break_flows),
             pending_loop_value: context.pending_loop_value,
             collect_item_types: context.collect_item_types.copy(),
+            collect_item_if: context.collect_item_if,
             last_loop_result_type: context.last_loop_result_type,
             arrow_loop_body: context.arrow_loop_body,
             reactive_upgrades: context.reactive_upgrades.copy(),
@@ -1401,6 +1407,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.loop_break_flows = sema_loop_break_flows_snapshot(saved.loop_break_flows)
     context.pending_loop_value = saved.pending_loop_value
     context.collect_item_types = saved.collect_item_types.copy()
+    context.collect_item_if = saved.collect_item_if
     context.last_loop_result_type = saved.last_loop_result_type
     context.arrow_loop_body = saved.arrow_loop_body
     context.reactive_upgrades = saved.reactive_upgrades.copy()

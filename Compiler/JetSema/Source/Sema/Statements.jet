@@ -3175,6 +3175,7 @@ fn sema_stmt_destructure_local(name: BindName, ty: Type, mutable: Bool, environm
     symbol := Symbol{id: id, kind: SymbolKind.Local, name: local_name, module_name: environment.module_identity, owner: Val(owner), span: local_span, ty: Val(ty), visibility: 0}
     if !sema_scope_declare_local(&scopes, symbol, mutable, AccessConvention.Read, None, false) {
         &diagnostics.push(sema_already_defined(local_name, local_span))
+        sema_stmt_shadow_refused_binding(symbol, mutable, &scopes, &state)
         return None
     }
     sema_ownership_declare_binding(&state, symbol, false)
@@ -3182,6 +3183,15 @@ fn sema_stmt_destructure_local(name: BindName, ty: Type, mutable: Bool, environm
     local := checked_symbol_local(local_name, local_span, id, ty)
     local.mutable = mutable
     Val(local)
+}
+
+// A binding refused as a duplicate name (E0118) still names what was
+// written for the statements after it, so their uses check against the
+// value bound here instead of cascading from the name it failed to replace.
+fn sema_stmt_shadow_refused_binding(symbol: Symbol, mutable: Bool, scopes: &SemaScopeTable, state: &SemaOwnershipState) Never! {
+    frame :: scopes.current
+    sema_scope_push_binding(&scopes, SemaScopeBinding{frame: frame, symbol: symbol, mutable: mutable, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+    sema_ownership_declare_binding(&state, symbol, false)
 }
 
 fn sema_stmt_destructure_recover(pattern: BindPattern, mutable: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) Never! {
@@ -4556,6 +4566,7 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     bounds :: if folded == .Val(number) -> Val(integer_bounds_exact(number)) else if binding.mutable -> None else -> checked_cost_integer_bounds(init)
     if !sema_scope_declare_local(&scopes, symbol, binding.mutable, AccessConvention.Read, bounds, string_view) {
         &diagnostics.push(sema_already_defined(binding.name, binding.name_span))
+        sema_stmt_shadow_refused_binding(symbol, binding.mutable, &scopes, &state)
         return None
     }
     sema_ownership_declare_binding(&state, symbol, false)

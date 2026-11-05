@@ -522,8 +522,12 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // A unit parameter checks its argument on its own, so another unit of
         // its family can convert into it below.
         unit_parameter :: sema_expr_unit_fact(required, environment, program) != None
+        // A variadic bounded by a compiler-owned trait has the trait's name as
+        // its type; like a trait parameter's, its argument is checked on its
+        // own and then against the bound (E1313 below).
+        owned_bound_variadic :: parameter.variadic && sema_call_owned_trait_bound(required_declared) != None
         argument_expected := Type?{None}
-        if !self_typed && !borrowed_trait && !unit_parameter -> argument_expected = Val(required)
+        if !self_typed && !borrowed_trait && !unit_parameter && !owned_bound_variadic -> argument_expected = Val(required)
         // A C callback is a pure, monomorphic function or a capture-free
         // lambda whose body is safe on a foreign thread; anything else is
         // E3203, reported before the argument's own type check.
@@ -579,26 +583,29 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         if !compatible {
             // (Rust `check_variadic_bound_tail`,
             // E1313): a trait-bounded variadic argument is checked against
-            // each bound trait it fails to implement. A builtin trait stays a
-            // named bound after resolution.
+            // each bound trait it fails to implement; one that implements
+            // every bound is accepted. A builtin trait stays a named bound
+            // after resolution.
             bounds := [String]{}
             if required == .TraitObject(list) {
                 bounds = list
-            } else if required_declared == .Named(trait_name) && sema_type_builtin_trait_symbol(trait_name) != None {
+            } else if sema_call_owned_trait_bound(required_declared) == .Val(trait_name) {
                 bounds = [String]{trait_name}
             }
             if parameter.variadic && !args[index].spread && bounds.len() > 0 {
                 arg_name :: type_name(value.ty)
+                unmet := false
                 loop bound in bounds {
-                    if bounds.len() > 1 && sema_call_type_assignable(Type.TraitObject{bounds: [String]{bound}}, value.ty, environment, program) == (Val(true)) -> next
-                    shown :: sema_error_conversion_leaf(bound)
-                    &diagnostics.push(sema_error("E1313", expr_span(args[index].expr), "`{arg_name}` doesn't implement `{shown}`", "`{parameter.name}: ...{shown}` checks every argument against `{shown}` — that's how `{callee}` accepts a mix of types safely", "implement `{shown}` for `{arg_name}`'s type, or drop the value from this call"))
+                    if sema_call_variadic_bound_met(bound, value.ty, environment, program) == (Val(true)) -> next
+                    &diagnostics.push(sema_call_variadic_bound_unmet(arg_name, parameter.name, bound, callee, expr_span(args[index].expr)))
+                    unmet = true
                 }
-                return None
+                if unmet -> return None
+            } else {
+                &diagnostics.push(sema_call_argument_mismatch(callee, index, required, sema_call_resolved_type(value.ty, environment, program), expr_span(args[index].expr)))
+                complete = false
+                next
             }
-            &diagnostics.push(sema_call_argument_mismatch(callee, index, required, sema_call_resolved_type(value.ty, environment, program), expr_span(args[index].expr)))
-            complete = false
-            next
         }
         // E3211 (Rust direct_calls.rs:2216 @ 6083377777): a written String
         // literal with a NUL byte can never reach a C-boundary `String`
@@ -649,6 +656,30 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         if sema_call_key_named_elsewhere(take_keys[position], take_indices[position], reference_starts, context) -> sema_ownership_note_implicit_take_twice(&state, expr_span(args[take_indices[position]].expr))
     }
     Val(SemaCallTypedArguments{values: values, slots: slots, required_types: required_types, source_indices: source_indices, pin_arguments: pin_arguments, binder_site: binder_site})
+}
+
+// Whether an argument of type `ty` implements variadic bound `bound`: as a
+// trait value of that bound, or by the bound check generic calls use; None
+// while that check cannot decide.
+fn sema_call_variadic_bound_met(bound: String, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
+    if sema_call_type_assignable(Type.TraitObject{bounds: [String]{bound}}, ty, environment, program) == (Val(true)) -> return Val(true)
+    if program.registration_graph == .Val(graph) -> return sema_type_bound_satisfied_with_generics(graph, ty, bound, environment.module_identity, environment.generic_params)
+    None
+}
+
+// E1313: an argument of a trait-bounded variadic `parameter` misses `bound`.
+// `callee` may be an arity function, which reports as the function called.
+fn sema_call_variadic_bound_unmet(arg_name: String, parameter: String, bound: String, callee: String, span: Span) -> Diagnostic {
+    shown :: sema_error_conversion_leaf(bound)
+    called :: sema_variadic_bound_callee(callee)
+    sema_error("E1313", span, "`{arg_name}` doesn't implement `{shown}`", "`{parameter}: ...{shown}` checks every argument against `{shown}` — that's how `{called}` accepts a mix of types safely", "implement `{shown}` for `{arg_name}`'s type, or drop the value from this call")
+}
+
+// The compiler-owned trait a parameter type names. Such a bound stays a
+// named type after resolution, where a declared trait becomes a trait object.
+fn sema_call_owned_trait_bound(ty: Type) -> String? {
+    if ty == .Named(name) && sema_type_builtin_trait_symbol(name) != None -> return Val(name.copy())
+    None
 }
 
 // A fixed-shape Core route checks its own arguments. An unmarked bare name

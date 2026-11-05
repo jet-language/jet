@@ -673,7 +673,8 @@ fn sema_type_alias_cycles_check(graph: &SemaRegistrationGraph) Never! {
 
 // Whether `name`, written as a type in module row `caller`, names nothing:
 // no primitive, type parameter, associated type, compiler or Core carrier
-// the checker types itself, Core export, or declared or imported type
+// the checker types itself, compiler-owned bound trait, Core export, or
+// declared or imported type
 // (#6294). Core source, an incomplete graph and qualified spellings
 // (`json.Value`, which resolve through their own owner checks) are never
 // judged here.
@@ -682,7 +683,7 @@ fn sema_type_written_name_unknown(graph: SemaRegistrationGraph, caller: Int, nam
     if name == "" || name.contains(".") || name.contains(":") || name.contains("$") || generic_names.contains(name) -> return false
     if foundation_named_type(name) != (Type.Named{name: name}) -> return false
     if name == "Self" || name == "Shared" || name == "Unit" || name == "Never" || name == "Err" || name == "Dyn" || name == "_" || name == "()" || name == "str" || name == "bytes" || name == "Complex" -> return false
-    if sema_reserved_type_name(name) || core_root_type(name) || sema_registration_core_builtin_is_name(name) || graph.compiler_builtin_rows.get(name) != None -> return false
+    if sema_reserved_type_name(name) || core_root_type(name) || sema_registration_core_builtin_is_name(name) || graph.compiler_builtin_rows.get(name) != None || sema_type_builtin_trait_symbol(name) != None -> return false
     if sema_process_handle_type(name) || sema_call_http_known_receiver_type(name) || sema_call_reflection_synthetic_printable(name) || sema_stream_handle_owner(Type.Named{name: name}) != None -> return false
     if sema_type_graph_lookup_symbol_at(graph, caller, name) != None || sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) != None -> return false
     // A standard or declared unit's type (`Meter`, an affine unit's `…Point`).
@@ -1439,6 +1440,9 @@ fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
             }
         }
         .TraitObject(bounds) -> return Val(bounds.contains(bound_name))
+        // A function value has no nominal row to carry an impl, and no
+        // compiler-owned bound trait is met by a function.
+        .Fn(_, _, _, _, _, _) -> return Val(false)
         .Tagged(_, inner) -> return sema_type_bound_satisfied_at(graph, inner, bound_name, caller, generic_params)
         .Named(name) -> {
             if sema_type_name_is_generic(generic_params, name) -> return None
