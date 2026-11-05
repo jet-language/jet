@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6569,
-    "rev": 92418,
+    "rev": 92433,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22999,6 +22999,11 @@
       "assignee": "Main",
       "log": [
         {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea): the games.frame lane (Tools/gauntlet/entries/game-frame/entry.json) shows Jet ahead (0.0386 s vs Rust 0.0443, Zig 0.0493, C 0.0766), but Jet runs its built-in runtime rasterizer while the peers run hand-written rasterizers, so the cell measures the runtime and not Jet code. The ceiling reference is filed on #6461; the codegen gap on Doom kernels on #6414."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 3 criteria from archived #2954, #4055: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -24001,10 +24006,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T10:47:46.080Z",
-      "updated": "2026-11-04T23:49:13.828Z",
+      "updated": "2026-11-05T14:23:23.327Z",
       "updatedBy": "Main",
       "probe": null,
-      "claimedAt": "2026-11-04T23:49:13.828Z",
+      "claimedAt": "2026-11-05T14:23:23.327Z",
       "visualMedia": [],
       "goals": [
         "G23"
@@ -40616,6 +40621,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-09-29T02:20:46.524Z"
+        },
+        {
+          "n": 6,
+          "text": "Taking the raw address of a list element inside #Unsafe (`*list[0]`) either compiles to a pointer into the list's storage or is rejected with a registered diagnostic; today it is an internal compiler error (\"raw address of a temporary\"), which violates I2. A census probes every place-expression form under * (list, array, field, nested index, view) at O0, O1 and O2, and each lands as a case. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:23:20.496Z"
         }
       ],
       "refs": [
@@ -40635,7 +40649,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-28T00:46:54.243Z",
-      "updated": "2026-11-04T18:09:40.549Z",
+      "updated": "2026-11-05T14:23:20.496Z",
       "updatedBy": "Main",
       "goals": [
         "G19"
@@ -60200,6 +60214,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:43:12.042Z"
+        },
+        {
+          "n": 21,
+          "text": "A Doom-style program on the static Linux target opens a window, presents a 320x200 8-bit indexed framebuffer through a 256-entry palette at 35 Hz, reads keyboard input, and plays a PCM sound effect, as an example with golden output; the platform layer follows the ratified D-RAYLIB-DRIVER-LOAD1 (speak the display and sound protocols directly, stay static). Today Compiler/JetRuntime/Source/RouteAGame.jet:1-8 opens no window and input is inert (window_should_close is true at :25), Core/Game/Raylib.jet:768-775 play_sound only checks the path, and the only present path is __fill_rect runs (Raylib.jet:819-821). Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:23:19.838Z"
         }
       ],
       "refs": [
@@ -60215,7 +60238,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-16T13:36:57.362Z",
-      "updated": "2026-11-04T23:43:12.648Z",
+      "updated": "2026-11-05T14:23:19.838Z",
       "updatedBy": "Main",
       "goals": [
         "G13"
@@ -70475,6 +70498,11 @@
         {
           "at": "2026-11-05",
           "by": "Main",
+          "text": "Owner ruling 2026-11-05: unbuilt work is built to the spec and the owner's requirements for that feature, not to the Rust compiler's output. Rust is removed and is not an oracle; Jet will differ from Rust and is meant to be better. A ui row whose Rust-era snapshot differs from Jet's spec-conforming output (registered code, what, why and fix) gets its snapshot regenerated from Jet, not Jet bent to match Rust bytes. KF-UNPORTED rows mean 'build to spec'."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
           "text": "c15 progress: ui rows A-PURITY clock_system_pure and A-FFI cffi_e3204_two_use_forms: 2 FAIL -> PASS. Root: a Clock intrinsic with no declared callee (Clock.system) in a pure body is E3403 with the pure denial, as Rust record_static_time_effect reports it, not an impure-call error; foreign-provider diagnostics passed their own span start as the aggregate source offset, so E3204 pointed at 1:1. clock_system_pure.stderr drops the stale (D-PURE2). Clock-provenance rows (laundered_through_a_struct*) stay open. On dev a706770a61 + c15e + c15f: ui 2376 rows PASS 2035 -> 2037; 210 cases and 1585 golden o0 rows lost 0; FIXED_POINT jet 8c7edcff4be66fd9"
         },
         {
@@ -71338,7 +71366,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-05T13:57:35.551Z",
+      "updated": "2026-11-05T14:13:37.290Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -72618,6 +72646,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T20:05:26.088Z"
+        },
+        {
+          "n": 15,
+          "text": "Definite initialization accepts a fixed array `[T#N]{ uninit }` that a counted loop fully writes before any read; today it reports E0420. The census covers each fill shape (counted loop, while with index, fill call) and each lands as a case. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:23:21.359Z"
         }
       ],
       "refs": [
@@ -72631,7 +72668,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-04T20:05:26.088Z",
+      "updated": "2026-11-05T14:23:21.359Z",
       "updatedBy": "Main",
       "goals": [
         "G5",
@@ -83993,6 +84030,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:43:34.843Z"
+        },
+        {
+          "n": 53,
+          "text": "On the Doom renderer kernels (R_DrawColumn, R_DrawSpan, FixedMul/FixedDiv, recursive BSP walk) with matching checksums, jet build --release is measurably faster than --optimize=none and reaches the peer floor against gcc -O2 and clang -O2. Measured on 2026-11-05: Jet O2 is 8.6x, 7.1x, 8.3x and 2.5x slower than gcc -O2; O0 and O2 run at nearly the same speed; #Inline(Always) and wrapping arithmetic make no measurable difference; --bounds=off only halves the column kernel. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:23:22.032Z"
         }
       ],
       "refs": [],
@@ -84004,7 +84050,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-04T23:43:35.581Z",
+      "updated": "2026-11-05T14:23:22.032Z",
       "updatedBy": "Main"
     },
     {
@@ -87463,6 +87509,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T18:52:20.942Z"
+        },
+        {
+          "n": 9,
+          "text": "The games area has a machine-ceiling reference built from Jet-written renderer kernels (column, span, fixed-point, BSP), with a matching asm-parity cell and a required gauntlet cell. Today Tools/gauntlet/matrix.json lists games with \"required\": false and no cells, Tools/perf/asm-parity has no game cell, and the game-frame entry compares Jet's built-in runtime rasterizer with hand-written rasterizers in other languages, so it measures the runtime, not Jet code generation. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:23:22.674Z"
         }
       ],
       "refs": [],
@@ -87471,7 +87526,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T18:51:36.927Z",
-      "updated": "2026-11-02T22:57:35.554Z",
+      "updated": "2026-11-05T14:23:22.674Z",
       "updatedBy": "Main"
     },
     {
@@ -91172,6 +91227,31 @@
       "log": [
         {
           "at": "2026-11-05",
+          "by": "agent",
+          "text": "ec28412cb0: the retired E1225 tests (jetpack_engine jetpack_toml_retirement_fires_e1225_from_cli and _from_nested_directory, tests/cli/jetpack_toml_retired.txt) are held out of the tree with their known-failing rows; RustTestMapping marks them obsolete. E1225 stays registered as retired, so old logs still explain."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "agent",
+          "text": "ec28412cb0: the E1402 ui tests (compiler_extension_host_failed, compiler_extension_incompatible) are held out of the tree with their known-failing rows. They pinned Rust output for the compiler-extension host, which the Jet compiler does not have; E1402 stays registered and returns with that host."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "agent",
+          "text": "ec28412cb0: ui --coverage on dev 7b6764ff4f found 38 registered codes with no snapshot. 16 now have real ones (E0063 E0081 E0158 E0223 E0391 E0992 E1404 E1412 E2474 E3106 E2501 E2932 L0303 E2113 L2201 E3502). 22 stay missing, each with its root in the commit message: 18 have no CLI path today, JT0198/JT0199 move with #6568 c2, E0401 and E2476 render text that misses the spec. Diagnostic pages regenerated; tests/guards/diagnostic_pages.jet FAIL -> PASS."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Defects found while snapshotting codes for ui --coverage (2026-11-05): (1) E0401 for an 'Int Err!' value reads 'needs Int, but the value is Int', and its fix names the retired bare '?'; (2) E2476's registry row is staged runtime, so sema prints 'Error [E2476]' without its jet. name; (3) two b.generate(\"alpha\") calls report E3502 'fn build returns nothing' instead of E3511; (4) the 4 criterion9 programmable_build cases exit 0 on base and have no known-failing rows. (1) and (2) are diagnostic-text defects of the kind #6568's generation and registry-render checks catch structurally; (3) and (4) are build-script defects."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-05: unbuilt work is built to the spec and the owner's requirements for that feature, not to the Rust compiler's output. Rust is removed and is not an oracle; Jet will differ from Rust and is meant to be better. A ui row whose Rust-era snapshot differs from Jet's spec-conforming output (registered code, what, why and fix) gets its snapshot regenerated from Jet, not Jet bent to match Rust bytes. KF-UNPORTED rows mean 'build to spec'."
+        },
+        {
+          "at": "2026-11-05",
           "by": "Main",
           "text": "ui --coverage: registered codes with no reachable CLI path (unfinished features or defects); these stay missing in the gate, with no allowlist (I4), until fixed: E0122 (only a defect path emits it: decide internal error or user path); E1410 (parser E0999 StackedRuleLines fires first on a doubled panel marker); E2389-E2392 (only text cells in Inspect proof rows, Inspect.jet:1751, never rendered as diagnostics); E3105 (the driver never fills request.gate_policies outside tests, so org and package unsafe declarations never reach sema_unsafe_inspect; #4268); E1257 and E1260 (plugin interface facts not loaded under jet check); E3512 (jet build --locked unbuilt; also locked_generated_drift_fails_before_materialization.case fails on base with no known-failing row); E3503 (ungranted build-action refusal unbuilt, #4268). Still being checked: E0998, E1300, E4201-E4203."
         },
@@ -91453,6 +91533,15 @@
           "evidence": "OBSOLETE: Astra appears nowhere in AGENTS.md or skills; Luna/Sol linger in .agents/skills/gauntlet/references/{build,run,shared}.md. G14 triage, 1b82825044:Docs/audits/g14-triage-2026-11/triage.tsv, reviewed by Main.",
           "at": "2026-11-05T02:35:06.000Z",
           "closure": "obsolete"
+        },
+        {
+          "n": 22,
+          "text": "The admitted compiler is reachable from a fresh clone: Tools/agent/jet-env sets JET to a runnable jet (today `Tools/agent/jet-env bash -c 'echo $JET'` prints an empty value, so tools fall back to a published base by hand). Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-05T14:23:19.189Z"
         }
       ],
       "refs": [],
@@ -91463,8 +91552,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T16:33:50.383Z",
-      "updated": "2026-11-05T14:02:37.378Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-05T14:29:35.452Z",
+      "updatedBy": "agent"
     },
     {
       "id": "c09umw0r",
@@ -91808,14 +91897,20 @@
       "epoch": "e14",
       "milestoneId": null,
       "phase": "ready",
-      "priority": "P1",
+      "priority": "P0",
       "plan": null,
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Owner 2026-11-05: single source of truth is to be resolved as soon as possible; raised to P0 and worked now. Owner order (standing, restated): defects are found structurally, never one by one. Enforcement from 2026-11-05: Main's landing script refuses any code patch whose msg lacks a 'Census:' line (the collect-all run, its scope and totals by root) and a 'Prevents:' line (the structural check that stops the defect class recurring)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -91862,7 +91957,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T14:08:03.130Z",
-      "updated": "2026-11-05T14:08:05.788Z",
+      "updated": "2026-11-05T14:13:39.545Z",
       "updatedBy": "Main"
     }
   ],
@@ -172986,6 +173081,111 @@
   ],
   "events": [
     {
+      "at": "2026-11-05T14:29:35.452Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T14:29:34.707Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T14:29:33.995Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T14:29:01.667Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T14:23:23.327Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hs3czc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T14:23:22.674Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0j6lwuh",
+      "note": "#9 The games area has a machine-ceiling reference built from Je"
+    },
+    {
+      "at": "2026-11-05T14:23:22.032Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0i891tv",
+      "note": "#53 On the Doom renderer kernels (R_DrawColumn, R_DrawSpan, Fixe"
+    },
+    {
+      "at": "2026-11-05T14:23:21.359Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0r02x8n",
+      "note": "#15 Definite initialization accepts a fixed array `[T#N]{ uninit"
+    },
+    {
+      "at": "2026-11-05T14:23:20.496Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tgtjtu",
+      "note": "#6 Taking the raw address of a list element inside #Unsafe (`*l"
+    },
+    {
+      "at": "2026-11-05T14:23:19.838Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0776o2m",
+      "note": "#21 A Doom-style program on the static Linux target opens a wind"
+    },
+    {
+      "at": "2026-11-05T14:23:19.189Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rdxo6y",
+      "note": "#22 The admitted compiler is reachable from a fresh clone: Tools"
+    },
+    {
+      "at": "2026-11-05T14:13:39.545Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xuffg1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T14:13:38.901Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xuffg1",
+      "note": "priority"
+    },
+    {
+      "at": "2026-11-05T14:13:37.940Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T14:13:37.290Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-05T14:08:05.788Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -176456,713 +176656,6 @@
       "action": "card.criteria-add",
       "ref": "c025w7rd",
       "note": "#12 (was #499 c1) core.archive gzip helpers moved to core.compre"
-    },
-    {
-      "at": "2026-11-04T23:47:56.935Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w7t4qu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:47:56.323Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0w7t4qu",
-      "note": "#21 (was #1632 c5) Targeted tests pass; no new tests/jit_gaps.tx"
-    },
-    {
-      "at": "2026-11-04T23:47:55.709Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0w7t4qu",
-      "note": "#20 (was #1632 c4) Enum values print the same on AOT, jet run (J"
-    },
-    {
-      "at": "2026-11-04T23:47:55.099Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0w7t4qu",
-      "note": "#19 (was #1632 c3) Reordering a Prelude enum variant fails the b"
-    },
-    {
-      "at": "2026-11-04T23:47:54.488Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0w7t4qu",
-      "note": "#18 (was #1632 c2) A test proves the JIT and Prelude discriminan"
-    },
-    {
-      "at": "2026-11-04T23:47:53.043Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0w7t4qu",
-      "note": "#17 (was #1632 c1) The two hardcoded discriminant tables in type"
-    },
-    {
-      "at": "2026-11-04T23:47:52.444Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01oyhqk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:47:51.837Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01oyhqk",
-      "note": "#6 (was #3914 c1) Closed by burn-down consolidation: merged int"
-    },
-    {
-      "at": "2026-11-04T23:47:51.227Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01oyhqk",
-      "note": "#5 (was #3569 c2) A focused positive witness produces identical"
-    },
-    {
-      "at": "2026-11-04T23:47:50.640Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01oyhqk",
-      "note": "#4 (was #3569 c1) Explicit !Never calls work as ordinary values"
-    },
-    {
-      "at": "2026-11-04T23:47:50.023Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01oyhqk",
-      "note": "#3 (was #3565 c3) Nested propagation uses the existing checked "
-    },
-    {
-      "at": "2026-11-04T23:47:49.418Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01oyhqk",
-      "note": "#2 (was #3565 c2) Focused positive witnesses preserve explicit "
-    },
-    {
-      "at": "2026-11-04T23:47:48.826Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01oyhqk",
-      "note": "#1 (was #14) Serde manual bound override attribute (reserved by"
-    },
-    {
-      "at": "2026-11-04T23:47:48.216Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06lvend",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:47:47.628Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06lvend",
-      "note": "#8 (was #2800 c2) All named library paths use real Tensor/autod"
-    },
-    {
-      "at": "2026-11-04T23:47:47.003Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06lvend",
-      "note": "#7 (was #2800 c1) The AI/ML package and real Tensor-based execu"
-    },
-    {
-      "at": "2026-11-04T23:47:46.342Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06lvend",
-      "note": "#6 (was #2780 c4) Every timing receipt binds length, precision,"
-    },
-    {
-      "at": "2026-11-04T23:47:45.684Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06lvend",
-      "note": "#5 (was #2780 c3) The rank-1 real FFT contract remains correct "
-    },
-    {
-      "at": "2026-11-04T23:47:45.060Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06lvend",
-      "note": "#4 (was #2780 c2) The fix preserves results on every execution "
-    },
-    {
-      "at": "2026-11-04T23:47:44.444Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06lvend",
-      "note": "#3 (was #2780 c1) The repro's measured time meets the target in"
-    },
-    {
-      "at": "2026-11-04T23:47:43.842Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00sxc6r",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:47:43.201Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00sxc6r",
-      "note": "#7 (was #5098 c1) jet doc on the runtime unit finishes promptly"
-    },
-    {
-      "at": "2026-11-04T23:47:42.581Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00sxc6r",
-      "note": "#6 (was #1498 c3) No new parallel compiler-speed plan, cache, o"
-    },
-    {
-      "at": "2026-11-04T23:47:41.965Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00sxc6r",
-      "note": "#5 (was #1498 c1) D-INCR-UNIT1 and D-TYPECHECK-BOUND1 are ratif"
-    },
-    {
-      "at": "2026-11-04T23:47:41.356Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00sxc6r",
-      "note": "#4 (was #1023 c7) Slice-specific: the behavior this card alone "
-    },
-    {
-      "at": "2026-11-04T23:47:40.720Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00sxc6r",
-      "note": "#3 (was #1023 c3, #1025 c3, #1027 c3) Cold-cache regressions, i"
-    },
-    {
-      "at": "2026-11-04T23:47:40.072Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00sxc6r",
-      "note": "#2 (was #1023 c2, #1025 c2, #1027 c2) Clean and incremental JIT"
-    },
-    {
-      "at": "2026-11-04T23:47:39.439Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05efrmn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:47:38.816Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05efrmn",
-      "note": "#18 (was #2329 c3) `jet inspect guarantees` shows every effectiv"
-    },
-    {
-      "at": "2026-11-04T23:47:38.184Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05efrmn",
-      "note": "#17 (was #2329 c2) Sema and lint enforce the effective policy wi"
-    },
-    {
-      "at": "2026-11-04T23:47:37.251Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05efrmn",
-      "note": "#16 (was #2329 c1) One package policy block sets effect ceilings"
-    },
-    {
-      "at": "2026-11-04T23:47:36.586Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05efrmn",
-      "note": "#15 (was #2047 c3) Report recommends adopt/defer per field and r"
-    },
-    {
-      "at": "2026-11-04T23:47:35.828Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05efrmn",
-      "note": "#14 (was #2047 c2) Each proposed field arrives with a concrete c"
-    },
-    {
-      "at": "2026-11-04T23:47:35.031Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05efrmn",
-      "note": "#13 (was #2047 c1) Survey names every current consumer of the ef"
-    },
-    {
-      "at": "2026-11-04T23:47:34.127Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0isxyo3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:47:33.282Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0isxyo3",
-      "note": "#8 (was #2470 c1) Implementation-only closure: TUI interaction,"
-    },
-    {
-      "at": "2026-11-04T23:47:32.516Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0isxyo3",
-      "note": "#7 (was #2467 c6) Source implementation is complete for this co"
-    },
-    {
-      "at": "2026-11-04T23:47:31.638Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0isxyo3",
-      "note": "#6 (was #2467 c5) Source implementation is complete for this co"
-    },
-    {
-      "at": "2026-11-04T23:47:30.775Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0isxyo3",
-      "note": "#5 (was #2467 c4) Source implementation is complete for this co"
-    },
-    {
-      "at": "2026-11-04T23:47:29.882Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0isxyo3",
-      "note": "#4 (was #2467 c3) Source implementation is complete for this co"
-    },
-    {
-      "at": "2026-11-04T23:47:28.853Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0isxyo3",
-      "note": "#3 (was #2467 c2) Source implementation is complete for this co"
-    },
-    {
-      "at": "2026-11-04T23:47:27.911Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0isxyo3",
-      "note": "#2 (was #2467 c1) Source implementation is complete for this co"
-    },
-    {
-      "at": "2026-11-04T23:47:26.937Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0a0gmpl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:47:26.025Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0a0gmpl",
-      "note": "#9 (was #2864 c3) Nested list/map place writes preserve D-MEM1 "
-    },
-    {
-      "at": "2026-11-04T23:47:25.211Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0a0gmpl",
-      "note": "#8 (was #2864 c2) Element assignment on lists and maps in the e"
-    },
-    {
-      "at": "2026-11-04T23:47:24.357Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0a0gmpl",
-      "note": "#7 (was #2864 c1) Interpreted sieve scales linearly: n=100,000 "
-    },
-    {
-      "at": "2026-11-04T23:47:23.485Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0a0gmpl",
-      "note": "#6 (was #2862 c4) Proof: `node --test Tools/gauntlet/harness/ti"
-    },
-    {
-      "at": "2026-11-04T23:47:22.494Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0a0gmpl",
-      "note": "#5 (was #2862 c3) gauntlet run tier for the five entries comple"
-    },
-    {
-      "at": "2026-11-04T23:47:21.552Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0a0gmpl",
-      "note": "#4 (was #2862 c2) A corpus-wide trace test fails when any gaunt"
-    },
-    {
-      "at": "2026-11-04T23:47:20.774Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0a0gmpl",
-      "note": "#3 (was #2862 c1) Tier trace shows native rows and whole_progra"
-    },
-    {
-      "at": "2026-11-04T23:47:19.997Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08s0ppt",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:47:19.263Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08s0ppt",
-      "note": "#41 (was #4422 c1) Closed by burn-down consolidation: merged int"
-    },
-    {
-      "at": "2026-11-04T23:47:18.557Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08s0ppt",
-      "note": "#40 (was #4236 c1) Closed by burn-down consolidation: merged int"
-    },
-    {
-      "at": "2026-11-04T23:47:17.894Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08s0ppt",
-      "note": "#39 (was #2398 c3) A false statement-position if with no else em"
-    },
-    {
-      "at": "2026-11-04T23:47:17.136Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08s0ppt",
-      "note": "#38 (was #2398 c2) Discarded Result handlers evaluate the subjec"
-    },
-    {
-      "at": "2026-11-04T23:47:16.156Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08s0ppt",
-      "note": "#37 (was #2398 c1) Statement-position if checks every condition,"
-    },
-    {
-      "at": "2026-11-04T23:47:15.483Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08s0ppt",
-      "note": "#36 (was #1897 c2) No Rust runtime wording reaches the user on a"
-    },
-    {
-      "at": "2026-11-04T23:47:14.772Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08s0ppt",
-      "note": "#35 (was #1897 c1) The recursion probe prints a registered Jet s"
-    },
-    {
-      "at": "2026-11-04T23:47:14.033Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08rdp62",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:47:13.326Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08rdp62",
-      "note": "#11 (was #4198 c2) A dependency that dereferences a raw pointer "
-    },
-    {
-      "at": "2026-11-04T23:47:12.628Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08rdp62",
-      "note": "#10 (was #3915 c1) Closed by burn-down consolidation: merged int"
-    },
-    {
-      "at": "2026-11-04T23:47:11.840Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08rdp62",
-      "note": "#9 (was #645 c5) Every policy/site/bypass failure has Jet-owned"
-    },
-    {
-      "at": "2026-11-04T23:47:11.177Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08rdp62",
-      "note": "#8 (was #645 c4) Typed valid_ptr/aligned/no_alias and operation"
-    },
-    {
-      "at": "2026-11-04T23:47:10.515Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08rdp62",
-      "note": "#7 (was #645 c3) Per-site .Track/.Skip is available as the owne"
-    },
-    {
-      "at": "2026-11-04T23:47:09.722Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08rdp62",
-      "note": "#6 (was #645 c2) Package and organization policies compute one "
-    },
-    {
-      "at": "2026-11-04T23:47:09.019Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08rdp62",
-      "note": "#5 (was #645 c1) Default behavior remains D-LL1/D-UNSAFE2 gate-"
-    },
-    {
-      "at": "2026-11-04T23:47:08.337Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0692z4s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:47:07.655Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0692z4s",
-      "note": "#13 (was #3445 c1) The checked tcp_stream.write_text Prelude met"
-    },
-    {
-      "at": "2026-11-04T23:47:06.987Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0692z4s",
-      "note": "#12 (was #3444 c1) The checked tcp_listener.accept Prelude metad"
-    },
-    {
-      "at": "2026-11-04T23:47:06.271Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0692z4s",
-      "note": "#11 (was #3080 c3) Event publication does not fabricate a handle"
-    },
-    {
-      "at": "2026-11-04T23:47:05.584Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0692z4s",
-      "note": "#10 (was #3080 c2) Timeout/lost reply after possible mutation re"
-    },
-    {
-      "at": "2026-11-04T23:47:04.901Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0692z4s",
-      "note": "#9 (was #3080 c1) Request is sent exactly when the public API s"
-    },
-    {
-      "at": "2026-11-04T23:47:04.214Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0692z4s",
-      "note": "#8 (was #2382 c3) The client request builder json(value) accept"
-    },
-    {
-      "at": "2026-11-04T23:47:03.508Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0692z4s",
-      "note": "#7 (was #2382 c2) Incoming request and received response text p"
-    },
-    {
-      "at": "2026-11-04T23:47:02.780Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rkebo4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:47:02.036Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0rkebo4",
-      "note": "#23 (was #3926 c1) Closed by burn-down consolidation: merged int"
-    },
-    {
-      "at": "2026-11-04T23:47:01.168Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0rkebo4",
-      "note": "#22 (was #2960 c1) Implementation-only closure: Checked-native a"
-    },
-    {
-      "at": "2026-11-04T23:47:00.392Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0rkebo4",
-      "note": "#21 (was #2957 c1) Implementation-only closure: Canonical eviden"
-    },
-    {
-      "at": "2026-11-04T23:46:59.757Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0rkebo4",
-      "note": "#20 (was #2956 c1) Implementation-only closure: One exact foreig"
-    },
-    {
-      "at": "2026-11-04T23:46:59.026Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0rkebo4",
-      "note": "#19 (was #2953 c1) Implementation-only closure: One foreign boun"
-    },
-    {
-      "at": "2026-11-04T23:46:58.103Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0rkebo4",
-      "note": "#18 (was #1900 c2) E3208 carries the binder's root cause, includ"
-    },
-    {
-      "at": "2026-11-04T23:46:57.448Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0rkebo4",
-      "note": "#17 (was #1900 c1) E0956's fix text names the real limitation an"
-    },
-    {
-      "at": "2026-11-04T23:46:56.764Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0rkebo4",
-      "note": "#16 (was #351) Syntax gap: audit/complete D-PLUGIN1 + D-DEP-WASM"
-    },
-    {
-      "at": "2026-11-04T23:46:56.071Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0iiv9ft",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:46:55.399Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iiv9ft",
-      "note": "#11 (was #2385 c5) process.args returns a fresh List<String> wit"
-    },
-    {
-      "at": "2026-11-04T23:46:54.730Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iiv9ft",
-      "note": "#10 (was #2385 c4) fs.walk_files inherits fs.walk ordering, erro"
-    },
-    {
-      "at": "2026-11-04T23:46:54.033Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iiv9ft",
-      "note": "#9 (was #2385 c3) Path.is_within compares normalized lexical co"
-    },
-    {
-      "at": "2026-11-04T23:46:53.238Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iiv9ft",
-      "note": "#8 (was #2385 c2) ASCII lower and upper change only A-Z/a-z, pr"
-    },
-    {
-      "at": "2026-11-04T23:46:52.436Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iiv9ft",
-      "note": "#7 (was #2385 c1) The ratified ASCII, path, walk, and args APIs"
-    },
-    {
-      "at": "2026-11-04T23:46:51.698Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iiv9ft",
-      "note": "#6 (was #2361 c3) The Jet dogfood archive digest matches the sh"
-    },
-    {
-      "at": "2026-11-04T23:46:50.974Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iiv9ft",
-      "note": "#5 (was #2361 c2) AOT, default JIT, and forced interpreter mars"
-    },
-    {
-      "at": "2026-11-04T23:46:50.152Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iiv9ft",
-      "note": "#4 (was #2361 c1) Stat.mode reports the exact mode value used b"
-    },
-    {
-      "at": "2026-11-04T23:46:49.462Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fq2ryv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-04T23:46:48.835Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fq2ryv",
-      "note": "#12 (was #3087 c7, #3100 c4) Exercise two service instances read"
-    },
-    {
-      "at": "2026-11-04T23:46:48.183Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fq2ryv",
-      "note": "#11 (was #3087 c3) HTTP GET response cache does not silently bec"
-    },
-    {
-      "at": "2026-11-04T23:46:47.538Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fq2ryv",
-      "note": "#10 (was #3087 c2) TTL units and expiration boundary are explici"
-    },
-    {
-      "at": "2026-11-04T23:46:46.885Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fq2ryv",
-      "note": "#9 (was #3087 c1) Stored false,0 and empty text remain hits [pr"
-    },
-    {
-      "at": "2026-11-04T23:46:46.150Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fq2ryv",
-      "note": "#8 (was #1043 c1) Every behavior named by “Build graph: remote "
-    },
-    {
-      "at": "2026-11-04T23:46:45.355Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fq2ryv",
-      "note": "#7 (was #693 c4, #1043 c4) Focused end-to-end driver tests forc"
-    },
-    {
-      "at": "2026-11-04T23:46:44.672Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fq2ryv",
-      "note": "#6 (was #693 c3, #1043 c3) Corrupt or mismatched entries, malic"
-    },
-    {
-      "at": "2026-11-04T23:46:43.977Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fq2ryv",
-      "note": "#5 (was #693 c2, #1043 c2) Local and remote action identity, in"
     }
   ],
   "nextNum": 368,
