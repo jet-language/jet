@@ -34,13 +34,13 @@ fn host_i32(value: I64) -> I64 {
 
 #Export(c) fn jet_std_os_getpgrp() -> I64 { host_call(I64{111}, I64{0}, I64{0}, I64{0}) }
 
-// OsExtra.rs:107 jet_sys_getuid_raw: unix getuid(2) cannot fail, so Some.
+// jet_sys_getuid_raw: unix getuid(2) cannot fail, so Some.
 #Export(c) fn jet_sys_getuid_raw(some: I64) -> I64 {
     rt_text_store(some, jet_std_os_getuid())
     I64{1}
 }
 
-// OsExtra.rs:10 std::thread::available_parallelism: the runtime's one probe
+// std::thread::available_parallelism: the runtime's one probe
 // (HostParallelism.jet: cgroup quota, affinity, online fallback) shared with
 // the scheduler pool. Rust's Err is None; Some carries the exact-Int word.
 #Export(c) fn jet_sys_cpu_count_raw(some: I64) -> I64 {

@@ -438,7 +438,6 @@ fn jet_target_layout_engine(items: [Item], target: JetTargetLayout) -> TargetLay
     jet_target_layout_engine_with_registry(items, [TargetLayoutQualifiedItem]{}, [TargetLayoutNameResolution]{}, target)
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::new
 fn jet_target_layout_engine_with_registry(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], target: JetTargetLayout) -> TargetLayoutEngine Never! {
     item_positions := [String:Int]{}
     loop position in 0..<items.len() {
@@ -462,13 +461,11 @@ fn jet_target_layout_engine_target(engine: TargetLayoutEngine) -> JetTargetLayou
     engine.target
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::struct_facts
 fn jet_target_layout_struct_facts(engine: TargetLayoutEngine, definition: StructDef) -> LayoutFacts Never! {
     query := jet_target_layout_query()
     jet_target_layout_struct_facts_inner_named(engine, definition, definition.name, "", &query)
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::struct_facts
 fn jet_target_layout_struct_facts_in_module(engine: TargetLayoutEngine, definition: StructDef, module_identity: String) -> LayoutFacts Never! {
     query := jet_target_layout_query()
     identity :: if module_identity == "" -> definition.name else -> "{module_identity}::{definition.name}"
@@ -573,26 +570,22 @@ fn jet_target_layout_marker_expression(marker: Marker, index: Int) -> Expr? {
     if marker.args[index] == { .Expr(value) -> Val(value) else -> None }
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::enum_facts
 fn jet_target_layout_enum_facts(engine: TargetLayoutEngine, definition: EnumDef) -> LayoutFacts Never! {
     query := jet_target_layout_query()
     jet_target_layout_enum_facts_inner_named(engine, definition, definition.name, "", &query)
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::enum_facts
 fn jet_target_layout_enum_facts_in_module(engine: TargetLayoutEngine, definition: EnumDef, module_identity: String) -> LayoutFacts Never! {
     query := jet_target_layout_query()
     identity :: if module_identity == "" -> definition.name else -> "{module_identity}::{definition.name}"
     jet_target_layout_enum_facts_inner_named(engine, definition, identity, identity, &query)
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::type_layout_inner
 fn jet_target_layout_type_facts(engine: TargetLayoutEngine, ty: Type) -> ByteLayout? {
     query := jet_target_layout_query()
     jet_target_layout_type_inner(engine, ty, "", &query)
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::struct_facts_inner
 fn jet_target_layout_struct_facts_inner_named(engine: TargetLayoutEngine, definition: StructDef, identity: String, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
     field_names :: loop field in definition.fields if field.computed == None -> field.name
     layout :: definition.layout ?? return jet_target_layout_native_struct_facts(engine, definition, identity, &query)
@@ -725,7 +718,6 @@ fn jet_target_layout_native_item(engine: TargetLayoutEngine, item: Item, identit
     }
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::enum_facts
 fn jet_target_layout_enum_facts_inner_named(engine: TargetLayoutEngine, definition: EnumDef, identity: String, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
     variant_names :: loop variant in definition.variants -> variant.name
     enum_tag :: jet_target_layout_enum_c_tag(definition) ?? return jet_target_layout_unknown(variant_names)
@@ -795,7 +787,6 @@ fn jet_target_layout_enum_facts_inner_named(engine: TargetLayoutEngine, definiti
     LayoutFacts{bytes: bytes, fields: facts}
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::aggregate_fields
 fn jet_target_layout_aggregate(engine: TargetLayoutEngine, names: [String], types: [Type], owner_qualified_name: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
     cursor := Val(0)
     aggregate_alignment := Val(1)
@@ -846,7 +837,6 @@ fn jet_target_layout_aggregate_bytes(cursor: Int?, aggregate_alignment: Int?) ->
     Val(ByteLayout{size: size, alignment: alignment, stride: size})
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::type_layout_inner
 fn jet_target_layout_type_inner(engine: TargetLayoutEngine, ty: Type, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
     if ty == {
         .Int | .Float -> Val(jet_target_layout_scalar(8))
@@ -895,7 +885,6 @@ fn jet_target_layout_resolved_name(engine: TargetLayoutEngine, owner_qualified_n
     engine.name_resolutions[position].qualified_name
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::named_type_layout
 fn jet_target_layout_named_item(engine: TargetLayoutEngine, item: Item, identity: String, registry_key: String, args: [Type], query: &JetTargetLayoutQuery) -> ByteLayout? {
     key :: type_identity_key(Type.Apply{name: registry_key, args: args})
     if !(query.active.get(identity) ?? false) {
@@ -926,7 +915,6 @@ fn jet_target_layout_named_item(engine: TargetLayoutEngine, item: Item, identity
     result
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::named_type_layout
 fn jet_target_layout_named_type(engine: TargetLayoutEngine, name: String, args: [Type], owner_qualified_name: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
     if jet_target_layout_numeric_type(name) == .Val(numeric) -> return jet_target_layout_type_inner(engine, numeric, owner_qualified_name, &query)
     if name == "Bool" -> return Val(jet_target_layout_scalar(1))
@@ -1050,7 +1038,6 @@ fn jet_target_layout_supports_atomic_word(target: JetTargetLayout) -> Bool Never
     target.triple.starts_with("x86_64-") || target.triple.starts_with("aarch64-") || target.triple.starts_with("wasm32-")
 }
 
-// Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::struct_facts_inner
 fn jet_target_layout_enter(query: &JetTargetLayoutQuery, identity: String) -> Bool Never! {
     if query.active.get(identity) ?? false {
         query.cycle_hits += 1

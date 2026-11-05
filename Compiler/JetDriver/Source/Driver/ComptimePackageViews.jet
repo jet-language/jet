@@ -1,5 +1,5 @@
 // `core.compiler.manifest/package/lock/profiles` in compile-time code
-// (D-PACKAGE-MODEL1=A, Compiler.rs `read_manifest`/`read_package`/`read_lock`/
+// (D-PACKAGE-MODEL1=A, `read_manifest`/`read_package`/`read_lock`/
 // `read_profiles`): read-only package-model views of the compile's pinned
 // package root. Every file is read through the package model's no-follow
 // authority resolver below that root; the views are the package model's own
@@ -44,7 +44,6 @@ use {
     jetpack_foundation.[DEFAULT_ENTRY_FILE, ENV_FILE, FILE_EXT, PACKAGE_FILE, UNIFIED_LOCK_FILE]
 }
 
-// Compiler.rs `PackageReadError`.
 #Error
 struct JetDriverPackageReadError {
     code: String
@@ -57,7 +56,7 @@ fn jet_driver_package_read_error(file: String, message: String, cause: String) -
     JetDriverPackageReadError{code: "E0956", file: file, message: message, cause: cause}
 }
 
-// Compiler.rs `authority_reason`: the cause text of an authority failure.
+// `authority_reason`: the cause text of an authority failure.
 fn jet_driver_package_authority_reason(cause: AuthorityError) -> String Never! {
     if cause == {
         .Missing(_) -> "authority input is missing; restore the required metadata and try again"
@@ -75,18 +74,16 @@ fn jet_driver_package_authority_reason(cause: AuthorityError) -> String Never! {
     }
 }
 
-// Compiler.rs `authority_read_error`.
 fn jet_driver_package_authority_error(file: String, message: String, cause: AuthorityError) -> JetDriverPackageReadError Never! {
     jet_driver_package_read_error(file, message, "{cause.diagnostic().code}: {jet_driver_package_authority_reason(cause)}")
 }
 
-// Compiler.rs `authority_diagnostic`: an authority failure as the profile
-// evaluator's error.
+// `authority_diagnostic`: an authority failure as the profile evaluator's
+// error.
 fn jet_driver_package_authority_diagnostic(cause: AuthorityError) -> EnvModelEvalError Never! {
     EnvModelEvalError{diagnostic: diagnostic_from_registry(cause.diagnostic().code, None, "authority input is unavailable", jet_driver_package_authority_reason(cause), "restore the authority input and retry the operation")}
 }
 
-// Compiler.rs `diagnostic_cause`.
 fn jet_driver_package_diagnostic_cause(diagnostic: Diagnostic) -> String Never! {
     if diagnostic.detail == .Val(detail) -> return "{diagnostic.code}: {diagnostic.what}; {detail}"
     "{diagnostic.code}: {diagnostic.what}"
@@ -103,8 +100,8 @@ struct JetDriverInlinePackageCarrier {
     source: String
 }
 
-// Compiler.rs `checked_inline_package`: the first entry candidate that
-// carries an inline Package.
+// `checked_inline_package`: the first entry candidate that carries an inline
+// Package.
 fn jet_driver_package_inline_carrier(resolver: AuthorityResolver) -[FS, Env]> JetDriverInlinePackageCarrier? JetDriverPackageReadError! {
     candidates :: [String]{DEFAULT_ENTRY_FILE, "src/{DEFAULT_ENTRY_FILE}"}
     loop relative in candidates {
@@ -134,7 +131,7 @@ fn jet_driver_package_open(file: String, root: String) -[FS, Env]> AuthorityReso
     Ok(resolver)
 }
 
-// Compiler.rs `read_manifest`: the uncomposed declaration.
+// `read_manifest`: the uncomposed declaration.
 fn jet_driver_package_read_manifest(root: String) -[FS, Env]> TComptimeValue JetDriverPackageReadError! {
     resolver :: jet_driver_package_open(PACKAGE_FILE, root)
     if resolver.checked_manifest(".") == {
@@ -148,7 +145,7 @@ fn jet_driver_package_read_manifest(root: String) -[FS, Env]> TComptimeValue Jet
     }
 }
 
-// Compiler.rs `read_package`: the composed package facts.
+// `read_package`: the composed package facts.
 fn jet_driver_package_read_package(root: String) -[FS, Env]> TComptimeValue JetDriverPackageReadError! {
     resolver :: jet_driver_package_open(PACKAGE_FILE, root)
     if resolver.checked_root_package() == {
@@ -166,7 +163,7 @@ fn jet_driver_package_read_package(root: String) -[FS, Env]> TComptimeValue JetD
     }
 }
 
-// Compiler.rs `read_lock`: the parsed `.jet/lock`.
+// `read_lock`: the parsed `.jet/lock`.
 fn jet_driver_package_read_lock(root: String) -[FS, Env]> TComptimeValue JetDriverPackageReadError! {
     resolver :: jet_driver_package_open(UNIFIED_LOCK_FILE, root)
     file :: resolver.checked_file(UNIFIED_LOCK_FILE) ?? return Err(jet_driver_package_authority_error(UNIFIED_LOCK_FILE, "could not read the package lock", err))
@@ -185,8 +182,8 @@ fn jet_driver_package_read_lock(root: String) -[FS, Env]> TComptimeValue JetDriv
     }})
 }
 
-// Compiler.rs `PackageSourceLoader`: the profile evaluator's files, each read
-// through the pinned root's authority and revalidated after evaluation.
+// `PackageSourceLoader`: the profile evaluator's files, each read through the
+// pinned root's authority and revalidated after evaluation.
 struct JetDriverPackageSourceLoader {
     resolver: AuthorityResolver
     checked_inputs: [CheckedFile]
@@ -229,7 +226,7 @@ impl JetDriverPackageSourceLoader.SourceLoader {
     }
 }
 
-// Compiler.rs `read_profiles`: the package profiles `env.jet` declares.
+// `read_profiles`: the package profiles `env.jet` declares.
 fn jet_driver_package_read_profiles(root: String) -[FS, Env, Exec, Time.Wait]> TComptimeValue JetDriverPackageReadError! {
     resolver :: jet_driver_package_open(ENV_FILE, root)
     env_file :: resolver.checked_file(ENV_FILE) ?? return Err(jet_driver_package_authority_error(ENV_FILE, "could not read the profile source", err))
@@ -241,7 +238,7 @@ fn jet_driver_package_read_profiles(root: String) -[FS, Env, Exec, Time.Wait]> T
         loader.resolver.revalidate_file(file) ?? return Err(jet_driver_package_authority_error(file.relative, "a profile input changed while it was being read", err))
     }
     // The plan's profiles are already composed (PackageProfileSet.insert_checked)
-    // and in name order, as Compiler.rs's re-composed BTreeMap yields them.
+    // and in name order, re-composed BTreeMap yields them.
     profiles := [ProfileView]{}
     loop profile in plan.package_profiles -> &profiles.push(jet_driver_package_profile_view(profile))
     view :: ProfileSetView.from_profiles(profiles)
@@ -254,7 +251,7 @@ fn jet_driver_package_read_profiles(root: String) -[FS, Env, Exec, Time.Wait]> T
     }})
 }
 
-// Compiler.rs `profile_view`: collisions in key order (the Rust BTreeMap order).
+// `profile_view`: collisions in key order (the Rust BTreeMap order).
 fn jet_driver_package_profile_view(profile: PackageProfileSpec) -> ProfileView Never! {
     keys := profile.collisions.keys().to_list()
     &keys.sort()
@@ -263,8 +260,8 @@ fn jet_driver_package_profile_view(profile: PackageProfileSpec) -> ProfileView N
     ProfileView.from_parts(profile.name, profile.extends, profile.packages, collisions, profile.sources)
 }
 
-// `query`'s view of the package rooted at `root` (Compiler.rs
-// `eval_core_call_with_type`'s package-view arm).
+// `query`'s view of the package rooted at `root` (`eval_core_call_with_type`'s
+// package-view arm).
 fn jet_driver_compiler_package_view(query: String, args: [TComptimeValue], root: String) -[FS, Env, Exec, Time.Wait]> TComptimeValue Never! {
     if args.len() != 0 -> return jet_driver_package_failed(jet_driver_package_read_error("", "`core.compiler.{query}` takes no arguments", "call the package view from `fn build` or a comptime binding without a path argument"))
     if root == "" -> return jet_driver_package_failed(jet_driver_package_read_error("", "`core.compiler.{query}` is available only during package-aware compile-time evaluation", "call the package view from `fn build` or a comptime binding; the compiler pins the package root for you"))
@@ -290,7 +287,7 @@ fn jet_driver_package_failed(error: JetDriverPackageReadError) -> TComptimeValue
     }}}}
 }
 
-// Compiler.rs `target_value`: the one exact target name, else absent.
+// `target_value`: the one exact target name, else absent.
 fn jet_driver_package_target_value(targets: [TargetProfileView]) -> TComptimeValue Never! {
     if targets.len() == 1 -> return jet_eval_compiler_services_option_string(Val(targets[0].name))
     jet_eval_compiler_services_option_string(None)
@@ -328,13 +325,12 @@ fn jet_driver_package_build_profile_value(profile: BuildProfileView) -> TComptim
     }}
 }
 
-// Compiler.rs `manifest_value`.
 fn jet_driver_package_manifest_value(view: ManifestView) -> TComptimeValue Never! {
     jet_driver_package_declaration_value("CompilerManifest", view)
 }
 
-// Compiler.rs `package_value`: the same fields as the manifest view, over
-// the composed facts.
+// `package_value`: the same fields as the manifest view, over the composed
+// facts.
 fn jet_driver_package_package_value(view: PackageView) -> TComptimeValue Never! {
     jet_driver_package_declaration_value("CompilerPackage", ManifestView{
         schema_version: view.schema_version, file: view.file, jet: view.jet, edition: view.edition,
@@ -370,7 +366,6 @@ fn jet_driver_package_declaration_value(type_name: String, view: ManifestView) -
     }}
 }
 
-// Compiler.rs `locked_package_value`.
 fn jet_driver_package_locked_value(package: LockedPackageView) -> TComptimeValue Never! {
     TComptimeValue.Struct{type_name: "CompilerLockedPackage", fields: [TComptimeField]{
         TComptimeField{name: "name", value: jet_eval_compiler_services_string(package.name)},
@@ -386,7 +381,6 @@ fn jet_driver_package_locked_value(package: LockedPackageView) -> TComptimeValue
     }}
 }
 
-// Compiler.rs `profile_value`.
 fn jet_driver_package_profile_value(profile: ProfileView) -> TComptimeValue Never! {
     collisions := [TComptimeValue]{}
     loop collision in profile.collisions {

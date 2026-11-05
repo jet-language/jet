@@ -1,10 +1,9 @@
-// SharedProtocol.rs:1408-1494,1572-1591,1603-1652 and MathTaskMem.rs:2991-3033.
 // Condition48: refs0 mutex8 FIFOhead16/tail24 epoch32 pending40.
-// Registration48: next0 embedded ParkSlot8..31 epoch32 stale40.
-// Registrations and wakes are protected by the condition mutex; a parker
-// removes its registration under that mutex before freeing its embedded slot.
-// Notify-one selects FIFO; notify-all drains. A notification with no waiter is
-// counted and consumed by a later registration, not discarded.
+// Registration48: next0 embedded ParkSlot8..31 epoch32 stale40. Registrations
+// and wakes are protected by the condition mutex; a parker removes its
+// registration under that mutex before freeing its embedded slot. Notify-one
+// selects FIFO; notify-all drains. A notification with no waiter is counted and
+// consumed by a later registration, not discarded.
 #Export(c) fn jet_rt_native_condition_new() -> I64 {
     condition :: jet_rt_alloc(I64{48}, I64{8})
     thread_zero(condition, I64{48})
@@ -112,7 +111,7 @@ fn condition_text(kind: I64) -> I64 {
 }
 
 fn condition_interrupted() -> Bool {
-    // Scheduler.rs:2001-2007: shield cancellation, but not expired deadlines.
+    // Shield cancellation, but not expired deadlines.
     (scheduler_task_cancelled() && !scheduler_shielded()) || (jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0})
 }
 
@@ -201,9 +200,9 @@ fn condition_reacquire(cell: I64) -> Bool {
     result
 }
 
-// MathTaskMem.rs:2987-3032 / SharedProtocol wait-once handoff: registration
-// precedes releasing the held edit permit; cleanup removes the same node
-// before reacquisition. Source, not this leaf, owns the predicate loop.
+// SharedProtocol wait-once handoff: registration precedes releasing the held
+// edit permit; cleanup removes the same node before reacquisition. Source, not
+// this leaf, owns the predicate loop.
 #Export(c) fn jet_rt_shared_guard_wait_once(guard: I64, condition: I64) -> I64 {
     if !jet_rt_shared_guard_held(guard) || sync_load(wrapping(guard + I64{8})) == (I64{0}) {
         shared_guard_invalid()

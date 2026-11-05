@@ -8,7 +8,6 @@ use jet_foundation.[
     type_name,
 ]
 
-// Rust Symbols.rs:1573–1938 and jet-repl/SemanticSymbols.rs:7–399.
 // One owned semantic catalog replaces the REPL's leaking static-string facade.
 // Summaries/examples live here; signatures come from the canonical checked
 // contracts, not the obsolete List<T>, ?T, or renamed Map operation spellings.
@@ -93,7 +92,7 @@ fn semantic_builtin_special_docs() -> [SemanticSymbol] Never! {
 
 fn semantic_builtin_doc_symbols() -> [SemanticSymbol] Never! {
     symbols := [SemanticSymbol]{}
-    // Rust Symbols.rs:1574–1609: duration constructors and explicit clock.
+    // Duration constructors and explicit clock.
     &symbols.push(semantic_builtin_static_doc("Duration", "milliseconds", "core.collections", [String]{"value"}, "Checked runtime duration in milliseconds.", None))
     &symbols.push(semantic_builtin_static_doc("Duration", "seconds", "core.collections", [String]{"value"}, "Checked runtime duration in seconds.", None))
     &symbols.push(semantic_builtin_static_doc("Duration", "minutes", "core.collections", [String]{"value"}, "Checked runtime duration in minutes.", None))
@@ -101,14 +100,13 @@ fn semantic_builtin_doc_symbols() -> [SemanticSymbol] Never! {
     loop symbol in semantic_builtin_special_docs() -> &symbols.push(symbol)
     semantic_append_builtin_collection_docs(&symbols)
     semantic_append_builtin_string_docs(&symbols)
-    // Rust Symbols.rs:1501–1532; numeric symbols share this same owned catalog.
+    // Numeric symbols share this same owned catalog.
     &symbols.push(semantic_builtin_static_doc("Int", "parse", "core.numeric", [String]{"text"}, "Parses text as an Int.", Val("Int.parse(text)")))
     &symbols.push(semantic_builtin_static_doc("Float", "parse", "core.numeric", [String]{"text"}, "Parses text as a Float.", Val("Float.parse(text)")))
     symbols
 }
 
 fn semantic_append_builtin_collection_docs(symbols: &[SemanticSymbol]) Never! {
-    // Rust Symbols.rs:1610–1810 and SemanticSymbols.rs:34–224: List docs.
     &symbols.push(semantic_builtin_collection_doc("List", "len", [String]{}, None, "Number of items.", Val("items.len()")))
     &symbols.push(semantic_builtin_collection_doc("List", "is_empty", [String]{}, None, "True when there are no items.", None))
     &symbols.push(semantic_builtin_collection_doc("List", "push", [String]{"item"}, None, "Appends an item to the end.", None))
@@ -145,7 +143,6 @@ fn semantic_append_builtin_collection_docs(symbols: &[SemanticSymbol]) Never! {
     &symbols.push(semantic_builtin_collection_doc("List", "concat", [String]{"other"}, None, "Returns this list followed by other.", None))
     &symbols.push(semantic_builtin_collection_doc("List", "indexed", [String]{}, None, "Pairs each item with its index.", None))
     &symbols.push(semantic_builtin_collection_doc("List", "indexes", [String]{}, None, "Yields every valid Int index.", None))
-    // Rust Symbols.rs:1811–1859 and SemanticSymbols.rs:225–279: Map docs.
     &symbols.push(semantic_builtin_collection_doc("Map", "len", [String]{}, None, "Number of entries.", None))
     &symbols.push(semantic_builtin_collection_doc("Map", "is_empty", [String]{}, None, "True when there are no entries.", None))
     &symbols.push(semantic_builtin_collection_doc("Map", "get", [String]{"key"}, None, "Value for key, if present.", None))
@@ -159,7 +156,6 @@ fn semantic_append_builtin_collection_docs(symbols: &[SemanticSymbol]) Never! {
 }
 
 fn semantic_append_builtin_string_docs(symbols: &[SemanticSymbol]) Never! {
-    // Rust Symbols.rs:1860–1938 and SemanticSymbols.rs:280–358: String docs.
     &symbols.push(semantic_builtin_string_doc("len", [String]{}, "Number of characters."))
     &symbols.push(semantic_builtin_string_doc("is_empty", [String]{}, "True when the string is empty."))
     &symbols.push(semantic_builtin_string_doc("contains", [String]{"s"}, "True when s appears in the string."))

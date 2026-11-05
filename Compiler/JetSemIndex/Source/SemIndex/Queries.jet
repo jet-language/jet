@@ -14,8 +14,8 @@ use {
     ]
 }
 
-// Rust Types.rs:716–907: construction, attachment, retained checked facts and
-// first-match queries. Views borrow the index; a single-result view has one row.
+// Construction, attachment, retained checked facts and first-match queries.
+// Views borrow the index; a single-result view has one row.
 impl SemIndex {
     fn new(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[CallEdge], effects: ^[EffectFact], members: ^[MemberFact], nodes: ^[StructuralNode], definition_facts: ^[DefinitionFact]) -> SemIndex Never! {
         SemIndex{
@@ -133,8 +133,8 @@ impl SemIndex {
         None
     }
 
-    // Rust Types.rs:909–963: dossier joins retained facts, never checks again.
-    // Bypass facts are program-wide; state graphs and references are owner-only.
+    // Dossier joins retained facts, never checks again. Bypass facts are
+    // program-wide; state graphs and references are owner-only.
     fn dossier(self, target: String) -> TypeDossier Never! {
         definition := SymbolDef?{None}
         owner := target.copy()
@@ -167,8 +167,8 @@ impl SemIndex {
         }
     }
 
-    // Rust Types.rs:965–991: identity joins; location/body/name alone never change
-    // the structural signature. Repeated IDs are retained, not deduplicated.
+    // location/body/name alone never change the structural signature. Repeated IDs
+    // are retained, not deduplicated.
     fn structural_audit(self, next: SemIndex) -> StructuralAudit Never! {
         added := [String]{}
         removed := [String]{}
@@ -191,8 +191,8 @@ impl SemIndex {
     }
 }
 
-// Rust Types.rs:994–1020: stable member order by kind, origin, spelling, module,
-// then byte start; end and trait spelling are intentionally not tie breakers.
+// Stable member order by kind, origin, spelling, module, then byte start; end
+// and trait spelling are intentionally not tie breakers.
 fn semindex_sort_members(members: &[MemberFact]) Never! {
     &members.sort_by((left: MemberFact, right: MemberFact) -> (semindex_member_rank(left.kind) <=> semindex_member_rank(right.kind)).then(semindex_origin_rank(left.origin) <=> semindex_origin_rank(right.origin)).then(left.name <=> right.name).then(left.module_path <=> right.module_path).then(left.span.start <=> right.span.start))
 }
@@ -212,8 +212,8 @@ fn semindex_origin_rank(origin: MemberOrigin) -> Int Never! {
     }
 }
 
-// Rust Types.rs:1022–1070: exact callable/field/variant identity material,
-// including structured returned-view provenance. Parameter names are excluded.
+// Exact callable/field/variant identity material, including structured
+// returned-view provenance. Parameter names are excluded.
 fn semindex_structural_signature(kind: SemIndexSymbolKind, view_provenance: [ViewProvenanceFact]) -> String Never! {
     if kind == {
         .Module -> "module"

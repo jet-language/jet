@@ -112,8 +112,8 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
     if (length == I64{0}) -> Float{0.0} else -> sum / iter_wide_float(I64{0}, wrapping(U64{length}))
 }
 
-// SimdLanes.rs:683-717,785-794: seed lane zero, source i in lane i&7,
-// then the fixed eight-lane tree. Scalar locals need no scratch allocation.
+// Seed lane zero, source i in lane i&7, then the fixed eight-lane tree. Scalar
+// locals need no scratch allocation.
 fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
     if (length == I64{0}) { return seed }
     a0 := seed
@@ -148,10 +148,10 @@ fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
     left + right
 }
 
-// ParallelKernel.rs:95-124: 64-item chunks, each with the original seed,
-// followed by adjacent-pair fixed-tree merges with zero seed and odd carry.
-// No callback or external side effect exists here; scheduling cannot change
-// the indexed partials or merge order. The boundary borrows the input slots.
+// 64-item chunks, each with the original seed, followed by adjacent-pair
+// fixed-tree merges with zero seed and odd carry. No callback or external side
+// effect exists here; scheduling cannot change the indexed partials or merge
+// order. The boundary borrows the input slots.
 #Export(c) fn jet_list_para_fold_add_fixed_f64(data: I64, length: I64, seed: Float) -> Float {
     if (length <= I64{0}) { return seed }
     if (length <= I64{64}) { return coll_f64_fixed(data, length, seed) }

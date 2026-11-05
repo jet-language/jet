@@ -234,9 +234,9 @@ fn sema_services_check_core_method(api: String, contract: SemaServiceCoreMethodC
         sema_services_check_untyped_args(updated_args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    // A tree query with no Core row (`event_count`) is the ordinary source
-    // call `core.service.<member>(receiver, args…)`, as Rust lowers it
-    // (method_calls.rs `service_method_route` + `core_source_owns_call`).
+    // A tree query with no Core row (`event_count`) is the ordinary source call
+    // `core.service.<member>(receiver, args…)`, as Rust lowers it
+    // (`service_method_route` + `core_source_owns_call`).
     if core_call("core.service", contract.member) == None {
         identity :: sema_call_core_module_identity(environment, program, "core.service") ?? {
             &diagnostics.push(sema_error("E0003", span, "service source module is not loaded", "`{api}` requires Core/Service/Service.jet", "load the registered Core source module"))
@@ -363,12 +363,11 @@ fn sema_services_delivery_contract(method: String) -> SemaServiceCoreMethodContr
     None
 }
 
-// Rust `infer_method_call` (method_calls.rs) routes a service
-// method only when the receiver is that service handle (`handle_ty ==
-// "ServiceTree"`, …); a user type's `start`, `send` or `show` keeps its own
-// declaration. A canonical `core.service` identity names the same handle,
-// whether its nominal is source-owned or still has a carrier projection
-// (`ServiceRuntime`, `DeliveryState`).
+// Rust `infer_method_call` routes a service method only when the receiver is
+// that service handle (`handle_ty == "ServiceTree"`, …); a user type's `start`,
+// `send` or `show` keeps its own declaration. A canonical `core.service`
+// identity names the same handle, whether its nominal is source-owned or still
+// has a carrier projection (`ServiceRuntime`, `DeliveryState`).
 fn sema_services_receiver_is(ty: Type, owner: String) -> Bool Never! {
     if ty == {
         .Named(name) -> name == owner || core_identity_is(name, "core.service", owner)
@@ -670,11 +669,11 @@ fn sema_validate_service_handler_graph(modules: [SemaGraphModuleResult]) -> [Dia
     diagnostics
 }
 
-// The checked type name of the Core nominal `leaf` that `module_name`
-// declares: its qualified source name, or the leaf for a compiler-owned
-// nominal. The checked #Job identity is normalized BEFORE the registered
-// source target, the same compiler-owned contract as Rust CheckerInfer/calls/
-// method_calls.rs: enqueue/delay are not string-selected public operations.
+// The checked type name of the Core nominal `leaf` that `module_name` declares:
+// its qualified source name, or the leaf for a compiler-owned nominal. The
+// checked #Job identity is normalized BEFORE the registered source target, the
+// same compiler-owned contract as the Rust method-call checker: enqueue/delay
+// are not string-selected public operations.
 fn sema_core_module_nominal(program: SemaProgramTables, module_name: String, leaf: String) -> String Never! {
     if program.registration_graph == .Val(graph) {
     loop module_index in 0..<graph.modules.len() {

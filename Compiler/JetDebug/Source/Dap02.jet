@@ -7,7 +7,6 @@ use {
 }
 
 impl DapServer {
-    // Rust: crates/jet-debug/src/Dap.rs:1805
     fn restart_target(self: &Self, out: &io.Write, request_seq: I64) {
         was_configuring :: self.state == .Configuring
         if self.resume_task.is_some() {
@@ -83,7 +82,6 @@ impl DapServer {
         if !was_configuring -> self.start_target(out)
     }
 
-    // Rust: crates/jet-debug/src/Dap.rs:1934
     fn begin_resume(self: &Self, out: &io.Write, command: String, mode: ResumeMode) {
         inf :: self.inf.take() ?? {
             self.terminate_with_diagnostic(out, "E2234", "the native debugger has no target to start")
@@ -95,10 +93,8 @@ impl DapServer {
         self.resume_task = .Val(ResumeTask.spawn(^inf, command, mode))
     }
 
-    // Rust: crates/jet-debug/src/Dap.rs:1948
     fn start_target(self: &Self, out: &io.Write) { self.begin_resume(out, "run", .Launch) }
 
-    // Rust: crates/jet-debug/src/Dap.rs:1954
     // A present unit keeps the request loop alive; None closes it.
     fn handle(self: Self, msg: Dyn, out: io.Write) -> Unit? {
         command :: json_get(msg, "command").and_then(json_str)
@@ -751,7 +747,6 @@ impl DapServer {
         return .Val(_)
     }
 
-    // Rust: crates/jet-debug/src/Dap.rs:3323
     fn apply_pending_breakpoints_and_run(self: &Self, out: &io.Write) {
         // Preserve source requests so restart can recreate them.
         lines :: self.pending_breakpoints.copy()
@@ -784,7 +779,6 @@ impl DapServer {
         self.begin_resume(out, resume, mode)
     }
 
-    // Rust: crates/jet-debug/src/Dap.rs:3376
     fn emit_program_output(self: &Self, out: &io.Write) {
         inf :: self.inf.as_mut() ?? { return }
         (stdout, stderr) :: inf.drain_program_output()
@@ -792,12 +786,10 @@ impl DapServer {
         if !stderr.is_empty() -> self.event(out, "output", "{{\"category\":\"stderr\",\"output\":\"{foundation_json_escape(self.output_text(stderr))}\"}}")
     }
 
-    // Rust: crates/jet-debug/src/Dap.rs:3395
     fn emit_resume(self: &Self, out: &io.Write, result: ResumeResult, mode: ResumeMode) {
         self.emit_resume_inner(out, ^result, mode, 0)
     }
 
-    // Rust: crates/jet-debug/src/Dap.rs:3399
     fn emit_resume_inner(self: &Self, out: &io.Write, result: ResumeResult, mode: ResumeMode, depth: Usize) {
         result := ^result
         mode := mode

@@ -923,11 +923,11 @@ fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, metho
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
-// Rust `task_method_return` (jet-foundation Collections.rs:2138): the task
-// handle's control-plane hooks over the coroutine substrate. `pause` takes an
-// optional mode, and every hook reads the handle (it is not consumed) and
-// returns nothing. The arguments carry no declared type (Rust
-// `builtin_method_arg_types` gives Task none), so they are inferred as written.
+// Rust `task_method_return` (jet-foundation): the task handle's control-plane
+// hooks over the coroutine substrate. `pause` takes an optional mode, and every
+// hook reads the handle (it is not consumed) and returns nothing. The arguments
+// carry no declared type (Rust `builtin_method_arg_types` gives Task none), so
+// they are inferred as written.
 fn sema_taskgroup_check_task_control(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     selected :: if {
         method == "pause" && (args.len() == 0 || args.len() == 1) -> Val(THandleOp.TaskPause)

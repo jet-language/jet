@@ -1,10 +1,10 @@
-// Mirror Core/Atomic.rs:238-246, one aligned inline AtomicU64.
-// Caller owns the place; no allocation, refcount, source Clone or side table.
-// Core/Atomic.rs:325-437 fixes SeqCst (there is no source ordering argument).
-// x86-64: aligned MOV load (OS/Linux.jet:287-292), XCHG store (:457-467),
-// LOCK CMPXCHG (:301-315) and LOCK XADD (:444-455) are the SC mapping.
-// Private init may use plain MOV; store/publish MUST NOT use release-only MOV.
-// Int is a separate exact lane: never pass its tagged owner to these exports.
+// Mirror, one aligned inline AtomicU64. Caller owns the place; no allocation,
+// refcount, source Clone or side table. The Rust original fixes SeqCst (there
+// is no source ordering argument). x86-64: aligned MOV load
+// (OS/Linux.jet:287-292), XCHG store (:457-467), LOCK CMPXCHG (:301-315) and
+// LOCK XADD (:444-455) are the SC mapping. Private init may use plain MOV;
+// store/publish MUST NOT use release-only MOV. Int is a separate exact lane:
+// never pass its tagged owner to these exports.
 
 fn atomic_bool_bits(value: I64) -> I64 { if (value != I64{0}) -> I64{1} else -> I64{0} }
 fn atomic_u32_bits(value: I64) -> I64 { value.bit_and(I64{4294967295}) }
@@ -35,9 +35,9 @@ fn atomic_word_add(place: I64, delta: I64) -> I64 {
         return os_fetch_add_i64(place, delta)
     }
 }
-// Core/Atomic.rs:111-116 and :199-210: 32-bit publications are ALWAYS zero
-// extended, even after wrap. A 64-bit XADD would leave a carry in upper32,
-// making later scalar-equal CMPXCHG fail. Keep the seed's canonical word.
+// and: 32-bit publications are ALWAYS zero extended, even after wrap. A 64-bit
+// XADD would leave a carry in upper32, making later scalar-equal CMPXCHG fail.
+// Keep the seed's canonical word.
 fn atomic32_add(place: I64, delta: I64) -> I64 {
     loop {
         previous :: atomic_word_load(place)

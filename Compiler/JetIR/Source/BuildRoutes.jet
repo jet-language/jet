@@ -3422,11 +3422,11 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
         return Val(root)
     }
     // `core.devtools.__publish_payload(source, entity, fields, field, value)`:
-    // DevtoolsPanel.rs:111-137 builds a JetDevtoolsEvent and hands it to
-    // jet_devtools_publish_event, which reaches only installed event sinks;
-    // the native runtime installs none (RouteACore.jet
-    // jet_job_queue_publish_parts), so the publication has no observer to
-    // build for and the fresh arguments it consumed end here.
+    // The Rust original builds a JetDevtoolsEvent and hands it to
+    // jet_devtools_publish_event, which reaches only installed event sinks; the
+    // native runtime installs none (RouteACore.jet
+    // jet_job_queue_publish_parts), so the publication has no observer to build
+    // for and the fresh arguments it consumed end here.
     if name == "jet_devtools_publish_payload" {
         loop slot in inputs -> ir_release(&m, &b, slot)
         return Val(-1)
@@ -3878,8 +3878,8 @@ fn ir_list_split(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int,
     pair
 }
 
-// `xss.flatten()` (Collections.rs jet_list_flatten): a new List of copies of
-// every inner List's elements, in order.
+// `xss.flatten()` (jet_list_flatten): a new List of copies of every inner
+// List's elements, in order.
 fn ir_list_flatten(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, result_row: Int, span: Span) -> Int Never! {
     inner :: ir_list_element_of(&m, p, row) ?? return ir_fail_slot(&b, span, "List flatten of {ir_type_name(m.types[row].ty)} elements")
     out :: ir_list_empty(&m, &b, result_row)

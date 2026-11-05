@@ -361,9 +361,9 @@ fn sema_effect_nondeterministic_core(node: SemaEffectNode, expression: BodyNode,
     None
 }
 
-// Rust D-DET1 `assume_deterministic { … }` (CheckerCore/statements.rs
-// Stmt::AssumeDet, det_suppress): inside a pure body the block suspends the
-// determinism rejections, E3403 and E3401 alike.
+// Rust D-DET1 `assume_deterministic { … }` (Stmt::AssumeDet, det_suppress):
+// inside a pure body the block suspends the determinism rejections, E3403 and
+// E3401 alike.
 fn sema_effect_in_assume_det(node: SemaEffectNode, span: Span) -> Bool Never! {
     if !node.is_pure -> return false
     loop region in node.assume_det_spans {
@@ -372,12 +372,12 @@ fn sema_effect_in_assume_det(node: SemaEffectNode, span: Span) -> Bool Never! {
     false
 }
 
-// Rust `crate::Sema::e3403` at a Clock intrinsic site (method_calls.rs
-// record_static_time_effect and the `Clock.{method}` check, binary.rs
-// `Clock comparison`, expr.rs `Clock formatting` and `Clock copy`): the
-// producer recorded a `Time` row under the operation's own name
-// (`Clock.system`), so a pure body reports E3403 with the pure denial and
-// records none of the site's effects. False when the site is not one.
+// Rust `crate::Sema::e3403` at a Clock intrinsic site
+// (record_static_time_effect and the `Clock.{method}` check, `Clock
+// comparison`, `Clock formatting` and `Clock copy`): the producer recorded a
+// `Time` row under the operation's own name (`Clock.system`), so a pure body
+// reports E3403 with the pure denial and records none of the site's effects.
+// False when the site is not one.
 fn sema_effect_report_nondeterministic_intrinsic(nodes: &[SemaEffectNode], node_index: Int, fact: SemaCallSiteFact, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
     if !nodes[node_index].is_pure || fact.callee != None -> return false
     api :: fact.intrinsic_api ?? return false
@@ -786,7 +786,7 @@ fn sema_effect_apply_via(nodes: &[SemaEffectNode], node_index: Int, function: Fn
     }
 }
 
-// Rust `Effects.rs` `e0740`: the span is the row's first entry.
+// `e0740`: the span is the row's first entry.
 fn sema_effect_bound_diagnostic(node: SemaEffectNode, over: [String]) -> Diagnostic {
     sorted := over.copy()
     &sorted.sort()
@@ -797,8 +797,8 @@ fn sema_effect_bound_diagnostic(node: SemaEffectNode, over: [String]) -> Diagnos
     diagnostic_with_rights(^diagnostic, "invocation", [String]{node.name}, [String]{}, None)
 }
 
-// Rust `Effects.rs` `e0749` / `e0749_panic`: a reached Panic names the
-// reachable function where the stop enters the call graph.
+// `e0749` / `e0749_panic`: a reached Panic names the reachable function where
+// the stop enters the call graph.
 fn sema_effect_prohibited_diagnostic(node: SemaEffectNode, reached: [String], panic_site: String) -> Diagnostic {
     reached_list :: sema_effect_show(reached)
     declared :: sema_effect_show(node.prohibited)
@@ -985,14 +985,13 @@ fn sema_effect_file_caps_of(index: Int, direct: [[SemaEffectModuleCap]], parents
     caps
 }
 
-// Rust `Effects.rs` `e0725`.
 fn sema_effect_replayable_diagnostic(node: SemaEffectNode, reached: [String]) -> Diagnostic {
     span :: node.replayable_span ?? node.name_span
     diagnostic :: sema_error("E0725", span, "`{node.name}` is `#Replayable` but reaches `{sema_effect_show(reached)}`", "`#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge", "inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function")
     diagnostic_with_rights(^diagnostic, "replayable", [String]{node.name}, [String]{}, None)
 }
 
-// Rust `Registration.rs` `effect_key`: a method's key is `Owner::name`.
+// `effect_key`: a method's key is `Owner::name`.
 fn sema_effect_chain_name(function: FnBody) -> String Never! {
     owner :: if function.kind == {
         .Method(_, owner_type) -> owner_type
@@ -1229,9 +1228,9 @@ fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, progr
 }
 
 fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
-    // Rust `direct_calls.rs` a foreign body with a known effect
-    // root records that root and an open memory dispatch; only an extern with
-    // no root is an unknown callee that forces the maximal set.
+    // A foreign body with a known effect root records that root and an open
+    // memory dispatch; only an extern with no root is an unknown callee that
+    // forces the maximal set.
     if fact.foreign_effect_root == .Val(root) {
         effect_name :: sema_effect_parse_name(root) ?? {
             &diagnostics.push(sema_effect_unknown(root, fact.span))
@@ -1512,9 +1511,9 @@ fn sema_effect_record_decl_call(nodes: &[SemaEffectNode], facts: SemaEffectCallI
     }
 }
 
-// Rust `direct_calls.rs` `attribute_fn_arg`: a named function passed to a
-// function-typed parameter flows its effects through to this caller, and the
-// callee may invoke it any number of times.
+// `attribute_fn_arg`: a named function passed to a function-typed parameter
+// flows its effects through to this caller, and the callee may invoke it any
+// number of times.
 fn sema_effect_record_function_arguments(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, tree: BodyTree, args: [BodyCallArg]) Never! {
     loop argument in args {
         if body_type(tree, argument.value) == .Fn(_, _, _, _, _, _) {
@@ -1550,15 +1549,15 @@ fn sema_effect_record_dispatch(nodes: &[SemaEffectNode], node_index: Int, tree: 
     }
 }
 
-// Rust `seed_trait_dispatch_effects` / `method_calls.rs` generic dispatch:
-// a call through a generic bound (`producer: P` with `P: Producer`) is
-// statically selected after type inference, so it reaches the trait
-// method's `<static>` node: the declared row when the method has one,
-// otherwise the union of every implementation's summary. An implementing
-// type with no summary of its own for the method (a trait default body, an
-// unloaded impl) is unresolved, and so is a trait with no implementation:
-// either forces the maximal row, as in Rust. Only a trait-object receiver is
-// the open-world dispatch that stays maximal for a row-less method.
+// Rust `seed_trait_dispatch_effects` / generic dispatch: a call through a
+// generic bound (`producer: P` with `P: Producer`) is statically selected after
+// type inference, so it reaches the trait method's `<static>` node: the
+// declared row when the method has one, otherwise the union of every
+// implementation's summary. An implementing type with no summary of its own for
+// the method (a trait default body, an unloaded impl) is unresolved, and so is
+// a trait with no implementation: either forces the maximal row, as in Rust.
+// Only a trait-object receiver is the open-world dispatch that stays maximal
+// for a row-less method.
 fn sema_effect_record_static_dispatch(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact) -> Bool Never! {
     if fact.facts.effect_bound != None -> return false
     if expression.kind == {
@@ -1936,8 +1935,8 @@ fn sema_effect_check_unsafe_statements_tree(nodes: &[SemaEffectNode], facts: Sem
     }
 }
 
-// Rust `Effects.rs` `e0712`: the region is both the call and the scope frame;
-// its own caps never grant the effects it is missing.
+// `e0712`: the region is both the call and the scope frame; its own caps never
+// grant the effects it is missing.
 fn sema_effect_scope_diagnostic(marker: String, over: [String], bounds: [String], span: Span) -> Diagnostic {
     allowed :: if bounds.len() == 0 -> "no effects" else -> "`{sema_effect_show(bounds)}`"
     diagnostic :: sema_error("E0712", span, "this `#{marker}` region uses the effect `{sema_effect_show(over)}`, which it has no authority for", "`#{marker}(…)` allows only {allowed}; an effect reached inside — even through a call — must be in that list", "add `{sema_effect_show(over)}` to the `#{marker}(…)` list, or move that work outside the region")
@@ -1985,8 +1984,7 @@ fn sema_effect_check_scope_bounds(marker: String, parsed: SemaEffectScopeBounds,
     valid
 }
 
-// Rust `Effects.rs` `e0747`: the callback's effects against its parameter's
-// invocation row.
+// `e0747`: the callback's effects against its parameter's invocation row.
 fn sema_effect_callback_diagnostic(over: [String], bounds: [String], span: Span) -> Diagnostic {
     over_list :: sema_effect_show(over)
     allowed :: if bounds.len() == 0 -> "the parameter is `fn(…) -[]>`, so the callback must be pure" else -> "the parameter is `fn(…) -[{sema_effect_show(bounds)}]>`, so the callback may use only those effects"
@@ -2769,8 +2767,8 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
             modules[target].functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
         }
     }
-    // Rust `Purity.rs` e3401 names the first impure call and its chain; the
-    // reached row is the report when no single call carries it.
+    // e3401 names the first impure call and its chain; the reached row is the
+    // report when no single call carries it.
     loop (pending, node_index) in pure_nodes {
         pure_diagnostics := [Diagnostic]{}
         &pure_diagnostics.push(sema_pure_root_find(nodes[node_index].key, modules, decls, true) ?? sema_effect_pure_diagnostic(nodes[node_index], pure_rows[pending]))

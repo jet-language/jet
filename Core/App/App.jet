@@ -114,15 +114,15 @@ fn __live_invalidate_all(source: String) Never! { web.__live_invalidate_all(sour
 
 fn __live_arg<A: Encode>(value: A) -> String Never! { web.__live_arg<A>(value) }
 
-// D-SYNC1: publish the canonical display of a CRDT document onto session
-// `over` (SyncPublish.rs jet_sync_publish). A session keeps its generation and
-// merged document; a publication that changes the document advances the
-// generation, and a duplicate delivery returns the existing receipt. The
-// document merges only facts that survive the display: map keys with equal
-// values, list members and counter components. A conflicting map value or a
-// differing text document is denied rather than replaced by a lexical winner.
-// The Rust adapter also handed each change to the installed live transport
-// subscribers (LiveQuery.rs:511); the native runtime installs none.
+// D-SYNC1: publish the canonical display of a CRDT document onto session `over`
+// (jet_sync_publish). A session keeps its generation and merged document; a
+// publication that changes the document advances the generation, and a
+// duplicate delivery returns the existing receipt. The document merges only
+// facts that survive the display: map keys with equal values, list members and
+// counter components. A conflicting map value or a differing text document is
+// denied rather than replaced by a lexical winner. The Rust adapter also handed
+// each change to the installed live transport subscribers; the native runtime
+// installs none.
 fn sync(doc_show: String, over: String) -> String Never! {
     if over.trim() == "" || over.len() > SYNC_MAX_SESSION || unicode.has_control(over) -> return "SyncError(invalid session)"
     document :: sync_document_parse(doc_show) ?? return "SyncError(document is not a canonical CRDT value)"
@@ -184,8 +184,8 @@ fn sync_session_decode(value: String) -> SyncSession? {
     Val(SyncSession{generation: generation, document: value.slice(colon + 1, value.len())})
 }
 
-// The canonical document `value` names, or None when it is malformed or not
-// in canonical order (SyncPublish.rs JetSyncDocument::parse).
+// The canonical document `value` names, or None when it is malformed or not in
+// canonical order (JetSyncDocument::parse).
 fn sync_document_parse(value: String) -> String? {
     if value == "" || value.trim() != value || value.len() > SYNC_MAX_DOCUMENT || unicode.has_control(value) -> return None
     if !value.ends_with(")") -> return None
@@ -204,7 +204,6 @@ fn sync_document_parse(value: String) -> String? {
     Val(canonical)
 }
 
-// SyncPublish.rs JetSyncDocument::merge.
 fn sync_document_merge(left: String, right: String) -> String? {
     if left == right -> return Val(left.copy())
     merged := ""

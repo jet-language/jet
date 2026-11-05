@@ -1,4 +1,3 @@
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1792
 // Continuation of the canonical GraphProjection module.
 use {
     std.fmt.[format]
@@ -12,7 +11,6 @@ use {
     jet_devserver.Canvas.ValidationJson.[json_str, span_json]
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1792
 fn project_stmt_block(g: &GraphBuilder, index: &SemIndex, src: String, stmts: &[Stmt], base: USize, x: I32, y: I32) {
     cursor_y := y
     loop (i, stmt) in stmts.iter().enumerate() {
@@ -21,7 +19,6 @@ fn project_stmt_block(g: &GraphBuilder, index: &SemIndex, src: String, stmts: &[
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1808
 // A list initializer's multi-input body grows with item count; retain enough
 // spacing for its data providers before the next sibling statement.
 fn stmt_row_step(stmt: Stmt) -> I32 {
@@ -33,12 +30,10 @@ fn stmt_row_step(stmt: Stmt) -> I32 {
     130 + (I32{items.saturating_sub(2)}) * 55
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1823
 fn multi_input_item_count(expr: Expr) -> USize {
     if expr is { .ListLit(items, _, _) -> items.len(); _ -> 0 }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1830
 fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, ordinal: USize, x: I32, y: I32) {
     if stmt is {
         .Val(b) -> {
@@ -270,23 +265,19 @@ fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, or
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2593
 fn switch_was_classic_if(src: String, arms: &[AST.SwitchArm], span: Span) -> Bool {
     first :: arms.first() ?? return false
     AST.uses_classic_if_spelling(src, span, first.cond.span())
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2600
 fn pattern_subject_type(g: GraphBuilder, index: SemIndex, cond: Expr) -> String? {
     if cond is { .PatternTest(subject: subject, ..) -> .Some(expr_type(g, index, subject)); _ -> .None }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2607
 fn set_pattern_node_type(g: &GraphBuilder, node_id: String, pattern_type: String) {
     if g.nodes.iter_mut().find((node) == .Val(node) -> node.id == node_id) { node.meta_json = .Some("{{\"pattern_type\":{json_str(pattern_type)}}}") }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2613
 fn pattern_pin_label(src: String, expr: &Expr) -> String {
     raw :: snippet(src, expr.span())
     text := raw.trim() // #4303
@@ -302,7 +293,6 @@ fn pattern_pin_label(src: String, expr: &Expr) -> String {
     balanced
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2625
 // Dispatch arm labels omit the leading enum-variant dot and carry no ==.
 fn dispatch_arm_pattern_label(src: String, expr: &Expr) -> String {
     (raw, _) :: dispatch_arm_pattern_fragment(src, expr)
@@ -311,14 +301,12 @@ fn dispatch_arm_pattern_label(src: String, expr: &Expr) -> String {
     balanced.strip_prefix('.').unwrap_or(balanced).to_string()
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2634
 fn dispatch_arm_pattern_span(src: String, expr: &Expr) -> SourceSpan {
     span :: SourceSpan{expr.span().into()}
     (pattern, offset) :: dispatch_arm_pattern_fragment(src, expr)
     SourceSpan(start: span.start + offset, end: span.start + offset + pattern.trim_end().len())
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2643
 fn dispatch_arm_pattern_fragment(src: String, expr: &Expr) -> (String, USize) {
     span :: SourceSpan{expr.span().into()}
     source :: src.get(span.start..span.end).unwrap_or("")
@@ -356,7 +344,6 @@ fn dispatch_arm_pattern_fragment(src: String, expr: &Expr) -> (String, USize) {
     (text.to_string(), offset)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2684
 fn pattern_arm_edit_span(src: String, expr: &Expr) -> SourceSpan {
     if expr is {
         .PatternTest(pattern: pattern, ..) -> span_through_closing_parens(src, pattern.span())
@@ -364,7 +351,6 @@ fn pattern_arm_edit_span(src: String, expr: &Expr) -> SourceSpan {
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2691
 fn balance_closing_parens(s: String) -> String {
     out := s.to_string()
     opens :: s.chars().filter((c) -> c == '(').count()
@@ -373,7 +359,6 @@ fn balance_closing_parens(s: String) -> String {
     out
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2702
 fn project_classic_switch_else(g: &GraphBuilder, index: &SemIndex, src: String, else_body: &[Stmt]?, ordinal: USize, x: I32, y: I32) {
     body :: else_body ?? return
     if body.len() == 1 {
@@ -388,12 +373,10 @@ fn project_classic_switch_else(g: &GraphBuilder, index: &SemIndex, src: String, 
     project_stmt_block(g, index, src, body, ordinal * 100 + 70, x, y)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2732
 fn connect_expr_to_input(g: &GraphBuilder, index: &SemIndex, src: String, expr: &Expr, ordinal: USize, role: String, owner_node_id: String, input_pin: String, x: I32, y: I32) {
     connect_expr_to_input_with_span(g, index, src, expr, expr.span(), ordinal, role, owner_node_id, input_pin, x, y)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2759
 fn expr_source_end(expr: Expr) -> USize {
     if expr is {
         // Compound-assignment sema gives the binary node the target span;
@@ -403,7 +386,6 @@ fn expr_source_end(expr: Expr) -> USize {
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2768
 fn binding_source_span(src: String, binding: &AST.Binding) -> SourceSpan {
     init_end := expr_source_end(binding.init)
     loop src.as_bytes().get(init_end).is_some_and((byte) -> byte.is_ascii_whitespace()) { init_end += 1 }
@@ -412,7 +394,6 @@ fn binding_source_span(src: String, binding: &AST.Binding) -> SourceSpan {
     SourceSpan(start: binding.name_span.start, end: init_span.end)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2788
 fn binding_init_span(src: String, binding: &AST.Binding) -> Span {
     end :: expr_source_end(binding.init)
     start := binding.sigil_span.map((span) -> span.end).unwrap_or_else(() -> binding.init.span().start)
@@ -420,7 +401,6 @@ fn binding_init_span(src: String, binding: &AST.Binding) -> Span {
     Span.new(start, end)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2801
 fn connect_expr_to_input_with_span(g: &GraphBuilder, index: &SemIndex, src: String, expr: &Expr, inline_span: Span, ordinal: USize, role: String, owner_node_id: String, input_pin: String, x: I32, y: I32) {
     provider_y :: data_provider_y(y, ordinal)
     if project_value_node(g, index, src, expr, ordinal, role, x, provider_y) == .Val(out) {
@@ -436,7 +416,6 @@ fn connect_expr_to_input_with_span(g: &GraphBuilder, index: &SemIndex, src: Stri
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2833
 fn details_composite_expr(expr: Expr) -> Bool {
     if expr is {
         .ListLit(_, _, _) | .MapLit(_, _, _) | .StructLit(..) | .TypedLit(..) | .TupleLit(_, _, _, _) | .Present(_, _, _) | .Ok(_, _, _) | .Err(_, _, _) -> true
@@ -444,10 +423,8 @@ fn details_composite_expr(expr: Expr) -> Bool {
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2847
 fn data_provider_y(y: I32, ordinal: USize) -> I32 { y + 96 + (I32{(ordinal % 2)} * 18) }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2851
 fn project_value_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, ordinal: USize, role: String, x: I32, y: I32) -> String? {
     if expr == .Place(inner, _, _, _) -> return project_value_node(g, index, src, inner, ordinal, role, x, y)
     if expr == .Ident(name, span, _) {
@@ -472,14 +449,12 @@ fn project_value_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr,
     .Some(add_pin(g, node_id, "value", "output", expr_type(g, index, expr), "", false))
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2933
 fn getter_key(index: SemIndex, name: String, span: SourceSpan) -> String {
     reference :: index.references().iter().find((reference) -> reference.span == span && reference.name == name) ?? return "{name}@{span.start}:{span.end}"
     target :: reference.target.as_ref() ?? return "{name}@{span.start}:{span.end}"
     "{name}@{target.module_path}:{target.def_span.start}:{target.def_span.end}"
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2950
 fn method_is_pure(index: SemIndex, span: SourceSpan) -> Bool {
     reference :: index.references().iter().find((reference) -> reference.span == span) ?? return false
     target :: reference.target.as_ref() ?? return false
@@ -488,12 +463,10 @@ fn method_is_pure(index: SemIndex, span: SourceSpan) -> Bool {
     if signature.effects is { .Checked(effects) -> effects.is_empty(); _ -> false }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2975
 fn canvas_ident_fragment(name: String) -> String {
     name.chars().map((c) -> if c.is_ascii_alphanumeric() || c == '_' -> c else -> '_').collect()
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2987
 fn project_expr_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, ordinal: USize, x: I32, y: I32, exec_context: Bool) -> String? {
     if expr is {
         .Binary(op, left, right, span) -> {

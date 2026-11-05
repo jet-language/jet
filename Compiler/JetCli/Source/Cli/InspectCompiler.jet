@@ -1,5 +1,5 @@
-// Source/Compiler.rs checked_value + status_ct_value. A check is a source query,
-// not check_file: its filename is metadata and imports use the eval source root.
+// A check is a source query, not check_file: its filename is metadata and
+// imports use the eval source root.
 use {
     cli_files :: core.files
     jet_foundation.[
@@ -96,7 +96,7 @@ fn jet_cli_inspect_compiler_check(file: String, source: String) -> JetDriverVerb
         .CheckedCompilerValue(checked) -> value = jet_cli_compiler_checked_value(checked.value)
         .RetainedCheckedProjection(_) -> { return jet_cli_ice("the compiler check query returned a retained projection instead of its compiler value") }
         .Failed -> {
-            // Compiler.rs's no-bundle path preserves syntax and diagnostics while
+            // No-bundle path preserves syntax and diagnostics while
             // semantic_index/effects are absent, rather than failing the API call.
             functions := [JetCLIStatusValue]{}
             loop item in parsed.parsed.program.items {

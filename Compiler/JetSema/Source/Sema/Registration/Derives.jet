@@ -1,9 +1,8 @@
 // Built-in derive providers are the ordinary Prelude declarations in
 // SEMA_PRELUDE_DERIVE_SOURCE (PreludeDerives.jet). Each selected capability
-// expands the provider's typed
-// template body for one declaration and enters registration as a
-// compiler-generated trait block, exactly like the Rust bootstrap's
-// `Registration/Derives.rs` + `Comptime::expand_derive_body`.
+// expands the provider's typed template body for one declaration and enters
+// registration as a compiler-generated trait block, exactly like the Rust
+// bootstrap's + `Comptime::expand_derive_body`.
 //
 // Expansion is linear in the template: `comptime if` selects its branch before
 // the branch is expanded, `comptime loop` pushes one binding onto the shared scope
@@ -1685,11 +1684,11 @@ fn sema_derive_expand_scoped(body: [DeriveBodyItem], scope: [NamedCtValue], repo
     Val(items)
 }
 
-// I4 (Rust `Bundle/Validation.rs` `author_facing_diagnostics`): a
-// compiler-generated derive body has no author and no user-typeable span; its
-// spans are offsets into `Prelude/Derives.jet`. Its advice is dropped; its
-// errors are kept and land on `anchor`, the derived type's name (the only
-// authored location the derive has), once per distinct problem.
+// I4 (`author_facing_diagnostics`): a compiler-generated derive body has no
+// author and no user-typeable span; its spans are offsets into
+// `Prelude/Derives.jet`. Its advice is dropped; its errors are kept and land on
+// `anchor`, the derived type's name (the only authored location the derive
+// has), once per distinct problem.
 fn sema_author_facing_diagnostics(anchor: Span, generated: [Diagnostic], diagnostics: &[Diagnostic]) {
     kept := [Diagnostic]{}
     loop diagnostic in generated {
@@ -1707,7 +1706,7 @@ fn sema_author_facing_diagnostics(anchor: Span, generated: [Diagnostic], diagnos
 }
 
 // ---------------------------------------------------------------------------
-// Built-in providers (Rust `Registration/Derives.rs`).
+// Built-in providers.
 
 fn sema_derive_builtin_providers() -> [DeriveDef] {
     parsed :: parse_source(SEMA_PRELUDE_DERIVE_SOURCE.bytes())

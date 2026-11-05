@@ -5,13 +5,10 @@ use {
     fs :: std.fs
     std.os.unix.fs.[symlink]
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4221
 TEST_SEQUENCE := AtomicU64.new(0) // GATE #4494: atomic fixture sequence.
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4223
 fn test_root(label: String) -> OSPath {
     std.env.temp_dir().join("jet-canvas-action-overlay-{label}-{std.process.id()}-{TEST_SEQUENCE.fetch_add(1, Ordering.Relaxed)}") // GATE #4494
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4233
 #Test("canvas_action_check_ignores_final_swap_in_legacy_temp_name") {
     if selected_family() == "unix" { // GATE #4483: original Unix-only test.
         root := test_root("final")
@@ -29,7 +26,6 @@ fn test_root(label: String) -> OSPath {
         fs.remove_dir_all(root).unwrap()
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4260
 #Test("canvas_action_check_ignores_ancestor_swap_in_legacy_temp_name") {
     if selected_family() == "unix" { // GATE #4483
         root := test_root("ancestor")

@@ -1673,11 +1673,11 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
     }
 }
 
-// Rust artifact_plan.rs `lower_guest_import_foreign`: one per-callable
-// `#Import(c)` declaration becomes the foreign row its calls bind to. The row
-// keeps the function's symbol identity, so a checked direct call to the
-// declaration lowers as a foreign C call of the marker's symbol; the
-// declaration itself has no Jet body and no FnBody.
+// `lower_guest_import_foreign`: one per-callable `#Import(c)` declaration
+// becomes the foreign row its calls bind to. The row keeps the function's
+// symbol identity, so a checked direct call to the declaration lowers as a
+// foreign C call of the marker's symbol; the declaration itself has no Jet body
+// and no FnBody.
 fn sema_checked_guest_import_foreign_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationFunction) -> SemaCheckedForeignFunction? {
     symbol :: parser_guest_import_symbol(registered.declaration) ?? return None
     module_identity :: module_row.module_identity
@@ -2132,8 +2132,8 @@ fn sema_checked_validate_struct_field(definition: StructDef, field: Field, diagn
     }
 }
 
-// D-DECIMAL1 float-money lint (Rust Registration/Items.rs:1821 and
-// Numeric.rs `is_money_like_name`/`allows_float_money` @ 6083377777).
+// D-DECIMAL1 float-money lint (and `is_money_like_name`/`allows_float_money` @
+// 6083377777).
 SEMA_CHECKED_MONEY_WORDS :: [String]{"price", "cost", "amount", "fee", "balance", "tax"}
 
 fn sema_checked_type_is_float(ty: Type) -> Bool Never! {
@@ -2191,8 +2191,8 @@ fn sema_checked_usable_alignment(alignment: Int, target_mode: Bool) -> Int Never
     usable
 }
 
-// Rust CheckerFieldPolicy.rs `process_computed_fields`: E0382 for a field
-// `#Memo` without a bare formula, then E0338 for a computed-field cycle.
+// `process_computed_fields`: E0382 for a field `#Memo` without a bare formula,
+// then E0338 for a computed-field cycle.
 fn sema_checked_validate_field_policy(definition: StructDef, diagnostics: &[Diagnostic]) {
     loop field_index in 0..<definition.fields.len() {
         loop marker in definition.fields[field_index].serde_markers {
@@ -2214,7 +2214,7 @@ fn sema_checked_validate_field_policy(definition: StructDef, diagnostics: &[Diag
         }
     }
     if names.len() == 0 -> return
-    // Rust Captures.rs `expr_refs_name`: an identifier read or a call name.
+    // `expr_refs_name`: an identifier read or a call name.
     deps := [[Int]]{}
     loop formula in formulas {
         referenced := [String]{}
@@ -2256,7 +2256,6 @@ fn sema_checked_computed_field_visit(struct_name: String, node: Int, names: [Str
     colors[node] = 2
 }
 
-// Rust CheckerPatchable.rs `validate_patchable_struct`.
 fn sema_checked_validate_patchable(definition: StructDef, diagnostics: &[Diagnostic]) {
     patchable := false
     loop derived in definition.derives {
@@ -2511,12 +2510,11 @@ fn sema_checked_box_select(box_graph: SemaCheckedBoxGraph, component: [Int]) -> 
     boxed
 }
 
-// The recursive-layout edges that need a box, for every struct and enum of
-// the graph, computed once: Rust `find_box_edges` (Codegen/Context.rs).
-// Every struct and enum is a root and only those have edges, so no
-// multi-type cycle runs through a non-root and Rust's SCC answer is exact
-// (its path-enumeration fallback never applies). Result: nominal SymbolId
-// key -> the owner's boxed keys.
+// The recursive-layout edges that need a box, for every struct and enum of the
+// graph, computed once: Rust `find_box_edges`. Every struct and enum is a root
+// and only those have edges, so no multi-type cycle runs through a non-root and
+// Rust's SCC answer is exact (its path-enumeration fallback never applies).
+// Result: nominal SymbolId key -> the owner's boxed keys.
 fn sema_checked_program_boxed_edges(graph: SemaRegistrationGraph) -> [String:[String]] Never! {
     nodes := [String:Int]{}
     rows := [SemaRegistrationRowRef]{}

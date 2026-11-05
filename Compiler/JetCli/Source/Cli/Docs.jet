@@ -1,12 +1,11 @@
 // The documentation projection of the Jet-hosted `jet doc` (jet-semindex
-// Docs.rs `build_doc_graph`, `DocGraph::to_status_envelope`, `to_markdown`,
-// `to_html`). The callable failure and nominal trait-contract facts it reads
-// are the shared semantic index's (SemIndexBuild.jet `jet_cli_build_semindex`),
-// exactly as Docs.rs reads `SemIndex`. The command checks a bundle, builds the
-// index once, asks this module for a projection, and chooses an output
-// format; it does not walk the AST a second time. The items are the checked
-// modules' items as sema settled them, so derived impls and inferred failure
-// contracts are the checker's.
+// `build_doc_graph`, `DocGraph::to_status_envelope`, `to_markdown`, `to_html`).
+// The callable failure and nominal trait-contract facts it reads are the shared
+// semantic index's (SemIndexBuild.jet `jet_cli_build_semindex`), exactly reads
+// `SemIndex`. The command checks a bundle, builds the index once, asks this
+// module for a projection, and chooses an output format; it does not walk the
+// AST a second time. The items are the checked modules' items as sema settled
+// them, so derived impls and inferred failure contracts are the checker's.
 use {
     jet_driver.[
         JetDriverDocModule,
@@ -159,7 +158,7 @@ fn jet_cli_doc_max(left: Int, right: Int) -> Int Never! {
     if left > right -> left else -> right
 }
 
-// Docs.rs `line_column`: 1-based line and byte column of `offset`.
+// `line_column`: 1-based line and byte column of `offset`.
 fn jet_cli_doc_line_column(bytes: [U8], offset: Int) -> [Int] Never! {
     end :: jet_cli_doc_min(offset, bytes.len())
     line := 1
@@ -173,7 +172,6 @@ fn jet_cli_doc_line_column(bytes: [U8], offset: Int) -> [Int] Never! {
     [Int]{line, end - line_start + 1}
 }
 
-// Docs.rs `source_for`.
 fn jet_cli_doc_source_for(path: String, source: String, span: Span) -> JetCLIDocSource Never! {
     bytes :: source.bytes()
     start :: jet_cli_doc_min(span.start, bytes.len())
@@ -182,8 +180,8 @@ fn jet_cli_doc_source_for(path: String, source: String, span: Span) -> JetCLIDoc
     JetCLIDocSource{path: path, start: start, end: end, line: position[0], column: position[1], link: "{path}#L{position[0]}"}
 }
 
-// Docs.rs `declaration_text`: the declaration head before its first `{`,
-// whitespace collapsed.
+// `declaration_text`: the declaration head before its first `{`, whitespace
+// collapsed.
 fn jet_cli_doc_declaration_text(source: String, span: Span) -> String Never! {
     bytes :: source.bytes()
     start :: jet_cli_doc_min(span.start, bytes.len())
@@ -197,8 +195,8 @@ fn jet_cli_doc_declaration_text(source: String, span: Span) -> String Never! {
     jet_cli_doc_collapse_whitespace(jet_cli_doc_text(bytes, start, end))
 }
 
-// Docs.rs `source_docs`: the `///` block directly above the declaration
-// line, as its first summary line and its `Example:` lines.
+// `source_docs`: the `///` block directly above the declaration line, as its
+// first summary line and its `Example:` lines.
 fn jet_cli_doc_source_docs(source: String, def_start: Int) -> JetCLIDocComment Never! {
     bytes :: source.bytes()
     prefix_end :: jet_cli_doc_min(def_start, bytes.len())
@@ -234,8 +232,7 @@ struct JetCLIDocComment {
     examples: [String]
 }
 
-// Docs.rs `leading_summary`: the first summary line of the file's leading
-// `///` block.
+// `leading_summary`: the first summary line of the file's leading `///` block.
 fn jet_cli_doc_leading_summary(source: String) -> String Never! {
     summary := ""
     loop raw in jet_cli_doc_lines(source) {
@@ -250,13 +247,13 @@ fn jet_cli_doc_leading_summary(source: String) -> String Never! {
     summary
 }
 
-// Docs.rs `stable_module_path` is the display path the driver carries; a
+// The Rust `stable_module_path` is the display path the driver carries; a
 // Windows separator is printed as `/`.
 fn jet_cli_doc_stable_path(path: String) -> String Never! {
     path.replace("\\", "/")
 }
 
-// Docs.rs `module_name`: the alias, else the file stem.
+// `module_name`: the alias, else the file stem.
 fn jet_cli_doc_module_name(path: String, alias: String) -> String Never! {
     // copy: `alias` stays with the caller (`alias` is a read parameter: no move out of it, E0201)
     // and the new value owns its own.
@@ -304,7 +301,6 @@ struct JetCLIDocUnit {
     source: String
 }
 
-// Docs.rs `add_item`.
 fn jet_cli_doc_add_item(output: &[JetCLIDocItem], unit: JetCLIDocUnit, kind: String, name: String, parent: String, public: Bool, package_public: Bool, span: Span, name_span: Span, markers: [String]) Never! {
     comment :: jet_cli_doc_source_docs(unit.source, name_span.start)
     &output.push(JetCLIDocItem{
@@ -324,7 +320,6 @@ fn jet_cli_doc_add_item(output: &[JetCLIDocItem], unit: JetCLIDocUnit, kind: Str
     })
 }
 
-// Docs.rs `add_function`.
 fn jet_cli_doc_add_function(output: &[JetCLIDocItem], unit: JetCLIDocUnit, function: Func, parent: String, inherited_public: Bool) Never! {
     jet_cli_doc_add_item(&output, unit, "function", function.name, parent, function.is_pub || inherited_public, function.is_package_pub, function.span, function.name_span, jet_cli_doc_marker_names(function.markers))
 }
@@ -336,7 +331,7 @@ fn jet_cli_doc_sorted_names(functions: [Func]) -> [String] Never! {
     names
 }
 
-// Docs.rs `add_nested_impl`: a trait block written inside a struct or enum.
+// `add_nested_impl`: a trait block written inside a struct or enum.
 fn jet_cli_doc_add_nested_impl(output: &[JetCLIDocItem], impls: &[JetCLIDocImpl], unit: JetCLIDocUnit, trait_name: String, type_name: String, methods: [Func], public: Bool, span: Span) Never! {
     &impls.push(JetCLIDocImpl{
         kind: "trait_impl",
@@ -350,7 +345,6 @@ fn jet_cli_doc_add_nested_impl(output: &[JetCLIDocItem], impls: &[JetCLIDocImpl]
     loop method in methods -> jet_cli_doc_add_function(&output, unit, method, type_name, public)
 }
 
-// Docs.rs `collect_protocol_names`.
 fn jet_cli_doc_collect_protocol_names(items: [Item], names: &[String]) Never! {
     loop item in items {
         if item == {
@@ -362,7 +356,6 @@ fn jet_cli_doc_collect_protocol_names(items: [Item], names: &[String]) Never! {
     }
 }
 
-// Docs.rs `collect_items`.
 fn jet_cli_doc_collect_items(items: [Item], unit: JetCLIDocUnit, parent: String, inherited_public: Bool, protocol_names: [String], output: &[JetCLIDocItem], impls: &[JetCLIDocImpl]) Never! {
     no_markers :: [String]{}
     loop item in items {
@@ -449,8 +442,8 @@ fn jet_cli_doc_collect_items(items: [Item], unit: JetCLIDocUnit, parent: String,
     }
 }
 
-// Docs.rs `definition_belongs_to_doc_item`: semindex definitions keep the
-// checked module path, documentation names its stable project path.
+// `definition_belongs_to_doc_item`: semindex definitions keep the checked
+// module path, documentation names its stable project path.
 fn jet_cli_doc_belongs(definition: JetCLISemDef, item: JetCLIDocItem) -> Bool Never! {
     jet_cli_doc_stable_path(definition.module_path) == item.module_path && item.source.start <= definition.def_span.start && definition.def_span.end <= item.source.end
 }
@@ -476,7 +469,6 @@ fn jet_cli_doc_nominal_contracts(index: JetCLISemIndex, item: JetCLIDocItem) -> 
     None
 }
 
-// Docs.rs `render_trait_contract`.
 fn jet_cli_doc_trait_contract(contract: JetCLISemTraitContract) -> String Never! {
     lines := [String]{"implements {contract.trait_name}"}
     loop entry in contract.associated_types {
@@ -498,7 +490,6 @@ fn jet_cli_doc_module_position(modules: [JetDriverDocModule], path: String) -> I
     None
 }
 
-// Docs.rs `enrich_callable_contracts` and `enrich_type_contracts`.
 fn jet_cli_doc_enrich(items: &[JetCLIDocItem], index: JetCLISemIndex) Never! {
     loop item_index in 0..<items.len() {
         if items[item_index].kind == "function" {
@@ -520,7 +511,6 @@ fn jet_cli_doc_enrich(items: &[JetCLIDocItem], index: JetCLISemIndex) Never! {
     }
 }
 
-// Docs.rs `doctest_fence_is_jet`.
 fn jet_cli_doc_fence_is_jet(fence: String) -> Bool Never! {
     bytes :: fence.bytes()
     start := 0
@@ -531,7 +521,7 @@ fn jet_cli_doc_fence_is_jet(fence: String) -> Bool Never! {
     language == "" || jet_cli_ascii_lower(language) == "jet"
 }
 
-// Docs.rs `find_doctest_expect_marker`: the `// =>` outside a string.
+// `find_doctest_expect_marker`: the `// =>` outside a string.
 fn jet_cli_doc_expect_marker(line: String) -> Int? Never! {
     bytes :: line.bytes()
     marker :: JET_CLI_DOC_EXPECT_MARKER.bytes()
@@ -564,7 +554,7 @@ fn jet_cli_doc_expect_marker(line: String) -> Int? Never! {
     None
 }
 
-// Docs.rs `discover_doctests`: fenced Jet blocks in `///` comments.
+// `discover_doctests`: fenced Jet blocks in `///` comments.
 fn jet_cli_doc_discover_doctests(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never! {
     tests := [JetCLIDocTest]{}
     in_fence := false
@@ -743,9 +733,9 @@ fn jet_cli_doc_sort_tests(values: &[JetCLIDocTest]) Never! {
     }
 }
 
-// Docs.rs `build_doc_graph`: the projection of the checked modules, enriched
-// from the semantic index of the same checked program (whose effect
-// projection is the application authority).
+// `build_doc_graph`: the projection of the checked modules, enriched from the
+// semantic index of the same checked program (whose effect projection is the
+// application authority).
 fn jet_cli_build_doc_graph(modules: [JetDriverDocModule], index: JetCLISemIndex) -> JetCLIDocGraph {
     protocol_names := [String]{}
     loop doc_module in modules -> jet_cli_doc_collect_protocol_names(doc_module.items, &protocol_names)
@@ -885,13 +875,12 @@ fn jet_cli_doc_status_json(graph: JetCLIDocGraph) -> String Never! {
     jet_cli_status_render("inspect.doc", true, [JetCLIStatusField]{jet_cli_status_field("doc", doc)})
 }
 
-// Docs.rs `docs_link`: the generated pages live one directory below the
-// sources they link to.
+// `docs_link`: the generated pages live one directory below the sources they
+// link to.
 fn jet_cli_doc_link(link: String) -> String Never! {
     "../{link}"
 }
 
-// Docs.rs `html_escape` (`&<>"'`).
 fn jet_cli_html_escape(value: String) -> String Never! {
     value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;")
 }

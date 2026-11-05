@@ -1406,7 +1406,7 @@ impl CachedStatement.Close {
     }
 }
 
-// rusqlite 0.31.0 cache.rs:19-22 and inner_connection.rs:63-130: cache16,
+// rusqlite 0.31.0: cache16,
 // READWRITE|CREATE|URI|NOMUTEX, extended codes and a 5000ms busy timeout.
 struct __Driver { database: SqliteDB, cache: [CachedStatement] }
 impl __Driver.Close {
@@ -1445,8 +1445,8 @@ fn __driver_open(path: String) -> __Driver? Never! {
     if __has_nul(path) -> return None
     pointer := U64{0}
     #Unsafe("NUL-free filename goes through the canonical C String adapter; the output pointer slot belongs to this stack frame") {
-        // rusqlite inner_connection.rs:406-438, for this pinned 3.45 engine:
-        // reject an unsafe global single-thread configuration before opening.
+        // rusqlite, for this pinned 3.45 engine: reject an unsafe global
+        // single-thread configuration before opening.
         if sqlite3.threadsafe() == (I32{0}) -> return None
         mutex :: sqlite3.mutex_alloc(I32{0})
         single_threaded :: mutex == (U64{8})
@@ -1528,8 +1528,8 @@ fn prepare(driver: &__Driver, sql: String) -> CachedStatement DBError! {
         if status != (I32{0}) {
             failure := error(driver)
             primary :: status.bit_and(I32{255})
-            // rusqlite error.rs:422-447: only Unknown primary errors (outside
-            // 2..26) acquire modern_sqlite's SQL/offset diagnostic suffix.
+            // rusqlite: only Unknown primary errors (outside 2..26) acquire
+            // modern_sqlite's SQL/offset diagnostic suffix.
             if primary < (I32{2}) || primary > (I32{26}) {
                 offset :: sqlite3.error_offset(raw(driver))
                 if offset >= (I32{0}) -> failure.message = "{failure.message} in {key} at offset {offset}"
@@ -1688,7 +1688,7 @@ fn __driver_query(driver: &__Driver, sql: String, params: [DBValue]) -> [[String
                     kind == (I32{3}) -> {
                         pointer :: sqlite3.column_text(statement_raw(statement), index)
                         length :: Int.from_i32(sqlite3.column_bytes(statement_raw(statement), index))
-                        // Prelude/DB.rs:167-169 maps invalid UTF-8 to "".
+                        // The Rust original maps invalid UTF-8 to "".
                         value = DBValue.Text(String.from_bytes(sqlite_mem.__bytes_unpack(pointer, length)) ?? "")
                     }
                     kind == (I32{4}) -> {

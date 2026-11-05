@@ -619,13 +619,13 @@ fn jet_driver_host_os_key(value: String) -> String Never! {
     ""
 }
 
-// The build snapshot sema folds `$package.*` and `$build.*`
-// from (Rust `seed_build_facts_from_stamp`). A manifest package names itself;
-// the manifest-less rung uses the entry file stem and version `0.0.0`. The
-// stamp is the lock's `[build.stamp]` the host read (request.build_stamp);
-// without one it is no git revision, clean, the compiler's own package
-// version and no time. A compile never captures a fresh stamp from git and
-// the clock: only lock writers do (Lock.rs `ensure_build_stamp`).
+// The build snapshot sema folds `$package.*` and `$build.*` from (Rust
+// `seed_build_facts_from_stamp`). A manifest package names itself; the
+// manifest-less rung uses the entry file stem and version `0.0.0`. The stamp is
+// the lock's `[build.stamp]` the host read (request.build_stamp); without one
+// it is no git revision, clean, the compiler's own package version and no time.
+// A compile never captures a fresh stamp from git and the clock: only lock
+// writers do.
 fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRequest, target_machine: TargetMachine) -> SemaBuildFacts Never! {
     package_name := ""
     package_version := ""
@@ -4067,17 +4067,17 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     result
 }
 
-// The effects the application requires (EffectBudget.rs `entry_effects`): the
-// direct effects of every function the entry `entry_key` reaches along checked
-// call edges. The maximal row an open-world call (an unannotated function
-// value, an extern) seeds into `solved` is a ceiling fact (E0743), not a
-// required right, so it never widens the authority the application must hold.
-// The generated typed-CLI entry `__jet_cli_run` (D-SHAPE-CLI1) and the parser
-// it calls, `__jet_cli_parse` of its module (`__jet_cli_parse_<binding>` for
-// `__jet_cli_run_<binding>`; JetSema Registration/CliEntry.jet), read argv and
-// its env fallbacks, print help and exit on a refusal through Core; that parse
-// is the toolchain's, as the Rust runtime parse was, so only the user
-// functions they dispatch to contribute required effects.
+// The effects the application requires: the direct effects of every function
+// the entry `entry_key` reaches along checked call edges. The maximal row an
+// open-world call (an unannotated function value, an extern) seeds into
+// `solved` is a ceiling fact (E0743), not a required right, so it never widens
+// the authority the application must hold. The generated typed-CLI entry
+// `__jet_cli_run` (D-SHAPE-CLI1) and the parser it calls, `__jet_cli_parse` of
+// its module (`__jet_cli_parse_<binding>` for `__jet_cli_run_<binding>`;
+// JetSema Registration/CliEntry.jet), read argv and its env fallbacks, print
+// help and exit on a refusal through Core; that parse is the toolchain's, as
+// the Rust runtime parse was, so only the user functions they dispatch to
+// contribute required effects.
 fn jet_driver_required_effects(functions: [FnBody], entry_key: String, startup_keys: [String]) -> [String] Never! {
     // Each key's first row: a hashed map, only looked up.
     by_key :: ir_first_function_rows(functions)

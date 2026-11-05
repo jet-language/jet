@@ -20,7 +20,7 @@ fn devserver_test_header_error(lines: [String]) -> String Never! {
     }
 }
 
-// Rust lib.rs:1218–1224. Host added for Main's strict Core framing cutover.
+// Host added for Main's strict Core framing cutover.
 #Test("request_and_query_policy") {
     cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
     r :: devserver_test_request("POST /x?q=a%20b HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: 2{cr}\n{cr}\nok")
@@ -33,7 +33,7 @@ fn devserver_test_header_error(lines: [String]) -> String Never! {
     // public tolerant/lossy Core value decoding; not replaced by raw output.
 }
 
-// Rust lib.rs:1226–1239, preserving the hostile metadata with a valid Host.
+// Preserving the hostile metadata with a valid Host.
 #Test("malformed_request_metadata_fails_closed") {
     cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
     assert(devserver_test_request_fails("POST /x HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: nope{cr}\n{cr}\n"))
@@ -42,7 +42,6 @@ fn devserver_test_header_error(lines: [String]) -> String Never! {
     assert(devserver_test_request_fails("POST /x HTTP/1.1{cr}\nHost: localhost{cr}\nContent-Length: 2{cr}\n{cr}\nx"))
 }
 
-// Rust lib.rs:1241–1253.
 // Original names retained; these exercise rejection, not allocator timing.
 // #4431 and DC1/DC2/DC5 gate before-proportional-allocation integration proof.
 #Test("request_lines_and_headers_are_bounded_before_allocation") {
@@ -50,7 +49,6 @@ fn devserver_test_header_error(lines: [String]) -> String Never! {
     assert(devserver_test_request_fails("GET /{"x".repeat(MAX_REQUEST_LINE_BYTES)} HTTP/1.1{cr}\nHost: localhost{cr}\n{cr}\n"))
     assert(devserver_test_request_fails("GET / HTTP/1.1{cr}\nHost: localhost{cr}\nX-Hostile: {"x".repeat(MAX_REQUEST_LINE_BYTES)}{cr}\n{cr}\n"))
 }
-// Rust lib.rs:1256–1263.
 #Test("aggregate_request_headers_are_bounded_before_parse") {
     cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
     lines := [String]{"GET / HTTP/1.1{cr}\nHost: localhost{cr}\n"}
@@ -58,7 +56,6 @@ fn devserver_test_header_error(lines: [String]) -> String Never! {
     &lines.push("{cr}\n")
     assert(devserver_test_request_fails(lines.join("")))
 }
-// Rust lib.rs:1266–1273.
 #Test("request_header_count_is_bounded_before_parse") {
     cr :: String.from_bytes([U8]{13}) ?? panic("ASCII CR fixture")
     lines := [String]{"GET / HTTP/1.1{cr}\nHost: localhost{cr}\n"}

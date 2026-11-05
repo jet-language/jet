@@ -1,12 +1,12 @@
-// crates/jet-semindex/src/Build.rs:2901–3273: collect_stmts/collect_stmt,
-// loop-label definitions/references, lvalues, bindings and binder inlay hints.
-// One walker: S5 owns DB/context, S6 checked anchors, S7 nodes/slots, S12 exprs.
-// Full composition remains gated by C4/CP-NAMES/S12 and S7's CP-AST optional-
-// projection/#4397 gate. No checked graph or reference target is synthesized.
-// Policy regions recurse exactly as Rust3110–3115: CP-POLICY's canonical
-// Foundation POLICY_RULES/resolver/explain belong to the item walker, not here.
-// CP-AST must publish stmt_span (AST/statements.rs865–902) and the borrowed
-// bind_pattern_names projection (AST/patterns.rs278–284); no local replicas.
+// collect_stmts/collect_stmt, loop-label definitions/references, lvalues,
+// bindings and binder inlay hints. One walker: S5 owns DB/context, S6 checked
+// anchors, S7 nodes/slots, S12 exprs. Full composition remains gated by
+// C4/CP-NAMES/S12 and S7's CP-AST optional-projection/#4397 gate. No checked
+// graph or reference target is synthesized. Policy regions recurse exactly as
+// Rust3110–3115: CP-POLICY's canonical Foundation POLICY_RULES/resolver/explain
+// belong to the item walker, not here. CP-AST must publish stmt_span
+// (AST/statements.rs865–902) and the borrowed bind_pattern_names projection
+// (AST/patterns.rs278–284); no local replicas.
 use jet_foundation.[Stmt, LValue, Binding, NamedSpan, Span, CallArg, Program, NameFacts, expr_span, type_name]
 
 fn semindex_collect_stmts(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, stmts: [Stmt], mp: String) {

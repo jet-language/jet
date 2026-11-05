@@ -1,11 +1,10 @@
-// core.game.raylib on the static native runtime: CoreLib/Top/HandlesRaylib.rs
-// :744-1065 with jet_raylib_api() == None. The display bridge dlopens
-// libraylib (HandlesRaylib.rs:664-735), which a static musl executable cannot
-// do, so windows are never native, input is inert and sticks read 0. Drawing
-// is real: Core scan-converts every primitive into clipped runs and this file
-// owns the RGBA canvas they paint and the decoded textures sprites blit from.
-// Atlas metadata is the shared Core/Raylib.rs:67-147 parse. Carriers are
-// UiRaylibMetadata.jet's RaylibWindow32/RaylibTextureAtlas64/Region40.
+// core.game.raylib on the static native runtime: with jet_raylib_api() == None.
+// The display bridge dlopens libraylib, which a static musl executable cannot
+// do, so windows are never native, input is inert and sticks read 0. Drawing is
+// real: Core scan-converts every primitive into clipped runs and this file owns
+// the RGBA canvas they paint and the decoded textures sprites blit. Atlas
+// metadata is the shared parse. Carriers are UiRaylibMetadata.jet's
+// RaylibWindow32/RaylibTextureAtlas64/Region40.
 
 // Each leaf narrows its exact-Int words as the C adapter does before the call.
 fn raylib_words(a: I64, b: I64, c: I64, d: I64) -> Bool {

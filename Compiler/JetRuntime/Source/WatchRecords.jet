@@ -1,4 +1,4 @@
-// CommonTypes.rs:640-665 derive Clone/PartialEq; CAbiRoutes.rs:12158-12195.
+// The Rust original derive Clone/PartialEq.
 #Export(c) fn jet_rt_record_new_watch_event(domain: I64, kind: I64, path: I64, detail: I64, pid: I64, port: I64) -> I64 {
     if (domain < I64{0} || domain > I64{2} || kind < I64{0} || kind > I64{5}) {
         trap_native_index_range_stop()
@@ -44,8 +44,8 @@
     if data_tree_word(wrapping(left + WATCH_EVENT_PID)) != data_tree_word(wrapping(right + WATCH_EVENT_PID)) -> return false
     data_tree_word(wrapping(left + WATCH_EVENT_PORT)) == data_tree_word(wrapping(right + WATCH_EVENT_PORT))
 }
-// Custom JetShow omits pid/port and does NOT quote/escape path/detail:
-// CommonTypes.rs:6772-6777. Stream into the existing builder, no formatter copy.
+// Custom JetShow omits pid/port and does NOT quote/escape path/detail. Stream
+// into the existing builder, no formatter copy.
 #Export(c) fn jet_rt_handle_show_watch_event(value: I64) -> I64 {
     result :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(result, rt_static_text("WatchEvent {{ domain: "))

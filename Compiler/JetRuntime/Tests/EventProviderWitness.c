@@ -1,9 +1,8 @@
 // Link real composed Jet runtime exports with -Wl,--wrap=jet_rt_alloc
 // -Wl,--wrap=jet_rt_free. Events.jet against the Rust meaning
-// (ReactiveEventWatch.rs JetEventScope/JetSubscription/JetEvent): registration
-// order, priority, once, cancellation, scope teardown, nested emit, the last
-// Event handle dropped mid-emit, and every provider allocation freed exactly
-// once.
+// (JetEventScope/JetSubscription/JetEvent): registration order, priority, once,
+// cancellation, scope teardown, nested emit, the last Event handle dropped
+// mid-emit, and every provider allocation freed exactly once.
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>

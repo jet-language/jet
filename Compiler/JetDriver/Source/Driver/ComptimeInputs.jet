@@ -3,10 +3,10 @@
 // literal path (relative, no `..`). Reads go through the host's raw build-input
 // transport, rooted at the directory of the file doing the embedding, with the
 // same no-follow read, tree-file bound and glob walk as `b.embed` / `b.find`
-// (dispatch.rs `eval_build_time_io`, one implementation of the path law). Each
-// file read is recorded with its SHA-256 for the comptime input lock. A Core
-// file's inputs are files beside it in the toolchain's Core tree, read by the
-// host's Core reader (JetDriverCoreComptimeInputs).
+// (`eval_build_time_io`, one implementation of the path law). Each file read is
+// recorded with its SHA-256 for the comptime input lock. A Core file's inputs
+// are files beside it in the toolchain's Core tree, read by the host's Core
+// reader (JetDriverCoreComptimeInputs).
 use {
     jet_foundation.[
         Diagnostic,
@@ -95,8 +95,8 @@ fn jet_driver_comptime_input_value(builtin: String, path: String, bytes: [U8], s
     Ok(TComptimeValue.String{value: text})
 }
 
-// dispatch.rs `eval_locked_find`: the sorted relative files the glob matches,
-// each read (and recorded) within the tree-file bound.
+// `eval_locked_find`: the sorted relative files the glob matches, each read
+// (and recorded) within the tree-file bound.
 fn jet_driver_comptime_find(adapter: JetDriverComptimeInputs, glob: String, span: Span) -[FS.Read]> TComptimeValue JetEvalComptimeInputError! {
     reply :: jet_driver_build_find(adapter.inputs, adapter.base_dir, [BuildSessionValue]{BuildSessionValue.Text{value: glob}}, span)
     found := [String]{}

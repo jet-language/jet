@@ -42,7 +42,7 @@ int main(int argc,char **argv){
     jet_rt_alloc_init();
     if(argc==2 && strcmp(argv[1],"overflow")==0){Reservoir *r=jet_reservoir_sampler_new(1);r->count=UINT64_MAX;Text t={"x",1,0};jet_rt_native_reservoir_add(r,&t);return 1;}
     assert(argc==1);
-    // Actual seed Sketch.rs oracle: capacity clamping, RNG bits and every output slot.
+    // Actual seed oracle: capacity clamping, RNG bits and every output slot.
     static const int64_t capacities[]={-1,0,1,4,16};
     static const unsigned lengths[]={1,1,1,4,16};
     static const unsigned indices[][16]={{57},{57},{57},{13,18,105,86},{0,73,77,52,64,54,98,59,69,102,70,11,41,44,95,67}};

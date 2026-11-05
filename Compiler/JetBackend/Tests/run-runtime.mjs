@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // The hosted CLI checks the canonical runtime source aggregate, then its
 // library hook lowers the checked exports and lifecycle as ONE native object.
-// No Tests.rs factory, emitted Rust, or Rust schema reader enters this path.
-// usage: JET=<hosted compiler> node run-runtime.mjs OUT
+// No factory, emitted Rust, or Rust schema reader enters this path. usage:
+// JET=<hosted compiler> node run-runtime.mjs OUT
 //        [--stage assemble|lower] [--until assemble|lower] [--test NAME]
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';

@@ -1,0 +1,156 @@
+#!/usr/bin/env jet
+// Rust-era ratchet: the deleted Rust tree leaves no data or citations behind.
+//
+// 1. Every harness data table directly under tests/ (`*.tsv`, `*.txt`) and
+//    under Tools/ci/ has a reader: some tracked source file other than the
+//    table itself names it. Docs, Markdown and the script census describe
+//    tables; they do not read them.
+// 2. No `//` comment under Compiler/ or Core/ cites a `.rs` file. The Rust
+//    sources are gone, so such a citation points nowhere. A reference into the
+//    pinned upstream Rust library (`library/std/`, `library/core/`,
+//    `library/alloc/`) names a real external input and stays.
+//
+// Usage (from the repository root): jet Tools/agent/RustEraRatchet.jet
+use {
+    process :: core.process
+    regex :: core.regex
+    term :: core.term
+}
+
+DATA_ROOTS :: [String]{"tests", "Tools/ci"}
+DATA_SUFFIXES :: [String]{".tsv", ".txt"}
+NOT_READERS :: [String]{"Tools/script-census.tsv"}
+CITATION_ROOTS :: [String]{"Compiler", "Core"}
+
+// git grep -E patterns (POSIX ERE): a comment line naming `<word>.rs`.
+CITATION_GREP :: "^[[:space:]]*//.*[A-Za-z0-9_]\\.rs([^A-Za-z0-9_]|$)"
+UPSTREAM_LIBRARY :: Regex{"library/(?:std|core|alloc)/"}
+COMMENT_CITATION :: Regex{"^\s*//.*\w\.rs\b"}
+
+#Error
+struct RatchetError {
+    message: String
+}
+
+// The stdout lines of a git command; `allow_empty` accepts git grep's exit 1
+// (no match) as no lines.
+fn git_lines(argv: [String], allow_empty: Bool) -[Exec, IO, Time.Wait]> [String] RatchetError! {
+    receipt :: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(RatchetError{message: "cannot run {argv.join(" ")}: {err}"})
+    if allow_empty && receipt.code == 1 && receipt.errors == "" -> return Ok([String]{})
+    if receipt.code != 0 -> return Err(RatchetError{message: "{argv.join(" ")} failed ({receipt.code}): {receipt.errors}"})
+    lines := [String]{}
+    loop line in receipt.output.split("\n") {
+        if line != "" -> &lines.push(line.copy())
+    }
+    Ok(lines)
+}
+
+fn base_name(path: String) -> String Never! {
+    split :: path.rpartition("/")
+    if split.sep == "" -> return path.copy()
+    split.tail.copy()
+}
+
+// A harness table: a `.tsv` or `.txt` directly in tests/, or anywhere under
+// Tools/ci/.
+fn is_harness_table(path: String) -> Bool Never! {
+    suffixed := false
+    loop suffix in DATA_SUFFIXES {
+        if path.ends_with(suffix) -> suffixed = true
+    }
+    if !suffixed -> return false
+    if path.starts_with("Tools/ci/") -> return true
+    path.starts_with("tests/") && !path.remove_prefix("tests/").contains("/")
+}
+
+// Whether `path`, a tracked file that names `table`, reads it.
+fn is_reader(table: String, path: String) -> Bool Never! {
+    path != table && !path.starts_with("Docs/") && !path.ends_with(".md") && !NOT_READERS.contains(path)
+}
+
+fn unread_tables() -[Exec, IO, Time.Wait]> [String] RatchetError! {
+    argv := [String]{"git", "ls-files", "--"}
+    loop root in DATA_ROOTS -> &argv.push(root)
+    unread := [String]{}
+    loop table in git_lines(argv, false) ?? return Err(err) {
+        if !is_harness_table(table) -> next
+        naming :: git_lines([String]{"git", "grep", "-l", "-I", "-F", "-e", base_name(table), "--", "."}, true) ?? return Err(err)
+        read := false
+        loop path in naming {
+            if is_reader(table, path) -> read = true
+        }
+        if !read -> &unread.push(table.copy())
+    }
+    Ok(unread)
+}
+
+// `path:line:text` rows of git grep -n whose text is a citation of a deleted
+// Rust source.
+fn stale_citations(rows: [String]) -> [String] Never! {
+    stale := [String]{}
+    loop row in rows {
+        location :: row.partition(":")
+        rest :: location.tail.partition(":")
+        if !COMMENT_CITATION.is_match(rest.tail) || UPSTREAM_LIBRARY.is_match(rest.tail) -> next
+        &stale.push(row.copy())
+    }
+    stale
+}
+
+fn citation_rows() -[Exec, IO, Time.Wait]> [String] RatchetError! {
+    argv := [String]{"git", "grep", "-n", "-I", "-E", "-e", CITATION_GREP, "--"}
+    loop root in CITATION_ROOTS -> &argv.push(root)
+    git_lines(argv, true)
+}
+
+fn rust_era_main() -[Exec, IO, Time.Wait]> Int RatchetError! {
+    unread :: unread_tables() ?? return Err(err)
+    stale :: stale_citations(citation_rows() ?? return Err(err))
+    if unread.len() == 0 && stale.len() == 0 {
+        print("rust-era-ratchet: ok (every harness table has a reader; no comment cites a deleted .rs source)")
+        return Ok(0)
+    }
+    loop table in unread -> term.eprint("{table}: no tracked source reads this table; delete it or add its reader")
+    loop row in stale -> term.eprint("{row}: cites a deleted Rust source; name the live Jet owner or drop the citation")
+    term.eprint("rust-era-ratchet: {unread.len()} unread table(s), {stale.len()} stale citation(s)")
+    Ok(1)
+}
+
+fn run() {
+    if rust_era_main() == {
+        .Ok(code) -> {
+            if code != 0 -> process.exit(code)
+        }
+        .Err(error) -> {
+            term.eprint(error.message)
+            process.exit(1)
+        }
+    }
+}
+
+#Test("harness tables are top-level tests/ tables and Tools/ci tables") {
+    assert(is_harness_table("tests/corpus_policy.tsv"))
+    assert(is_harness_table("tests/diagnostics_coverage_baseline.txt"))
+    assert(is_harness_table("Tools/ci/test-weights.tsv"))
+    assert(!is_harness_table("tests/cases/x/expected.txt"))
+    assert(!is_harness_table("tests/guards/corpus_policy.jet"))
+}
+
+#Test("documents and the script census do not count as readers") {
+    assert(is_reader("tests/a.tsv", "tests/guards/a.jet"))
+    assert(!is_reader("tests/a.tsv", "tests/a.tsv"))
+    assert(!is_reader("tests/a.tsv", "Docs/audits/a.md"))
+    assert(!is_reader("tests/a.tsv", "README.md"))
+    assert(!is_reader("tests/a.tsv", "Tools/script-census.tsv"))
+}
+
+#Test("comment citations of deleted Rust sources are stale; upstream library and code are not") {
+    rows :: [String]{
+        "Compiler/A.jet:3:// Rust: crates/jet-cli/src/Lock.rs:12",
+        "Compiler/B.jet:9:    /// See CmdFlash.rs `identity`.",
+        "Core/C.jet:4:// Rust 1.90.0 library/std/src/sys/env/unix.rs, env()::parse:",
+        "Compiler/D.jet:7:    rust_file :: dir.join(\"prog.rs\")",
+        "Compiler/E.jet:2:// The term rs.trust is unrelated.",
+    }
+    assert_eq(stale_citations(rows).join("|"), "Compiler/A.jet:3:// Rust: crates/jet-cli/src/Lock.rs:12|Compiler/B.jet:9:    /// See CmdFlash.rs `identity`.")
+}

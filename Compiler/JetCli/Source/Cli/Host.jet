@@ -150,10 +150,10 @@ use {
     jetpack_trust.[trust_list_records, trust_store_path]
 }
 
-// crates/jet-foundation/src/ExitCodes.rs `ICE`: Jet's own defect.
+// `ICE`: Jet's own defect.
 JET_CLI_EXIT_ICE :: 101
 
-// Rust host `render_internal_fault` (Diagnostics.rs `render_ice_report`).
+// Rust host `render_internal_fault`.
 fn jet_cli_ice(what: String) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{
         stdout: "",
@@ -171,16 +171,15 @@ fn jet_cli_errors(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 }
 
 // `jet check <file>`: compile through the Jet compiler, place each diagnostic
-// on the file that owns it, and report the outcome the Rust host prints;
-// `json` selects the machine outcome. An explicit file outside every project
-// that imports `project.<module>` is E2393 before the compile (CmdCompile.rs
-// `run_native_execution`). A `project` check (bare or directory) of a
-// program, not a library, runs in Run mode, so an entry with no `fn run` is
-// E0101 (CmdInspect.rs `check_projection_with_options_and_preflight`,
-// Completion.rs). `verbose` on an explicit-file check adds the check's scope
-// and proof rows on stdout (first-hour.md lesson 3). `finish` ends the
-// process with the outcome once the compile ran, skipping the teardown of
-// its result.
+// on the file that owns it, and report the outcome the Rust host prints; `json`
+// selects the machine outcome. An explicit file outside every project that
+// imports `project.<module>` is E2393 before the compile. A `project` check
+// (bare or directory) of a program, not a library, runs in Run mode, so an
+// entry with no `fn run` is E0101
+// (`check_projection_with_options_and_preflight`). `verbose` on an
+// explicit-file check adds the check's scope and proof rows on stdout
+// (first-hour.md lesson 3). `finish` ends the process with the outcome once the
+// compile ran, skipping the teardown of its result.
 fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, verbose: Bool, trace_sink: JetCLITraceSink?, finish: Bool) -> JetDriverVerbOutput {
     watch :: cli_time.start()
     if !project {
@@ -305,11 +304,11 @@ fn jet_cli_test_member(index: Int, argv: [String], env: [String]) -> JetCLITestM
     JetCLITestMemberRun{index: index, done: true, code: code, output: receipt.output, errors: receipt.errors}
 }
 
-// CmdCompile.rs `emit_check_outcome` under `--json`, on stdout: errors are
-// one failed `diagnostics` status (exit 1); visible warnings alone are a
-// passing one; a clean explicit-file check is one passing `check` status
-// carrying the `jet.check/v1` fields, since every `--json` command answers
-// with the `jet.status/v1` object.
+// `emit_check_outcome` under `--json`, on stdout: errors are one failed
+// `diagnostics` status (exit 1); visible warnings alone are a passing one; a
+// clean explicit-file check is one passing `check` status carrying the
+// `jet.check/v1` fields, since every `--json` command answers with the
+// `jet.status/v1` object.
 fn jet_cli_check_json_outcome(file: String, source: String, diagnostics: [Diagnostic], elapsed_ms: Int) -[FS, Env]> JetDriverVerbOutput Never! {
     base :: jet_cli_report_base(file)
     errors :: jet_cli_errors(diagnostics)
@@ -349,13 +348,13 @@ fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool, t
     output
 }
 
-// `jet eval <file>` (CmdDevTools.rs `run_eval`): the entry checks for the
-// interpreter (Eval mode under `--pure`, where the driver adds the transitive
-// E3401 purity walk from `run`) and stops before lowering; the checked
-// program builds as slot IR from `run`, which runs natively in the
-// compile's comptime child (not the generated entry, which drops a valued
-// result). What the program printed is program output: before the value,
-// or on stderr under `--json` so stdout stays one `eval` document.
+// `jet eval <file>`: the entry checks for the interpreter (Eval mode under
+// `--pure`, where the driver adds the transitive E3401 purity walk from `run`)
+// and stops before lowering; the checked program builds as slot IR from `run`,
+// which runs natively in the compile's comptime child (not the generated entry,
+// which drops a valued result). What the program printed is program output:
+// before the value, or on stderr under `--json` so stdout stays one `eval`
+// document.
 fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> JetDriverVerbOutput {
     source :: cli_files.read(file) ?? return jet_cli_report_output("", "E2105", "couldn't read `{file}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -430,8 +429,8 @@ fn jet_cli_eval_json_unsupported(byte_offset: Int, path: String, reason: String,
     JetDriverVerbOutput{stdout: "{rendered}\n", stderr: program_stdout, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
-// CmdDevTools.rs `render_eval_value`: a present value shows its inner value
-// and Unit shows nothing.
+// `render_eval_value`: a present value shows its inner value and Unit shows
+// nothing.
 fn jet_cli_eval_shown(value: CtValue) -> String? Never! {
     if value == .Present(inner) -> return jet_cli_eval_shown(inner)
     if value == .Unit -> return None
@@ -1800,8 +1799,8 @@ fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool
     output
 }
 
-// `jet new` starters (CmdCompile.rs `NEW_PRINT_RUN`, `NEW_CLI_RUN`,
-// `NEW_UI_RUN`, `NEW_WEB_RUN`): `run.jet` for each template.
+// `jet new` starters (`NEW_PRINT_RUN`, `NEW_CLI_RUN`, `NEW_UI_RUN`,
+// `NEW_WEB_RUN`): `run.jet` for each template.
 fn jet_cli_new_run_source(template: String) -> String Never! {
     if template == {
         "cli" -> "#CLI\nstruct GreetingArgs {{\n    #Doc(\"name to greet\") name: String{{\"world\"}}\n}}\n\nfn greeting(name: String) -> String {{ \"hello, {{name}}\" }}\n\nfn run(args: GreetingArgs) {{\n    print(greeting(args.name))\n}}\n\n#Test(\"the greeting stays stable\") {{\n    assert_eq(greeting(\"world\"), \"hello, world\")\n}}\n"
@@ -1812,8 +1811,7 @@ fn jet_cli_new_run_source(template: String) -> String Never! {
 }
 
 // The comment-only command homes `--template overrides` writes beside
-// `run.jet`, which is the `jet run` home itself (CmdCompile.rs
-// `NEW_COMMAND_HOMES`), as (file, source) rows.
+// `run.jet`, which is the `jet run` home itself, as (file, source) rows.
 JET_CLI_NEW_COMMAND_HOMES :: [[String]]{
     [String]{"build.jet", "// Optional `jet build` override. Uncomment one `fn build` to replace the stock default.\n// fn build(b: Build) {{\n//     b.add_executable(\"app\", [\"run.jet\"], [])\n// }}\n// Inspect the stock behavior with: `jet build --show-default`\n"},
     [String]{"dev.jet", "// Optional `jet dev` override. Uncomment one `fn dev` to replace the stock default.\n// fn dev(d: Dev) {{\n//     print(\"dev override\")\n// }}\n// Inspect the stock behavior with: `jet dev --show-default`\n"},
@@ -1841,7 +1839,7 @@ fn jet_cli_zero_pad(value: Int, width: Int) -> String Never! {
     text
 }
 
-// Lock.rs `timestamp_now`: RFC 3339 UTC with nanoseconds.
+// `timestamp_now`: RFC 3339 UTC with nanoseconds.
 fn jet_cli_rfc3339(unix_ns: Int) -> String Never! {
     seconds :: unix_ns /% 1000000000
     days :: seconds /% 86400
@@ -1859,7 +1857,7 @@ fn jet_cli_rfc3339(unix_ns: Int) -> String Never! {
     "{jet_cli_zero_pad(year, 4)}-{jet_cli_zero_pad(month, 2)}-{jet_cli_zero_pad(day, 2)}T{jet_cli_zero_pad(second /% 3600, 2)}:{jet_cli_zero_pad((second % 3600) /% 60, 2)}:{jet_cli_zero_pad(second % 60, 2)}.{jet_cli_zero_pad(unix_ns % 1000000000, 9)}Z"
 }
 
-// Lock.rs `git_output`: trimmed stdout of a successful `git -C <root> …`.
+// `git_output`: trimmed stdout of a successful `git -C <root> …`.
 fn jet_cli_git_output(root: String, args: [String]) -> String? {
     argv := [String]{"git", "-C", root}
     loop argument in args -> &argv.push(argument)
@@ -1868,9 +1866,8 @@ fn jet_cli_git_output(root: String, args: [String]) -> String? {
     Val(receipt.output.trim())
 }
 
-// The `.jet/lock` of a new project: the running toolchain pin
-// (JetPin.rs `toolchain_record`) and the build stamp (Lock.rs
-// `capture_build_stamp`), written as Lock.rs `write` lays them out.
+// The `.jet/lock` of a new project: the running toolchain pin and the build
+// stamp, written as `write` lays them out.
 fn jet_cli_new_lock(root: String) -> String {
     version :: JET_CLI_VERSION
     parts :: version.split(".").to_list()
@@ -1895,12 +1892,12 @@ fn jet_cli_new_failed(code: String, what: String, fix: String, color: Bool) -> J
     jet_cli_report_output("", code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
-// `jet new <name>` (CmdCompile.rs `run_new`): the folder and `.jet/`, then
-// package.jet, the lock, run.jet, the `overrides` command homes, and
-// .gitignore, each a failure of its own; the status lines go to stderr, or
-// with `json` one `new` status line names the folder and its files on stdout.
-// Every Jet file goes through the formatter first, so a fresh project already
-// passes `jet fmt --check`; a template the formatter rejects is a compiler fault.
+// `jet new <name>`: the folder and `.jet/`, then package.jet, the lock, run.jet,
+// the `overrides` command homes, and.gitignore, each a failure of its own; the
+// status lines go to stderr, or with `json` one `new` status line names the
+// folder and its files on stdout. Every Jet file goes through the formatter
+// first, so a fresh project already passes `jet fmt --check`; a template the
+// formatter rejects is a compiler fault.
 fn jet_cli_new_project(name: String, template: String, annotated: Bool, quiet: Bool, json: Bool, color: Bool) -> JetDriverVerbOutput {
     write_failed :: "correct the named problem, then run the command again"
     manifest :: jet_cli_fmt_format_source(jet_cli_new_manifest(name, template, annotated), "{name}/package.jet", false, false, color)
@@ -1939,10 +1936,10 @@ fn jet_cli_new_project(name: String, template: String, annotated: Bool, quiet: B
     JetDriverVerbOutput{stdout: "", stderr: "{status}next: cd {name} && jet {next_command}\n", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// CmdDoc.rs `undocumented_diagnostics` + `render_doc_diagnostics`: one L2201
-// per public item with no summary, rendered against its own module, the
-// modules in path order; `json` renders each module's batch as report lines
-// naming the module's physical path under `base` (jet_cli_report_base).
+// `undocumented_diagnostics` + `render_doc_diagnostics`: one L2201 per public
+// item with no summary, rendered against its own module, the modules in path
+// order; `json` renders each module's batch as report lines naming the module's
+// physical path under `base` (jet_cli_report_base).
 fn jet_cli_doc_undocumented_report(graph: JetCLIDocGraph, modules: [JetDriverDocModule], color: Bool, json: Bool, base: JetCLIReportBase?) -> String Never! {
     paths := [String]{}
     loop item in jet_cli_doc_undocumented_public(graph) {
@@ -1969,9 +1966,9 @@ fn jet_cli_doc_undocumented_report(graph: JetCLIDocGraph, modules: [JetDriverDoc
     rendered
 }
 
-// `jet doc <file>` (CmdDoc.rs `run_doc`): check the file, project its
-// documentation, then report the `--check` verdict, print the `--json`
-// status, or write `docs/index.html` and `docs/index.md` beside the entry.
+// `jet doc <file>`: check the file, project its documentation, then report the
+// `--check` verdict, print the `--json` status, or write `docs/index.html` and
+// `docs/index.md` beside the entry.
 fn jet_cli_compile_doc(file: String, source: String, color: Bool, json: Bool, check: Bool) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc)
@@ -2013,10 +2010,9 @@ fn jet_cli_doc_result(file: String, source: String, color: Bool, json: Bool, che
     JetDriverVerbOutput{stdout: "doc: generated {output_dir}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// `jet inspect semindex <file>` (CmdSemIndex.rs `run_semindex`): check the
-// entry through the Jet compiler, then print the semantic index summary or
-// its `inspect.semindex` status line. Load or check errors are reported on
-// stderr with exit 1.
+// `jet inspect semindex <file>`: check the entry through the Jet compiler, then
+// print the semantic index summary or its `inspect.semindex` status line. Load
+// or check errors are reported on stderr with exit 1.
 fn jet_cli_compile_semindex(file: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc)
@@ -2043,9 +2039,9 @@ fn jet_cli_semindex_result(file: String, color: Bool, json: Bool, result: JetDri
     JetDriverVerbOutput{stdout: jet_cli_semindex_text(index), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// ---- `jet fmt` (Source/CmdCompile.rs `run_fmt` / `run_fmt_stdin`) ----
+// ---- `jet fmt` (`run_fmt` / `run_fmt_stdin`) ----
 
-// CmdCompile.rs `IGNORED_DIRS`: directory walks never enter these.
+// `IGNORED_DIRS`: directory walks never enter these.
 JET_CLI_FMT_IGNORED_DIRS :: [String]{"vendor", "target", "build", ".git", "node_modules", ".jet"}
 
 // One preflight result (`run_fmt` `FileResult`); `report` is a host
@@ -2083,8 +2079,8 @@ fn jet_cli_fmt_after_last(text: String, needle: String) -> String? Never! {
     Val(parts[parts.len() - 1])
 }
 
-// CmdCompile.rs `skip_fmt_walk_path`: diagnostic snapshot trees and the
-// syntax catalog are not valid Jet by construction; directory walks skip them.
+// `skip_fmt_walk_path`: diagnostic snapshot trees and the syntax catalog are
+// not valid Jet by construction; directory walks skip them.
 fn jet_cli_fmt_skip_walk_path(path: String) -> Bool Never! {
     normalized :: path.replace("\\", "/")
     rel := normalized
@@ -2109,8 +2105,8 @@ fn jet_cli_fmt_file_name(path: String) -> String Never! {
     parts[parts.len() - 1]
 }
 
-// CmdCompile.rs `walk_jet_files`: sorted, recursive, IGNORED_DIRS and the
-// retired `pkg.jet` skipped.
+// `walk_jet_files`: sorted, recursive, IGNORED_DIRS and the retired `pkg.jet`
+// skipped.
 fn jet_cli_fmt_walk(directory: String, files: &[String]) {
     names := cli_files.listdir(directory) ?? return
     &names.sort()
@@ -2124,8 +2120,8 @@ fn jet_cli_fmt_walk(directory: String, files: &[String]) {
     }
 }
 
-// CmdCompile.rs `is_typed_package_source`: `package.jet`, or a source whose
-// first binding is a `Config` record.
+// `is_typed_package_source`: `package.jet`, or a source whose first binding is
+// a `Config` record.
 fn jet_cli_fmt_is_typed_package_source(source: String, origin: String) -> Bool Never! {
     if jet_cli_fmt_file_name(origin) == "package.jet" -> return true
     trimmed :: source.trim()
@@ -2147,17 +2143,16 @@ fn jet_cli_fmt_plural(count: Int, singular: String, plural: String) -> String Ne
     if count == 1 -> singular else -> plural
 }
 
-// CmdCompile.rs `is_package_manifest_file` the one
-// reserved Package root filename; its `config.jet`/`env.jet` siblings are
-// ordinary modules.
+// `is_package_manifest_file` the one reserved Package root filename; its
+// `config.jet`/`env.jet` siblings are ordinary modules.
 fn jet_cli_fmt_is_package_manifest_file(origin: String) -> Bool Never! {
     jet_cli_fmt_file_name(origin) == PACKAGE_FILE
 }
 
-// CmdCompile.rs `format_package_manifest_for_fmt`: `package.jet` is formatted
-// only by the typed Package model. A manifest the model cannot read stops the
-// run with its registered manifest diagnostic (E1215 and family); a layout
-// the model declines (authored comments) is left exactly as written.
+// `format_package_manifest_for_fmt`: `package.jet` is formatted only by the
+// typed Package model. A manifest the model cannot read stops the run with its
+// registered manifest diagnostic (E1215 and family); a layout the model
+// declines (authored comments) is left exactly as written.
 fn jet_cli_fmt_package_manifest(source: String, origin: String) -> JetCLIFmtSource {
     if PackageFacts.parse(source, origin) == .Err(error) -> return jet_cli_fmt_rejected([Diagnostic]{pkg_manifest_parse_diagnostic(origin, error)})
     if pkg_format_source(source, origin) == .Ok(formatted) -> return jet_cli_fmt_formatted(formatted)
@@ -2167,12 +2162,12 @@ fn jet_cli_fmt_package_manifest(source: String, origin: String) -> JetCLIFmtSour
 // The module policy that turns every implicit copy site into a Safe `.copy()` edit.
 JET_CLI_FMT_EXPLICIT_COPIES_POLICY :: "#Policy(copies: .Explicit)\n"
 
-// CmdCompile.rs `format_source_for_fmt` copy materialization: `origin` must
-// check clean as written, then `.copy()` goes in at every implicit copy site. The
-// sites are sema's one copy-site rule (#3738): the Safe `.copy()`
-// edits it gives the same bytes under `#Policy(copies: .Explicit)` are the
-// copies the default policy makes implicitly. Sema spans point into the
-// source as read, so marks go in before any package-target migration.
+// The Rust `format_source_for_fmt` copy materialization: `origin` must check
+// clean as written, then `.copy()` goes in at every implicit copy site. The sites
+// are sema's one copy-site rule (#3738): the Safe `.copy()` edits it gives the
+// same bytes under `#Policy(copies: .Explicit)` are the copies the default policy
+// makes implicitly. Sema spans point into the source as read, so marks go in
+// before any package-target migration.
 fn jet_cli_fmt_explicit_copies(source: String, origin: String, color: Bool) -> JetCLIFmtSource {
     if jet_cli_compile_file(origin, color, None, JetDriverCompileMode.Program) == {
         .Refused(refusal) -> return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(refusal.stderr)}
@@ -2202,9 +2197,9 @@ fn jet_cli_fmt_explicit_copies(source: String, origin: String, color: Bool) -> J
     jet_cli_fmt_formatted("{marked}{source.slice(cursor..<source.len())}")
 }
 
-// CmdCompile.rs `format_source_for_fmt`: `package.jet` through the Package
-// model; otherwise optional copy marks, the retired package-target rewrite,
-// the Package model for a `Config` record, then the ordinary formatter.
+// `format_source_for_fmt`: `package.jet` through the Package model; otherwise
+// optional copy marks, the retired package-target rewrite, the Package model
+// for a `Config` record, then the ordinary formatter.
 fn jet_cli_fmt_format_source(source: String, origin: String, explicit_copies: Bool, simplify: Bool, color: Bool) -> JetCLIFmtSource {
     if jet_cli_fmt_is_package_manifest_file(origin) -> return jet_cli_fmt_package_manifest(source, origin)
     marked := source
@@ -2278,8 +2273,8 @@ fn jet_cli_fmt_git_changed(argv: [String], cwd: String, found: &[String]) {
     }
 }
 
-// CmdCompile.rs `collect_changed_files`: the `.jet` files git reports changed
-// against HEAD or staged; None outside a git worktree.
+// `collect_changed_files`: the `.jet` files git reports changed against HEAD or
+// staged; None outside a git worktree.
 fn jet_cli_fmt_changed_files() -> [String]? {
     probe :: cli_process.cmd([String]{"git", "rev-parse", "--is-inside-work-tree"}).run() ?? return None
     if !probe.success -> return None
@@ -2301,7 +2296,7 @@ fn jet_cli_fmt_relative(path: String, root: String) -> String Never! {
     path.copy()
 }
 
-// ---- `jet fmt --lang` (CmdCompile.rs `run_external_fmt`) ----
+// ---- `jet fmt --lang` ----
 
 // Flags the environment run takes unchanged.
 JET_CLI_EXTERNAL_FMT_FORWARDED :: [String]{"--trust", "--offline", "--online", "--no-color", "--json", "--flake", "--pure", "--yes", "-y"}
@@ -2319,8 +2314,8 @@ fn jet_cli_external_fmt_fail(code: String, what: String, why: String, fix: Strin
     jet_cli_report_output("", code, what, why, fix, color, exit_code)
 }
 
-// EnvHook.rs `find_env_root`: the nearest directory at or above `start`
-// that holds `env.jet`.
+// `find_env_root`: the nearest directory at or above `start` that holds
+// `env.jet`.
 fn jet_cli_find_env_root(start: String) -[FS]> String? Never! {
     current := start
     loop {
@@ -2330,8 +2325,8 @@ fn jet_cli_find_env_root(start: String) -[FS]> String? Never! {
     }
 }
 
-// CmdCompile.rs `external_formatter_program`: the formatter package's name
-// (no `@source`, no `#selector`, the last `/` or `:` segment), trimmed.
+// `external_formatter_program`: the formatter package's name (no `@source`, no
+// `#selector`, the last `/` or `:` segment), trimmed.
 fn jet_cli_external_formatter_program(package: String) -> String? Never! {
     name :: package.split("@").to_list()[0].split("#").to_list()[0]
     start := 0
@@ -2371,8 +2366,8 @@ fn jet_cli_external_fmt_path_less(left: String, right: String) -> Bool Never! {
     left_parts.len() < right_parts.len()
 }
 
-// CmdCompile.rs `walk_external_fmt_files`: sorted, recursive, the ignored
-// directories skipped, symbolic links never followed.
+// `walk_external_fmt_files`: sorted, recursive, the ignored directories
+// skipped, symbolic links never followed.
 fn jet_cli_external_fmt_walk(directory: String, language: String, files: &[String]) {
     names := cli_files.listdir(directory) ?? return
     &names.sort()
@@ -2388,9 +2383,9 @@ fn jet_cli_external_fmt_walk(directory: String, language: String, files: &[Strin
     }
 }
 
-// CmdCompile.rs `collect_external_fmt_files`: the environment root's files
-// for `language`, or those under each explicit path; sorted and unique.
-// Returns the problem text when an explicit path cannot be inspected.
+// `collect_external_fmt_files`: the environment root's files for `language`, or
+// those under each explicit path; sorted and unique. Returns the problem text
+// when an explicit path cannot be inspected.
 fn jet_cli_external_fmt_collect(cwd: String, project_dir: String, explicit_paths: [String], language: String, files: &[String]) -> String? {
     found := [String]{}
     if explicit_paths.len() == 0 {
@@ -2426,9 +2421,9 @@ fn jet_cli_external_fmt_collect(cwd: String, project_dir: String, explicit_paths
     None
 }
 
-// CmdCompile.rs `external_fmt_changed_files`: root-relative files Git
-// reports changed against HEAD, staged, or untracked. Returns the problem
-// text when Git cannot answer a `diff`.
+// `external_fmt_changed_files`: root-relative files Git reports changed against
+// HEAD, staged, or untracked. Returns the problem text when Git cannot answer a
+// `diff`.
 fn jet_cli_external_fmt_changed(root: String, changed: &[String]) -> String? {
     queries :: [[String]]{[String]{"diff", "--name-only", "HEAD"}, [String]{"diff", "--name-only", "--cached"}, [String]{"ls-files", "--others", "--exclude-standard"}}
     loop query in queries {
@@ -2444,7 +2439,7 @@ fn jet_cli_external_fmt_changed(root: String, changed: &[String]) -> String? {
     None
 }
 
-// CmdCompile.rs `fmt_json_ok` / `fmt_json_dirty_*`: the `fmt` status line.
+// `fmt_json_ok` / `fmt_json_dirty_*`: the `fmt` status line.
 fn jet_cli_external_fmt_status(status: String, files: [JetCLIStatusValue]?) -> String Never! {
     fields := [JetCLIStatusField]{jet_cli_status_field("status", jet_cli_status_text(status))}
     if files == .Val(entries) -> &fields.push(jet_cli_status_field("files", jet_cli_status_array(entries)))
@@ -2502,10 +2497,10 @@ fn jet_cli_external_fmt_staged(temp: String, project_dir: String, program: Strin
     jet_cli_external_fmt_finish(project_dir, files, staged, befores, check_only, show_diff, json, color)
 }
 
-// `jet fmt --lang <language>` (CmdCompile.rs `run_external_fmt`): `raw`
-// starts at `fmt`. Jet evaluates the environment's formatter fact itself,
-// stages the inputs, and asks the Jetpack engine only to realize the
-// environment and run that formatter over the staged copies.
+// `jet fmt --lang <language>`: `raw` starts at `fmt`. Jet evaluates the
+// environment's formatter fact itself, stages the inputs, and asks the Jetpack
+// engine only to realize the environment and run that formatter over the staged
+// copies.
 fn jet_cli_external_fmt(raw: [String], color: Bool) -> JetDriverVerbOutput {
     language := String?{None}
     explicit_paths := [String]{}
@@ -2608,7 +2603,7 @@ fn jet_cli_terminal_bits() -> [U8] {
     bits
 }
 
-// CmdDevTools.rs `run_completions` caps a program's metadata read here.
+// `run_completions` caps a program's metadata read here.
 JET_CLI_COMPLETION_PROGRAM_MAX :: 536870912
 JET_CLI_COMPLETION_READ_CHUNK :: 16777216
 
@@ -2668,12 +2663,12 @@ fn jet_cli_diagnostic_type_explain_host(name: String, file: String, color: Bool,
     }
 }
 
-// CmdGates.rs `run`/`append_external_writers`: the authorized load-only
-// request of `file`, its external gate rows extended by the canonical writers
-// (the entry package's and lock's authority rows, the actual trust store's
-// typed records, then the written invocation choices in `args`), queried
-// without checking bodies. Transfer the prepared request when replacing its
-// ledger; its execution host cannot be copied.
+// `run`/`append_external_writers`: the authorized load-only request of `file`,
+// its external gate rows extended by the canonical writers (the entry package's
+// and lock's authority rows, the actual trust store's typed records, then the
+// written invocation choices in `args`), queried without checking bodies.
+// Transfer the prepared request when replacing its ledger; its execution host
+// cannot be copied.
 fn jet_cli_gates_run(file: String, args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc)
     if prepared == {
@@ -2688,7 +2683,7 @@ fn jet_cli_gates_run(file: String, args: [String], color: Bool, json: Bool) -> J
 
 // The request's own external gate rows, then the package/lock writers, the
 // trust store's records and the invocation choices in `args`, in the order
-// CmdGates.rs `append_external_writers` writes them.
+// `append_external_writers` writes them.
 fn jet_cli_external_gate_rows(external: ^[GateEntry], snapshot: JetDriverAuthorizedSourceSnapshot, args: [String]) -> [GateEntry] {
     ledger := GateLedger{}
     loop entry in ^external -> gate_ledger_push(&ledger, ^entry)
@@ -2700,8 +2695,8 @@ fn jet_cli_external_gate_rows(external: ^[GateEntry], snapshot: JetDriverAuthori
     ledger.rows
 }
 
-// CmdInspect.rs `run_output`: the canonical Output query (run intent, dev
-// profile) over the authorized request of `file`.
+// `run_output`: the canonical Output query (run intent, dev profile) over the
+// authorized request of `file`.
 fn jet_cli_output_run(file: String, address: String?, color: Bool, json: Bool) -> JetDriverVerbOutput {
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc)
     if prepared == {

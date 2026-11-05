@@ -192,8 +192,8 @@ fn parser_parse_user_policy(state: &JetParserState) -> ParsedUserPolicy {
     }
     parser_expect(&state, TOKEN_RPAREN, "after the policy callable parameter")
     body := parser_parse_block(&state)
-    // The wrapper body's line end lexes as `;` before the outer `}` (Rust
-    // imports_policy.rs skips every `Semi` in this gap).
+    // The wrapper body's line end lexes as `;` before the outer `}` (skips
+    // every `Semi` in this gap).
     parser_skip_semicolons(&state)
     close :: parser_expect(&state, TOKEN_RBRACE, "after the policy wrapper body")
     parser_finish_statement(&state)
@@ -488,11 +488,10 @@ fn parser_parse_marker(state: &JetParserState) -> Marker {
     Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: args.args, arg_labels: args.labels, span: parser_cover(hash.span, end), ct: None}
 }
 
-// D-MARK-FORM1=A (Rust Parser/Items/marker_groups.rs, Policy.rs
-// `marker_empty_arguments_error`): a marker writes parentheses exactly when it
-// passes arguments, so `#Name()` of a rule that takes arguments is a leftover
-// pair. It is E0999 at `(`…`)` with the delete edit, and parsing goes on so
-// `jet fmt` can apply it.
+// D-MARK-FORM1=A: a marker writes parentheses exactly when it passes arguments,
+// so `#Name()` of a rule that takes arguments is a leftover pair. It is E0999
+// at `(`…`)` with the delete edit, and parsing goes on so `jet fmt` can apply
+// it.
 fn parser_check_empty_marker_parens(state: &JetParserState, name: String, parens: Span) {
     if !marker_registered_accepts_arguments(name) || parser_aborting(&state) -> return
     diagnostic :: diagnostic_from_registry("E0999", Val(parens), "`#{name}()` has empty parentheses", "a marker writes parentheses exactly when it passes arguments", "write `#{name}`")

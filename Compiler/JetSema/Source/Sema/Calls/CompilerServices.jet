@@ -214,10 +214,10 @@ fn sema_compiler_services_check_call(module_name: String, member: String, args: 
     SemaCompilerServicesCallCheck{recognized: true, arguments_complete: arguments_complete, module_name: module_name, member: member, arguments: values, result_type: selected.result_type, failure_carrier: selected.failure_carrier}
 }
 
-// (Rust imports.rs:799, the cross-file Core call check) a `core.compiler`
-// argument checked where the compiler API runs (comptime or `build`) that does
-// not fit its parameter is the call's E0112 "wants T here"; a runtime call
-// keeps the value's own E0108 beside its E0956.
+// (the cross-file Core call check) a `core.compiler` argument checked where the
+// compiler API runs (comptime or `build`) that does not fit its parameter is
+// the call's E0112 "wants T here"; a runtime call keeps the value's own E0108
+// beside its E0956.
 fn sema_compiler_services_replace_mismatch(member: String, required: Type, value: Expr, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     value_span :: expr_span(value)
     mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return

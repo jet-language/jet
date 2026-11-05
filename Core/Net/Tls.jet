@@ -157,9 +157,8 @@ fn __server(stream: ^TCPStream, cert_pem: String, key_pem: String, alpn: [String
 // listener (`tls: server.tls(cert, key)`) also builds one at bind to reject an
 // unusable identity before serving (D-TLSSERVE1=A,
 // Docs/spec/syntax-decisions.md:5083). The messages are the Rust oracle's
-// (c9129d174d^ crates/jet-pkg-model/src/Prelude/HTTPServerTLS.rs:37-64): a
-// certificate PEM holds a CERTIFICATE block, and a key PEM holds a PKCS#8,
-// PKCS#1 or SEC1 private key block.
+// (c9129d174d^): a certificate PEM holds a CERTIFICATE block, and a key PEM
+// holds a PKCS#8, PKCS#1 or SEC1 private key block.
 fn __server_context(cert_pem: String, key_pem: String) -> __TLSContext __TLSFailure! {
     if !cert_pem.contains("-----BEGIN CERTIFICATE-----") -> return Err(__fail("TLS certificate PEM did not contain a certificate"))
     if !key_pem.contains("-----BEGIN PRIVATE KEY-----") && !key_pem.contains("-----BEGIN RSA PRIVATE KEY-----") && !key_pem.contains("-----BEGIN EC PRIVATE KEY-----") {

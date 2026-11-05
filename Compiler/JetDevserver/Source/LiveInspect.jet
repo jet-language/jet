@@ -1,6 +1,5 @@
-// Bounded runtime-owned snapshot readers and projections.
-// Never reads process memory or exposes payloads, locals, environment or credentials.
-// Rust: crates/jet-devserver/src/LiveInspect.rs:5
+// Bounded runtime-owned snapshot readers and projections. Never reads process memory
+// or exposes payloads, locals, environment or credentials.
 use {
     jet_foundation.Devtools.[JetDevtoolsEnvelope, JET_DEVTOOLS_MAX_ENVELOPE_BYTES]
     jet_foundation.DevtoolsControl.[JetDevtoolsDecodedEnvelope]
@@ -17,50 +16,37 @@ use {
     core.encoding.[Dyn]
 }
 
-// Rust: crates/jet-devserver/src/LiveInspect.rs:14
 MAX_SNAPSHOT_BYTES :: U64{1024 * 1024}
-// Rust: crates/jet-devserver/src/LiveInspect.rs:15
 MAX_SNAPSHOT_AGE_MS :: U128{2_000}
-// Rust: crates/jet-devserver/src/LiveInspect.rs:16
 MAX_SNAPSHOT_ITEMS :: Usize{4096}
-// Rust: crates/jet-devserver/src/LiveInspect.rs:17
 MAX_DEVTOOLS_RELAY_BYTES :: U64{4 * 1024 * 1024}
 
-// Rust: crates/jet-devserver/src/LiveInspect.rs:20
 struct LiveTask {
     id: I64; parent: I64; state: String; wait: String
     deadline_ms: I64?; cancelled: Bool
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:30
 struct LiveChannel {
     id: I64; depth: I64; capacity: I64?
     send_waiters: I64; recv_waiters: I64; closed: Bool
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:40
 struct LiveEffects { compute: I64; waiting: I64; channel: I64; time: I64; io: I64 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:48
 struct LiveInspectValue {
     value_id: String; type_identity: String; disposition: String
     reason: String; rendered_value: String?
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:58
 struct LiveInspectShape { type_identity: String; value_ids: [String] }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:64
 struct LiveInspectProjection {
     plane: String; scope: String; pid: U32
     protocol: String; session_id: String; source_id: String
     build_id: String; revision: String; world_id: String
     values: [LiveInspectValue]; shapes: [LiveInspectShape]
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:81
 struct LiveResources {
     workers: I64; running: I64; queued: I64; cancelled: I64
     arenas: I64; arena_allocations: I64; arena_bytes: I64
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:91
 // Runtime-published run-phase window, including the synchronous exit seam.
 struct LiveRuntimeWindow { elapsed_ns: U64; cpu_ns: U64?; exit: Bool }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:104
 struct LiveSnapshot {
     protocol: String; session_id: String; source_id: String; build_id: String
     revision: String; world_id: String; pid: I64; start_id: String; captured_ms: U128
@@ -70,7 +56,6 @@ struct LiveSnapshot {
     runtime: LiveRuntimeWindow?
 }
 
-// Rust: crates/jet-devserver/src/LiveInspect.rs:124
 fn checked_object(value: Dyn, required: [String], optional: [String], label: String) -> [String: Dyn] Err! {
     fields :: if value == {
         .Object(fields) -> fields.iter().cloned().collect()
@@ -81,13 +66,11 @@ fn checked_object(value: Dyn, required: [String], optional: [String], label: Str
     }
     return fields
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:144
 fn int_field(object: Dyn, key: String, label: String, nonnegative: Bool) -> I64 Err! {
     value :: json_get(object, key).and_then(json_int) ?? return .Err("{label} has invalid `{key}`")
     if nonnegative && value < 0 -> return .Err("{label} has negative `{key}`")
     return value
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:154
 fn optional_int_field(object: Dyn, key: String, label: String) -> I64? Err! {
     if json_get(object, key) == {
         .None | .Val(.Null) -> { return .None }
@@ -97,20 +80,17 @@ fn optional_int_field(object: Dyn, key: String, label: String) -> I64? Err! {
         }
     }
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:167
 fn string_field(object: Dyn, key: String, label: String) -> String Err! {
     value :: json_get(object, key).and_then(json_str) ?? return .Err("{label} has invalid `{key}`")
     if value.chars().any((c) -> c.is_control()) -> return .Err("{label} has control characters in `{key}`")
     return value.to_string()
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:177
 fn bool_field(object: Dyn, key: String, label: String) -> Bool Err! {
     if json_get(object, key) == {
         .Val(.Bool(value)) -> { return value }
         else -> { return .Err("{label} has invalid `{key}`") }
     }
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:243
 fn parse_live_snapshot(snapshot: String) -> LiveSnapshot Err! {
     root :: parse_json(snapshot) ?? return .Err("live runtime snapshot is not valid JSON")
     root_fields :: checked_object(&root,
@@ -216,20 +196,15 @@ fn parse_live_snapshot(snapshot: String) -> LiveSnapshot Err! {
         has_event_observations: root_fields.contains_key("event_observations"), runtime
     }
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:473
 // Runtime-published window, if this producer supplies one.
 fn runtime_window(snapshot: String) -> LiveRuntimeWindow? Err! { return parse_live_snapshot(snapshot)?.runtime }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:479
 fn snapshot_path(pid: U32) -> OSPath { return std.env.temp_dir().join("jet-observe-{pid}.json") }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:483
 // Process-scoped length-delimited relay; envelope event deque is the retained ring.
 fn devtools_relay_path(pid: U32) -> OSPath { return std.env.temp_dir().join("jet-devtools-relay-{pid}.ring") }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:490
 fn read_devtools_relay(pid: U32) -> JetDevtoolsEnvelope Err! {
     if pid == 0 -> return .Err("process id must be greater than zero")
     return read_devtools_relay_path(devtools_relay_path(pid))
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:497
 // Shared attach/perf reader for caller-provisioned relays.
 fn read_devtools_relay_path(path: OSPath) -> JetDevtoolsEnvelope Err! {
     // GATE #4494: native retained file descriptor, no-follow open, metadata and bounded IO.
@@ -272,13 +247,11 @@ fn read_devtools_relay_path(path: OSPath) -> JetDevtoolsEnvelope Err! {
         .Commands(_) -> { return .Err("jet.devtools.v1 relay must contain runtime events, not host commands") }
     }
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:581
 fn read_devtools_relay_path_with_identity(path: OSPath, expected_session_id: String?, expected_source_id: String?, expected_build_id: String?, expected_revision: String?, expected_world_id: String?) -> JetDevtoolsEnvelope Err! {
     envelope :: read_devtools_relay_path(path)
     validate_devtools_relay_identity(&envelope, expected_session_id, expected_source_id, expected_build_id, expected_revision, expected_world_id)
     return envelope
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:603
 // Identity/completeness gate shared by attach and perf. Expectations are optional
 // only where callers cannot know a producer's identity.
 fn validate_devtools_relay_identity(envelope: &JetDevtoolsEnvelope, expected_session_id: String?, expected_source_id: String?, expected_build_id: String?, expected_revision: String?, expected_world_id: String?) Err! {
@@ -458,7 +431,6 @@ fn decode_raw_snapshot(bytes: [U8], stat: String?) -> String Err! {
     channel_json :: channels.iter().map(((_0: _, _1: json)) -> json).join(",")
     return "{{{identity},\"values\":[{values.join(",")}],\"schema_version\":1,\"pid\":{pid},\"start_id\":{foundation_json_quote(start_id)},\"captured_ms\":{captured_ms},\"tasks\":[{task_json}],\"channels\":[{channel_json}],\"effects\":{{\"compute\":{compute},\"waiting\":{waiting},\"channel\":{channel},\"time\":{time},\"io\":{io}}},\"resources\":{{\"workers\":{workers},\"running\":{running},\"queued\":{queued},\"cancelled\":{cancelled},\"arenas\":{arenas},\"arena_allocations\":{arena_allocations},\"arena_bytes\":{arena_bytes}}},\"event_observations\":[{events.join(",")}],\"runtime\":{{\"elapsed_ns\":{elapsed_ns},\"cpu_ns\":{cpu_ns},\"exit\":{exit}}}}}"
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:650
 fn read(pid: U32) -> String Err! {
     // GATE #4494: native descriptor/metadata, bounded IO, process identity and clock.
     // GATE #4483: preserve selected Linux/Android and Unix branches.
@@ -498,7 +470,6 @@ fn read(pid: U32) -> String Err! {
     if now_ms.saturating_sub(parsed.captured_ms) > MAX_SNAPSHOT_AGE_MS -> return .Err("process {pid} is not publishing a live runtime snapshot")
     return snapshot
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:742
 // All inspect planes share the canonical live value/type identity projection.
 fn read_plane(pid: U32, plane: String) -> LiveInspectProjection Err! {
     if !["types", "rights", "claims", "shapes", "structure", "build", "gates", "decisions"].contains(plane) -> return .Err("unknown live inspect plane `{plane}`")
@@ -518,7 +489,6 @@ fn read_plane(pid: U32, plane: String) -> LiveInspectProjection Err! {
         values: ^parsed.values, shapes
     }
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:792
 fn render(snapshot: String) -> String {
     parsed :: parse_live_snapshot(snapshot) ?? return "jet inspect live · invalid snapshot: {err}\n"
     event_lines :: if parsed.has_event_observations {

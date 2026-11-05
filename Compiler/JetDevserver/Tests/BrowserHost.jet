@@ -1,15 +1,12 @@
 use jet_devserver.BrowserHost.[BrowserActionGrant, BrowserHost, BrowserHostAction, BrowserHostEvent, BrowserHtmlElement, BrowserNode, BrowserPanelFact, BrowserReconnectCursor, BrowserSourceGrant, BrowserSourceLocation, MAX_RECONNECT_EVENTS]
-// Rust: crates/jet-devserver/src/BrowserHost.rs:1495
 fn panel(status: String, nodes: [BrowserNode]) -> BrowserPanelFact {
     BrowserPanelFact.new("build", "Build", 12, status, ^nodes)
 }
-// Rust: crates/jet-devserver/src/BrowserHost.rs:1499
 fn event(session: String, revision: U64, sequence: U64, status: String) -> BrowserHostEvent {
     BrowserHostEvent.new(session, revision, sequence, 100 + sequence, [panel(status, [
         BrowserNode.new("go", .Action, "Go"), BrowserNode.new("source", .Text, "Source")
     ])])
 }
-// Rust: crates/jet-devserver/src/BrowserHost.rs:1516
 #Test("event_validation_and_monotonic_projection") {
     host := BrowserHost.new("s1")
     &host.apply_event(event("s1", 1, 1, "ready")).unwrap()
@@ -30,7 +27,6 @@ fn event(session: String, revision: U64, sequence: U64, status: String) -> Brows
         else -> false
     })
 }
-// Rust: crates/jet-devserver/src/BrowserHost.rs:1538
 #Test("layout_and_selection_are_shared_but_open_state_is_placement_local") {
     host := BrowserHost.new("s1")
     &host.apply_event(event("s1", 1, 1, "ready")).unwrap()
@@ -52,7 +48,6 @@ fn event(session: String, revision: U64, sequence: U64, status: String) -> Brows
         node_id: element.node_id.copy(), label: element.label.copy(), value: element.value.copy(), status: element.status.copy()
     }).collect[[BrowserHtmlElement]]())
 }
-// Rust: crates/jet-devserver/src/BrowserHost.rs:1569
 #Test("reconnect_is_bounded_and_cursor_resumes") {
     host := BrowserHost.new("s1")
     loop sequence in 1..(U64(MAX_RECONNECT_EVENTS) + 2) {
@@ -70,7 +65,6 @@ fn event(session: String, revision: U64, sequence: U64, status: String) -> Brows
         else -> false
     })
 }
-// Rust: crates/jet-devserver/src/BrowserHost.rs:1589
 #Test("stale_wrong_session_and_ungranted_actions_are_rejected") {
     host := BrowserHost.new("s1")
     &host.apply_event(event("s1", 7, 1, "ready")).unwrap()

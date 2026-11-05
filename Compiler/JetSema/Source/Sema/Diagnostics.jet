@@ -294,7 +294,7 @@ fn sema_unknown_name_in(name: String, span: Span, scopes: SemaScopeTable) -> Dia
 
 fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
     if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
-    // Rust type_assign.rs:1430: a plain value offered to a `T?` slot is a payload mismatch (D-OPT-LIFT1=A).
+    // A plain value offered to a `T?` slot is a payload mismatch (D-OPT-LIFT1=A).
     if required == .Option(payload) {
         offered_optional :: offered == .Option(_)
         if !offered_optional {
@@ -378,8 +378,8 @@ fn sema_value_mismatch_index(diagnostics: [Diagnostic], start: Int, span: Span) 
     None
 }
 
-// Rust serde_diags.rs `wrong_core_arity`: a standard-library method or
-// function called with the wrong number of arguments.
+// `wrong_core_arity`: a standard-library method or function called with the
+// wrong number of arguments.
 fn sema_wrong_core_arity(name: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
     sema_error("E0104", span, "`{name}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a standard library function parameter", "check the call to `{name}`")
 }

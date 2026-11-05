@@ -1,24 +1,23 @@
-// FixedArithmetic.rs:1–491. One policy owner; adapters only marshal bit words.
-// R0 must lower fixed scalar arithmetic in this module to primitive leaves,
-// not back to jet_fixed_arithmetic. No exact Int arithmetic is used on the
-// successful path. Int appears only for small codes/counts and error display.
-// The two-word operand is signed i128 in two's complement (high signed word,
-// low unsigned word), by value, with no owner/tag interpretation. It is not a
-// C ABI declaration: native providers must marshal the two explicit words.
-// Required R0 primitive specializations (all arguments/results are values):
-// U64.wrapping_{add,sub,mul}(U64,U64)->U64;
-// U64.checked_mul(U64,U64)->U64? (overflow is a primitive fact);
-// U64 bit and/or/xor(U64,U64)->U64; shl/logical-shr(U64,Int[0..63])->U64;
-// I64 arithmetic-shr(I64,Int[0..63])->I64; unsigned quotient/remainder
-// (U64,U64[nonzero])->U64; U64/I64 add/sub/neg with proven in-range
-// operands; U64/I64 comparisons; U64.from_i64(I64)->U64? and
-// I64.from_u64(U64)->I64? with their existing checked conversion meaning.
-// Codes/counts/bits stay inline Int (0..64); no full64 word converts to Int.
-// Existing bootstrap leaves: Core.rs:1619–1628 wrapping operations,
-// FixedArithmetic.rs:432–462 bit/shift and :350–397 quotient/remainder;
-// Syntax.rs:635–652 registers the destination-owned conversion spellings.
-// Final lowering must bind these scalar facts directly, without selecting
-// this kernel again. Provider identity and shared-symbol binding are R0 facts.
+// One policy owner; adapters only marshal bit words. R0 must lower fixed scalar
+// arithmetic in this module to primitive leaves, not back to
+// jet_fixed_arithmetic. No exact Int arithmetic is used on the successful path.
+// Int appears only for small codes/counts and error display. The two-word
+// operand is signed i128 in two's complement (high signed word, low unsigned
+// word), by value, with no owner/tag interpretation. It is not a C ABI
+// declaration: native providers must marshal the two explicit words. Required
+// R0 primitive specializations (all arguments/results are values):
+// U64.wrapping_{add,sub,mul}(U64,U64)->U64; U64.checked_mul(U64,U64)->U64?
+// (overflow is a primitive fact); U64 bit and/or/xor(U64,U64)->U64;
+// shl/logical-shr(U64,Int[0..63])->U64; I64
+// arithmetic-shr(I64,Int[0..63])->I64; unsigned quotient/remainder
+// (U64,U64[nonzero])->U64; U64/I64 add/sub/neg with proven in-range operands;
+// U64/I64 comparisons; U64.from_i64(I64)->U64? and I64.from_u64(U64)->I64? with
+// their existing checked conversion meaning. Codes/counts/bits stay inline Int
+// (0..64); no full64 word converts to Int. Existing bootstrap leaves: wrapping
+// operations, bit/shift and quotient/remainder; the Rust original registers the
+// destination-owned conversion spellings. Final lowering must bind these scalar
+// facts directly, without selecting this kernel again. Provider identity and
+// shared-symbol binding are R0 facts.
 
 #[Equatable, Error]
 enum JetFixedArithmeticError {

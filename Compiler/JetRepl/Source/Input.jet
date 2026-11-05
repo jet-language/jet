@@ -1,7 +1,7 @@
-// REPL source classification. Rust: jet-repl lib.rs 1591-1634, 1709-1788,
-// 1839-1999. This adapter feeds the canonical parser; it owns no interpreter.
-// Every input the parser accepts is checked by the compiler on the shared
-// path (`jet repl`, JetCli Repl.jet); nothing here refuses a feature by name.
+// REPL source classification. Rust: jet-repl 1591-1634, 1709-1788, 1839-1999.
+// This adapter feeds the canonical parser; it owns no interpreter. Every input
+// the parser accepts is checked by the compiler on the shared path (`jet repl`,
+// JetCli Repl.jet); nothing here refuses a feature by name.
 use {
     jet_foundation.[Diagnostic, DiagnosticLabel, Item, ParseResult, Span, Stmt, TextEdit]
     jet_lexer.[lex]
@@ -20,12 +20,12 @@ enum ReplInput {
 
 enum ReplInputParse {
     Accepted(input: ReplInput)
-    // Spans are anchored to the user's input text (lib.rs `reanchor_repl_diagnostic`).
+    // Spans are anchored to the user's input text.
     Rejected(diagnostics: [Diagnostic])
 }
 
-// lib.rs `reanchor_repl_diagnostic`: shift a span `offset` bytes back to the
-// user's input; a span inside the generated wrapper clamps to 0.
+// `reanchor_repl_diagnostic`: shift a span `offset` bytes back to the user's
+// input; a span inside the generated wrapper clamps to 0.
 fn repl_reanchor_span(span: Span, offset: Int) -> Span Never! {
     start :: if span.start - offset < 0 -> 0 else -> span.start - offset
     end :: if span.end - offset < 0 -> start else -> span.end - offset

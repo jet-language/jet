@@ -190,9 +190,9 @@ fn spawn_plan_close(plan: I64, count: I64) {
     }
 }
 
-// Parent-only PTY setup mirrors ProcessPty.rs's posix_openpt/unlockpt/open
-// plus Term.rs configure_fd(cfmakeraw). Linux TIOCGPTPEER avoids libc's
-// process-global ptsname buffer without changing the opened slave.
+// Parent-only PTY setup mirrors posix_openpt/unlockpt/open plus
+// configure_fd(cfmakeraw). Linux TIOCGPTPEER avoids libc's process-global
+// ptsname buffer without changing the opened slave.
 fn spawn_pty(terminal: I64, scratch: I64, minimum: I64, child: I64) -> I64 {
     fd_put(scratch, I64{64}, I64{9})
     fd_put(scratch, I64{96}, I64{7887052196584711215})
@@ -245,7 +245,7 @@ fn spawn_pty(terminal: I64, scratch: I64, minimum: I64, child: I64) -> I64 {
 }
 
 fn spawn_cpu_seconds(milliseconds: I64) -> I64 {
-    // ProcessPty.rs max(0).saturating_add(999)/1000, after source normalization.
+    // max(0).saturating_add(999)/1000, after source normalization.
     rounded :: if (milliseconds > I64{9223372036854774808}) -> I64{9223372036854775807} else -> wrapping(milliseconds + I64{999})
     rounded /% I64{1000}
 }
@@ -261,9 +261,9 @@ fn spawn_exec_errno_class(result: I64) -> I64 {
 
 // ONLY raw word loads/stores/syscalls are reachable in the child. In particular
 // there is no allocation, exact-Int/Text helper, mutex, or inherited TLS use.
-// Mirrors std::process's Unix fork+pre_exec path used by ProcessPty.rs; the
-// child shares the parent's memory (spawn_vfork), so its only stores are the
-// scratch error words and the fallback argv slot this spawn owns.
+// Mirrors std::process's Unix fork+pre_exec path; the child shares the parent's
+// memory (spawn_vfork), so its only stores are the scratch error words and the
+// fallback argv slot this spawn owns.
 fn spawn_exec_child(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, err_write: I64, candidates: I64, argv: I64, envp: I64, fallback_argv: I64, cwd: I64, dirs: I64, session: Bool, terminal: Bool, cpu: Bool, memory: Bool, files: Bool, parent: I64) {
     spawn_close(err_read)
     spawn_close(fd_word(child, I64{32}))

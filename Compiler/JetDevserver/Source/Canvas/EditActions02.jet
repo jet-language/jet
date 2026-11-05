@@ -7,9 +7,7 @@ use {
     jet_semindex.[SourceSpan]
     core.files.[OSPath]
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1815
 struct StatementLoc { anchor: SourceSpan; source: SourceSpan; full: SourceSpan; block: [USize]; index: USize; is_guard: Bool; is_expr: Bool; guard_span: SourceSpan? }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1826
 fn apply_reorder_statements(path: OSPath, src: String, graph_id: String, moved: SourceSpan, anchor: SourceSpan, position: String) -> String Err! {
     name_span := graph_id_name_span(graph_id) ?? return .Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
     (diags, checked) := check_file(path.to_string_lossy(), .None, true)
@@ -37,7 +35,6 @@ fn apply_reorder_statements(path: OSPath, src: String, graph_id: String, moved: 
     changed.insert_str(insert_at, chunk)
     write_checked_formatted(path, src, changed)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1928
 fn apply_exec_convergence(path: OSPath, src: String, graph_id: String, from_span: SourceSpan, target_span: SourceSpan, from_pin_name: String, strategy: String, function: String, helper_name: String?) -> String Err! {
     validate_ident(function)
     if !["extract", "helper", "duplicate"].contains(strategy) -> return .Err(edit_error("bad_request", "Canvas convergence strategy must be extract, helper, or duplicate"))
@@ -86,7 +83,6 @@ fn apply_exec_convergence(path: OSPath, src: String, graph_id: String, from_span
     changed := FixEngine.apply_edits(src, edits) ?? return .Err(edit_error("overlap", "Canvas convergence source edits overlapped"))
     write_checked_formatted(path, src, changed)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2072
 fn convergence_params(path: OSPath, target: SourceSpan) -> [(String, String)] Err! {
     index := jet_semindex.open(path) ?? return .Err(edit_error("check", "Canvas could not resolve convergence captures: {err}"))
     references := index.references().iter().filter((reference) -> reference.span.start >= target.start && reference.span.end <= target.end).collect()
@@ -104,11 +100,8 @@ fn convergence_params(path: OSPath, target: SourceSpan) -> [(String, String)] Er
     }
     .Ok(params)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2118
 struct ExpressionSelection { span: SourceSpan; full: SourceSpan }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2124
 struct ExecInsertion { offset: USize; indent: String; owner: SourceSpan; branch: Bool }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2131
 fn find_expression_selection(stmts: [Stmt], target: SourceSpan, src: String) -> ExpressionSelection? {
     if find_expression_selection_in_block(stmts, target, src) == .Val(found) -> return .Val(found)
     loop stmt in stmts {
@@ -116,7 +109,6 @@ fn find_expression_selection(stmts: [Stmt], target: SourceSpan, src: String) -> 
     }
     .None
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2147
 fn find_expression_selection_in_block(stmts: [Stmt], target: SourceSpan, src: String) -> ExpressionSelection? {
     first := USize?{.None}; last := USize?{.None}
     loop (index, stmt) in stmts.iter().enumerate() {
@@ -143,7 +135,6 @@ fn find_expression_selection_in_block(stmts: [Stmt], target: SourceSpan, src: St
     if selected.len() > 1 && (span.start < target.start || span.end > target.end) -> return .None
     .Val(ExpressionSelection { span: span, full: SourceSpan { start: line_start(src, span.start), end: line_after(src, span.end) } })
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2196
 fn source_expression_span(src: String, expr: &Expr) -> SourceSpan {
     start := if expr == {
         .Call(call, _) -> call.name_span.start, .MethodCall { receiver, .. } -> source_expression_span(src, receiver).start
@@ -163,16 +154,12 @@ fn source_expression_span(src: String, expr: &Expr) -> SourceSpan {
     }
     SourceSpan { start: start, end: end.max(start) }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2226
 fn call_source_end(src: String, name_end: USize, fallback_end: USize) -> USize {
     open := find_unquoted_char(src, name_end, '(') ?? return fallback_end
     matching_delimiter(src, open, '(', ')').map_or(fallback_end, (close) -> close.saturating_add(1))
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2233
 fn span_contains(outer: SourceSpan, inner: SourceSpan) -> Bool { inner.start >= outer.start && inner.end <= outer.end }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2237
 fn source_spans_overlap(a: SourceSpan, b: SourceSpan) -> Bool { a.start < b.end && b.start < a.end }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2241
 fn find_expression_selection_in_children(stmt: Stmt, target: SourceSpan, src: String) -> ExpressionSelection? {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
@@ -186,7 +173,6 @@ fn find_expression_selection_in_children(stmt: Stmt, target: SourceSpan, src: St
         else -> .None
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2293
 fn find_exec_insertion(src: String, stmts: &[Stmt], node_span: SourceSpan, pin_name: String) -> ExecInsertion? Err! {
     loop stmt in stmts {
         if exec_branch_node_matches(stmt, node_span) {
@@ -205,14 +191,12 @@ fn find_exec_insertion(src: String, stmts: &[Stmt], node_span: SourceSpan, pin_n
     }
     .None
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2334
 fn exec_branch_node_matches(stmt: Stmt, node_span: SourceSpan) -> Bool {
     if stmt == {
         .Switch { arms, span, .. } | .ComptimeSwitch { arms, span, .. } -> same_span(span.into(), node_span) || arms.iter().any((arm) -> same_span(arm.cond.span().into(), node_span))
         .ComptimeIf { span, .. } -> same_span(span.into(), node_span), _ -> false
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2347
 fn branch_source_span(src: String, stmt: &Stmt) -> SourceSpan {
     line := line_start(src, stmt.span().start)
     keyword := find_word(src, line, "if").unwrap_or(stmt.span().start)
@@ -228,7 +212,6 @@ fn branch_source_span(src: String, stmt: &Stmt) -> SourceSpan {
     }
     SourceSpan { start: keyword, end: close.saturating_add(1) }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2376
 fn find_word(src: String, start: USize, word: String) -> USize? {
     cursor := start.min(src.len())
     loop {
@@ -242,7 +225,6 @@ fn find_word(src: String, start: USize, word: String) -> USize? {
     }
     .None
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2394
 fn find_unquoted_char(src: String, start: USize, wanted: Char) -> USize? {
     quote := Char?{.None}; escaped := false; line_comment := false; cursor := start.min(src.len())
     loop cursor < src.len() {
@@ -255,7 +237,6 @@ fn find_unquoted_char(src: String, start: USize, wanted: Char) -> USize? {
     }
     .None
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2428
 fn matching_delimiter(src: String, open: USize, opening: Char, closing: Char) -> USize? {
     depth := USize{0}; quote := Char?{.None}; escaped := false; line_comment := false; cursor := open.min(src.len())
     loop cursor < src.len() {
@@ -268,7 +249,6 @@ fn matching_delimiter(src: String, open: USize, opening: Char, closing: Char) ->
     }
     .None
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2468
 fn find_exec_insertion_in_children(src: String, stmt: &Stmt, node_span: SourceSpan, pin_name: String) -> ExecInsertion? Err! {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
@@ -289,7 +269,6 @@ fn find_exec_insertion_in_children(src: String, stmt: &Stmt, node_span: SourceSp
         else -> .None
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2530
 fn matching_exec_branch(stmt: Stmt, node_span: SourceSpan, pin_name: String) -> [Stmt]? {
     if stmt == .ComptimeIf { then_body, else_body, span, .. } {
         if !same_span(span.into(), node_span) -> return .None
@@ -310,7 +289,6 @@ fn matching_exec_branch(stmt: Stmt, node_span: SourceSpan, pin_name: String) -> 
     index := pin_name.strip_prefix("arm")?.parse<USize>().ok()?
     arms.get(index.checked_sub(1)?).map((arm) -> arm.body.as_slice())
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2584
 fn branch_exec_insertion(src: String, body: &[Stmt], owner: SourceSpan) -> ExecInsertion Err! {
     last := body.last().ok_or_else(() -> edit_error("ambiguous", "Canvas needs a non-empty source-backed branch body to converge"))
     structured := if last == {
@@ -333,7 +311,6 @@ fn branch_exec_insertion(src: String, body: &[Stmt], owner: SourceSpan) -> ExecI
     }
     .Ok(ExecInsertion { offset: offset, indent: indent, owner: owner, branch: true })
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2642
 fn execution_terminates(stmt: Stmt) -> Bool {
     if stmt == {
         .Return(..) | .Break(..) | .BreakValue(..) | .BreakLabel(..) | .BreakLabelValue(..) | .Continue(..) | .ContinueLabel(..) -> true
@@ -341,9 +318,7 @@ fn execution_terminates(stmt: Stmt) -> Bool {
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2655
 fn exact_body_helper_name(bundle: ProgramBundle, src: String, target: String, current: String) -> String? {
-    // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2661
     fn in_items(items: [Item], src: String, target: String, current: String) -> String? {
         loop item in items {
             if item == {
@@ -372,7 +347,6 @@ fn exact_body_helper_name(bundle: ProgramBundle, src: String, target: String, cu
     }
     bundle.modules.iter().find_map((module_ref) -> in_items(module_ref.items, src, target, current))
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2713
 fn expression_body_source(src: String, body: &[Stmt]) -> String? {
     spans := [SourceSpan]{[].with_capacity(body.len())}
     loop stmt in body {
@@ -386,9 +360,7 @@ fn expression_body_source(src: String, body: &[Stmt]) -> String? {
     text := source_snippet(src, SourceSpan { start: start, end: end }).trim() // #4303
     .Val(text.to_string())
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2730
 fn source_snippet(src: String, span: SourceSpan) -> String { src.get(span.start..span.end).unwrap_or_default().to_string() }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2736
 fn formatted_expression_matches(left: String, right: String) -> Bool {
     wrap := (expr: String) -> {
         trimmed := expr.trim() // #4303
@@ -398,7 +370,6 @@ fn formatted_expression_matches(left: String, right: String) -> Bool {
     l := wrap(left); r := wrap(right)
     l == r || normalized_source_shape(l) == normalized_source_shape(r)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2746
 fn normalized_source_shape(source: String) -> String {
     normalized := String.with_capacity(source.len()); quote := Char?{.None}; escaped := false
     loop ch in source.chars() {
@@ -409,9 +380,7 @@ fn normalized_source_shape(source: String) -> String {
     }
     normalized
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2770
 fn function_name_exists(bundle: ProgramBundle, name: String) -> Bool {
-    // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2771
     fn in_items(items: [Item], name: String) -> Bool {
         items.iter().any((item) -> if item == {
             .Func(func) -> func.name == name
@@ -422,7 +391,6 @@ fn function_name_exists(bundle: ProgramBundle, name: String) -> Bool {
     }
     bundle.modules.iter().any((module_ref) -> in_items(module_ref.items, name))
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2792
 fn apply_add_pattern_arm(path: OSPath, src: String, graph_id: String, node_span: SourceSpan, pattern: String) -> String Err! {
     func := checked_func_for_graph(path, src, graph_id)
     head := normalize_pattern_arm_head(pattern)
@@ -442,7 +410,6 @@ fn apply_add_pattern_arm(path: OSPath, src: String, graph_id: String, node_span:
     }
     write_checked_formatted(path, src, changed)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2854
 fn apply_edit_pattern_arm(path: OSPath, src: String, graph_id: String, pattern_span: SourceSpan, pattern: String) -> String Err! {
     func := checked_func_for_graph(path, src, graph_id)
     head := normalize_pattern_arm_head(pattern)
@@ -451,7 +418,6 @@ fn apply_edit_pattern_arm(path: OSPath, src: String, graph_id: String, pattern_s
     changed := FixEngine.apply_edits(src, [edit(pattern_span, head)]) ?? return .Err(edit_error("overlap", "Canvas pattern arm edit overlapped"))
     write_checked_formatted(path, src, changed)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2877
 fn apply_remove_pattern_arm(path: OSPath, src: String, graph_id: String, pattern_span: SourceSpan) -> String Err! {
     func := checked_func_for_graph(path, src, graph_id)
     arm := RemoveArmInfo?{.None}
@@ -461,7 +427,6 @@ fn apply_remove_pattern_arm(path: OSPath, src: String, graph_id: String, pattern
     changed := FixEngine.apply_edits(src, [edit(info.remove_span, "")]) ?? return .Err(edit_error("overlap", "Canvas pattern arm delete overlapped"))
     write_checked_formatted(path, src, changed)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2903
 fn apply_toggle_switch_state(path: OSPath, src: String, graph_id: String, node_span: SourceSpan) -> String Err! {
     func := checked_func_for_graph(path, src, graph_id)
     if find_switched_node(func.body, node_span) == {
@@ -478,9 +443,7 @@ fn apply_toggle_switch_state(path: OSPath, src: String, graph_id: String, node_s
         }
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2946
 enum SwitchedNode { Marker(SourceSpan); Nested }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2951
 fn find_switched_node(stmts: [Stmt], node_span: SourceSpan) -> SwitchedNode? {
     loop stmt in stmts {
         if stmt == {
@@ -495,7 +458,6 @@ fn find_switched_node(stmts: [Stmt], node_span: SourceSpan) -> SwitchedNode? {
     }
     .None
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2976
 fn find_switched_node_in_children(stmt: Stmt, node_span: SourceSpan) -> SwitchedNode? {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .Unsafe { body, .. } |
@@ -512,9 +474,7 @@ fn find_switched_node_in_children(stmt: Stmt, node_span: SourceSpan) -> Switched
         else -> .None
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3028
 fn statement_contains_span(stmts: [Stmt], node_span: SourceSpan) -> Bool { stmts.iter().any((stmt) -> span_within(node_span, stmt.span().into())) }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3034
 fn apply_append_multi_input(path: OSPath, src: String, node_span: SourceSpan, element: String) -> String Err! {
     target := MultiInputTarget?{.None}
     func := checked_func_containing_span(path, src, node_span)
@@ -529,7 +489,6 @@ fn apply_append_multi_input(path: OSPath, src: String, node_span: SourceSpan, el
     changed := FixEngine.apply_edits(src, [edit(SourceSpan { start: insert, end: insert }, "{prefix}{element}")]) ?? return .Err(edit_error("overlap", "Canvas multi-input append overlapped"))
     write_checked_formatted(path, src, changed)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3078
 fn apply_remove_multi_input_element(path: OSPath, src: String, node_span: SourceSpan, element_span: SourceSpan) -> String Err! {
     func := checked_func_containing_span(path, src, node_span)
     if !multi_input_element_belongs_to_graph(func.body, node_span, element_span) -> return .Err(edit_error("not_found", "Canvas multi-input element no longer exists"))
@@ -537,24 +496,20 @@ fn apply_remove_multi_input_element(path: OSPath, src: String, node_span: Source
     changed := FixEngine.apply_edits(src, [edit(remove, "")]) ?? return .Err(edit_error("overlap", "Canvas multi-input delete overlapped"))
     write_checked_formatted(path, src, changed)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3097
 fn checked_func_for_graph(path: OSPath, src: String, graph_id: String) -> jet_parser.AST.Func Err! {
     name_span := graph_id_name_span(graph_id) ?? return .Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
     checked_func_by_name_span(path, src, name_span)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3111
 fn checked_func_containing_span(path: OSPath, src: String, span: SourceSpan) -> jet_parser.AST.Func Err! {
     bundle := checked_bundle(path, src)
     func := bundle.modules.iter().find_map((module_ref) -> find_func_containing_span(module_ref.items, span)) ?? return .Err(edit_error("not_found", "Canvas source node no longer belongs to a function"))
     .Ok(func)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3130
 fn checked_func_by_name_span(path: OSPath, src: String, name_span: SourceSpan) -> jet_parser.AST.Func Err! {
     bundle := checked_bundle(path, src)
     func := find_func_by_name_span(bundle, name_span) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
     .Ok(func)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3142
 fn checked_bundle(path: OSPath, src: String) -> ProgramBundle Err! {
     (diags, checked) := check_file(path.to_string_lossy(), .None, true)
     errors := diags.iter().filter((d) -> d.severity == .Error).cloned().collect()
@@ -562,12 +517,10 @@ fn checked_bundle(path: OSPath, src: String) -> ProgramBundle Err! {
     bundle := checked ?? return .Err(edit_error("check", "Canvas could not read checked pattern facts"))
     .Ok(std.box.Box.leak(std.box.Box.new(bundle))) // GATE #4494: retained checked AST allocation.
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3162
 enum PatternTarget {
     Classic { arm: &jet_parser.AST.SwitchArm; else_body: &[Stmt]?; span: SourceSpan }
     Switch { arms: &[jet_parser.AST.SwitchArm]; else_body: &[Stmt]?; span: SourceSpan }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3175
 fn find_pattern_target(src: String, stmts: &[Stmt], node_span: SourceSpan, out: &PatternTarget?) {
     if out.is_some() -> return
     loop stmt in stmts {
@@ -602,7 +555,6 @@ fn find_pattern_target(src: String, stmts: &[Stmt], node_span: SourceSpan, out: 
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3252
 fn find_pattern_target_in_children(src: String, stmt: &Stmt, node_span: SourceSpan, out: &PatternTarget?) {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
@@ -617,9 +569,7 @@ fn find_pattern_target_in_children(src: String, stmt: &Stmt, node_span: SourceSp
         else -> {}
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3293
 struct RemoveArmInfo { remove_span: SourceSpan; only_arm_without_else: Bool }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3298
 fn find_pattern_arm_remove_span(src: String, stmts: &[Stmt], pattern_span: SourceSpan, out: &RemoveArmInfo?) {
     if out.is_some() -> return
     loop stmt in stmts {
@@ -648,7 +598,6 @@ fn find_pattern_arm_remove_span(src: String, stmts: &[Stmt], pattern_span: Sourc
         }
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3358
 fn find_pattern_arm_remove_span_in_children(src: String, stmt: &Stmt, pattern_span: SourceSpan, out: &RemoveArmInfo?) {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
@@ -663,11 +612,9 @@ fn find_pattern_arm_remove_span_in_children(src: String, stmt: &Stmt, pattern_sp
         else -> {}
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3401
 fn pattern_span_belongs_to_graph(src: String, stmts: &[Stmt], pattern_span: SourceSpan) -> Bool {
     found := false; find_pattern_span(src, stmts, pattern_span, &found); found
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3407
 fn find_pattern_span(src: String, stmts: &[Stmt], pattern_span: SourceSpan, found: &Bool) {
     if found -> return
     loop stmt in stmts {
@@ -690,7 +637,6 @@ fn find_pattern_span(src: String, stmts: &[Stmt], pattern_span: SourceSpan, foun
         }
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3449
 fn find_pattern_span_in_children(src: String, stmt: &Stmt, pattern_span: SourceSpan, found: &Bool) {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
@@ -705,14 +651,11 @@ fn find_pattern_span_in_children(src: String, stmt: &Stmt, pattern_span: SourceS
         else -> {}
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3490
 enum MultiInputTarget { List { span: SourceSpan; item_spans: [SourceSpan] } }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3497
 fn find_multi_input_target(stmts: &[Stmt], node_span: SourceSpan, out: &MultiInputTarget?) {
     if out.is_some() -> return
     loop stmt in stmts -> find_multi_input_in_stmt(stmt, node_span, out)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3510
 fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &MultiInputTarget?) {
     if out.is_some() -> return
     if stmt == {
@@ -756,14 +699,12 @@ fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &MultiInput
         .Return(.None, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3629
 fn find_multi_input_in_lvalue(target: &LValue, node_span: SourceSpan, out: &MultiInputTarget?) {
     if target == {
         .Index { base, index, .. } -> { find_multi_input_in_expr(base, node_span, out); find_multi_input_in_expr(index, node_span, out) }
         .Field { base, .. } -> find_multi_input_in_expr(base, node_span, out), _ -> {}
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3644
 fn find_multi_input_in_expr(expr: &Expr, node_span: SourceSpan, out: &MultiInputTarget?) {
     if out.is_some() -> return
     if expr == {
@@ -771,7 +712,6 @@ fn find_multi_input_in_expr(expr: &Expr, node_span: SourceSpan, out: &MultiInput
         else -> walk_expr_children_for_multi_input(expr, node_span, out)
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3663
 fn walk_expr_children_for_multi_input(expr: &Expr, node_span: SourceSpan, out: &MultiInputTarget?) {
     if expr == {
         .Call(c, _) -> { loop arg in c.args -> find_multi_input_in_expr(arg.expr, node_span, out) }
@@ -808,7 +748,6 @@ fn walk_expr_children_for_multi_input(expr: &Expr, node_span: SourceSpan, out: &
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3765
 fn multi_input_element_belongs_to_graph(stmts: [Stmt], node_span: SourceSpan, element_span: SourceSpan) -> Bool {
     target := MultiInputTarget?{.None}; find_multi_input_target(stmts, node_span, &target)
     if target == {
@@ -816,26 +755,22 @@ fn multi_input_element_belongs_to_graph(stmts: [Stmt], node_span: SourceSpan, el
         .None -> false
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3780
 fn normalize_pattern_arm_head(pattern: String) -> String {
     trimmed := pattern.trim() // #4303
     head := trimmed.strip_prefix("==").map((s) -> s.trim()).unwrap_or(trimmed).trim_end_matches("->").trim() // #4303
     head.to_string()
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3791
 fn fresh_arm_body(func: jet_parser.AST.Func) -> String {
     if func.return_type.as_ref().map(jet_parser.AST.Type.name) == {
         .Val(ret) && ret != "Void" -> "return {default_arg_for_type(ret)}", _ -> "print(\"canvas arm\")"
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3798
 fn switch_arm_edit_span(src: String, subject: &Expr, switch_span: jet_foundation.Span, arm: &jet_parser.AST.SwitchArm) -> SourceSpan {
     if jet_parser.AST.is_subjectless_guard(subject, switch_span) && jet_parser.AST.uses_classic_if_spelling(src, switch_span, arm.cond.span()) {
         if arm.cond == .PatternTest { pattern, .. } -> return span_through_closing_parens(src, pattern.span())
     }
     arm.cond.span().into()
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3814
 fn add_arm_to_classic_switch(src: String, arm: &jet_parser.AST.SwitchArm, else_body: &[Stmt]?, span: SourceSpan, new_head: String, fresh_body: String) -> String Err! {
     (subject, pattern) := if arm.cond == {
         .PatternTest { subject, pattern, .. } -> (_0: subject, _1: pattern)
@@ -855,7 +790,6 @@ fn add_arm_to_classic_switch(src: String, arm: &jet_parser.AST.SwitchArm, else_b
     replacement := "if {subject_src} == {{\n    {head} -> {{\n{then_body}    }}\n    {new_head} -> {{\n        {fresh_body}\n    }}\n{else_text}}}\n"
     FixEngine.apply_edits(src, [edit(span, replacement)]).map_err((_) -> edit_error("overlap", "Canvas pattern branch conversion overlapped"))
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3851
 fn block_body_source(src: String, stmts: &[Stmt], levels: USize) -> String {
     if stmts.is_empty() -> return String.new()
     out := String.new(); indent := "    ".repeat(levels)
@@ -869,17 +803,13 @@ fn block_body_source(src: String, stmts: &[Stmt], levels: USize) -> String {
     }
     out
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3873
 fn first_stmt_start(stmts: [Stmt]) -> USize? { stmts.first().map((stmt) -> stmt.span().start) }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3877
 fn dispatch_body_insert_offset(src: String, span: SourceSpan) -> USize {
     src.get(span.start..span.end).and_then((chunk) -> chunk.find('{').map((idx) -> line_after(src, span.start + idx))).unwrap_or(span.end)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3883
 fn stmt_arm_text_span(src: String, arm: &jet_parser.AST.SwitchArm) -> SourceSpan {
     SourceSpan { start: line_start(src, arm.span.start), end: line_after(src, arm.span.end) }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3890
 fn comma_separated_remove_span(src: String, container: SourceSpan, element: SourceSpan) -> SourceSpan Err! {
     container_text := src.get(container.start..container.end) ?? return .Err(edit_error("bad_request", "Canvas multi-input span is stale"))
     rel_start := element.start.saturating_sub(container.start); rel_end := element.end.saturating_sub(container.start)
@@ -894,18 +824,15 @@ fn comma_separated_remove_span(src: String, container: SourceSpan, element: Sour
     }
     .Ok(element)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3922
 fn consume_trailing_space(src: String, offset: USize, limit: USize) -> USize {
     loop offset < limit && src.as_bytes().get(offset).is_some_and((b) -> b.is_ascii_whitespace()) -> offset += 1
     offset
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3934
 fn consume_leading_space_back(before: String, comma: USize) -> USize {
     start := comma
     loop start > 0 && before.as_bytes()[start - 1].is_ascii_whitespace() -> start -= 1
     start
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3942
 fn find_func_containing_span(items: [Item], span: SourceSpan) -> jet_parser.AST.Func? {
     loop item in items {
         if item == {
@@ -917,11 +844,8 @@ fn find_func_containing_span(items: [Item], span: SourceSpan) -> jet_parser.AST.
     }
     .None
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3973
 fn span_within(inner: SourceSpan, outer: SourceSpan) -> Bool { inner.start >= outer.start && inner.end <= outer.end }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3977
 fn find_func_by_name_span(bundle: ProgramBundle, name_span: SourceSpan) -> jet_parser.AST.Func? {
-    // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3981
     fn find_in_items(items: [Item], name_span: SourceSpan) -> jet_parser.AST.Func? {
         loop item in items {
             if item == {
@@ -936,7 +860,6 @@ fn find_func_by_name_span(bundle: ProgramBundle, name_span: SourceSpan) -> jet_p
     loop module_ref in bundle.modules { if find_in_items(module_ref.items, name_span) == .Val(found) -> return .Val(found) }
     .None
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4019
 fn collect_statement_locs(src: String, stmts: &[Stmt], block: &[USize], out: &[StatementLoc]) {
     loop (index, stmt) in stmts.iter().enumerate() {
         out.push(StatementLoc { anchor: stmt_canvas_anchor(stmt).into(), source: stmt_source_span(stmt), full: stmt_text_span(src, stmt),
@@ -956,7 +879,6 @@ fn collect_statement_locs(src: String, stmts: &[Stmt], block: &[USize], out: &[S
         block.push(index); collect_child_statement_locs(src, stmt, block, out); _ :: block.pop()
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4047
 fn collect_child_statement_locs(src: String, stmt: &Stmt, block: &[USize], out: &[StatementLoc]) {
     if stmt == {
         .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
@@ -977,7 +899,6 @@ fn collect_child_statement_locs(src: String, stmt: &Stmt, block: &[USize], out: 
         else -> {}
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4113
 fn stmt_canvas_anchor(stmt: Stmt) -> jet_foundation.Span {
     if stmt == {
         .Val(b) -> b.name_span, .Assign { target, .. } -> target.span(), .Expr(e) -> e.span()
@@ -985,7 +906,6 @@ fn stmt_canvas_anchor(stmt: Stmt) -> jet_foundation.Span {
         .BreakValue(_, span) | .BreakLabelValue(_, _, _, span) -> span, _ -> stmt.span()
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4128
 fn stmt_text_span(src: String, stmt: &Stmt) -> SourceSpan {
     span := if stmt == {
         .Expr(expr) -> source_expression_span(src, expr)
@@ -993,7 +913,6 @@ fn stmt_text_span(src: String, stmt: &Stmt) -> SourceSpan {
     }
     SourceSpan { start: line_start(src, span.start), end: line_after(src, span.end) }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4139
 fn stmt_source_span(stmt: Stmt) -> SourceSpan {
     if stmt == {
         .Val(b) -> SourceSpan { start: b.name_span.start, end: b.init.span().end }
@@ -1003,16 +922,12 @@ fn stmt_source_span(stmt: Stmt) -> SourceSpan {
         else -> stmt.span().into()
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4162
 fn same_span(a: SourceSpan, b: SourceSpan) -> Bool { a.start == b.start && a.end == b.end }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4166
 fn write_checked_formatted(path: OSPath, before: String, candidate: String) -> String Err! {
     formatted := jet_driver.Formatter.format_source(candidate) ?? return .Err(diagnostics_error(path, candidate, err))
     write_checked_candidate(path, before, formatted)
 }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4176
 fn write_checked_source(path: OSPath, before: String, candidate: String) -> String Err! { write_checked_candidate(path, before, candidate) }
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:4184
 fn write_checked_candidate(path: OSPath, before: String, candidate: String) -> String Err! {
     abs := canonical_path(path)
     (diags, _, _) := jet_driver.Driver.check_file_with_effect_facts(path.to_string_lossy(), .Val((_0: abs, _1: candidate)), true)

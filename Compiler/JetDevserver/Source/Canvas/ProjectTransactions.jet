@@ -1,4 +1,3 @@
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1
 use {
     core.files.[OSPath]
     fs :: std.fs // GATE #4494 retained-descriptor filesystem primitives
@@ -20,24 +19,19 @@ use {
     jetpack_foundation.[ReportEnvelope]
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:26
 struct ProjectRenamePlan { changes: [ProjectChange] }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:30
 struct ProjectRenameSource {
     path: OSPath
     source_id: String
     source: String
     index: SemIndex
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:37
 struct ProjectRenameError {
     kind: String
     message: String
-    // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:44
     fn new(kind: String, message: String) -> Self { Self(kind: kind, message: message) }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:52
 fn required_project_touched_files(request: String) -> [TouchedProjectFile] Err! {
     files_body :: json_array_body(request, "files") ?? return .Err(project_edit_error("bad_request", "missing `files`"))
     files := []
@@ -51,19 +45,15 @@ fn required_project_touched_files(request: String) -> [TouchedProjectFile] Err! 
     .Ok(files)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:76
 struct GameSelectionTargetRecord {
     source_id: String
     revision: String
     authored_instance_id: String
     source_span: SourceSpan
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:84
 struct GameSelectionPatch { field: String, value: String }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:90
 struct GameSelectionSource { path: OSPath, before: String, edits: [(SourceSpan, String)] }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:100
 fn apply_project_edit_game_selection(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     if json_key_present(request, "span") || json_key_present(request, "patch") {
         return .Err(project_edit_error("bad_request", "edit_game_selection requires `source_span` targets and one `field_patch`"))
@@ -103,7 +93,6 @@ fn apply_project_edit_game_selection(ctx: ProjectContext, request: String, touch
     finish_project_changes_with_audit(ctx, request, "edit_game_selection", changes, audit)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:187
 fn required_game_selection_targets(request: String) -> [GameSelectionTargetRecord] Err! {
     body :: json_array_body(request, "targets") ?? return .Err(project_edit_error("bad_request", "missing `targets`"))
     targets := [GameSelectionTargetRecord]{}
@@ -124,7 +113,6 @@ fn required_game_selection_targets(request: String) -> [GameSelectionTargetRecor
     .Ok(targets)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:251
 fn required_game_selection_patch(request: String) -> GameSelectionPatch Err! {
     body :: json_object_body(request, "field_patch") ?? return .Err(project_edit_error("bad_request", "missing `field_patch`"))
     field :: json_string_field(body, "field") ?? return .Err(project_edit_error("bad_request", "game field patch missing `field`"))
@@ -133,13 +121,11 @@ fn required_game_selection_patch(request: String) -> GameSelectionPatch Err! {
     .Ok(GameSelectionPatch(field: field, value: value))
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:268
 fn game_selection_audit_json(targets: [GameSelectionTargetRecord], patch: &GameSelectionPatch) -> String {
     rendered :: targets.iter().map((target) -> "{{\"source_id\":{json_str(target.source_id)},\"revision\":{json_str(target.revision)},\"authored_instance_id\":{json_str(target.authored_instance_id)},\"source_span\":{{format("{{\"start\":{{}},\"end\":{{}}}}", target.source_span.start, target.source_span.end)}}}}").collect().join(",")
     "{{\"targets\":[{rendered}],\"field_patch\":{{\"field\":{json_str(patch.field)},\"value\":{json_str(patch.value)}}},\"transaction\":\"one_checked_source_transaction\",\"undo\":\"replace_source\",\"provenance\":\"authored_instance\"}}"
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:296
 fn game_field_edit(source: String, source_span: SourceSpan, field: String, value: String) -> (SourceSpan, String) Err! {
     selected :: source.get(source_span.start..source_span.end) ?? return .Err(project_edit_error("bad_request", "game selection `source_span` is outside the source file"))
     field := field.trim() // #4303
@@ -168,7 +154,6 @@ fn game_field_edit(source: String, source_span: SourceSpan, field: String, value
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:363
 fn game_source_context_contains(source: String, span: SourceSpan, needles: [String]) -> Bool {
     prefix :: source.get(..span.start) ?? return false
     needles.iter().any((needle) -> {
@@ -177,7 +162,6 @@ fn game_source_context_contains(source: String, span: SourceSpan, needles: [Stri
     })
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:381
 fn game_call_argument_span(selected: String, offset: Usize, methods: [String]) -> SourceSpan? {
     (method_pos, method) :: methods.iter().filter_map((method) -> selected.find(".{method}(").map((position) -> (position, method))).min_by_key(((position, _)) -> position)?
     open :: method_pos + method.len() + 1
@@ -205,7 +189,6 @@ fn game_call_argument_span(selected: String, offset: Usize, methods: [String]) -
     .Some(SourceSpan(start: offset + start, end: offset + finish))
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:432
 fn game_component_type_span(selected: String, offset: Usize) -> SourceSpan? {
     method :: selected.find(".component")?
     open :: selected[method..<selected.len()].find('(')? + method
@@ -217,7 +200,6 @@ fn game_component_type_span(selected: String, offset: Usize) -> SourceSpan? {
     .Some(SourceSpan(start: offset + start, end: offset + end))
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:448
 fn trim_byte_range(text: String, start: Usize, end: Usize) -> (Usize, Usize)? {
     start := start
     end := end
@@ -225,12 +207,10 @@ fn trim_byte_range(text: String, start: Usize, end: Usize) -> (Usize, Usize)? {
     loop end > start && text.as_bytes()[end - 1].is_ascii_whitespace() { end -= 1 }
     (start < end).then_some((start, end))
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:458
 fn is_quoted_source(source: String) -> Bool {
     source := source.trim() // #4303
     source.len() >= 2 && source.starts_with('"') && source.ends_with('"')
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:463
 fn is_game_type_name(value: String) -> Bool {
     !value.is_empty() && value.split('.').all((part) -> {
         chars := part.chars()
@@ -238,15 +218,12 @@ fn is_game_type_name(value: String) -> Bool {
         (first.is_ascii_alphabetic() || first == '_') && chars.all((c) -> c.is_ascii_alphanumeric() || c == '_')
     })
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:474
 fn validate_game_type_name(value: String) Err! {
     if is_game_type_name(value.trim()) -> .Ok(_) else -> .Err(project_edit_error("bad_request", "component type must be a qualified Jet type name"))
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:485
 fn game_string_literal(value: String) -> String {
     "\"{{value.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace(Char{13}, "\\r").replace('\t', "\\t")}\""
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:497
 fn json_key_present(text: String, key: String) -> Bool {
     needle :: "\"{key}\""
     search_from := Usize{0}
@@ -258,7 +235,6 @@ fn json_key_present(text: String, key: String) -> Bool {
     }
     false
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:514
 fn json_object_body(text: String, key: String) -> String? {
     needle :: "\"{key}\""
     key_pos :: text.find(needle)?
@@ -287,7 +263,6 @@ fn json_object_body(text: String, key: String) -> String? {
     .None
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:553
 fn validate_touched_project_files(ctx: &ProjectContext, touched: [TouchedProjectFile]) Err! {
     loop file in touched {
         if file.path.contains("..") || OSPath.new(file.path).is_absolute() -> return .Err(project_edit_error("bad_request", "Canvas project file paths must stay inside the project"))
@@ -300,7 +275,6 @@ fn validate_touched_project_files(ctx: &ProjectContext, touched: [TouchedProject
     .Ok(_)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:587
 // The selected semantic definition anchor owns the preview and transaction edit set.
 fn prepare_project_rename(ctx: ProjectContext, selected_path: OSPath, from: String, to: String, touched: [TouchedProjectFile]?) -> ProjectRenamePlan ProjectRenameError! {
     if ctx.authority_diagnostic == .Val(diagnostic) -> return .Err(ProjectRenameError.new("stale", diagnostic.what))
@@ -339,7 +313,6 @@ fn prepare_project_rename(ctx: ProjectContext, selected_path: OSPath, from: Stri
     .Ok(ProjectRenamePlan(changes: changes))
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:669
 fn apply_project_rename(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     selected_rel :: json_string_field(request, "source_id").map((path) -> clean_project_rel_path(path)).transpose()?.unwrap_or_else(() -> rel_path(ctx.project_root, ctx.entry_path))
     if !ctx.files.iter().any((file) -> file.kind == "source" && file.path == selected_rel) -> return .Err(project_edit_error("not_found", "Canvas rename source is not in the projected project"))
@@ -358,7 +331,6 @@ fn apply_project_rename(ctx: ProjectContext, request: String, touched: [TouchedP
     finish_project_changes(ctx, request, op, plan.changes)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:707
 fn project_rename_sources(ctx: ProjectContext) -> [ProjectRenameSource] ProjectRenameError! {
     sources := [ProjectRenameSource]{}
     loop file in ctx.files.iter().filter((file) -> file.kind == "source") {
@@ -374,7 +346,6 @@ fn project_rename_sources(ctx: ProjectContext) -> [ProjectRenameSource] ProjectR
     .Ok(sources)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:744
 fn selected_rename_anchor(ctx: ProjectContext, selected: ProjectRenameSource, from: String) -> DefinitionAnchor ProjectRenameError! {
     definitions :: selected.index.definitions().iter().filter((definition) -> definition.name == from && module_belongs_to(ctx.project_root, selected.path, definition.module_path)).collect()
     if definitions.len() == 1 -> return .Ok(DefinitionAnchor(module_path: definitions[0].module_path, kind: "", def_span: definitions[0].def_span, semantic_identity: .Some(definitions[0].identity)))
@@ -387,16 +358,13 @@ fn selected_rename_anchor(ctx: ProjectContext, selected: ProjectRenameSource, fr
     .Err(ProjectRenameError.new("ambiguous", "Canvas rename needs one selected semantic definition"))
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:805
 fn add_project_rename_edit(edits_by_source: &[String:[SourceSpan]], seen: &HashSet<(String, Usize, Usize)>, source: &ProjectRenameSource, span: SourceSpan) {
     if !seen.insert((source.source_id, span.start, span.end)) -> return
     edits_by_source.entry(source.source_id).or_default().push(span)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:820
 fn definition_matches_anchor(definition: SymbolDef, anchor: DefinitionAnchor) -> Bool {
     definition.module_path == anchor.module_path && definition.def_span == anchor.def_span && anchor.semantic_identity.is_none_or((identity) -> identity == definition.identity)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:829
 fn reference_matches_anchor(reference: SymbolRef, anchor: DefinitionAnchor) -> Bool {
     target :: reference.target ?? return false
     if target.def_span != anchor.def_span -> return false
@@ -406,7 +374,6 @@ fn reference_matches_anchor(reference: SymbolRef, anchor: DefinitionAnchor) -> B
     target.module_path == anchor.module_path
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:840
 fn apply_project_add_dependency(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     manifest_rel :: project_manifest_rel(ctx, request)?
     if !touched.iter().any((f) -> f.path == manifest_rel) -> return .Err(project_edit_error("bad_request", "add_dependency must touch the edited Package file"))
@@ -419,7 +386,6 @@ fn apply_project_add_dependency(ctx: ProjectContext, request: String, touched: [
     before :: read_source_without_symlinks(manifest_path).map_err((e) -> project_edit_error("io", e.to_string()))?
     apply_canonical_dependency(ctx, request, manifest_rel, before, name, .Some((spec_text, spec)))
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:870
 fn apply_project_remove_dependency(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     manifest_rel :: project_manifest_rel(ctx, request)?
     if !touched.iter().any((f) -> f.path == manifest_rel) -> return .Err(project_edit_error("bad_request", "remove_dependency must touch the edited Package file"))
@@ -430,7 +396,6 @@ fn apply_project_remove_dependency(ctx: ProjectContext, request: String, touched
     before :: read_source_without_symlinks(manifest_path).map_err((e) -> project_edit_error("io", e.to_string()))?
     apply_canonical_dependency(ctx, request, manifest_rel, before, name, .None)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:891
 fn apply_project_edit_pkg_field(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     manifest_rel :: project_manifest_rel(ctx, request)?
     if !touched.iter().any((f) -> f.path == manifest_rel) -> return .Err(project_edit_error("bad_request", "edit_pkg_field must touch the edited Package file"))
@@ -444,7 +409,6 @@ fn apply_project_edit_pkg_field(ctx: ProjectContext, request: String, touched: [
     Package.PackageFacts.parse(after, manifest_rel).map_err((error) -> project_edit_error("diagnostic", error.to_string()))?
     finish_project_changes(ctx, request, "edit_pkg_field", [ProjectChange(path: manifest_path, rel: manifest_rel, before: before, after: after, existed: true)])
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:928
 fn apply_project_add_target(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     manifest_rel :: project_manifest_rel(ctx, request)?
     if !touched.iter().any((f) -> f.path == manifest_rel) -> return .Err(project_edit_error("bad_request", "add_target must touch the edited Package file"))
@@ -465,7 +429,6 @@ fn apply_project_add_target(ctx: ProjectContext, request: String, touched: [Touc
     Package.PackageFacts.parse(after, manifest_rel).map_err((error) -> project_edit_error("diagnostic", error.to_string()))?
     finish_project_changes(ctx, request, "add_target", [ProjectChange(path: manifest_path, rel: manifest_rel, before: before, after: after, existed: true)])
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:989
 fn project_manifest_rel(ctx: ProjectContext, request: String) -> String Err! {
     relative :: json_string_field(request, "manifest").unwrap_or_else(() -> {
         if ctx.manifest_root == .Val(root) -> return rel_path(ctx.project_root, root.join(Syntax.PACKAGE_FILE))
@@ -475,7 +438,6 @@ fn project_manifest_rel(ctx: ProjectContext, request: String) -> String Err! {
     clean_project_rel_path(relative)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1008
 fn apply_project_create_package(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     raw :: json_string_field(request, "package_path").or_else(() -> json_string_field(request, "new_package_path")) ?? return .Err(project_edit_error("bad_request", "missing `package_path`"))
     package_rel :: clean_project_rel_path(raw)?
@@ -516,7 +478,6 @@ fn apply_project_create_package(ctx: ProjectContext, request: String, touched: [
     finish_project_changes(ctx, request, "create_package", changes)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1110
 fn apply_project_add_workspace_member(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     workspace_rel :: json_string_field(request, "workspace").map((path) -> clean_project_rel_path(path)).transpose()?.unwrap_or(Syntax.WORKSPACE_FILE)
     member_path :: clean_project_rel_path(required_project_string(request, "member_path")?)?
@@ -537,7 +498,6 @@ fn apply_project_add_workspace_member(ctx: ProjectContext, request: String, touc
     finish_project_changes(ctx, request, "add_workspace_member", [change])
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1178
 fn apply_project_add_env_service(ctx: ProjectContext, request: String, touched: [TouchedProjectFile]) -> String Err! {
     env_rel :: json_string_field(request, "env").map((path) -> clean_project_rel_path(path)).transpose()?.unwrap_or(Syntax.ENV_FILE)
     env_path :: ctx.project_root.join(env_rel)
@@ -554,7 +514,6 @@ fn apply_project_add_env_service(ctx: ProjectContext, request: String, touched: 
     finish_project_changes(ctx, request, "add_env_service", [ProjectChange(path: env_path, rel: env_rel, before: before, after: after, existed: existed)])
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1228
 fn env_service_source(request: String, name: String) -> String Err! {
     fields := ["enable: {if json_bool_field(request, "enable").unwrap_or(true) { "true" } else { "false" }}"]
     if json_usize_field(request, "port") == .Val(port) -> fields.push("ports: [{port}]")
@@ -576,7 +535,6 @@ fn env_service_source(request: String, name: String) -> String Err! {
     if json_string_field(request, "data_dir") == .Val(data_dir) -> fields.push("data_dir: \"{manifest_string(data_dir)}\"")
     .Ok("{name}: {{ {fields.join(", ")} }}")
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1276
 fn add_env_service_to_source(src: String, name: String, service: String) -> String Err! {
     if src.contains("{name}:") -> return .Ok(src.to_string())
     if (start, end) :: block_body_span(src, "services:") {
@@ -597,7 +555,6 @@ fn add_env_service_to_source(src: String, name: String, service: String) -> Stri
     out.push_str(src[close..<src.len()])
     .Ok(out)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1310
 fn add_workspace_member_to_source(src: String, member_path: String) -> String Err! {
     normalized :: "./{member_path.trim_start_matches("./")}"
     if src.contains("\"{normalized}\"") || src.contains("\"{member_path}\"") -> return .Ok(src.to_string())
@@ -615,7 +572,6 @@ fn add_workspace_member_to_source(src: String, member_path: String) -> String Er
     out.push_str(src[list_end..<src.len()])
     .Ok(out)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1352
 fn workspace_find_covers(src: String, member_path: String) -> Bool {
     find_pos :: src.find("find(") ?? return false
     rest := src[find_pos + "find(".len()..<src.len()] // #4303
@@ -625,7 +581,6 @@ fn workspace_find_covers(src: String, member_path: String) -> Bool {
     dir := rest[0..<end].trim_start_matches("./").trim_end_matches('/') // #4303
     member_path == dir || member_path.starts_with("{dir}/")
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1368
 fn validate_payload_field(field: String, value: String) Err! {
     if field is {
         "name" -> validate_ident_for_project(value)
@@ -633,11 +588,9 @@ fn validate_payload_field(field: String, value: String) Err! {
         _ -> .Err(project_edit_error("bad_request", "Canvas can edit known payload string fields only"))
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1379
 fn is_canonical_package_file(path: String) -> Bool {
     OSPath.new(path).file_name().and_then((name) -> name.to_str()) == .Some(.PACKAGE_FILE)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1389
 // Use the shared comment- and order-preserving dependency edit engine.
 fn apply_canonical_dependency(ctx: &ProjectContext, request: String, manifest_rel: String, before: String, name: String, add: (String, Manifest.DepSpec)?) -> String Err! {
     adding :: add.is_some()
@@ -657,7 +610,6 @@ fn apply_canonical_dependency(ctx: &ProjectContext, request: String, manifest_re
     finish_project_changes(ctx, request, if adding -> "add_dependency" else -> "remove_dependency", [ProjectChange(path: ctx.project_root.join(manifest_rel), rel: manifest_rel, before: before, after: after, existed: true)])
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1434
 fn replace_top_level_field(src: String, field: String, replacement: String) -> String {
     depth := I32{0}
     quoted := false
@@ -708,7 +660,6 @@ fn replace_top_level_field(src: String, field: String, replacement: String) -> S
         out
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1503
 fn block_body_span(src: String, label: String) -> (Usize, Usize)? {
     label_pos :: src.find(label)?
     open :: label_pos + src[label_pos..<src.len()].find('{')?
@@ -731,14 +682,11 @@ fn block_body_span(src: String, label: String) -> (Usize, Usize)? {
     }
     .None
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1537
 fn manifest_string(value: String) -> String { value.replace('\\', "\\\\").replace('"', "\\\"") }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1541
 fn require_touched_revision(touched: [TouchedProjectFile], path: String, revision: String) Err! {
     if touched.iter().any((file) -> file.path == path && file.revision == revision) -> return .Ok(_)
     .Err(project_edit_error("bad_request", "project transaction touched files do not match the operation"))
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1558
 fn clean_project_rel_path(path: String) -> String Err! {
     path := path.trim().trim_start_matches("./") // #4303
     if path.is_empty() || path.contains('\\') || OSPath.new(path).is_absolute() -> return .Err(project_edit_error("bad_request", "Canvas project paths must be relative source paths"))
@@ -755,7 +703,6 @@ fn clean_project_rel_path(path: String) -> String Err! {
     }
     .Ok(parts.join("/"))
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1599
 // Inspect each existing component without following symlinks; missing tails are allowed.
 fn validate_project_path(root: OSPath, path: OSPath, relative: String) Err! {
     root_metadata :: fs.symlink_metadata(root).map_err((error) -> project_edit_error("io", "could not inspect the Canvas project root: {error}"))? // GATE #4494
@@ -780,9 +727,7 @@ fn validate_project_path(root: OSPath, path: OSPath, relative: String) Err! {
     }
     .Ok(_)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1669
 fn is_reserved_project_path_part(part: String) -> Bool { part == ".git".bit_or(".jet").bit_or("target").bit_or("build") }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1673
 fn project_target_text(target: String) -> String Err! {
     if target is {
         "library" -> .Ok("library")
@@ -792,18 +737,15 @@ fn project_target_text(target: String) -> String Err! {
         _ -> .Err(project_edit_error("bad_request", "unknown Canvas package target"))
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1686
 fn project_dep_spec(spec: String) -> Manifest.DepSpec Err! {
     if spec.starts_with("./") || spec.starts_with("../") || spec.starts_with('/') -> return .Ok(.Path(path: spec.to_string()))
     if spec.starts_with("git@") -> return .Err(project_edit_error("unsupported", "Canvas project transactions need an explicit version or path dependency here"))
     if spec.trim().is_empty() -> return .Err(project_edit_error("bad_request", "dependency spec is empty"))
     .Ok(.Registry(spec.to_string()))
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1707
 fn finish_project_changes(ctx: ProjectContext, request: String, op: String, changes: [ProjectChange]) -> String Err! {
     finish_project_changes_with_audit(ctx, request, op, changes, "")
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1716
 fn finish_project_changes_with_audit(ctx: ProjectContext, request: String, op: String, changes: [ProjectChange], audit: String) -> String Err! {
     changes := changes
     loop change in changes { validate_project_path(ctx.project_root, change.path, change.rel)? }
@@ -827,15 +769,12 @@ fn finish_project_changes_with_audit(ctx: ProjectContext, request: String, op: S
     next_project_revision :: if preview -> project_revision_after_changes(ctx, changes) else -> project_context_for_entry(ctx.entry_path).project_revision
     .Ok(project_edit_ok_with_audit(op, preview, changed, ctx.project_revision, next_project_revision, touched_files, diff, audit))
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1780
 fn normalize_and_validate_project_changes(ctx: &ProjectContext, changes: &[ProjectChange]) Err! {
     normalize_and_validate_project_changes_inner(ctx, changes, true)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1787
 fn normalize_and_format_project_changes(ctx: &ProjectContext, changes: &[ProjectChange]) Err! {
     normalize_and_validate_project_changes_inner(ctx, changes, false)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1794
 fn normalize_and_validate_project_changes_inner(ctx: &ProjectContext, changes: &[ProjectChange], check_source: Bool) Err! {
     loop change in changes {
         if change.before == change.after -> next
@@ -852,12 +791,10 @@ fn normalize_and_validate_project_changes_inner(ctx: &ProjectContext, changes: &
     }
     .Ok(_)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1852
 fn validate_project_rename_overlay(ctx: &ProjectContext, changes: [ProjectChange]) Err! {
     overlays :: changes.iter().map((change) -> (change.path, change.after)).collect()
     semindex.open_with_overlays(ctx.entry_path, overlays).map((_) -> ()).map_err((error) -> project_edit_error("diagnostic", error.to_string()))
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1865
 fn validate_project_jet_overlay(path: OSPath, src: String) Err! {
     shown :: path.display().to_string()
     diags :: if {
@@ -872,7 +809,6 @@ fn validate_project_jet_overlay(path: OSPath, src: String) Err! {
     .Err(project_edit_error("diagnostic", render_all(shown, src, errors)))
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1886
 fn write_project_changes_with_rollback(ctx: &ProjectContext, changes: [ProjectChange]) Err! {
     with_source_transaction(() -> {
         current :: project_context_for_entry(ctx.entry_path)
@@ -903,7 +839,6 @@ fn write_project_changes_with_rollback(ctx: &ProjectContext, changes: [ProjectCh
         .Io(error) -> project_edit_error("io", error.to_string())
     })
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:1945
 fn record_project_rename(ctx: &ProjectContext, changes: [ProjectChange], from: String, to: String) Err! {
     source_changes :: changes.iter().filter((change) -> change.before != change.after && change.path.extension().and_then((extension) -> extension.to_str()) == .Some(.FILE_EXT)).collect()
     if source_changes.is_empty() -> return .Ok(_)
@@ -931,7 +866,6 @@ fn record_project_rename(ctx: &ProjectContext, changes: [ProjectChange], from: S
         }
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:2049
 fn project_revision_after_changes(ctx: ProjectContext, changes: [ProjectChange]) -> String {
     files := ctx.files.clone()
     loop change in changes {
@@ -940,7 +874,6 @@ fn project_revision_after_changes(ctx: ProjectContext, changes: [ProjectChange])
     files.sort_by((left, right) -> left.path.cmp(right.path))
     project_revision_from_files(files)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:2069
 fn rollback_project_writes(written: [ProjectWriteBackup]) {
     loop backup in written.iter().rev() {
         expected :: .Some(backup.after)
@@ -948,23 +881,18 @@ fn rollback_project_writes(written: [ProjectWriteBackup]) {
         _ :: replace_source_if_unchanged_locked(backup.path, expected, candidate)
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:2077
 struct ProjectWriteBackup { path: OSPath, before: String, after: String, existed: Bool }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:2084
 fn project_file_kind_for_rel(rel: String) -> String {
     if is_canonical_package_file(rel) { "package" } else if rel.ends_with("/{Syntax.WORKSPACE_FILE}") || rel == Syntax.WORKSPACE_FILE { "workspace" } else if rel.ends_with("/{Syntax.ENV_FILE}") || rel == Syntax.ENV_FILE { "env" } else if rel == Syntax.UNIFIED_LOCK_FILE { "lock" } else { "source" }
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:2106
 fn diagnostic_json(d: Diagnostic) -> String {
     ReportEnvelope.new("canvas", if d.severity is { .Error -> "error"; .Lint -> "warning" }, d.code, d.what, d.why, d.fix).json()
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:2121
 fn module_belongs_to(project_root: OSPath, source_path: OSPath, module_path: String) -> Bool {
     source_id := rel_path(project_root, source_path).trim_start_matches("./") // #4303
     module_path :: module_path.replace('\\', "/")
     module_path == source_id || module_path == source_path.to_string_lossy().replace('\\', "/") || module_path.ends_with("/{source_id}")
 }
-// Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:2134
 fn rel_path(root: OSPath, path: OSPath) -> String {
     path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace(MAIN_SEPARATOR, "/")
 }

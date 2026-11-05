@@ -17,13 +17,10 @@ use {
     core.files.[OSPath]
 }
 
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:13
 fn project_file(path: OSPath) -> Projection Err! [Diagnostic] { project_file_with_runtime(path, .None) }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:17
 fn project_file_with_runtime(path: OSPath, runtime_events: String?) -> Projection Err! [Diagnostic] {
     jet_driver.run_compiler_work(() -> project_file_with_runtime_on_compiler_stack(path, runtime_events)) // GATE #4494: compiler worker stack.
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:29
 fn project_file_with_runtime_on_compiler_stack(path: OSPath, runtime_events: String?) -> Projection Err! [Diagnostic] {
     path_str := path.to_string_lossy()
     root := path.parent().unwrap_or_else(() -> OSPath.new("."))
@@ -65,21 +62,15 @@ fn project_file_with_runtime_on_compiler_stack(path: OSPath, runtime_events: Str
     source_id := rel_path(project_context_for_entry(path).project_root, checked.path)
     project_checked(path, source_id, src, bundle, facts, package_facts, workspace_overlay_policy, runtime_events)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:87
 struct ProjectFileRec { path: String; revision: String; kind: String }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:93
 struct ProjectContext {
     entry_path: OSPath; project_root: OSPath; manifest_root: OSPath?; ecosystem_root: OSPath?
     workspace_root: OSPath?; files: [ProjectFileRec]; parts: jet_driver.ProjectParts.ProjectPartsReport
     project_revision: String; authority_diagnostic: Diagnostic?
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:107
 struct TouchedProjectFile { path: String; revision: String }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:112
 struct ProjectChange { path: OSPath; rel: String; before: String; after: String; existed: Bool }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:120
 struct WorkspaceBoundary { root: OSPath; member_root: OSPath?; malformed: Bool; diagnostic: Diagnostic? }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:127
 fn project_context_for_entry(path: OSPath) -> ProjectContext {
     entry_path := absolute_entry_path(path)
     entry_dir := entry_path.parent().unwrap_or_else(() -> OSPath.new("."))
@@ -130,14 +121,12 @@ fn project_context_for_entry(path: OSPath) -> ProjectContext {
     ProjectContext { entry_path: entry_path, project_root: project_root, manifest_root: manifest_root, ecosystem_root: ecosystem_root, workspace_root: workspace_root, files: files, parts: parts, project_revision: project_revision,
         authority_diagnostic: package_diagnostic.or(collection_diagnostic).or(manifest_diagnostic).or(ecosystem_diagnostic).or_else(() -> workspace_boundary.as_ref().and_then((boundary) -> boundary.diagnostic.clone())) }
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:218
 fn absolute_entry_path(path: OSPath) -> OSPath {
     if path.is_absolute() -> return path.to_path_buf()
     parent := path.parent().filter((parent) -> !parent.as_os_str().is_empty()).unwrap_or_else(() -> OSPath.new("."))
     base := fs.canonicalize(parent).or_else((_) -> std.env.current_dir().map((cwd) -> cwd.join(parent))).unwrap_or_else((_) -> parent.to_path_buf())
     path.file_name().map((name) -> base.join(name)).unwrap_or(base)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:232
 fn find_workspace_boundary(start: OSPath) -> WorkspaceBoundary? {
     resolver := AuthorityResolver.open(start) ?? {
         error :: err
@@ -189,7 +178,6 @@ fn find_workspace_boundary(start: OSPath) -> WorkspaceBoundary? {
         if dir.parent() == .Val(parent) { dir = parent.to_path_buf() } else { return .None }
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:331
 fn matching_member_root(resolver: AuthorityResolver, entry_dir: OSPath, plan: WorkspacePlan) -> OSPath? Diagnostic! {
     entry_resolver := AuthorityResolver.open(entry_dir) ?? {
         error :: err
@@ -215,13 +203,9 @@ fn matching_member_root(resolver: AuthorityResolver, entry_dir: OSPath, plan: Wo
     }
     result
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:364
 fn path_is_within(path: OSPath, root: OSPath) -> Bool { comparable_path(path).zip(comparable_path(root)).is_some_and((pair) -> pair._0.starts_with(pair._1)) }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:370
 fn same_path(left: OSPath, right: OSPath) -> Bool { comparable_path(left).zip(comparable_path(right)).is_some_and((pair) -> pair._0 == pair._1) }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:376
 fn comparable_path(path: OSPath) -> OSPath? { fs.canonicalize(path).ok().or_else(() -> AuthorityResolver.open(path).ok().map((resolver) -> resolver.root().to_path_buf())) }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:387
 fn collect_project_files(project_root: OSPath, entry_path: OSPath, manifest_root: OSPath?, ecosystem_root: OSPath?, workspace_root: OSPath?) -> ([ProjectFileRec], Diagnostic?) {
     paths := [OSPath]{}; authority_diagnostic := Diagnostic?{.None}
     workspace_source_failed := false; workspace_member_roots := [OSPath]{}
@@ -301,7 +285,6 @@ fn collect_project_files(project_root: OSPath, entry_path: OSPath, manifest_root
     }
     (_0: files, _1: authority_diagnostic)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:532
 fn workspace_source_path(root: OSPath) -> (AuthorityResolver, WorkspaceSource)? Diagnostic! {
     resolver := AuthorityResolver.open(root) ?? {
         error :: err
@@ -313,9 +296,7 @@ fn workspace_source_path(root: OSPath) -> (AuthorityResolver, WorkspaceSource)? 
     }
     source.map((source) -> (_0: resolver, _1: source))
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:551
 fn workspace_snapshot_for_source(resolver: AuthorityResolver, source: WorkspaceSource) -> WorkspaceSnapshot Diagnostic! { jet_env_model.WorkspaceFile.load_checked_source(resolver, source.clone()) }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:558
 fn push_existing(paths: [OSPath], path: OSPath) -> Unit {
     metadata := fs.symlink_metadata(path) ?? {
         error :: err
@@ -325,7 +306,6 @@ fn push_existing(paths: [OSPath], path: OSPath) -> Unit {
     if metadata.is_file() && !is_single_link_file(metadata) -> return
     paths.push(path.to_path_buf())
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:567
 fn is_single_link_file(metadata: fs.Metadata) -> Bool {
     if !metadata.is_file() -> return false
     // GATE #4483 selected-target dispatch; #4494 native link count.
@@ -333,13 +313,11 @@ fn is_single_link_file(metadata: fs.Metadata) -> Bool {
     if core.sys.target.selected_os() == "windows" -> return metadata.number_of_links() == 1
     false
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:588
 fn project_revision_from_files(files: [ProjectFileRec]) -> String {
     acc := String.new()
     loop file in files { acc.push_str(file.path); acc.push('\n'); acc.push_str(file.revision); acc.push('\n'); acc.push_str(file.kind); acc.push('\n') }
     source_revision(acc)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:601
 fn workspace_project_json(project_root: OSPath, workspace_root: OSPath?) -> String {
     if workspace_root.is_none() -> return "null"
     root := workspace_root.unwrap()
@@ -363,7 +341,6 @@ fn workspace_project_json(project_root: OSPath, workspace_root: OSPath?) -> Stri
     }
     "{{\"path\":{json_str(source_path)},\"members\":[{members}],\"diagnostics\":[]}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:661
 fn packages_project_json(project_root: OSPath, entry_path: OSPath, manifest_root: OSPath?, ecosystem_root: OSPath?, workspace_root: OSPath?) -> String {
     dirs := package_dirs(manifest_root, ecosystem_root, workspace_root) ?? {
         diagnostic :: err
@@ -373,7 +350,6 @@ fn packages_project_json(project_root: OSPath, entry_path: OSPath, manifest_root
     dirs.sort(); dirs.dedup()
     dirs.iter().filter_map((dir) -> package_project_json(project_root, entry_path, dir)).collect().join(",")
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:691
 fn package_dirs(manifest_root: OSPath?, ecosystem_root: OSPath?, workspace_root: OSPath?) -> [OSPath] Diagnostic! {
     dirs := package_dirs_without_workspace(manifest_root, ecosystem_root)
     if workspace_root == .Val(root) {
@@ -388,14 +364,12 @@ fn package_dirs(manifest_root: OSPath?, ecosystem_root: OSPath?, workspace_root:
     }
     dirs.sort(); dirs.dedup(); dirs
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:712
 fn package_dirs_without_workspace(manifest_root: OSPath?, ecosystem_root: OSPath?) -> [OSPath] {
     dirs := [OSPath]{}
     if manifest_root == .Val(root) -> dirs.push(root.to_path_buf())
     if ecosystem_root == .Val(root) -> dirs.push(root.to_path_buf())
     dirs.sort(); dirs.dedup(); dirs
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:728
 fn targets_project_json(project_root: OSPath, entry_path: OSPath, manifest_root: OSPath?, ecosystem_root: OSPath?, workspace_root: OSPath?) -> String {
     dirs := package_dirs(manifest_root, ecosystem_root, workspace_root) ?? {
         diagnostic :: err
@@ -405,11 +379,8 @@ fn targets_project_json(project_root: OSPath, entry_path: OSPath, manifest_root:
     dirs.sort(); dirs.dedup()
     dirs.iter().filter_map((dir) -> package_targets_project_json(project_root, entry_path, dir)).flatten().collect().join(",")
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:756
 fn package_targets_project_json(project_root: OSPath, entry_path: OSPath, dir: OSPath) -> [String]? { canonical_package_targets_project_json(project_root, entry_path, dir) }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:764
 fn package_project_json(project_root: OSPath, entry_path: OSPath, dir: OSPath) -> String? { canonical_package_project_json(project_root, entry_path, dir) }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:767
 fn inline_entry_dir(entry_path: OSPath) -> OSPath? {
     source := fs.read_to_string(entry_path).ok()
     package := Package.extract_inline_package(source) ?? {
@@ -418,7 +389,6 @@ fn inline_entry_dir(entry_path: OSPath) -> OSPath? {
     }
     if package.is_none() -> .None else -> entry_path.parent().map((path) -> path.to_path_buf())
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:775
 fn canonical_package_facts(dir: OSPath, entry_path: OSPath) -> Package.PackageFacts Err! {
     if entry_path.parent().is_some_and((parent) -> path_is_within(entry_path, dir) || same_path(parent, dir)) {
         if jet_semindex.package_facts_for_entry(entry_path)? == .Val(facts) -> return facts
@@ -429,15 +399,12 @@ fn canonical_package_facts(dir: OSPath, entry_path: OSPath) -> Package.PackageFa
     }
     facts.unwrap_or_else(() -> { throw "canonical Package `{dir.join(Syntax.PACKAGE_FILE).display()}` is missing" })
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:799
 fn projection_diagnostic_json(diagnostic: Diagnostic) -> String { "{{\"diagnostics\":[{diagnostic_json(diagnostic)}]}}" }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:803
 fn canonical_package_error(project_root: OSPath, entry_path: OSPath, dir: OSPath, error: String) -> String {
     diagnostic := jet_semindex.package_facts_diagnostic(entry_path, error)
     name := dir.file_name().and_then((name) -> name.to_str()).unwrap_or("package")
     "{{\"path\":{json_str(rel_path(project_root, dir))},\"manifest\":{json_str(rel_path(project_root, dir.join(Syntax.PACKAGE_FILE)))},\"name\":{json_str(name)},\"version\":\"\",\"target\":\"native\",\"deps\":[],\"targets\":[],\"outputs\":[],\"environments\":[],\"effects_enabled\":false,\"diagnostics\":[{diagnostic_json(diagnostic)}]}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:819
 fn output_kind_label(kind: Package.PackageOutputKind) -> String {
     if kind == {
         .Library -> "library"
@@ -451,7 +418,6 @@ fn output_kind_label(kind: Package.PackageOutputKind) -> String {
         .Fleet -> "fleet"
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:834
 fn output_payload_json(payload: Package.OutputPayload) -> String {
     if payload == {
         .Null -> "null"
@@ -466,9 +432,7 @@ fn output_payload_json(payload: Package.OutputPayload) -> String {
         }
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:860
 fn field_provenance_json(facts: Package.PackageFacts, field: String) -> String { "[{facts.field_provenance(field).iter().map((origin) -> json_str(origin)).collect().join(",")}]" }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:872
 fn canonical_outputs_json(facts: Package.PackageFacts) -> String {
     keys := facts.outputs.keys().collect(); keys.sort()
     keys.iter().map((name) -> {
@@ -476,7 +440,6 @@ fn canonical_outputs_json(facts: Package.PackageFacts) -> String {
         "{{\"name\":{json_str(output.name)},\"kind\":{json_str(output_kind_label(output.kind))},\"entry\":{json_optional_str(output.entry)},\"payload\":{output_payload_json(output.payload)},\"provenance\":{field_provenance_json(facts, "outputs.{name}")}}}"
     }).collect().join(",")
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:890
 fn canonical_environments_json(facts: Package.PackageFacts) -> String {
     keys := facts.environments.keys().collect(); keys.sort()
     keys.iter().map((key) -> {
@@ -493,7 +456,6 @@ fn canonical_environments_json(facts: Package.PackageFacts) -> String {
         "{{\"name\":{json_str(environment.name)},\"tools\":[{tools}],\"services\":[{services}],\"secrets\":[{secrets}]}}"
     }).collect().join(",")
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:936
 fn canonical_package_targets_project_json(project_root: OSPath, entry_path: OSPath, dir: OSPath) -> [String]? {
     facts := canonical_package_facts(dir, entry_path) ?? {
         error :: err
@@ -513,7 +475,6 @@ fn canonical_package_targets_project_json(project_root: OSPath, entry_path: OSPa
     }
     .Val(targets)
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:987
 fn legacy_target_label(target: Package.Target) -> String { if target == {
     .Library -> "library"
     .Executable -> "executable"
@@ -521,7 +482,6 @@ fn legacy_target_label(target: Package.Target) -> String { if target == {
     .Example -> "example"
     .Plugin { .. } -> "plugin"
 } }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:998
 fn canonical_package_project_json(project_root: OSPath, entry_path: OSPath, dir: OSPath) -> String? {
     facts := canonical_package_facts(dir, entry_path) ?? {
         error :: err
@@ -547,9 +507,7 @@ fn canonical_package_project_json(project_root: OSPath, entry_path: OSPath, dir:
     })).collect().join(",")
     .Val("{{\"path\":{json_str(rel_path(project_root, dir))},\"manifest\":{json_str(rel_path(project_root, dir.join(Syntax.PACKAGE_FILE)))},\"name\":{json_str(facts.name)},\"version\":{json_optional_str(facts.version)},\"targets\":[{target_profiles}],\"package_targets\":[{package_targets_json}],\"deps\":[{deps}],\"outputs\":[{canonical_outputs_json(facts)}],\"environments\":[{canonical_environments_json(facts)}],\"configs\":[{configs}],\"members\":[{members}],\"package_facts\":{jet_semindex.package_facts_json(facts)},\"workspace_overlays\":{workspace_overlays},\"effects_enabled\":false,\"diagnostics\":{diagnostics}}}")
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:1096
 struct EnvProjectJson { envs: String; services: String; diagnostics: String }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:1102
 fn env_project_json(project_root: OSPath) -> EnvProjectJson {
     resolver := AuthorityResolver.open(project_root) ?? {
         error :: err
@@ -590,7 +548,6 @@ fn env_project_json(project_root: OSPath) -> EnvProjectJson {
     prompt := plan.prompt.unwrap_or(Syntax.JETPACK_PROMPT_LABEL)
     EnvProjectJson { envs: "{{\"path\":{json_str(Syntax.ENV_FILE)},\"prompt\":{json_str(prompt)},\"environments\":[{environments}],\"sources\":[{sources}],\"presets\":[{presets}],\"languages\":[{languages}],\"reload\":{json_str(reload)},\"packages\":[{packages}],\"secrets\":[{secrets}],\"diagnostics\":[]}}", services: services, diagnostics: "" }
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:1238
 fn dev_service_project_json(service: jet_env_model.ModuleEval.DevServicePlan) -> String {
     ports := service.ports.iter().map((port) -> port.to_string()).collect().join(",")
     extra_keys := service.extra.keys().collect(); extra_keys.sort()
@@ -604,7 +561,6 @@ fn dev_service_project_json(service: jet_env_model.ModuleEval.DevServicePlan) ->
     before_start := "[{service.before_start.iter().map((name) -> json_str(name)).collect().join(",")}]"
     "{{\"name\":{json_str(service.name)},\"enable\":{service.enable},\"ports\":[{ports}],\"run\":{run},\"shutdown\":{shutdown.map((value) -> json_str(value)).unwrap_or_else(() -> "null")},\"data_dir\":{json_optional_str(service.data_dir)},\"ready\":{json_optional_str(service.ready)},\"after\":{after},\"before_start\":{before_start},\"extra\":[{extra}],\"source\":{json_str(Syntax.ENV_FILE)}}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/project_scan.rs:1308
 fn lock_project_json(project_root: OSPath) -> String {
     resolver := AuthorityResolver.open(project_root) ?? {
         _ :: err

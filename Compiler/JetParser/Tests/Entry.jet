@@ -1,4 +1,3 @@
-// Rust: crates/jet-parser/src/lib.rs:20
 use jet_foundation.[expr_span, pattern_binding_names, type_name]
 
 #Test("generic_module_slots_remain_unresolved_until_sema_without_casing_heuristics") {
@@ -17,7 +16,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
  else -> false })
 }
 
-// Rust: crates/jet-parser/src/lib.rs:40
 #Test("generic_module_value_slots_parse_closed_identifier_led_expressions") {
     result :: parser_test_result("module retry(count: Int) {{ fn ready() -> Bool {{ return true }} }}\nmodule a :: retry(limit + 1)\nmodule b :: retry(compute())")
     assert(result.diagnostics.is_empty(), "{result.diagnostics:Debug}")
@@ -29,17 +27,15 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     }
 }
 
-// Rust: crates/jet-parser/src/lib.rs:70. The Rust parser also teaches the
-// `::` respelling; retired spellings carry no teaching any more, so only the
-// rejection remains. Rust lib.rs:54 (teaching for a `<K, capacity: Int>`
-// value slot) has no parser claim left: a bounded type parameter is valid
-// syntax and sema judges the bound.
+// The Rust parser also teaches the `::` respelling; retired spellings carry no
+// teaching any more, so only the rejection remains. (teaching for a `<K,
+// capacity: Int>` value slot) has no parser claim left: a bounded type
+// parameter is valid syntax and sema judges the bound.
 #Test("generic_module_equals_alias_is_rejected") {
     result :: parser_test_result("module cache<K>(capacity: Int) {{ fn size() -> Int {{ return capacity }} }}\nmodule old = cache<Int>(64)")
     assert(!result.diagnostics.is_empty(), "equals alias spelling")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:86
 #Test("generic_module_retains_symbolic_fixed_length_and_nested_modules") {
     result :: parser_test_result("module buffer<T>(capacity: Int) {{ struct Data {{ items: [T#capacity] }} module stats {{ fn size() -> Int {{ return capacity }} }} }}")
     assert(result.diagnostics.is_empty(), "{result.diagnostics:Debug}")
@@ -49,13 +45,11 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(if def.body[1] == { .CodeModule(child) -> child.name == "stats" else -> false })
 }
 
-// Rust: crates/jet-parser/src/lib.rs:104
 #Test("shared_prefix_accepts_inferred_brace_values") {
     result :: parser_test_result("fn run() {{ value :: shared {{ count: 1 }} }}\n")
     assert(result.diagnostics.is_empty(), "shared must accept an inferred brace value: {result.diagnostics:Debug}")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:112
 #Test("script_statements_survive_items_and_formatter") {
     source :: "print(\"first\")\nfn helper() {{}}\nprint(\"last\")\n"
     result :: parser_test_result(source)
@@ -76,7 +70,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(!formatted.contains("fn run"), "formatter must keep script syntax: {formatted}")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:136
 #Test("result_handler_desugars_to_ok_and_err_value_tests") {
     result :: parser_test_result("fn pick(value: Int String!) -> String {{ value ? ok -> ok ! error -> error }}\n")
     assert(result.diagnostics.is_empty(), "Result handler should parse: {result.diagnostics:Debug}")
@@ -104,7 +97,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(expr_span(ok_cond).end < expr_span(err_cond).start)
 }
 
-// Rust: crates/jet-parser/src/lib.rs:213
 #Test("result_handler_accepts_multiline_and_effectful_branches") {
     result :: parser_test_result("fn run(value: Int String!) Err! {{\n    value ? ok -> print(ok) // success\n    ! error -> print(error)\n}}\n")
     assert(result.diagnostics.is_empty(), "multiline Result handler should parse: {result.diagnostics:Debug}")
@@ -125,20 +117,17 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
  else -> false })
 }
 
-// Rust: crates/jet-parser/src/lib.rs:255
 #Test("result_handler_allows_nested_value_handlers") {
     result :: parser_test_result("fn pick(value: Int String!) -> String {{ value ? ok -> ok ? inner -> inner ! inner_error -> inner_error ! error -> error }}\n")
     assert(result.diagnostics.is_empty(), "nested Result handlers should parse: {result.diagnostics:Debug}")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:263
 #Test("result_handler_stays_distinct_from_neighboring_postfix_and_branch_forms") {
     source :: "\nfn optional() -> Success? {{ None }}\nfn fallible() Err! {{ Err(\"bad\") }}\nfn result() -> Success? Err! {{ Ok(1) }}\nfn run(value: Int Err!, optional: String) {{\n    propagated :: value\n    noted :: value?(\"context\")\n    chained :: optional?.len\n    negated :: !true\n    if value == {{\n        .Ok(ok) -> print(ok)\n        .Err(error) -> print(error)\n    }}\n    fallback :: value ?? 0\n}}\n"
     result :: parser_test_result(source)
     assert(result.diagnostics.is_empty(), "neighboring Result syntax should keep its meanings: {result.diagnostics:Debug}")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:286
 #Test("result_handler_keeps_one_sided_pattern_checks_and_fallbacks") {
     source :: "\nfn run(value: Int Err!, maybe: Int?) {{\n    if value == .Ok(ok) -> print(ok)\n    if value == .Err(error) -> print(error)\n    fallback :: maybe ?? 0\n    value == .Ok(other) ?? return\n}}\n"
     result :: parser_test_result(source)
@@ -182,7 +171,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
  else -> false })
 }
 
-// Rust: crates/jet-parser/src/lib.rs:362
 #Test("result_handler_reports_fixed_shape_errors_at_the_offending_token") {
     cases :: [
         (source: "fn pick(value: Int String!) -> String {{ value ? ok -> ok }}\n", expected: "A Result handler needs a `!` failure branch", code: "E0003"),
@@ -211,7 +199,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     }
 }
 
-// Rust: crates/jet-parser/src/lib.rs:406
 #Test("callable_policy_marker_keeps_one_typed_wrapper_chain") {
     result :: parser_test_result("#Policy(retry(3), trace(\"users.load\"))\nfn load_user(id: Int) -> Int {{ return id }}\n")
     assert(result.diagnostics.is_empty(), "callable policy marker should parse: {result.diagnostics:Debug}")
@@ -228,7 +215,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(found, "policy marker")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:430
 #Test("memory floor words are not scoped policies") {
     loop source in ["#Policy(no_alloc)\nfn run() {{}}\n", "#Policy(zero_rc)\nfn run() {{}}\n"] {
         result :: parser_test_result(source)
@@ -245,7 +231,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(found)
 }
 
-// Rust: crates/jet-parser/src/lib.rs:449
 #Test("duplicate_callable_policy_markers_are_rejected") {
     result :: parser_test_result("#Policy(trace(\"one\"))\n#Policy(trace(\"two\"))\nfn run() {{}}\n")
     assert(!result.diagnostics.is_empty(), "duplicate policy marker")
@@ -254,7 +239,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(found)
 }
 
-// Rust: crates/jet-parser/src/lib.rs:473
 #Test("comptime_braced_values_accept_implicit_eof_termination") {
     loop suffix in ["", "\n", " // trailing comment"] {
         loop testcase in [
@@ -282,7 +266,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     }
 }
 
-// Rust: crates/jet-parser/src/lib.rs:519
 #Test("comptime_eof_termination_keeps_newline_item_boundaries") {
     source :: "FIRST :: CoreModuleExportNames{{ name: \"first\" }}\nSECOND :: 2"
     result :: parser_test_result(source)
@@ -294,7 +277,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
  else -> false })
 }
 
-// Rust: crates/jet-parser/src/lib.rs:535
 #Test("comptime_eof_termination_still_rejects_incomplete_initializers") {
     source :: "CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{{ CoreModuleExportNames{{ name: \"core\" }}"
     result :: parser_test_result(source)
@@ -306,7 +288,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(found, "{result.diagnostics:Debug}")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:552
 #Test("comptime_eof_termination_still_rejects_unseparated_declarations") {
     source :: "FIRST :: CoreModuleExportNames{{ name: \"first\" }} SECOND :: 2"
     second_start :: parser_test_find(source, "SECOND")
@@ -319,13 +300,11 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(found, "{result.diagnostics:Debug}")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:575
 #Test("separated_le_and_gt_still_reject_as_an_invalid_expression") {
     result :: parser_test_result("fn run() {{ return a <= > b }}")
     assert(!result.diagnostics.is_empty())
 }
 
-// Rust: crates/jet-parser/src/lib.rs:587
 #Test("yielding_loop_keeps_numeric_stride_after_source") {
     result :: parser_test_result("fn run() {{\n    values :: loop i in 0..10, 2 -> i\n}}\n")
     assert(result.diagnostics.is_empty(), "genuine stride should parse: {result.diagnostics:Debug}")
@@ -355,13 +334,11 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(found, "run function")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:630
 #Test("source_loops_use_in_for_bindings_and_keep_stride_comma") {
     result :: parser_test_result("\nfn run() {{\n    loop x in xs {{ print(x) }}\n    loop (key, value) in map {{ print(key, value) }}\n    loop n in 0..10, 2 {{ print(n) }}\n    filtered :: loop x in xs if x > 0 -> x\n}}\n")
     assert(result.diagnostics.is_empty(), "canonical source-loop forms should parse: {result.diagnostics:Debug}")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:678
 #Test("in_is_reserved_for_source_loops") {
     result :: parser_test_result("fn in() {{}}\n")
     assert(!result.diagnostics.is_empty(), "`in` must not be an identifier")
@@ -372,7 +349,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(found, "{result.diagnostics:Debug}")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:699
 #Test("typed_literal_bodies_keep_raw_backslashes") {
     src :: "fn run() {{\n    digits :: Pattern{{\"\\d+\"}}\n    text :: \"a\\nb\"\n    loc :: Pattern{{\"https://x/{{name}}\"}}\n}}\n"
     once :: parser_test_format(src)
@@ -383,7 +359,6 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(once == twice, "typed-literal formatting must be idempotent")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:723
 #Test("numeric_literals_keep_ratified_spelling") {
     src :: "fn run() {{\npopulation :: 8_100_000_000\nred :: 0xFF\nperms :: 0o755\nflags :: 0b1010\navogadro :: 6.022e23\n}}\n"
     once :: parser_test_format(src)
@@ -394,28 +369,23 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
     assert(once == twice, "numeric literal formatting must be idempotent")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:747
 fn parse_complete(source: String) {
     result :: parser_test_result(source)
     assert(result.diagnostics.is_empty(), "complete dispatch program should parse: {result.diagnostics:Debug}")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:753
 #Test("or_pattern_arm_after_braceless_call_keeps_payloads_and_guard") {
     parse_complete("\nenum Conn {{\n    Active(Int)\n    Reconnecting(Int)\n    Idle(Int)\n    Closed\n}}\n\nfn classify(c: Conn) -> String {{\n    if c == {{\n        .Closed -> render_closed()\n        .Active(id) /* before pipe */ | /* after pipe */ .Reconnecting(id) /* before pipe */ | .Idle(id) /* before guard */ && id > 0 /* before arrow */ -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:775
 #Test("or_pattern_arm_after_nested_value_dispatch_keeps_outer_boundary") {
     parse_complete("\nenum Conn {{\n    Active(Int)\n    Reconnecting(Int)\n    Idle(Int)\n    Closed\n}}\n\nfn classify_nested(c: Conn, code: Int) -> String {{\n    if c == {{\n        .Closed -> return if code == {{\n            0 -> \"zero\"\n            else -> \"other\"\n        }}\n        .Active(id) | .Reconnecting(id) | .Idle(id) /* before arrow */ -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:800
 #Test("leading_dot_fluent_chain_stays_one_expression") {
     parse_complete("\nstruct Box {{\n    value: Int\n}}\n\nfn chain(value: Box) -> Box {{\n    return value\n        .next()\n        .finish()\n}}\n")
 }
 
-// Rust: crates/jet-parser/src/lib.rs:817
 #Test("malformed_or_pattern_does_not_gain_a_terminator_boundary") {
     loop source in [
         "\nenum Conn {{\n    Active(Int)\n    Reconnecting(Int)\n    Closed\n}}\n\nfn trailing_pipe(c: Conn) -> String {{\n    if c == {{\n        .Closed -> render_closed()\n        .Active(id) | -> render_live(id)\n        else -> \"unknown\"\n    }}\n}}\n",

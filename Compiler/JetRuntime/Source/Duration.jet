@@ -45,15 +45,15 @@ fn runtime_duration_scale(unit: I64) -> I64 {
     I64{1}
 }
 
-// MathRandomTime.rs:165 jet_duration_ns_value: d.ns, through the C adapter's
-// native(a0) (range stop beyond i64) and jet_int_from_i64 (owned word).
+// jet_duration_ns_value: d.ns, through the C adapter's native(a0) (range stop
+// beyond i64) and jet_int_from_i64 (owned word).
 #Export(c) fn jet_duration_ns_value(value: I64) -> I64 {
     ns :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     jet_int_owned_from_i64(ns)
 }
 
-// MathRandomTime.rs:186 / Duration.rs:187 difference: saturating i64 sub.
+// difference: saturating i64 sub.
 #Export(c) fn jet_duration_difference(left: I64, right: I64) -> I64 {
     a :: host_native_int(left)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -67,9 +67,9 @@ fn runtime_duration_scale(unit: I64) -> I64 {
 // CAbiRoutes:31752 source duration addition: raw i64 words, saturating.
 #Export(c) fn jet_i64_saturating_add(left: I64, right: I64) -> I64 { datetime_saturating_add(left, right) }
 
-// Core/Duration.rs:56-74 jet_duration_kernel_total_in: the fixed unit names
-// resolve to nanoseconds; an unknown unit reads 0.0. The C adapter lends the
-// exact-Int ns word and the unit text; neither is consumed.
+// jet_duration_kernel_total_in: the fixed unit names resolve to nanoseconds; an
+// unknown unit reads 0.0. The C adapter lends the exact-Int ns word and the
+// unit text; neither is consumed.
 fn runtime_duration_unit_ns(unit: I64) -> I64 {
     if (jet_rt_string_eq(unit, rt_static_text("nanosecond")) || jet_rt_string_eq(unit, rt_static_text("nanoseconds")) || jet_rt_string_eq(unit, rt_static_text("ns"))) -> return I64{1}
     if (jet_rt_string_eq(unit, rt_static_text("microsecond")) || jet_rt_string_eq(unit, rt_static_text("microseconds")) || jet_rt_string_eq(unit, rt_static_text("us")) || jet_rt_string_eq(unit, rt_static_text("µs"))) -> return I64{1000}
@@ -90,9 +90,9 @@ fn runtime_duration_unit_ns(unit: I64) -> I64 {
     Float{ns} / Float{scale}
 }
 
-// Duration.rs jet_duration_kernel_in through the C adapter: the whole count of
-// `unit` in the duration, truncated towards zero. The read cannot fail, so the
-// Result is always Ok; `error` is the adapter's unused Err slot.
+// jet_duration_kernel_in through the C adapter: the whole count of `unit` in
+// the duration, truncated towards zero. The read cannot fail, so the Result is
+// always Ok; `error` is the adapter's unused Err slot.
 #Export(c) fn jet_duration_in(value: I64, unit: I64, output: I64, _error: I64) -> I64 {
     ns :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -102,8 +102,8 @@ fn runtime_duration_unit_ns(unit: I64) -> I64 {
     I64{1}
 }
 
-// Duration.rs jet_duration_kernel_total_seconds: whole seconds, truncated
-// towards zero, as an owned exact-Int word.
+// jet_duration_kernel_total_seconds: whole seconds, truncated towards zero, as
+// an owned exact-Int word.
 #Export(c) fn jet_duration_total_seconds(value: I64) -> I64 {
     ns :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -122,9 +122,8 @@ fn runtime_duration_float_word(whole: Float) -> I64 {
     if (bits < I64{0}) -> -word else -> word
 }
 
-// Duration.rs jet_duration_kernel_from_float: value * unit nanoseconds,
-// truncated towards zero; a non-finite or out-of-range product is the owned
-// RangeError.
+// jet_duration_kernel_from_float: value * unit nanoseconds, truncated towards
+// zero; a non-finite or out-of-range product is the owned RangeError.
 #Export(c) fn jet_duration_from_float(value: Float, unit: I64, output: I64, error: I64) -> I64 {
     scale :: runtime_duration_scale(unit)
     if (scale == I64{0}) -> return I64{0}
@@ -138,21 +137,20 @@ fn runtime_duration_float_word(whole: Float) -> I64 {
     I64{1}
 }
 
-// Duration.rs jet_duration_kernel_is_zero.
 #Export(c) fn jet_duration_is_zero(value: I64) -> Bool {
     ns :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return false
     ns == I64{0}
 }
 
-// Duration.rs jet_duration_kernel_seconds_value: ns as Float over 1e9.
+// jet_duration_kernel_seconds_value: ns as Float over 1e9.
 #Export(c) fn jet_duration_seconds_value(value: I64) -> Float {
     ns :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return Float{0.0}
     Float{ns} / Float{1000000000.0}
 }
 
-// Duration.rs jet_duration_kernel_abs: i64 saturating_abs.
+// jet_duration_kernel_abs: i64 saturating_abs.
 #Export(c) fn jet_duration_abs(value: I64) -> I64 {
     ns :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -160,7 +158,7 @@ fn runtime_duration_float_word(whole: Float) -> I64 {
     jet_int_owned_from_i64(if (ns < I64{0}) -> -ns else -> ns)
 }
 
-// Duration.rs jet_duration_kernel_negated: i64 saturating_neg.
+// jet_duration_kernel_negated: i64 saturating_neg.
 #Export(c) fn jet_duration_negated(value: I64) -> I64 {
     ns :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -168,7 +166,7 @@ fn runtime_duration_float_word(whole: Float) -> I64 {
     jet_int_owned_from_i64(-ns)
 }
 
-// Duration.rs jet_duration_kernel_sign: i64 signum as an owned Int word.
+// jet_duration_kernel_sign: i64 signum as an owned Int word.
 #Export(c) fn jet_duration_sign(value: I64) -> I64 {
     ns :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -177,10 +175,10 @@ fn runtime_duration_float_word(whole: Float) -> I64 {
     jet_int_owned_from_i64(I64{0})
 }
 
-// MathRandomTime.rs:212-223: a failed checked scale or divide panics with
-// Duration.rs jet_duration_kernel_scale_error_reason. Compiled code passes
-// the call site (the `_at` exports), so the stop names the user's line; the
-// route form has none and reports <core.prelude>:0 (`file` 0).
+// A failed checked scale or divide panics
+// jet_duration_kernel_scale_error_reason. Compiled code passes the call site
+// (the `_at` exports), so the stop names the user's line; the route form has
+// none and reports <core.prelude>:0 (`file` 0).
 fn runtime_duration_scale_stop(file: I64, file_len: I64, line: I64) -> I64 {
     message :: rt_static_text("duration scaling overflowed or divided by zero")
     if (file == I64{0}) {
@@ -191,8 +189,8 @@ fn runtime_duration_scale_stop(file: I64, file_len: I64, line: I64) -> I64 {
     I64{0}
 }
 
-// Duration.rs jet_duration_kernel_scale: i64 checked_mul of ns by the factor.
-// Compiled `d * n` and `n * d` (JetIR ir_duration_scale) pass the call site.
+// jet_duration_kernel_scale: i64 checked_mul of ns by the factor. Compiled `d *
+// n` and `n * d` (JetIR ir_duration_scale) pass the call site.
 #Export(c) fn jet_duration_scale_at(value: I64, factor: I64, file: I64, file_len: I64, line: I64) -> I64 {
     a :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -212,8 +210,8 @@ fn runtime_duration_scale_stop(file: I64, file_len: I64, line: I64) -> I64 {
     jet_int_owned_from_i64(a * b)
 }
 
-// Duration.rs jet_duration_kernel_divide: i64 checked_div, truncating.
-// Compiled `d / n` (JetIR ir_duration_scale) passes the call site.
+// jet_duration_kernel_divide: i64 checked_div, truncating. Compiled `d / n`
+// (JetIR ir_duration_scale) passes the call site.
 #Export(c) fn jet_duration_divide_at(value: I64, factor: I64, file: I64, file_len: I64, line: I64) -> I64 {
     a :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -232,9 +230,9 @@ fn runtime_duration_scale_stop(file: I64, file_len: I64, line: I64) -> I64 {
     jet_duration_divide_at(value, factor, I64{0}, I64{0}, I64{0})
 }
 
-// Duration.rs jet_duration_kernel_round_quotient's mode names: 0 trunc,
-// 1 expand, 2 floor, 3 ceil, 4 half_trunc, 5 half_expand, 6 half_even,
-// 7 half_ceil, 8 half_floor; -1 for an unknown mode.
+// jet_duration_kernel_round_quotient's mode names: 0 trunc, 1 expand, 2 floor,
+// 3 ceil, 4 half_trunc, 5 half_expand, 6 half_even, 7 half_ceil, 8 half_floor;
+// -1 for an unknown mode.
 fn runtime_duration_round_mode(mode: I64) -> I64 {
     if (jet_rt_string_eq(mode, rt_static_text("trunc")) || jet_rt_string_eq(mode, rt_static_text("toward_zero"))) -> return I64{0}
     if (jet_rt_string_eq(mode, rt_static_text("expand")) || jet_rt_string_eq(mode, rt_static_text("away_from_zero"))) -> return I64{1}
@@ -248,10 +246,9 @@ fn runtime_duration_round_mode(mode: I64) -> I64 {
     I64{-1}
 }
 
-// Duration.rs jet_duration_kernel_round (i128 there) in sign and U64
-// magnitude: ns rounded to a multiple of `step` units by `mode`. An unknown
-// unit or mode, a step below 1 or a result outside i64 keeps ns
-// (MathRandomTime.rs:209 `unwrap_or(d.ns)`).
+// jet_duration_kernel_round (i128 there) in sign and U64 magnitude: ns rounded
+// to a multiple of `step` units by `mode`. An unknown unit or mode, a step
+// below 1 or a result outside i64 keeps ns (`unwrap_or(d.ns)`).
 fn runtime_duration_round(ns: I64, unit: I64, step: I64, mode: I64) -> I64 {
     unit_ns :: runtime_duration_unit_ns(unit)
     rule :: runtime_duration_round_mode(mode)
@@ -299,8 +296,8 @@ fn runtime_duration_round(ns: I64, unit: I64, step: I64, mode: I64) -> I64 {
     wrapping(I64{rounded})
 }
 
-// MathRandomTime.rs:207 jet_duration_round through the C adapter: the
-// duration and increment cross as exact-Int words, unit and mode as text.
+// jet_duration_round through the C adapter: the duration and increment cross as
+// exact-Int words, unit and mode as text.
 #Export(c) fn jet_duration_round(value: I64, unit: I64, increment: I64, mode: I64) -> I64 {
     ns :: host_native_int(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}

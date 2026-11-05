@@ -13,8 +13,8 @@ fn compiler_fs_error(kind: I64, operation: I64, path: I64, code: I64, cause: I64
     rt_text_store(error, value)
     I64{0}
 }
-// JSONDyn.rs:2-22 jet_std::io_error_at: only these std ErrorKinds have their
-// own IOError arm. AlreadyExists, Unsupported and the rest are Other.
+// jet_std::io_error_at: only these std ErrorKinds have their own IOError arm.
+// AlreadyExists, Unsupported and the rest are Other.
 fn compiler_fs_errno(operation: I64, path: I64, code: I64, error: I64) -> I64 {
     kind :: if {
         (code == I64{2}) -> HOST_IO_KIND_NOT_FOUND
@@ -318,9 +318,9 @@ fn compiler_fs_time_ns(seconds: I64, nanos: I64) -> I64 {
     scaled :: if (seconds > I64{9223372036}) -> I64{9223372036854775807} else if (seconds < I64{-9223372036}) -> I64{-9223372036854775808} else -> seconds * I64{1000000000}
     if (scaled > I64{9223372036854775807} - nanos) -> I64{9223372036854775807} else -> scaled + nanos
 }
-// FileHandles.rs:571-616 jet_fs_stat_row from StatFacts128 and BirthTime24:
-// kind, size, mode, readonly, device, inode, links, owner, size_on_disk,
-// modified_ns, changed_ns, created present, created_ns. Shared by every stat.
+// jet_fs_stat_row from StatFacts128 and BirthTime24: kind, size, mode,
+// readonly, device, inode, links, owner, size_on_disk, modified_ns, changed_ns,
+// created present, created_ns. Shared by every stat.
 fn compiler_fs_stat_row(facts: I64, birth: I64, output: I64, len: I64) {
     mode :: rt_text_word(wrapping(facts + I64{16}))
     bits :: mode.bit_and(I64{61440})

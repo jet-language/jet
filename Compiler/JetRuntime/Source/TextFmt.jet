@@ -1,8 +1,8 @@
-// Native core.text.fmt.decimal: Prelude/Core/Fmt.rs jet_fmt_decimal /
-// fixed_half_away. Round value * 10^precision (the scale built by repeated
-// `* 10.0`) half away from zero; past the i64 range, round the exact binary
-// expansion half away at the same place. Never print a negative zero.
-// The Word precision is the raw carrier word the Rust adapter receives.
+// Native core.text.fmt.decimal: jet_fmt_decimal / fixed_half_away. Round value
+// * 10^precision (the scale built by repeated `* 10.0`) half away from zero;
+// past the i64 range, round the exact binary expansion half away at the same
+// place. Never print a negative zero. The Word precision is the raw carrier
+// word the Rust adapter receives.
 #Import(c) fn text_fmt_round(x: Float) -> Float = "round"
 
 TEXT_FMT_BIG_BYTES :: I64{328}
@@ -74,7 +74,7 @@ fn text_fmt_next_digit(remainder: I64, bits: I64) -> I64 {
     digit
 }
 
-// Fmt.rs exact_fixed_half_away: the unsigned text of finite magnitude bits.
+// exact_fixed_half_away: the unsigned text of finite magnitude bits.
 fn text_fmt_exact(bits: I64, precision: I64) -> I64 {
     exponent :: (bits >> I64{52}).bit_and(I64{2047})
     fraction :: bits.bit_and(I64{4503599627370495})
@@ -201,8 +201,8 @@ fn text_fmt_exact(bits: I64, precision: I64) -> I64 {
     body
 }
 
-// Fmt.rs jet_fmt_grouped: jet_fmt_decimal with its whole digits grouped by
-// commas in threes (comma_decimal); the sign and the fraction are kept.
+// jet_fmt_grouped: jet_fmt_decimal with its whole digits grouped by commas in
+// threes (comma_decimal); the sign and the fraction are kept.
 #Export(c) fn jet_fmt_grouped(value: Float, precision: I64) -> I64 {
     plain :: jet_fmt_decimal(value, precision)
     data :: rt_text_data(plain)

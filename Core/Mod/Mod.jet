@@ -75,8 +75,8 @@ fn unload(compiled: CompiledModule) -[FS]> CompiledModule ModError! {
     Err(ModError.Unsupported("core.mod.unload is unavailable: loaded Mod handles are provider-owned and unload on drop"))
 }
 
-// The provider reports a refusal as `<Case>: <reason>` (Top/Mod.rs
-// `JetModFailure`); an untagged reason is a malformed request, so `Invalid`.
+// The provider reports a refusal as `<Case>: <reason>`; an untagged reason is a
+// malformed request, so `Invalid`.
 fn mod_error(reason: String) -> ModError Never! {
     if reason.starts_with("Denied: ") -> return ModError.Denied(parse.strip_prefix(reason, "Denied: "))
     if reason.starts_with("NotFound: ") -> return ModError.NotFound(parse.strip_prefix(reason, "NotFound: "))

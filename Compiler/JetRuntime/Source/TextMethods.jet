@@ -1,8 +1,8 @@
-// Native String/core.text method routes: CoreLib/Top/Text.rs and
-// UnicodeString.rs over the E4 text carrier. Text arguments are borrowed;
-// every Text result is a fresh owner. Case/property decisions use the pinned
-// Unicode 17 lookups (UnicodeTables.jet, UnicodeText_<n>.jet and the frozen
-// CompilerNeededText Alphabetic/Numeric trees that match Rust char).
+// Native String/core.text method routes: over the E4 text carrier. Text
+// arguments are borrowed; every Text result is a fresh owner. Case/property
+// decisions use the pinned Unicode 17 lookups (UnicodeTables.jet,
+// UnicodeText_<n>.jet and the frozen CompilerNeededText Alphabetic/Numeric
+// trees that match Rust char).
 
 // JetInt::to_i64(): an exact Int carrier word fits a native i64.
 fn text_route_fits(value: I64) -> Bool {
@@ -36,8 +36,8 @@ fn text_scalar_start(data: I64, floor: I64, end: I64) -> I64 {
     at
 }
 
-// UnicodeString.rs jet_unicode_trim_start/_end (and str::trim_start/_end,
-// whose char::is_whitespace is the same White_Space property).
+// jet_unicode_trim_start/_end (and str::trim_start/_end, whose
+// char::is_whitespace is the same White_Space property).
 fn text_trim_side(value: I64, leading: Bool, trailing: Bool) -> I64 {
     data :: rt_text_data(value)
     start := I64{0}
@@ -123,8 +123,8 @@ fn text_trim_side(value: I64, leading: Bool, trailing: Bool) -> I64 {
     jet_int_owned_from_i64(rt_text_find(value, needle, I64{0}, true))
 }
 
-// Text.rs jet_text_parse_rpartition: cut at the last separator; a miss keeps
-// the whole text in the third item.
+// jet_text_parse_rpartition: cut at the last separator; a miss keeps the whole
+// text in the third item.
 #Export(c) fn jet_text_parse_rpartition(value: I64, separator: I64, item0: I64, item1: I64, item2: I64) {
     found :: rt_text_find(value, separator, I64{0}, true)
     if (found < I64{0}) {
@@ -138,8 +138,8 @@ fn text_trim_side(value: I64, leading: Bool, trailing: Bool) -> I64 {
     rt_text_store(item2, rt_text_slice(value, found + rt_text_len(separator), rt_text_len(value)))
 }
 
-// Text.rs jet_text_parse_split_once: (found, head, tail) at the first
-// separator; a miss is (false, text, "").
+// jet_text_parse_split_once: (found, head, tail) at the first separator; a miss
+// is (false, text, "").
 #Export(c) fn jet_text_parse_split_once(value: I64, separator: I64, item0: I64, item1: I64, item2: I64) {
     found :: rt_text_find(value, separator, I64{0}, false)
     if (found < I64{0}) {
@@ -153,7 +153,7 @@ fn text_trim_side(value: I64, leading: Bool, trailing: Bool) -> I64 {
     rt_text_store(item2, rt_text_slice(value, found + rt_text_len(separator), rt_text_len(value)))
 }
 
-// Text.rs jet_text_zfill: zeros after a leading '+'/'-' up to width scalars.
+// jet_text_zfill: zeros after a leading '+'/'-' up to width scalars.
 #Export(c) fn jet_text_zfill_ref(value: I64, width: I64) -> I64 {
     if !text_route_fits(width) {
         text_route_panic(rt_static_text("text zfill width does not fit native i64"))
@@ -178,8 +178,8 @@ fn text_trim_side(value: I64, leading: Bool, trailing: Bool) -> I64 {
     result
 }
 
-// Text.rs jet_text_expandtabs: tabs advance to the next multiple of the
-// nonnegative tab size (dropped at zero); CR/LF reset the scalar column.
+// jet_text_expandtabs: tabs advance to the next multiple of the nonnegative tab
+// size (dropped at zero); CR/LF reset the scalar column.
 #Export(c) fn jet_text_expandtabs(value: I64, tabsize: I64) -> I64 {
     if !text_route_fits(tabsize) {
         text_route_panic(rt_static_text("text tab size does not fit native i64"))
@@ -261,7 +261,7 @@ fn text_route_all(value: I64, kind: I64, empty: Bool) -> Bool {
     true
 }
 
-// Text.rs jet_text_istitle over Rust char Uppercase/Lowercase/Alphabetic.
+// jet_text_istitle over Rust char Uppercase/Lowercase/Alphabetic.
 #Export(c) fn jet_text_istitle(value: I64) -> Bool {
     data :: rt_text_data(value)
     length :: rt_text_len(value)
@@ -287,9 +287,9 @@ fn text_route_all(value: I64, kind: I64, empty: Bool) -> Bool {
     has_cased
 }
 
-// Text.rs jet_text_is_lower/_upper: at least one Cased scalar, and the
-// opposite one-scalar full mapping changes every Cased scalar (a lone scalar
-// has no Final_Sigma predecessor, so its lowercase is its table mapping).
+// jet_text_is_lower/_upper: at least one Cased scalar, and the opposite
+// one-scalar full mapping changes every Cased scalar (a lone scalar has no
+// Final_Sigma predecessor, so its lowercase is its table mapping).
 fn text_cased_all(value: I64, lower: Bool) -> Bool {
     data :: rt_text_data(value)
     length :: rt_text_len(value)
@@ -311,8 +311,8 @@ fn text_cased_all(value: I64, lower: Bool) -> Bool {
 #Export(c) fn jet_text_is_upper(value: I64) -> Bool { text_cased_all(value, false) }
 
 // ---- case conversion -------------------------------------------------------
-// Text.rs jet_text_capitalize: the first scalar's titlecase mapping, then the
-// remaining suffix lowercased as its own string (Final_Sigma restarts there).
+// jet_text_capitalize: the first scalar's titlecase mapping, then the remaining
+// suffix lowercased as its own string (Final_Sigma restarts there).
 #Export(c) fn jet_text_capitalize(value: I64) -> I64 {
     data :: rt_text_data(value)
     length :: rt_text_len(value)
@@ -323,7 +323,7 @@ fn text_cased_all(value: I64, lower: Bool) -> Bool {
     result
 }
 
-// Text.rs jet_text_casefold: full default case folding (C+F).
+// jet_text_casefold: full default case folding (C+F).
 #Export(c) fn jet_text_casefold(value: I64) -> I64 {
     data :: rt_text_data(value)
     length :: rt_text_len(value)
@@ -336,8 +336,8 @@ fn text_cased_all(value: I64, lower: Bool) -> Bool {
     result
 }
 
-// Text.rs jet_text_swapcase: a Cased scalar takes its uppercase mapping if
-// that changes it, else its lowercase mapping; everything else is copied.
+// jet_text_swapcase: a Cased scalar takes its uppercase mapping if that changes
+// it, else its lowercase mapping; everything else is copied.
 #Export(c) fn jet_text_swapcase(value: I64) -> I64 {
     data :: rt_text_data(value)
     length :: rt_text_len(value)
@@ -357,8 +357,8 @@ fn text_cased_all(value: I64, lower: Bool) -> Bool {
     result
 }
 
-// Text.rs jet_text_title: an Alphabetic/Numeric run starts with its titlecase
-// mapping and continues lowercased per scalar; any other scalar ends the word.
+// jet_text_title: an Alphabetic/Numeric run starts with its titlecase mapping
+// and continues lowercased per scalar; any other scalar ends the word.
 #Export(c) fn jet_text_title(value: I64) -> I64 {
     data :: rt_text_data(value)
     length :: rt_text_len(value)

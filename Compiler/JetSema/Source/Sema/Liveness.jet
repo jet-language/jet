@@ -124,16 +124,15 @@ fn sema_liveness_inline_asm_gate_aliases(module_row: SemaRegistrationModule, ali
     }
 }
 
-// ---------------------------------------------------------------------------
-// (Rust `Bundle/Liveness.rs`): L0104 reports a function of a `priv module`
-// that no reference reaches from outside its own body (a namespace package's
-// sibling files count as callers); L0105 reports a function or constant of a
-// `priv(package) module`, or a `pub(package)` re-export, that no other module
-// of its package consumes. An inline module's members are lifted under
-// generated `__jet_` names, so they are judged and reported by their source
-// names. Roots (the entry `run`, the build entry, jobs, wasm exports) are never
-// reported. Only snapshot (user) modules are judged; every module's references
-// count.
+// ---------------------------------------------------------------------------:
+// L0104 reports a function of a `priv module` that no reference reaches from
+// outside its own body (a namespace package's sibling files count as callers);
+// L0105 reports a function or constant of a `priv(package) module`, or a
+// `pub(package)` re-export, that no other module of its package consumes. An
+// inline module's members are lifted under generated `__jet_` names, so they
+// are judged and reported by their source names. Roots (the entry `run`, the
+// build entry, jobs, wasm exports) are never reported. Only snapshot (user)
+// modules are judged; every module's references count.
 
 struct SemaLivenessCandidate {
     module_index: Int

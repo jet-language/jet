@@ -1,9 +1,9 @@
-// Outcome.rs typed error report: the `jet.err/v1` wire built from typed
-// error facts, never reconstructed from rendered text. The private execution
-// journey (thread-local) stays with the runtime host.
+// Typed error report: the `jet.err/v1` wire built from typed error facts, never
+// reconstructed from rendered text. The private execution journey
+// (thread-local) stays with the runtime host.
 use error_report_json :: core.encoding.json
 
-// Outcome.rs reports wire failures as the Rust error string.
+// The Rust original reports wire failures as the Rust error string.
 #Error
 struct JetErrorReportError { message: String }
 
@@ -161,7 +161,7 @@ fn jet_error_details_from_json(value: Dyn) -> JetErrorDetails JetErrorReportErro
         .Null -> None
         else -> {
             span :: jet_error_json_object(span_value, "source span")
-            // Outcome.rs writes every usize but reads back only a u32.
+            // The Rust original writes every usize but reads back only a u32.
             Val(JetErrorSpan{start: jet_error_json_u32(jet_error_json_field(span, "start"), "span start"), end: jet_error_json_u32(jet_error_json_field(span, "end"), "span end")})
         }
     }
@@ -200,8 +200,8 @@ fn jet_error_report_from_json(value: Dyn) -> JetErrorReport JetErrorReportError!
     }
     Ok(JetErrorReport{code: code, message: message, typed_identity: typed_identity, causes: causes, context_frames: context, origin: origin, source_journey: journey, conversion_history: conversions, details: details})
 }
-// Outcome.rs `jet_error_json_encode_value`: protocol quoting (every Unicode
-// control escaped) and Rust f64 Display, in the object's own field order.
+// `jet_error_json_encode_value`: protocol quoting (every Unicode control
+// escaped) and Rust f64 Display, in the object's own field order.
 fn jet_error_json_encode_value(value: Dyn) -> String Never! {
     if value == {
         .Null -> "null"

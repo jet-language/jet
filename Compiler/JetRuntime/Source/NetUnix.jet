@@ -1,9 +1,8 @@
-// NetHTTP.rs:3012-3511 Unix listener/stream routes over Listener8/Stream56
-// (HostNetCarriers.jet) and FD72. Accept, shutdown, ready and deadlines share
-// the TCP handle policy; unlike TCP, the reference applies no OS socket
-// timeouts and retries Interrupted as well as WouldBlock on read/write.
-// Broker.rs:494-503,842-867: an inherited listener descriptor and the
-// SO_PEERCRED triple of a connected stream.
+// Unix listener/stream routes over Listener8/Stream56 (HostNetCarriers.jet) and
+// FD72. Accept, shutdown, ready and deadlines share the TCP handle policy;
+// unlike TCP, the reference applies no OS socket timeouts and retries
+// Interrupted as well as WouldBlock on read/write. An inherited listener
+// descriptor and the SO_PEERCRED triple of a connected stream.
 
 fn net_unix_path_refused(status: I64, operation: I64, path: I64, error: I64) -> I64 {
     message :: if (status == HOST_UNIX_PATH_NUL) -> rt_static_text(" failed: paths must not contain interior null bytes") else -> rt_static_text(" failed: path must be shorter than SUN_LEN")

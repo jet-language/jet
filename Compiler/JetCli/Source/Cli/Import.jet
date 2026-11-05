@@ -1,8 +1,8 @@
-// `jet import <lang> <dir> [--dry-run|--update]` (Source/CmdImport.rs `run`,
-// `apply_plan`, `report`, `report_value`, `usage_error`, `operation_error`):
-// narrow source conversion into editable Jet under `jet/<name>`, a stored
-// baseline for three-way `--update` merges, the import report, and the
-// generated-candidate evidence record.
+// `jet import <lang> <dir> [--dry-run|--update]` (`run`, `apply_plan`,
+// `report`, `report_value`, `usage_error`, `operation_error`): narrow source
+// conversion into editable Jet under `jet/<name>`, a stored baseline for
+// three-way `--update` merges, the import report, and the generated-candidate
+// evidence record.
 use {
     import_crypto :: core.crypto
     import_out_files :: core.files
@@ -131,9 +131,9 @@ fn jet_cli_import_attach_evidence(plan: &JetCLIImportPlan) JetCLIImportPlanError
     plan.boundary = ^boundary
 }
 
-// Rust `persist_evidence_report_for_inputs` (CmdCompile.rs): the encoded
-// report under `.jet/evidence/<sha256>.json` of the selected project root,
-// indexed as protected evidence for the source digest.
+// Rust `persist_evidence_report_for_inputs`: the encoded report under
+// `.jet/evidence/<sha256>.json` of the selected project root, indexed as
+// protected evidence for the source digest.
 fn jet_cli_import_persist_evidence(report: EvidenceReport, target_inputs_sha256: String) JetCLIReadError! -[FS, Env, Time]> {
     report_id :: report.identity.report_id
     if report_id == "" || report_id.contains("/") || report_id.contains("\\") || report_id == "." || report_id == ".." -> return Err(jet_cli_read_error("evidence report has an unsafe id `{report_id}`"))

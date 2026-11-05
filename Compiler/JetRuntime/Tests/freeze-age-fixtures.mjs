@@ -25,8 +25,8 @@ for (const name of readdirSync(testkit).sort()) {
     const key = /^identity: (AGE-SECRET-KEY-\S+)$/mu.exec(metadata)?.[1] ?? identity;
     const expect = /^expect: ([^\r\n]+)$/mu.exec(metadata)?.[1];
     if (!expect) throw new Error(`missing expect: ${name}`);
-    // age0.10.1/tests/testkit.rs:617-620 deliberately accepts these beta-era
-    // stanzas despite the spec testkit's header-failure metadata.
+    // Deliberately accepts these beta-era stanzas despite the spec testkit's
+    // header-failure metadata.
     const seedLegacyAcceptance = ['stanza_missing_body', 'stanza_missing_final_line'].includes(name);
     const valid = !providerPassphraseReject && (expect === 'success' || seedLegacyAcceptance);
     const plainSha256 = /^payload: ([0-9a-f]{64})$/mu.exec(metadata)?.[1] ?? null;

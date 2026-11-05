@@ -182,9 +182,9 @@ fn seams_checked_projection() {
     generate.selected_entry = Val("generate_files")
     generated :: jet_driver_lowering_inputs(^generate, None)
     seams_require(generated.compile.complete && generated.compile.internal_problem == None && seams_entry_name(generated) == Val("generate_files"), "generate selects declared Job without fn run")
-    // Rust artifact_plan.rs `lower_entry`: with no selected Output and no
-    // manifest entry, the executable entry is the entry module's `fn run`;
-    // without one the package lowers as a library, with no entry.
+    // `lower_entry`: with no selected Output and no manifest entry, the
+    // executable entry is the entry module's `fn run`; without one the package
+    // lowers as a library, with no entry.
     plain :: jet_driver_lowering_inputs(seams_request("fn helper() -> Int {{ 1 }}\nfn run() {{ print(helper()) }}", JetDriverCompileMode.Program), None)
     seams_require(plain.compile.complete && seams_entry_name(plain) == Val("run"), "no-output package selects its `fn run` as the executable entry")
     library :: jet_driver_lowering_inputs(seams_request("fn helper() -> Int {{ 1 }}", JetDriverCompileMode.Program), None)

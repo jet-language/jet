@@ -111,7 +111,7 @@ fn net_swap16(value: I64) -> I64 { ((value.bit_and(I64{255})) << I64{8}).bit_or(
         rt_text_bytes_copy(wrapping(output + I64{4}), wrapping(value + I64{8}), I64{4})
         return I64{16}
     }
-    // Rust 1.90 socket.rs socket_addr_v6_to_c passes flowinfo raw; only port
+    // Rust 1.90 std `socket_addr_v6_to_c` passes flowinfo raw; only port
     // is network-order. https://github.com/rust-lang/rust/blob/1.90.0/library/std/src/sys/net/connection/socket.rs
     net_store_uint(wrapping(output + I64{4}), I64{4}, net_word(value, I64{32}))
     rt_text_bytes_copy(wrapping(output + I64{8}), wrapping(value + I64{8}), I64{16})

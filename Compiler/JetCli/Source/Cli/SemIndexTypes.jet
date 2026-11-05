@@ -1,8 +1,8 @@
-// The semantic index's stable query types (crates/jet-semindex/src/Types.rs
-// and the `SymKind`/`SymDef`/`SymRef` records Build.rs walks into). The index
-// is versioned independently of its consumers: `jet inspect semindex`,
-// `jet inspect expand`, and `jet doc` read these rows; LSP hover and inlay
-// projections have no Jet consumer and are not part of this port.
+// The semantic index's stable query types (and the `SymKind`/`SymDef`/`SymRef`
+// records walks into). The index is versioned independently of its consumers:
+// `jet inspect semindex`, `jet inspect expand`, and `jet doc` read these rows;
+// LSP hover and inlay projections have no Jet consumer and are not part of this
+// port.
 use jet_foundation.[
     AccessConvention,
     CallablePolicy,
@@ -21,26 +21,25 @@ use jet_foundation.[
     Param,
 ]
 
-// Types.rs `SCHEMA_VERSION`: bump when the exported fact shape changes
-// incompatibly.
+// `SCHEMA_VERSION`: bump when the exported fact shape changes incompatibly.
 JET_CLI_SEMINDEX_SCHEMA_VERSION :: 20
 
-// Types.rs `CallableFactUnavailable`: the typed reason a checked projection
-// cannot supply a later metadata value.
+// `CallableFactUnavailable`: the typed reason a checked projection cannot
+// supply a later metadata value.
 struct JetCLISemUnavailable {
     required_stage: String
     reason: String
 }
 
-// Types.rs `CallableDefaultFact`: a source-text projection of a declared
-// default; its prepared value is unavailable.
+// `CallableDefaultFact`: a source-text projection of a declared default; its
+// prepared value is unavailable.
 struct JetCLISemDefault {
     source_text: String
     source: Span
 }
 
-// One public call slot (Types.rs `CallableParameterFact` plus the Build.rs
-// `SymKind::Function` parallel rows it is assembled from).
+// One public call slot (`CallableParameterFact` plus the `SymKind::Function`
+// parallel rows it is assembled from).
 struct JetCLISemParam {
     name: String
     ty: Type
@@ -52,9 +51,8 @@ struct JetCLISemParam {
     default: JetCLISemDefault?
 }
 
-// Build.rs `SymKind::Function`. `failure_contract` is `None` exactly when
-// `failure_unavailable` explains why (`CallableFactAvailability`); the same
-// holds for `generic_parameters`.
+// `failure_contract` is `None` exactly when `failure_unavailable` explains why
+// (`CallableFactAvailability`); the same holds for `generic_parameters`.
 struct JetCLISemCallable {
     params: [JetCLISemParam]
     signature_facts_available: Bool
@@ -74,7 +72,6 @@ struct JetCLISemField {
     ty: Type
 }
 
-// Build.rs `SymKind`.
 enum JetCLISemKind {
     Module
     Function(callable: JetCLISemCallable)
@@ -90,8 +87,8 @@ enum JetCLISemKind {
     Param(ty: Type)
 }
 
-// Build.rs `SymDef`; `qualified_name` is the canonical display path
-// (Symbols.rs `canonical_symbol_name`) the walk records with the definition.
+// `qualified_name` is the canonical display path the walk records with the
+// definition.
 struct JetCLISemDef {
     identity: String
     name: String
@@ -101,7 +98,6 @@ struct JetCLISemDef {
     kind: JetCLISemKind
 }
 
-// Types.rs `DefinitionAnchor`.
 struct JetCLISemAnchor {
     module_path: String
     kind: String
@@ -109,14 +105,12 @@ struct JetCLISemAnchor {
     semantic_identity: String?
 }
 
-// Types.rs `CompilerFact`.
 struct JetCLISemCompilerFact {
     name: String
     kind: String
     type_name: String
 }
 
-// Build.rs `SymRef` / Types.rs `SymbolRef`.
 struct JetCLISemRef {
     name: String
     span: Span
@@ -126,7 +120,6 @@ struct JetCLISemRef {
     fact: JetCLISemCompilerFact?
 }
 
-// Types.rs `CallEdge`.
 struct JetCLISemCall {
     caller: String
     callee: String
@@ -134,9 +127,9 @@ struct JetCLISemCall {
     span: Span
 }
 
-// Types.rs `MemberFact`. `kind` is `field`, `variant`, or `method`;
-// `origin` is `type_body`, `inherent_impl`, `trait_impl`, or
-// `trait_requirement`, with `origin_trait` naming the trait of the last two.
+// `kind` is `field`, `variant`, or `method`; `origin` is `type_body`,
+// `inherent_impl`, `trait_impl`, or `trait_requirement`, with `origin_trait`
+// naming the trait of the last two.
 struct JetCLISemMember {
     owner: String
     name: String
@@ -149,14 +142,12 @@ struct JetCLISemMember {
     span: Span
 }
 
-// Types.rs `EffectProvenance`.
 struct JetCLISemEffectProvenance {
     effect_name: String
     call_path: [String]
     spans: [Span]
 }
 
-// Types.rs `EffectFact`.
 struct JetCLISemEffect {
     function: String
     direct: [String]
@@ -166,7 +157,6 @@ struct JetCLISemEffect {
     provenance: [JetCLISemEffectProvenance]
 }
 
-// Types.rs `ArithmeticOperationFact`.
 struct JetCLISemArithmetic {
     operation: String
     policy: String
@@ -175,7 +165,7 @@ struct JetCLISemArithmetic {
     scope_span: Span
 }
 
-// Types.rs `StructuralNode`; `slot_kind` is `scalar` or `list`.
+// `slot_kind` is `scalar` or `list`.
 struct JetCLISemNode {
     id: Int
     parent: Int?
@@ -188,7 +178,6 @@ struct JetCLISemNode {
     span: Span
 }
 
-// Types.rs `StructuralSlotBoundary`.
 struct JetCLISemSlotBoundary {
     parent: Int
     slot: String
@@ -196,7 +185,7 @@ struct JetCLISemSlotBoundary {
     span: Span
 }
 
-// Types.rs `BypassFact`; `kind` is the stable `BypassKind::as_str` word.
+// `kind` is the stable `BypassKind::as_str` word.
 struct JetCLISemBypass {
     kind: String
     site: String
@@ -205,7 +194,6 @@ struct JetCLISemBypass {
     span: Span
 }
 
-// Types.rs `DefinitionFact`.
 struct JetCLISemDefinitionFact {
     stable_id: String
     signature_id: String
@@ -217,8 +205,7 @@ struct JetCLISemDefinitionFact {
     span: Span
 }
 
-// Types.rs `TraitContractFact`; an associated type with no `ty` is a
-// requirement (`type Item`).
+// An associated type with no `ty` is a requirement (`type Item`).
 struct JetCLISemAssociatedType {
     name: String
     ty: String?
@@ -230,7 +217,6 @@ struct JetCLISemTraitContract {
     methods: [String]
 }
 
-// Types.rs `InstanceApplicationFact` and `InstanceFact`.
 struct JetCLISemInstanceApplication {
     name: String
     module_path: String
@@ -252,7 +238,6 @@ struct JetCLISemInstance {
     exported_members: [String]
 }
 
-// Types.rs `OutputEntryFact` and `OutputFact`.
 struct JetCLISemOutputEntry {
     identity: String
     name: String
@@ -276,7 +261,6 @@ struct JetCLISemOutput {
     entry: JetCLISemOutputEntry
 }
 
-// Types.rs `StateNodeFact`, `StateTransitionFact`, `StateGraphFact`.
 struct JetCLISemStateNode {
     name: String
     terminal: Bool
@@ -297,8 +281,8 @@ struct JetCLISemStateGraph {
     transitions: [JetCLISemStateTransition]
 }
 
-// One converted definition (Types.rs `SymbolDef`): the walk's record plus
-// the per-definition facts `convert_defs` attaches.
+// One converted definition: the walk's record plus the per-definition facts
+// `convert_defs` attaches.
 struct JetCLISemDefinition {
     def: JetCLISemDef
     view_provenance: ViewProvenanceMap?
@@ -307,9 +291,9 @@ struct JetCLISemDefinition {
     trait_contracts: [JetCLISemTraitContract]
 }
 
-// Types.rs `SemIndex`: the versioned index over one checked program. Its
-// effect projection (EffectBudget.rs `EffectProjection`) is the application
-// authority of the same checked program `jet build` authorizes.
+// `SemIndex`: the versioned index over one checked program. Its effect
+// projection is the application authority of the same checked program `jet
+// build` authorizes.
 struct JetCLISemIndex {
     definitions: [JetCLISemDefinition]
     definition_facts: [JetCLISemDefinitionFact]

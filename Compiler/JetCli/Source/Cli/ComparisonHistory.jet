@@ -1,5 +1,4 @@
-// Source/CmdTest.rs::persist_comparison_artifacts and ReceiptStore.rs
-// index_published_receipt. The comparison and receipt index rows land together.
+// The comparison and receipt index rows land together.
 use {
     jet_foundation.[
         EvidenceSource, EvidenceBuild, EvidenceRevision, EvidenceAttachment, EvidenceProducerKind,
@@ -67,8 +66,8 @@ fn jet_cli_comparison_index_entry(index: JetCLIRecordIndex, identity: JetCLIReco
     jet_cli_record_entry_normalize(entry)
 }
 
-// Rust `persist_evidence_report_for_inputs_with_retention` (CmdCompile.rs):
-// the encoded `bytes` of `report` under the project root selected from cwd
+// Rust `persist_evidence_report_for_inputs_with_retention`: the encoded `bytes`
+// of `report` under the project root selected from cwd
 // (jet_cli_evidence_persist_at).
 fn jet_cli_evidence_persist(cache: &WorkspaceDeclarationCache, report: EvidenceReport, bytes: [U8], name: String, target_inputs_sha256: String, protected: Bool) JetCLIReadError! -[FS, Env, Time]> {
     cwd :: cli_sys.current_dir() ?? return Err(jet_cli_read_error("could not read the current directory: {jet_cli_io_error_text(err)}"))
@@ -134,8 +133,8 @@ fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv: [S
     jet_cli_record_index_upsert_many_and_store(&index, receipt_root, [JetCLIRecordIndexEntry]{^comparison_entry, ^receipt_entry})
 }
 
-// Rust ReceiptStore.rs `optional_history_notice`: one stderr line naming the
-// optional `operation` that failed; the command's own result stands.
+// `optional_history_notice`: one stderr line naming the optional `operation`
+// that failed; the command's own result stands.
 fn jet_cli_history_notice(operation: String, error: String) -> String Never! {
     lower :: error.to_lower()
     fix :: if {

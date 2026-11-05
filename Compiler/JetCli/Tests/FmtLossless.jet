@@ -1,25 +1,23 @@
-// Rust: tests/support/fmt_lossless.rs (deleted in 44561018e9).
-// `jet fmt` must keep every meaningful token of every supported source in
-// order. The oracle compares lexed token streams after a closed list of
-// parser-equivalent rewrites: top-level formatter ordering; marker-list
-// grouping; `Type<T>.method()`; external-method sugar; canonical anonymous
-// union member order; optional declaration and trailing commas; redundant
-// default file aliases; typed-literal constructor dot removal; formatter-added
-// arm blocks, bare-lambda parens, leading-dot variant patterns, struct
-// shorthand labels and separators; and a required default alias on a dotted
-// module import. Two rules follow later ratified spellings: the redundant
-// default alias in the `name :: path` use form, and the D-LOOP-STMT-ARROW1
-// choice between `-> statement` and a braced control body. No rule can
-// reorder or drop an expression operand, operator, marker payload, comment or
-// string interpolation.
-// Not ported: the `=>` arrow rules (`retired_result_arrow_removal`, the
-// LambdaArrow half of `canonical_arrow_rewrite`). The Jet lexer has no `=>`
-// token, so neither rewrite can occur.
-// The pinned parse-invalid UI list is the set the Jet parser rejects today
-// (`jfmt_check_parse_accepts`), not the Rust list.
-// Known failing on #6005: on dev the corpus has 146 failures. `jet fmt` drops
-// or changes tokens in 131 files, cannot parse 11 example programs, and writes
-// 4 outputs that no longer lex.
+// (deleted in 44561018e9). `jet fmt` must keep every meaningful token of every
+// supported source in order. The oracle compares lexed token streams after a
+// closed list of parser-equivalent rewrites: top-level formatter ordering;
+// marker-list grouping; `Type<T>.method()`; external-method sugar; canonical
+// anonymous union member order; optional declaration and trailing commas;
+// redundant default file aliases; typed-literal constructor dot removal;
+// formatter-added arm blocks, bare-lambda parens, leading-dot variant patterns,
+// struct shorthand labels and separators; and a required default alias on a
+// dotted module import. Two rules follow later ratified spellings: the
+// redundant default alias in the `name :: path` use form, and the
+// D-LOOP-STMT-ARROW1 choice between `-> statement` and a braced control body.
+// No rule can reorder or drop an expression operand, operator, marker payload,
+// comment or string interpolation. Not ported: the `=>` arrow rules
+// (`retired_result_arrow_removal`, the LambdaArrow half of
+// `canonical_arrow_rewrite`). The Jet lexer has no `=>` token, so neither
+// rewrite can occur. The pinned parse-invalid UI list is the set the Jet parser
+// rejects today (`jfmt_check_parse_accepts`), not the Rust list. Known failing
+// on #6005: on dev the corpus has 146 failures. `jet fmt` drops or changes
+// tokens in 131 files, cannot parse 11 example programs, and writes 4 outputs
+// that no longer lex.
 use {
     fl_files :: core.files
     jet_cli.[jet_cli_fmt_ordinary]
@@ -1011,9 +1009,8 @@ fn fl_parse_invalid(src: String) -> Bool {
     !jfmt_check_parse_accepts(parse_source(src.bytes()).diagnostics)
 }
 
-// Rust: tests/support/fmt_lossless.rs:1529
-// Run from the repository root.
-// Known failing: #6005 c18 owns this corpus pass (146 token-stream failures).
+// Run from the repository root. Known failing: #6005 c18 owns this corpus pass
+// (146 token-stream failures).
 #Test("fmt_is_lossless_on_supported_source_corpus", expected_fail: true) {
     example_files :: fl_collect_sorted("Examples")
     ui_files :: fl_collect_sorted("tests/ui")
@@ -1081,7 +1078,6 @@ fn fl_parse_invalid(src: String) -> Bool {
     print("formatter corpus: {example_programs} example programs, {example_configs} configs, {ui_parse_valid} parse-valid UI fixtures, {ui_parse_invalid} parse-invalid UI fixtures, {ui_configs} UI manifest configs")
 }
 
-// Rust: tests/support/fmt_lossless.rs:1686
 #Test("canonical_rewrite_rules_are_explicit_and_narrow") {
     allowed :: [[String]]{
         {"top-level ordering", "#Target(Web)\nuse core.ui as ui\nfn run() {{}}\n", "use core.ui as ui\n#Target(Web)\nfn run() {{}}\n"},

@@ -179,8 +179,8 @@ fn scheduler_control_leave(save: I64) {
         ((parent_flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && scheduler_scope_delivered_kind(parent_flags) != I64{0})
     control :: scheduler_control_new()
     sync_store(wrapping(control + I64{104}), SCHEDULER_SCOPE_ROOT.bit_or((if inherited -> SCHEDULER_SCOPE_INHERITED_STOP else -> I64{0})))
-    // Scheduler.rs:1776 jet_scheduler_with_root_control: an entry with no
-    // current control runs under the process root task control.
+    // jet_scheduler_with_root_control: an entry with no current control runs
+    // under the process root task control.
     if (parent == I64{0}) -> scheduler_process_root_install(control)
     scheduler_control_enter(control, save)
     sync_store(wrapping(thread_base() + I64{64}), I64{0})
@@ -192,10 +192,10 @@ fn scheduler_control_leave(save: I64) {
     scheduler_control_drop(control)
 }
 
-// Scheduler.rs:1743-1759: the process root task control. Process signals
-// cancel it; a cancelled (or absent) root is replaced by a fresh root control
-// at the next lookup, which the running entry does not adopt. The slot owns
-// one reference and is guarded by the scheduler root mutex.
+// The process root task control. Process signals cancel it; a cancelled (or
+// absent) root is replaced by a fresh root control at the next lookup, which
+// the running entry does not adopt. The slot owns one reference and is guarded
+// by the scheduler root mutex.
 scheduler_process_root := I64{0}
 
 fn scheduler_process_root_install(control: I64) {
@@ -243,9 +243,9 @@ fn scheduler_root_task_control() -> I64 {
 
 fn scheduler_control_is_root(control: I64) -> Bool { (scheduler_scope_flags(control).bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0} }
 
-// Scheduler.rs:521 jet_task_deliver_cancel: only a task unwinds a delivered
-// cancellation. A cancelled root has no catch frame: its wait points observe
-// the flag and return their cooperative fallback without publishing a stop.
+// jet_task_deliver_cancel: only a task unwinds a delivered cancellation. A
+// cancelled root has no catch frame: its wait points observe the flag and
+// return their cooperative fallback without publishing a stop.
 fn scheduler_root_cancel_observed() -> Bool {
     control :: scheduler_control_current()
     control != I64{0} && scheduler_control_is_root(control) && sync_load(wrapping(control + I64{16})) != I64{0} && !scheduler_shielded()
@@ -369,7 +369,7 @@ fn scheduler_stop_new(kind: I64, message: I64) -> I64 {
 }
 
 // Takes the record, including on rejection. First stop wins, except Deadline
-// supersedes Cancelled (Scheduler.rs:929-938). Record precedes release status.
+// supersedes Cancelled. Record precedes release status.
 fn scheduler_control_publish(control: I64, record: I64) -> Bool {
     kind :: sync_load(record)
     // A root never unwinds a cancellation (scheduler_root_cancel_observed).
@@ -431,8 +431,8 @@ fn scheduler_scope_delivered_kind(flags: I64) -> I64 { (flags.bit_and(SCHEDULER_
 // scope plus Shield, the idiom of every runtime-owned close: a stop pending at
 // entry stays in its control slot while Check/Propagate delivery of it is
 // masked, a new panic over it is process-fatal (scheduler_panic_check), and
-// cancellation/deadlines arriving meanwhile are held until leave delivers them
-// (Scheduler.rs:234-244). The returned word is the owned session token.
+// cancellation/deadlines arriving meanwhile are held until leave delivers them.
+// The returned word is the owned session token.
 #Export(c) fn jet_rt_cleanup_enter() -> I64 {
     saved :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
     jet_scheduler_shield_enter()
@@ -717,7 +717,7 @@ fn scheduler_observe_update(state: I64, wait: I64) {
     jet_rt_observe_task_wait(state, wait, if jet_ctx_deadline_present() -> I64{1} else -> I64{0}, jet_deadline_remaining_ms())
 }
 
-// Mirrors Scheduler.rs:1879-1967, including its per-site interrupt order.
+// Including its per-site interrupt order.
 fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
     // A cancelled root wait point returns its fallback without parking.
     if scheduler_root_cancel_observed() -> return I64{0}
@@ -862,9 +862,9 @@ fn scheduler_worker_count() -> I64 {
     scheduler_available_parallelism(I64{4})
 }
 
-// The pool's environment override stays in worker_count. Pool (fallback 4,
-// Scheduler.rs:4338), joined parallel walks (fallback 1) and cpu_count
-// (None) all read std's one available_parallelism (HostParallelism.jet).
+// The pool's environment override stays in worker_count. Pool (fallback 4),
+// joined parallel walks (fallback 1) and cpu_count (None) all read std's one
+// available_parallelism (HostParallelism.jet).
 fn scheduler_available_parallelism(fallback: I64) -> I64 {
     count :: cpu_available_parallelism(I64{0}, I64{0})
     if (jet_rt_session_propagate() != I64{0}) -> return I64{0}
@@ -1467,7 +1467,7 @@ fn scheduler_owner_deadline_queue() -> I64 {
 }
 
 fn scheduler_fatal(message: I64) {
-    // Core.rs:1459-1460 uses E3001 with an empty owner, not <core.prelude>.
+    // The Rust original uses E3001 with an empty owner, not <core.prelude>.
     bytes :: sync_load(message)
     length :: sync_load(wrapping(message + I64{8}))
     if !rt_task_panic_publish(bytes, length, I64{0}) -> trap_simple(I64{0}, I64{0}, I64{0}, I64{0}, bytes, length)
@@ -1502,11 +1502,10 @@ fn scheduler_panic_check() -> Bool {
         scheduler_delivered_status_unmasked() != I64{0}) -> scheduler_abort_double_panic()
     true
 }
-// `code` is the registered stop row the root report would carry (0 E3001,
-// 1 E3010, 2 E3011, 3 the host stop E2805; trap_header's numbering). Core.rs jet_runtime_stop
-// records the raw stop on every active expectation frame before it unwinds,
-// so the native catch probe sees the same first stop as the Rust reference.
-// The published record stays the raw message (form 0).
+// `code` is the registered stop row the root report would carry (0 E3001, 1 E3010, 2 E3011, 3
+// the host stop E2805; trap_header's numbering). jet_runtime_stop records the raw stop on
+// every active expectation frame before it unwinds, so the native catch probe sees the same
+// first stop as the Rust reference. The published record stays the raw message (form 0).
 fn rt_task_panic_publish(message: I64, length: I64, code: I64) -> Bool {
     test_scope_record_coded_stop(code, message, length)
     rt_task_panic_publish_recorded(message, length)

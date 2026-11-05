@@ -1,8 +1,8 @@
-// Authority.rs:8-54 + JetStd/MappedFile.rs:196-324. One process registry of
-// canonical path keys and live mapping counts, guarded by the runtime mutex.
-// Map56: reserved0, FD72 owner8, owned original path16, owned canonical key24,
-// read-only mapped pointer32, length40, reserved48. The registry lease is held
-// until AFTER unmap/unlock/close. Empty maps hold the same descriptor and lease.
+// One process registry of canonical path keys and live mapping counts, guarded
+// by the runtime mutex. Map56: reserved0, FD72 owner8, owned original path16,
+// owned canonical key24, read-only mapped pointer32, length40, reserved48. The
+// registry lease is held until AFTER unmap/unlock/close. Empty maps hold the
+// same descriptor and lease.
 compiler_mapped_root := I64{0}
 // runtime-init: 4 when compiler_mapped_root
 #Export(c) fn jet_rt_compiler_mapped_init() {
@@ -20,7 +20,7 @@ fn compiler_mapped_key(path: I64) -> I64 {
         at += I64{1}
     }
     // Failed canonicalize falls back to the ORIGINAL spelling (not absolute or
-    // lexical normalization), exactly as Authority.rs's PathBuf fallback does.
+    // lexical normalization), exactly PathBuf fallback does.
     name :: fd_c_path(path)
     scratch :: jet_rt_alloc(I64{48}, I64{8})
     bytes :: jet_process_path_canonicalize_raw(name, scratch, wrapping(scratch + I64{8}), wrapping(scratch + I64{16}))

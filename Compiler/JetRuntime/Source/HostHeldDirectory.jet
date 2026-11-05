@@ -1,11 +1,10 @@
-// FileHandles.rs:9-98,265-896: held directories. One process table keyed by
-// an Int that only Core's opaque Directory carries. Keys start at 1 and are
-// never reused, so a stale key reports IOError.Closed instead of naming
-// another directory. A negative key means the current directory (AT_FDCWD).
-// Root24: mutex0, next key8, list head16. Node32: next0, key8, the table's
-// FD72 reference16, owned shown path24. Lookups retain the FD72, so a
-// concurrent close can never recycle a descriptor number still in use.
-// Core/Files/Files.jet owns name validation, defaults and public policy.
+// One process table keyed by an Int that only Core's opaque Directory carries.
+// Keys start at 1 and are never reused, so a stale key reports IOError.Closed
+// instead of naming another directory. A negative key means the current
+// directory (AT_FDCWD). Root24: mutex0, next key8, list head16. Node32: next0,
+// key8, the table's FD72 reference16, owned shown path24. Lookups retain the
+// FD72, so a concurrent close can never recycle a descriptor number still in
+// use. Core/Files/Files.jet owns name validation, defaults and public policy.
 fs_held_root := I64{0}
 // runtime-init: 4 when fs_held_root
 #Export(c) fn jet_rt_fs_held_init() {
@@ -393,11 +392,11 @@ fn fs_open_at(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, links
     if (state != I64{0}) -> jet_fd_drop_raw(state)
 }
 
-// FileStream.rs:311 -> FileHandles.rs:1079 jet_fs_link_fd_at_raw: link the
-// reader's open inode into the held directory with one AT_EMPTY_PATH linkat,
-// never reopening a source pathname. (available, held, retval, errno); an
-// unknown key is (true, false, 0, 0). Success reports errno 0, where the seed
-// reads a meaningless stale errno. Core/Jetpack classify errno (EXDEV etc.).
+// -> jet_fs_link_fd_at_raw: link the reader's open inode into the held
+// directory with one AT_EMPTY_PATH linkat, never reopening a source pathname.
+// (available, held, retval, errno); an unknown key is (true, false, 0, 0).
+// Success reports errno 0, where the seed reads a meaningless stale errno.
+// Core/Jetpack classify errno (EXDEV etc.).
 #Export(c) fn jet_files_link_reader_at_raw(reader: I64, into: I64, name: I64, available: I64, held: I64, value: I64, errno: I64) {
     key :: host_native_int(into)
     if (jet_scheduler_native_propagate() != I64{0}) -> return

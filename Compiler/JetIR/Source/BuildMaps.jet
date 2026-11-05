@@ -974,15 +974,14 @@ fn ir_map_set(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map: Int, key
     b.fresh[owned_value] = false
 }
 
-// A runtime index stop at the builder's current line (Core.rs
-// jet_index_map_ref): the line's source quoted, its caret at the line start.
+// A runtime index stop at the builder's current line (jet_index_map_ref): the
+// line's source quoted, its caret at the line start.
 fn ir_line_report(p: IRProgram, b: IRBuilder) -> TPanicLoc Never! {
     ir_report_location(p, TPanicLoc{file: b.f.source_file.copy(), source_line: "", line: b.line, column: 0, caret: 0, function: "", locals: [TPanicLocal]{}})
 }
 
 // The address of the value stored under `key` in the map at `map`; a missing
-// key stops at the current line with the key's debug text (Core.rs
-// jet_index_map_ref).
+// key stops at the current line with the key's debug text (jet_index_map_ref).
 fn ir_map_value_address(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, map: Int, key: Int) -> Int Never! {
     shape :: ir_map_shape(&m, p, row) ?? return -1
     word_row :: ir_word_row(&m)

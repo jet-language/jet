@@ -1,7 +1,7 @@
 // Pure callable/provenance helper tests, followed by unregistered integration
-// assertions ported from Rust lib.rs:313–467 and tests/semindex.rs:923–1033.
-// Integration helpers consume actual checked records and JSON; their fixtures
-// must pass through S4/C4/S6 before these helpers become registered tests.
+// assertions ported:313–467. Integration helpers consume actual checked records
+// and JSON; their fixtures must pass through S4/C4/S6 before these helpers
+// become registered tests.
 
 fn semindex_test_callable(effects: CallableEffectsFact, failure: CallableFactAvailability<FailureContract>) -> CallableSignatureFact Never! {
     CallableSignatureFact{
@@ -140,8 +140,8 @@ fn semindex_test_callable(effects: CallableEffectsFact, failure: CallableFactAva
     assert_eq(provenance.canonical(), "slot:$;one_of();access:write")
 }
 
-// Exact Rust lib.rs:330–338 fixture. Not opened here: the shared checked producer
-// and open API must supply the records to the integration assertions below.
+// Exact fixture. Not opened here: the shared checked producer and open API must
+// supply the records to the integration assertions below.
 fn semindex_test_typed_callable_fixture() -> String Never! {
     `fn no_value() {}
 fn typed(label: String, value: Int{7}) -[]> Bool { return true }
@@ -175,8 +175,8 @@ fn semindex_test_checked_identity(facts: [DefinitionFact], identity: String) -> 
     panic("typed declaration should have a stable semindex identity")
 }
 
-// All original Rust lib.rs:353–462 assertions, apart from filesystem lifecycle.
-// Unregistered until actual open/repeated-open and index JSON are available.
+// All original assertions, apart from filesystem lifecycle. Unregistered until
+// actual open/repeated-open and index JSON are available.
 fn semindex_test_callable_signature_facts_keep_typed_and_unavailable_states(definitions: [SymbolDef], facts: [DefinitionFact], repeated_facts: [DefinitionFact], json: String) {
     source :: semindex_test_typed_callable_fixture().bytes()
     typed_definition :: semindex_test_checked_definition(definitions, "typed")
@@ -219,7 +219,7 @@ fn semindex_test_callable_signature_facts_keep_typed_and_unavailable_states(defi
     assert(json.contains("\"metadata_declaration_identity\":{{\"status\":\"unavailable\",\"required_stage\":\"Resolved\",\"reason\":\"the semindex producer does not receive a checker-issued DeclarationHandle\"}}"))
 }
 
-// Exact Rust tests/semindex.rs:926,960 fixtures, opened as two checked revisions.
+// Exact fixtures, opened as two checked revisions.
 fn semindex_test_returned_view_union_fixture() -> String Never! {
     `fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> {
     if first { return left[0..1] }
@@ -235,8 +235,8 @@ fn run() {}
 `
 }
 
-// Original Rust tests/semindex.rs:930–975 assertions on real checked records.
-// Unregistered until S4/C4/S6 and index JSON supply both checked revisions.
+// Original assertions on real checked records. Unregistered until S4/C4/S6 and
+// index JSON supply both checked revisions.
 fn semindex_test_returned_view_provenance_is_structured_and_changes_signature_id(union_pick: SymbolDef, right_pick: SymbolDef, union_fact: DefinitionFact, right_fact: DefinitionFact, union_json: String) {
     assert(union_pick.kind == .Function(_, _, _))
     assert_eq(union_pick.view_provenance.len(), 1)
@@ -255,13 +255,13 @@ fn semindex_test_returned_view_provenance_is_structured_and_changes_signature_id
     assert(union_fact.signature_id != right_fact.signature_id)
 }
 
-// Exact Rust tests/semindex.rs:982–992 fixture parameterized by right_owner.
+// Exact fixture parameterized by right_owner.
 fn semindex_test_aggregate_view_fixture(right_owner: String) -> String Never! {
     "\nstruct Pair {{ left: View<Int>, right: View<Int> }}\n\nfn pair(left: [Int], right: [Int]) -> Pair {{\n    left_view :: left[0..1]\n    right_view :: {right_owner}[0..1]\n    return Pair.{{ left: left_view, right: right_view }}\n}}\n\nfn run() {{}}\n"
 }
 
-// Original Rust tests/semindex.rs:998–1032 assertions on actual pair facts.
-// Before opens aggregate_view_fixture("right"), after opens ("left").
+// Original assertions on actual pair facts. Before opens
+// aggregate_view_fixture("right"), after opens ("left").
 fn semindex_test_aggregate_view_provenance_preserves_slots_and_changes_signature_id(pair: SymbolDef, distinct_fact: DefinitionFact, changed_fact: DefinitionFact, distinct_json: String) {
     assert_eq(pair.view_provenance.len(), 2)
     assert_eq(pair.view_provenance[0].output_path, [String]{"left"})

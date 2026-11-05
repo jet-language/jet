@@ -1,4 +1,3 @@
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1
 use {
     std.collections.[VecDeque]
     fs :: std.fs
@@ -22,35 +21,21 @@ use {
     jet_foundation.[Diagnostic, GateSet, type_name]
 }
 
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:19
 MAX_DEBUG_SESSIONS :: 32
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:20
 MAX_DEBUG_COMMANDS :: 64
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:21
 MAX_DEBUG_WATCHES :: 32
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:22
 MAX_DEBUG_BREAKPOINTS :: 128
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:23
 MAX_DEBUG_COMMAND_BYTES :: 256
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:24
 MAX_DEBUG_TRACE_LINES :: 128
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:25
 MAX_DEBUG_CALL_STACK :: 32
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:26
 MAX_DEBUG_TRACE_BYTES :: 32 * 1024
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:27
 MAX_DEBUG_LOCAL_VALUES :: 64
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:28
 MAX_DEBUG_VALUE_BYTES :: 4 * 1024
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:29
 MAX_DEBUG_CALL_STACK_BYTES :: 16 * 1024
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:30
 MAX_DEBUG_WIRE_PATH :: 64
 
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:36
 enum DebugTier { Interpreter; NativeLldb }
 impl DebugTier {
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:42
     fn parse(value: String?) -> Self Err! {
         if value.unwrap_or("jet-dev-interpreter") == {
             "jet-dev-interpreter" -> { return .Ok(.Interpreter) }
@@ -58,7 +43,6 @@ impl DebugTier {
             else -> { return .Err(debug_error("bad_request", "Canvas debug tier must be `jet-dev-interpreter` or `native-lldb`")) }
         }
     }
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:53
     fn wire_name(self) -> String {
         if self == {
             .Interpreter -> "jet-dev-interpreter"
@@ -67,14 +51,12 @@ impl DebugTier {
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:65
 // Source/revision-bound ownership of the canonical debugger, not a second interpreter.
 struct DebugSessions {
     next_id: AtomicU64
     sessions: Mutex<[String: DebugSession]>
     pause_on_input_end: Bool
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:70
 struct DebugSession {
     path: OSPath
     source_id: String
@@ -90,7 +72,6 @@ struct DebugSession {
     snapshot: DebugSnapshot?
     paused_adapter: PausedDebugSessionAdapter?
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:96
 struct NativeDebugArtifact {
     dir: OSPath
     binary: OSPath
@@ -101,13 +82,11 @@ struct NativeDebugArtifact {
     jet_source: String
 }
 impl NativeDebugArtifact {
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:107
     fn drop(self: Self) -> Unit {
         // GATE #4494: native filesystem cleanup on artifact destruction.
         _ :: fs.remove_dir_all(self.dir)
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:112
 struct DebugExecution {
     id: String
     status: SessionStatus
@@ -117,16 +96,13 @@ struct DebugExecution {
 }
 
 impl DebugSessions {
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:121
     fn new() -> Self {
         // GATE #4494: canonical native atomics and mutex ownership.
         Self { next_id: AtomicU64.new(1), sessions: Mutex.new({}), pause_on_input_end: true }
     }
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:129
     fn one_shot() -> Self {
         Self { next_id: AtomicU64.new(1), sessions: Mutex.new({}), pause_on_input_end: false }
     }
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:137
     fn execute(self: &Self, path: &OSPath, source_id: String, revision: String,
         requested_id: String?, commands: &[String], breakpoints: &[Usize], watches: &[String], tier: DebugTier) -> DebugExecution Err! {
         if source_id.is_empty() || source_id.len() > 256 || source_id.chars().any((ch) -> ch.is_control()) {
@@ -260,7 +236,6 @@ impl DebugSessions {
         return .Ok(DebugExecution { id: ^id, status: result.status, transcript: ^result.transcript, snapshot: ^result.snapshot, tier: session_tier })
     }
 
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:422
     fn paused_adapter(self: Self, identity: SessionIdentity) -> PausedDebugSessionAdapter Err! {
         sessions :: self.sessions.lock() ?? return .Err(debug_error("session", "debug session store is unavailable"))
         session :: sessions.get(identity.session_id) ?? return .Err(debug_error("session", "debug session is no longer live; start a new session"))
@@ -273,7 +248,6 @@ impl DebugSessions {
         }
         return .Ok(adapter.copy())
     }
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:460
     fn clear_paused_session(self: &Self, host: &PausedEvaluateHost, id: String) Err! {
         sessions := self.sessions.lock() ?? return .Err(debug_error("session", "debug session store is unavailable"))
         if sessions.get_mut(id) == .Val(session) {
@@ -283,7 +257,6 @@ impl DebugSessions {
         } else if host.session().is_some_and((injected) -> injected.identity.session_id == id) -> host.clear_session()
         return .Ok(_)
     }
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:487
     fn resume_paused_session(self: &Self, host: &PausedEvaluateHost, id: String) Err! {
         sessions := self.sessions.lock() ?? return .Err(debug_error("session", "debug session store is unavailable"))
         if sessions.get_mut(id) == .Val(session) {
@@ -293,7 +266,6 @@ impl DebugSessions {
         } else if host.session().is_some_and((injected) -> injected.identity.session_id == id) -> host.clear_session()
         return .Ok(_)
     }
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:515
     fn cancel_paused_session(self: &Self, host: &PausedEvaluateHost, id: String, reason: String) Err! {
         sessions := self.sessions.lock() ?? return .Err(debug_error("session", "debug session store is unavailable"))
         if sessions.get_mut(id) == .Val(session) {
@@ -303,13 +275,11 @@ impl DebugSessions {
         } else if host.session().is_some_and((injected) -> injected.identity.session_id == id) -> host.clear_session()
         return .Ok(_)
     }
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:543
     fn cancel_all_paused_sessions(self: &Self, host: &PausedEvaluateHost, reason: String) Err! {
         ids :: self.sessions.lock().map_err((_) -> debug_error("session", "debug session store is unavailable"))?.keys().cloned().collect()
         loop id in ids -> self.cancel_paused_session(host, id, reason)
         return .Ok(_)
     }
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:561
     fn stale_paused_session(self: &Self, host: &PausedEvaluateHost, id: String) Err! {
         sessions := self.sessions.lock() ?? return .Err(debug_error("session", "debug session store is unavailable"))
         if sessions.get_mut(id) == .Val(session) {
@@ -319,11 +289,9 @@ impl DebugSessions {
         } else if host.session().is_some_and((injected) -> injected.identity.session_id == id) -> host.clear_session()
         return .Ok(_)
     }
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:590
     fn discard(self: Self, id: String) -> DebugTier? {
         self.sessions.lock().ok().and_then((sessions) -> sessions.remove(id).map((session) -> session.tier))
     }
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:597
     fn stop(self: Self, path: OSPath, revision: String, current_revision: String, id: String, tier: DebugTier) -> DebugTier Err! {
         path :: canonical_path(path)
         sessions := self.sessions.lock() ?? return .Err(debug_error("session", "debug session store is unavailable"))
@@ -345,11 +313,9 @@ impl DebugSessions {
         tier :: sessions.remove(id).map((session) -> session.tier) ?? return .Err(debug_error("session", "debug session disappeared"))
         return .Ok(tier)
     }
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:650
     fn default() -> Self { Self.new() }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:656
 fn validate_debug_limits(commands: &[String], breakpoints: &[Usize], watches: &[String]) Err! {
     if commands.len() > MAX_DEBUG_COMMANDS || breakpoints.len() > MAX_DEBUG_BREAKPOINTS || watches.len() > MAX_DEBUG_WATCHES {
         return .Err(debug_error("limit", "Canvas debug accepts at most 64 commands, 128 breakpoints, and 32 watches per session"))
@@ -366,14 +332,12 @@ fn validate_debug_limits(commands: &[String], breakpoints: &[Usize], watches: &[
     }
     return .Ok(_)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:694
 fn validate_debug_breakpoint_anchors(anchors: &[String]) Err! {
     if anchors.len() > MAX_DEBUG_BREAKPOINTS || anchors.iter().any((anchor) -> anchor.len() > MAX_DEBUG_COMMAND_BYTES) {
         return .Err(debug_error("limit", "Canvas debug accepts at most 128 breakpoint spans of 256 bytes each"))
     }
     return .Ok(_)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:708
 fn validate_debug_command(command: String) Err! {
     parts := command.split_whitespace()
     verb :: parts.next() ?? return .Err(debug_error("unsupported", "Canvas debug commands cannot be empty"))
@@ -395,7 +359,6 @@ fn validate_debug_command(command: String) Err! {
 }
 
 impl NativeDebugArtifact {
-    // Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:749
     fn build(path: OSPath, id: String) -> Self Err! {
         // GATE #4494: native filesystem/process primitives, bounded real child output.
         jet_source :: read_source_without_symlinks(path) ?? return .Err(debug_error("io", "couldn't read debug source: {err}"))
@@ -441,7 +404,6 @@ impl NativeDebugArtifact {
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:849
 fn debug_ok(src: String, graph_json: String, transcript: String, snapshot: &DebugSnapshot?, status: SessionStatus,
     session_id: String, tier: DebugTier, source_id: String, breakpoint_lines: &[Usize], stale_breakpoints: &[String], watches: &[String]) -> String {
     active_line :: if status == {
@@ -469,19 +431,15 @@ fn debug_ok(src: String, graph_json: String, transcript: String, snapshot: &Debu
     (trace, trace_truncated) :: trace_json(transcript)
     return "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{DEBUG_SCHEMA_VERSION},\"ok\":true,\"source_id\":{json_str(source_id)},\"revision\":{json_str(revision)},\"session\":{{\"id\":{json_str(session_id)},\"state\":{json_str(overlay)},\"tier\":{json_str(tier.wire_name())},\"persistence\":\"local-source-span\",\"source_id\":{json_str(source_id)},\"revision\":{json_str(revision)}}},\"overlay\":{{\"debug_overlay\":{json_str(overlay)},\"runtime_state\":{json_str(runtime_state)},\"source_id\":{json_str(source_id)},\"revision\":{json_str(revision)},\"active_line\":{active_line.map((line) -> line.to_string()).unwrap_or("null")},\"active_span\":{span_json(active_span)},\"active_graph_id\":{json_str(active_graph)},\"active_node_id\":{json_str(active_node)},\"active_wire_id\":{json_str(active_wire)},\"wire_path\":[{wire_path.iter().map((wire) -> json_str(wire)).collect().join(",")}],\"breakpoints\":[{breakpoint_json(src, breakpoint_lines, stale_breakpoints)}],\"locals\":[{locals}],\"watches\":[{watch_values}],\"call_stack\":[{call_stack}],\"trace\":[{trace}],\"limits\":{{\"locals_truncated\":{if locals_truncated -> "true" else -> "false"},\"watches_truncated\":{if watches_truncated -> "true" else -> "false"},\"call_stack_truncated\":{if call_stack_truncated -> "true" else -> "false"},\"trace_truncated\":{if trace_truncated -> "true" else -> "false"},\"wire_path_truncated\":{if wire_path_truncated -> "true" else -> "false"}}}}}}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:939
 fn debug_error(kind: String, message: String) -> String {
     message :: bounded_message(message)
     "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{DEBUG_SCHEMA_VERSION},\"ok\":false,\"kind\":{json_str(kind)},\"message\":{json_str(message)}}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:949
 fn debug_stop_ok(src: String, session_id: String, tier: DebugTier, source_id: String) -> String {
     revision :: source_revision(src)
     "{{\"protocol\":\"jet.canvas.debug\",\"schema_version\":{DEBUG_SCHEMA_VERSION},\"ok\":true,\"source_id\":{json_str(source_id)},\"revision\":{json_str(revision)},\"session\":{{\"id\":{json_str(session_id)},\"state\":\"stopped\",\"tier\":{json_str(tier.wire_name())},\"persistence\":\"local-source-span\",\"source_id\":{json_str(source_id)},\"revision\":{json_str(revision)}}},\"overlay\":null}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:968
 fn bounded_message(message: String) -> String { bounded_text(message, 16 * 1024)._0 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:972
 fn bounded_text(text: String, max_bytes: Usize) -> (String, Bool) {
     if text.len() <= max_bytes -> return (_0: text.copy(), _1: false)
     end := max_bytes.saturating_sub(" [truncated]".len())
@@ -489,16 +447,13 @@ fn bounded_text(text: String, max_bytes: Usize) -> (String, Bool) {
     prefix := text[0..<end] // #4303
     return (_0: "{prefix} [truncated]", _1: true)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:983
 fn debug_diagnostics_error(path: OSPath, src: String, diags: [Diagnostic]) -> String {
     debug_error("diagnostic", render_all(path.display().to_string(), src, diags))
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:990
 fn required_debug_string(text: String, key: String) -> String Err! {
     value :: json_string_field(text, key) ?? return .Err(debug_error("bad_request", "missing `{key}`"))
     return .Ok(^value)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:995
 fn active_line_from_transcript(transcript: String) -> Usize? {
     loop line in transcript.lines().rev() {
         if !line.contains("<- here") -> next
@@ -522,7 +477,6 @@ fn active_line_from_transcript(transcript: String) -> Usize? {
     }
     return .None
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1021
 fn line_span(src: String, line: Usize) -> SourceSpan {
     current := 1
     start := 0
@@ -538,17 +492,14 @@ fn line_span(src: String, line: Usize) -> SourceSpan {
     end :: suffix.find('\n').map((i) -> start + i).unwrap_or(src.len())
     return SourceSpan { start: start, end: end }
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1043
 fn line_of_offset(src: String, offset: Usize) -> Usize {
     prefix := src[0..<offset.min(src.len())] // #4303
     prefix.bytes().filter((b) -> b == 10).count() + 1
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1051
 fn line_from_anchor(src: String, anchor: String) -> Usize? {
     span :: anchor_span(src, anchor)
     return .Val(line_of_offset(src, span.start))
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1056
 fn anchor_span(src: String, anchor: String) -> SourceSpan? {
     (start, end) :: anchor.split_once(':')
     start :: start.parse[Usize]().ok()
@@ -556,12 +507,10 @@ fn anchor_span(src: String, anchor: String) -> SourceSpan? {
     if start >= src.len() || start > end || end > src.len() || !src.is_char_boundary(start) || !src.is_char_boundary(end) -> return .None
     return .Val(SourceSpan { start: start, end: end })
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1071
 fn record_id_for_span(json: String, id_key: String, active: SourceSpan) -> String? {
     (matches, _) :: record_ids_for_span(json, id_key, active)
     matches.into_iter().min_by_key((id) -> record_width_for_span(json, id_key, id).unwrap_or(Usize.MAX))
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1078
 fn record_ids_for_span(json: String, id_key: String, active: SourceSpan) -> ([String], Bool) {
     needle :: "\"{id_key}\":"
     matches := []
@@ -584,7 +533,6 @@ fn record_ids_for_span(json: String, id_key: String, active: SourceSpan) -> ([St
     }
     return (_0: ^matches, _1: false)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1114
 fn record_width_for_span(json: String, id_key: String, wanted: String) -> Usize? {
     needle :: "\"{id_key}\":"
     loop chunk in json.split(needle).skip(1) {
@@ -601,9 +549,7 @@ fn record_width_for_span(json: String, id_key: String, wanted: String) -> Usize?
     }
     return .None
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1134
 fn span_overlaps(a: SourceSpan, b: SourceSpan) -> Bool { a.start <= b.end && b.start <= a.end }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1138
 fn graph_id_from_node_id(node_id: String) -> String? {
     loop marker in [":entry", ":stmt:", ":expr:"] {
         if node_id.find(marker) == .Val(pos) {
@@ -613,7 +559,6 @@ fn graph_id_from_node_id(node_id: String) -> String? {
     }
     return .None
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1147
 fn breakpoint_json(src: String, lines: &[Usize], stale_anchors: &[String]) -> String {
     entries := []
     loop line in lines {
@@ -627,13 +572,11 @@ fn breakpoint_json(src: String, lines: &[Usize], stale_anchors: &[String]) -> St
     }
     return entries.join(",")
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1172
 fn locals_json(transcript: String) -> (String, Bool) {
     line :: transcript.lines().rev().find((line) -> line.starts_with("locals:")) ?? return (_0: "", _1: false)
     text := line.trim_start_matches("locals:").trim() // #4303
     return parse_assignments(text)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1183
 fn watches_json(transcript: String, watches: &[String]) -> (String, Bool) {
     truncated := false
     values := []
@@ -647,7 +590,6 @@ fn watches_json(transcript: String, watches: &[String]) -> (String, Bool) {
     }
     return (_0: values.join(","), _1: truncated)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1208
 fn parse_assignments(text: String) -> (String, Bool) {
     if text == "(none)" || text.is_empty() -> return (_0: "", _1: false)
     truncated := false
@@ -666,7 +608,6 @@ fn parse_assignments(text: String) -> (String, Bool) {
     }
     return (_0: values.join(","), _1: truncated)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1235
 fn snapshot_locals_json(snapshot: DebugSnapshot) -> (String, Bool) {
     truncated := false
     values := []
@@ -682,7 +623,6 @@ fn snapshot_locals_json(snapshot: DebugSnapshot) -> (String, Bool) {
     }
     return (_0: values.join(","), _1: truncated)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1261
 fn snapshot_watches_json(snapshot: DebugSnapshot, watches: [String]) -> (String, Bool) {
     truncated := false
     values := []
@@ -695,7 +635,6 @@ fn snapshot_watches_json(snapshot: DebugSnapshot, watches: [String]) -> (String,
     }
     return (_0: values.join(","), _1: truncated)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1285
 fn snapshot_call_stack_json(snapshot: DebugSnapshot, source_id: String) -> (String, Bool) {
     entries := []
     bytes := 0
@@ -717,7 +656,6 @@ fn snapshot_call_stack_json(snapshot: DebugSnapshot, source_id: String) -> (Stri
     }
     return (_0: entries.join(","), _1: truncated)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1319
 fn call_stack_json(transcript: String) -> (String, Bool) {
     entries := []
     bytes := 0
@@ -746,7 +684,6 @@ fn call_stack_json(transcript: String) -> (String, Bool) {
     entries.reverse()
     return (_0: entries.join(","), _1: truncated)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1351
 fn trace_json(transcript: String) -> (String, Bool) {
     entries := []
     bytes := 0
@@ -767,9 +704,7 @@ fn trace_json(transcript: String) -> (String, Bool) {
     entries.reverse()
     return (_0: entries.join(","), _1: truncated)
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1372
 fn canonical_path(path: OSPath) -> OSPath { fs.canonicalize(path).unwrap_or_else((_) -> path.copy()) }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1376
 fn git_root(path: OSPath) -> OSPath? {
     // GATE #4494: real bounded git subprocess and native path transport.
     dir :: path.parent().unwrap_or_else(() -> OSPath.new("."))
@@ -781,13 +716,11 @@ fn git_root(path: OSPath) -> OSPath? {
     if text.is_empty() -> return .None
     return .Val(OSPath.from(text))
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1395
 fn git_relative_path(root: OSPath, path: OSPath) -> String {
     abs :: canonical_path(path)
     root :: canonical_path(root)
     abs.strip_prefix(root).unwrap_or(abs).to_string_lossy().replace('\\', "/")
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1404
 fn git_output(root: OSPath, args: [String]) -> String? {
     command := Command.new("git")
     command.arg("-C").arg(root).args(args)
@@ -795,7 +728,6 @@ fn git_output(root: OSPath, args: [String]) -> String? {
     if out.status.success() -> return .Val(String.from_utf8_lossy(out.stdout).to_string())
     return .None
 }
-// Rust: crates/jet-devserver/src/Canvas/debug_source_git.rs:1415
 fn untracked_diff(rel: String, src: String) -> String {
     diff := "--- /dev/null\n+++ b/{rel}\n"
     loop line in src.lines() {

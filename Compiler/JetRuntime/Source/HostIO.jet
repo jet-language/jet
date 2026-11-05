@@ -1,8 +1,8 @@
-// Seed parity: Observe.rs:1049-1052 tests active==0 && allocated==retired.
-// The only counter writes are run_iocp (Scheduler.rs:2653 Windows-only cfg,
-// :2732-2889). Linux never changes them, including during blocked pipe reads.
-// Do not instrument Linux host operations: these facts describe IOCP owners,
-// not all host I/O. Preserve the predicate without a store or allocation.
+// Seed parity: tests active==0 && allocated==retired. The only counter writes
+// are run_iocp (Windows-only cfg). Linux never changes them, including during
+// blocked pipe reads. Do not instrument Linux host operations: these facts
+// describe IOCP owners, not all host I/O. Preserve the predicate without a
+// store or allocation.
 #Export(c) fn jet_rt_observe_io_quiescent() -> Bool {
     active :: I64{0}
     allocated :: I64{0}
@@ -211,7 +211,7 @@ fn host_error_with_context(context: I64, kind: I64) -> I64 {
     value
 }
 
-// CAbiHost.rs:220 interprets the entire presence word, not a C Bool byte.
+// The Rust original interprets the entire presence word, not a C Bool byte.
 fn host_context_equal(left: I64, right: I64) -> Bool {
     if (rt_text_word(left) != rt_text_word(right)) -> return false
     left_present :: rt_text_word(wrapping(left + I64{16})) != I64{0}
@@ -242,8 +242,8 @@ fn host_optional_text_equal(left: I64, right: I64) -> Bool {
 
 #Export(c) fn jet_rt_handle_eq_io_operation(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
 
-// Streaming labels follow StructuralDebug.rs:182-228 and the seed's custom
-// JetDebug implementations at preregeneration-runtime.rs:72109-72218.
+// Streaming labels and the seed's custom JetDebug implementations at
+// preregeneration-.
 fn host_io_operation_label(target: I64, ordinal: I64, debug: Bool) {
     word :: if {
         (ordinal == I64{0}) -> I64{1684104530}

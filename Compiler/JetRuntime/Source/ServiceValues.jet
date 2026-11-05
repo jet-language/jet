@@ -1,5 +1,5 @@
 // Plain native values only; no service authority/channel/task lifecycle here.
-// Services.rs:882-885, ServiceAuthority.rs:105-109 own field semantics.
+// The Rust originals own field semantics.
 #Export(c) fn jet_rt_record_new_jet_service_state_store(path: I64) -> I64 {
     result :: jet_rt_alloc(SERVICE_STORE_BYTES, I64{8})
     encoding_store(wrapping(result + SERVICE_STORE_PATH), jet_rt_string_clone(path))
@@ -22,8 +22,8 @@
 }
 #Export(c) fn jet_rt_handle_display_jet_service_state_store(value: I64) -> I64 { jet_rt_handle_show_jet_service_state_store(value) }
 #Export(c) fn jet_rt_record_new_jet_service_runtime(store: I64, retention: I64) -> I64 {
-    // CAbiRoutes.rs:11319-11320 native(m1): canonical checked narrowing.
-    // Int.jet jet_int_owned_to_i64 owns the native-index-range stop, not a new trap.
+    // native(m1): canonical checked narrowing. Int.jet jet_int_owned_to_i64 owns the
+    // native-index-range stop, not a new trap.
     raw :: jet_int_owned_to_i64(retention)
     result :: jet_rt_alloc(SERVICE_RUNTIME_BYTES, I64{8})
     encoding_store(wrapping(result + SERVICE_RUNTIME_STORE), jet_rt_string_clone(store))

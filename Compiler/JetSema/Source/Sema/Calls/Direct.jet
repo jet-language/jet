@@ -151,8 +151,8 @@ fn sema_call_debug_traceable(ty: Type, environment: SemaScopeEnvironment, progra
         .Result(ok, err) | .Map(ok, _, err) -> sema_call_debug_traceable(ok, environment, program) && sema_call_debug_traceable(err, environment, program)
         .Named(name) -> {
             if sema_call_reflection_leaf_name(name) == "Unit" || sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" -> return true
-            // The game asset handles carry a Debug form (Rust Game.rs
-            // `JetDebug for GameImage`/`GameSound`: `GameImage(<path>)`).
+            // The game asset handles carry a Debug form (`JetDebug for
+            // GameImage`/`GameSound`: `GameImage(<path>)`).
             if name == "GameImage" || name == "GameSound" -> return true
             if program.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None -> return true
             sema_call_debug_implemented(ty, environment, program)
@@ -315,8 +315,7 @@ fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment: Sem
 
 // The readable prelude's builtin rows (Rust `CorePrelude` Builtin targets
 // `print`, `input`, `panic`, `assert`, `assert_eq`), checked by one dispatcher
-// with the Rust checker's arity and argument rules
-// (CheckerInfer/calls/direct_calls.rs, CheckerItems.rs check_*_call). A user
+// with the Rust checker's arity and argument rules (check_*_call). A user
 // function or local of the same name shadows every row. `#NoPrelude`
 // print/input refusal (E0429) runs before this dispatcher.
 fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
@@ -614,11 +613,10 @@ fn sema_call_check_ambient_input(call: Call, expected: Type?, environment: SemaS
     SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
 }
 
-// Rust core_call.rs `("core.term", "eprint")` / `("core.term", "input")`:
-// fixed rows with no typed Source contract. `eprint` is variadic: every
-// printable argument joins, one per line, into the row's single stderr write
-// (the Rust reference lowering's `join_print_args`); `input` takes an optional String prompt and
-// returns `Result<String, IOError>`.
+// `("core.term", "eprint")` / `("core.term", "input")`: fixed rows with no typed Source
+// contract. `eprint` is variadic: every printable argument joins, one per line, into the row's
+// single stderr write (the Rust reference lowering's `join_print_args`); `input` takes an
+// optional String prompt and returns `Result<String, IOError>`.
 fn sema_call_try_term_core_call(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if record.module_name != "core.term" -> return SemaDirectSpecialCheck{handled: false, value: None}
     if record.member == {
@@ -677,10 +675,10 @@ fn sema_call_check_term_input(record: CoreCallRecord, args: [CallArg], span: Spa
     SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
 }
 
-// Rust core_call.rs `("core.term", "progress")` over a sequence: a List or
-// Iter source with a description and an optional template is the
-// `progress_iter` row, which hands the items on as the loop pulls them. A
-// List is read through its `lazy()` iterator; a missing template is empty.
+// `("core.term", "progress")` over a sequence: a List or Iter source with a
+// description and an optional template is the `progress_iter` row, which hands
+// the items on as the loop pulls them. A List is read through its `lazy()`
+// iterator; a missing template is empty.
 fn sema_call_check_term_progress_iter(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     record :: core_call("core.term", "progress_iter") ?? return SemaDirectSpecialCheck{handled: false, value: None}
     if args.len() > 3 {
@@ -707,10 +705,10 @@ fn sema_call_check_term_progress_iter(args: [CallArg], span: Span, expected: Typ
     SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
 }
 
-// Rust core_call.rs `("core.reflect", "of")`: the compiler-owned reflection
-// intrinsic has no typed Source contract. Its one argument is legal wherever
-// `"{x}"` interpolation is (or a Unit), and the call yields the runtime
-// reflection handle `Value`.
+// `("core.reflect", "of")`: the compiler-owned reflection intrinsic has no
+// typed Source contract. Its one argument is legal wherever `"{x}"`
+// interpolation is (or a Unit), and the call yields the runtime reflection
+// handle `Value`.
 fn sema_call_try_reflect_core_call(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if record.module_name != "core.reflect" || record.member != "of" -> return SemaDirectSpecialCheck{handled: false, value: None}
     if args.len() != 1 {
@@ -828,9 +826,9 @@ fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironme
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }
 
-// Rust core_call.rs `("core.mem.scope", "guard")` (option B): the
-// compiler-owned guard has no registry row. Its one zero-parameter cleanup
-// lambda becomes the `ScopeGuard` whose scope-end drop runs it.
+// `("core.mem.scope", "guard")` (option B): the compiler-owned guard has no
+// registry row. Its one zero-parameter cleanup lambda becomes the `ScopeGuard`
+// whose scope-end drop runs it.
 fn sema_call_try_scope_guard(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name != "core.mem.scope" || member != "guard" -> return SemaDirectSpecialCheck{handled: false, value: None}
     imported :: sema_call_core_import_target(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
@@ -1626,8 +1624,8 @@ fn sema_call_check_freeze(call: Call, expected: Type?, environment: SemaScopeEnv
     SemaDirectSpecialCheck{handled: true, value: checked_result}
 }
 
-// E2475 (Rust core_call.rs `core.web.table.column`): a literal column name
-// is checked against the one row schema the table sorts, filters and renders.
+// E2475 (`core.web.table.column`): a literal column name is checked against the
+// one row schema the table sorts, filters and renders.
 fn sema_call_web_table_column_schema(args: [CallArg], checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     if args.len() == 0 -> return
     column := String?{None}

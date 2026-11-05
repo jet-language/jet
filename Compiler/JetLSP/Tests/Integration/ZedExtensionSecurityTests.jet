@@ -9,7 +9,6 @@ use {
 // GATE #4494: actual filesystem permissions and Node child process.
 // GATE #4483: selected-family dispatch retains Rust cfg(unix).
 
-// Rust: tests/zed_extension_security.rs:26
 #Test("zed_extension_keeps_hostile_worktree_path_out_of_the_server_command") {
     root :: repo_root().join("Tools/editors/zed")
     source :: fs.read_to_string(root.join("wasm-src/src/lib.rs")).expect("Zed extension source must be present")
@@ -31,7 +30,6 @@ use {
     assert(readme.contains("does not call\n`Worktree::which`"), "{readme}")
 }
 
-// Rust: tests/zed_extension_security.rs:68
 #Test("vscode_untrusted_workspace_rejects_hostile_binary_and_shell_launches") {
     if selected_family() != "unix" -> return
     scratch :: Scratch.new("vscode-hostile-workspace")

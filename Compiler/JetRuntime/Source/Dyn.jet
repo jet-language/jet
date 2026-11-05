@@ -1,8 +1,8 @@
-// Canonical native Dyn provider; DataABI.jet is the only offset/tag table.
-// foundation/Dyn.rs:136-148 owns tags and structural PartialEq;
-// JetStd/JSONDyn.rs:24-91 owns ordered JSON render semantics.
-// Exact Int words retain shared owners. Text constructors clone, sequence
-// constructors adopt, sequence getters lend; Dyn is the sole public carrier.
+// Canonical native Dyn provider; DataABI.jet is the only offset/tag table. The
+// Rust original owns tags and structural PartialEq; the Rust original owns
+// ordered JSON render semantics. Exact Int words retain shared owners. Text
+// constructors clone, sequence constructors adopt, sequence getters lend; Dyn
+// is the sole public carrier.
 fn data_tree_word(address: I64) -> I64 {
     #Unsafe("address borrows an initialized word in a live native Dyn or List") { return os_load_i64(address) }
 }
@@ -200,10 +200,10 @@ fn data_tree_render(target: I64, tree: I64) {
     data_tree_render(target, tree)
     jet_rt_string_builder_finish(target)
 }
-// JetStd/Dyn.rs:228-243 JetDynAccess::field: the first entry with this key is
-// cloned out; a missing key or non-object tree is ONE FieldError at path
-// `name`. The C adapter lends tree and name; err receives an owned List
-// payload of one owned FieldError (CAbiRoutes list_out, length via err_len).
+// JetDynAccess::field: the first entry with this key is cloned out; a missing
+// key or non-object tree is ONE FieldError at path `name`. The C adapter lends
+// tree and name; err receives an owned List payload of one owned FieldError
+// (CAbiRoutes list_out, length via err_len).
 #Export(c) fn jet_dyn_field(tree: I64, name: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     object :: data_tree_word(wrapping(tree + DATA_TREE_TAG)) == DATA_TREE_OBJECT
     if object {
@@ -238,15 +238,15 @@ fn data_tree_render(target: I64, tree: I64) {
     data_tree_store(err_len, I64{1})
     I64{0}
 }
-// JetStd/Dyn.rs:344-355 JetDynAccess::to_text: scalar leaves project exactly
-// as Show does (jet_rt_handle_show_dyn); Null, Array and Object are None.
+// JetDynAccess::to_text: scalar leaves project exactly as Show does
+// (jet_rt_handle_show_dyn); Null, Array and Object are None.
 #Export(c) fn jet_dyn_to_text(tree: I64, some: I64) -> I64 {
     kind :: data_tree_word(wrapping(tree + DATA_TREE_TAG))
     if kind == DATA_TREE_NULL || kind >= DATA_TREE_ARRAY -> return I64{0}
     data_tree_store(some, jet_rt_handle_show_dyn(tree))
     I64{1}
 }
-// JetStd/Dyn.rs render_dyn_json(tree, false, 0) after `prefix`; owned.
+// render_dyn_json(tree, false, 0) after `prefix`; owned.
 fn data_tree_got(prefix: I64, tree: I64) -> I64 {
     target :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(target, prefix)
@@ -265,8 +265,8 @@ fn data_tree_field_error(path: I64, reason: I64, err: I64, err_len: I64) -> I64 
     data_tree_store(err_len, I64{1})
     I64{0}
 }
-// JetStd/Dyn.rs JetDynAccess::at: Array item `index`, counted from the end
-// when negative; every failure is one FieldError at path `[index]`.
+// JetDynAccess::at: Array item `index`, counted from the end when negative;
+// every failure is one FieldError at path `[index]`.
 #Export(c) fn jet_dyn_at(tree: I64, index: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     position :: jet_int_owned_to_i64(index)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -294,8 +294,8 @@ fn data_tree_field_error(path: I64, reason: I64, err: I64, err_len: I64) -> I64 
 fn data_tree_scalar_error(prefix: I64, tree: I64, err: I64, err_len: I64) -> I64 {
     data_tree_field_error(jet_rt_string_clone(rt_static_text("")), data_tree_got(prefix, tree), err, err_len)
 }
-// JetStd/Dyn.rs JetDynAccess::int: an Int, or a Number lexeme that is an
-// exact integer (json_exact_integer_text then the exact parse).
+// JetDynAccess::int: an Int, or a Number lexeme that is an exact integer
+// (json_exact_integer_text then the exact parse).
 #Export(c) fn jet_dyn_int(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     kind :: data_tree_word(wrapping(tree + DATA_TREE_TAG))
     payload :: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
@@ -316,20 +316,20 @@ fn data_tree_scalar_error(prefix: I64, tree: I64, err: I64, err_len: I64) -> I64
     }
     data_tree_scalar_error(rt_static_text("expected int, got "), tree, err, err_len)
 }
-// JetStd/Dyn.rs JetDynAccess::text: only a Text leaf.
+// JetDynAccess::text: only a Text leaf.
 #Export(c) fn jet_dyn_text(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     if data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_TEXT -> return data_tree_scalar_error(rt_static_text("expected text, got "), tree, err, err_len)
     data_tree_store(ok, jet_rt_string_clone(data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))))
     I64{1}
 }
-// JetStd/Dyn.rs JetDynAccess::bool: only a Bool leaf.
+// JetDynAccess::bool: only a Bool leaf.
 #Export(c) fn jet_dyn_bool(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     if data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_BOOL -> return data_tree_scalar_error(rt_static_text("expected bool, got "), tree, err, err_len)
     rt_text_put(ok, if (data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD)) != I64{0}) -> I64{1} else -> I64{0})
     I64{1}
 }
-// JetStd/Dyn.rs JetDynAccess::float: a Float, a finite Int, or a finite
-// trimmed Number lexeme.
+// JetDynAccess::float: a Float, a finite Int, or a finite trimmed Number
+// lexeme.
 #Export(c) fn jet_dyn_float(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     kind :: data_tree_word(wrapping(tree + DATA_TREE_TAG))
     payload :: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
@@ -352,9 +352,8 @@ fn data_tree_scalar_error(prefix: I64, tree: I64, err: I64, err_len: I64) -> I64
     }
     data_tree_scalar_error(rt_static_text("expected float, got "), tree, err, err_len)
 }
-// JetStd/Dyn.rs JetDynAccess::equal_unordered: structural equality where an
-// Object's entries match in any order (each right entry used once) and NaN
-// equals nothing.
+// JetDynAccess::equal_unordered: structural equality where an Object's entries
+// match in any order (each right entry used once) and NaN equals nothing.
 #Export(c) fn jet_dyn_equal_unordered(left: I64, right: I64) -> Bool {
     kind :: data_tree_word(wrapping(left + DATA_TREE_TAG))
     if kind != data_tree_word(wrapping(right + DATA_TREE_TAG)) -> return false
@@ -395,7 +394,7 @@ fn data_tree_scalar_error(prefix: I64, tree: I64, err: I64, err_len: I64) -> I64
     if (length != I64{0}) -> jet_rt_free(used, length * I64{8}, I64{8})
     same
 }
-// DynKind.rs dyn_kind: the diagnostic name of a runtime tree's kind.
+// dyn_kind: the diagnostic name of a runtime tree's kind.
 fn data_tree_kind_name(kind: I64) -> I64 {
     if kind == DATA_TREE_NULL -> return rt_static_text("null")
     if kind == DATA_TREE_BOOL -> return rt_static_text("Bool")
@@ -408,8 +407,8 @@ fn data_tree_kind_name(kind: I64) -> I64 {
     if kind == DATA_TREE_ARRAY -> return rt_static_text("a list")
     rt_static_text("an object")
 }
-// foundation/Dyn.rs get_opt: the borrowed value of the first Object entry
-// named `key`; 0 for a miss or a tree that is not an Object.
+// get_opt: the borrowed value of the first Object entry named `key`; 0 for a
+// miss or a tree that is not an Object.
 fn data_tree_object_find(tree: I64, key: I64) -> I64 {
     if data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_OBJECT -> return I64{0}
     sequence :: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
@@ -430,7 +429,7 @@ fn data_tree_array_item(tree: I64, position: I64) -> I64 {
     if (position < I64{0} || position >= data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))) -> return I64{0}
     data_tree_word(wrapping(data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA)) + position * DATA_TREE_ELEMENT_BYTES))
 }
-// Outcome.rs jet_dyn_stop_message: a builder holding "{site}: ".
+// jet_dyn_stop_message: a builder holding "{site}: ".
 fn data_tree_stop_begin(site: I64) -> I64 {
     target :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(target, site)
@@ -445,14 +444,14 @@ fn data_tree_push_count(target: I64, count: I64) {
     jet_rt_string_drop(text)
     jet_rt_int_drop(exact)
 }
-// DynRuntime.rs jet_dyn_get_key: Some(clone) of the first entry named `key`.
+// jet_dyn_get_key: Some(clone) of the first entry named `key`.
 #Export(c) fn jet_dyn_get_key(tree: I64, key: I64, some: I64) -> I64 {
     found :: data_tree_object_find(tree, key)
     if (found == I64{0}) -> return I64{0}
     data_tree_store(some, jet_rt_handle_clone_dyn(found))
     I64{1}
 }
-// DynRuntime.rs jet_dyn_get_at: Some(clone) of the Array item at `index`.
+// jet_dyn_get_at: Some(clone) of the Array item at `index`.
 #Export(c) fn jet_dyn_get_at(tree: I64, index: I64, some: I64) -> I64 {
     position :: jet_int_owned_to_i64(index)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -461,10 +460,10 @@ fn data_tree_push_count(target: I64, count: I64) {
     data_tree_store(some, jet_rt_handle_clone_dyn(found))
     I64{1}
 }
-// DynRuntime.rs jet_dyn_has: an Object has an entry named `key`.
+// jet_dyn_has: an Object has an entry named `key`.
 #Export(c) fn jet_dyn_has(tree: I64, key: I64) -> Bool { data_tree_object_find(tree, key) != I64{0} }
-// DynRuntime.rs jet_dyn_keys: an Object's keys in entry order; empty for
-// every other kind. Returns the count and an owned word column of texts.
+// jet_dyn_keys: an Object's keys in entry order; empty for every other kind.
+// Returns the count and an owned word column of texts.
 #Export(c) fn jet_dyn_keys(tree: I64, output: I64) -> I64 {
     if data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_OBJECT {
         data_tree_store(output, I64{0})
@@ -482,8 +481,8 @@ fn data_tree_push_count(target: I64, count: I64) {
     data_tree_store(output, words)
     length
 }
-// DynRuntime.rs jet_dyn_index_key: Ok(clone) of the first entry named `key`,
-// else the "{site}: ..." stop text. ok and err share the caller's slot.
+// jet_dyn_index_key: Ok(clone) of the first entry named `key`, else the
+// "{site}..." stop text. ok and err share the caller's slot.
 #Export(c) fn jet_dyn_index_key(tree: I64, key: I64, site: I64, ok: I64, err: I64) -> I64 {
     found :: data_tree_object_find(tree, key)
     if (found != I64{0}) {
@@ -502,8 +501,8 @@ fn data_tree_push_count(target: I64, count: I64) {
     data_tree_store(err, jet_rt_string_builder_finish(target))
     I64{0}
 }
-// DynRuntime.rs jet_dyn_index_at: Ok(clone) of the Array item at `index`,
-// else the "{site}: ..." stop text. ok and err share the caller's slot.
+// jet_dyn_index_at: Ok(clone) of the Array item at `index`, else the
+// "{site}..." stop text. ok and err share the caller's slot.
 #Export(c) fn jet_dyn_index_at(tree: I64, index: I64, site: I64, ok: I64, err: I64) -> I64 {
     position :: jet_int_owned_to_i64(index)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -557,11 +556,10 @@ fn data_tree_f64(kind: I64, payload: I64) -> Float {
     if kind == DATA_TREE_INT -> return jet_int_owned_to_f64(payload)
     rt_f64_from_bits(payload)
 }
-// DynRuntime.rs jet_dyn_binary: `+ - *` of two Int leaves is their exact
-// Int and `/` the correctly rounded Float of their ratio; an Int with a
-// Float, or two Floats, give the Float result. Any other pair stops with
-// "{site}: cannot {verb} {left kind} by {right kind}". ok and err share the
-// caller's slot.
+// jet_dyn_binary: `+ - *` of two Int leaves is their exact Int and `/` the
+// correctly rounded Float of their ratio; an Int with a Float, or two Floats,
+// give the Float result. Any other pair stops with "{site}: cannot {verb} {left
+// kind} by {right kind}". ok and err share the caller's slot.
 #Export(c) fn jet_dyn_binary(left: I64, right: I64, op: I64, site: I64, ok: I64, err: I64) -> I64 {
     left_kind :: data_tree_word(wrapping(left + DATA_TREE_TAG))
     right_kind :: data_tree_word(wrapping(right + DATA_TREE_TAG))
@@ -689,11 +687,11 @@ fn data_tree_order(left: I64, right: I64) -> I64 {
     }
     I64{3}
 }
-// DynRuntime.rs jet_dyn_compare: `==` and `!=` are structural equality;
-// `< <= > >=` order two Texts or two Bytes bytewise, two DateTimes by
-// instant, and Int and Float leaves by exact value, where a NaN orders with
-// nothing (every test is false). Any other pair stops with "{site}: cannot
-// compare {left kind} with {right kind}". ok and err share the caller's slot.
+// jet_dyn_compare: `==` and `!=` are structural equality; `< <= > >=` order two
+// Texts or two Bytes bytewise, two DateTimes by instant, and Int and Float
+// leaves by exact value, where a NaN orders with nothing (every test is false).
+// Any other pair stops with "{site}: cannot compare {left kind} with {right
+// kind}". ok and err share the caller's slot.
 #Export(c) fn jet_dyn_compare(left: I64, right: I64, op: I64, site: I64, ok: I64, err: I64) -> I64 {
     if jet_rt_string_eq(op, rt_static_text("==")) || jet_rt_string_eq(op, rt_static_text("!=")) {
         equal :: jet_rt_handle_eq_dyn(left, right) == jet_rt_string_eq(op, rt_static_text("=="))
@@ -712,8 +710,8 @@ fn data_tree_order(left: I64, right: I64) -> I64 {
     rt_text_put(ok, if holds -> I64{1} else -> I64{0})
     I64{1}
 }
-// DynRuntime.rs jet_dyn_remove: an Object's first entry named `key` leaves
-// the tree in place; Some(that value), else None for a miss or a non-Object.
+// jet_dyn_remove: an Object's first entry named `key` leaves the tree in place;
+// Some(that value), else None for a miss or a non-Object.
 #Export(c) fn jet_dyn_remove(tree: I64, key: I64, some: I64) -> I64 {
     if (data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_OBJECT) -> return I64{0}
     sequence :: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
@@ -746,10 +744,10 @@ fn data_tree_set_refused(target: I64, value: I64, err: I64) -> I64 {
     data_tree_store(err, jet_rt_string_builder_finish(target))
     I64{0}
 }
-// DynRuntime.rs jet_dyn_set_path over `steps`, a runtime Array of Text (key)
-// and Int (index) trees. A key missing at the last step is appended; the
-// reached node takes the owned `value` (their contents swap, and the value's
-// shell drops the replaced contents). Every refusal names its step as Rust does.
+// jet_dyn_set_path over `steps`, a runtime Array of Text (key) and Int (index)
+// trees. A key missing at the last step is appended; the reached node takes the
+// owned `value` (their contents swap, and the value's shell drops the replaced
+// contents). Every refusal names its step as Rust does.
 #Export(c) fn jet_dyn_set_path(tree: I64, steps: I64, value: I64, site: I64, err: I64) -> I64 {
     sequence :: data_tree_word(wrapping(steps + DATA_TREE_PAYLOAD))
     count :: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
@@ -814,8 +812,8 @@ fn data_tree_set_refused(target: I64, value: I64, err: I64) -> I64 {
     jet_rt_handle_drop_dyn(value)
     I64{1}
 }
-// Outcome.rs jet_dyn_stop_message: "{site}: {detail}". Native Dyn lowering
-// (Lower/Dyn.jet) lends the borrowed site text and a static detail span.
+// jet_dyn_stop_message: "{site}: {detail}". Native Dyn lowering (Lower/Dyn.jet)
+// lends the borrowed site text and a static detail span.
 #Export(c) fn jet_rt_dyn_stop_message(site: I64, detail: I64, length: I64) -> I64 {
     target :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(target, site)
@@ -876,7 +874,7 @@ fn data_tree_set_refused(target: I64, value: I64, err: I64) -> I64 {
 }
 #Export(c) fn jet_rt_record_seq_entries_rec_dyn_push(sequence: I64, key: I64, tree: I64) { data_sequence_push(sequence, key, tree, true) }
 
-// foundation/Dyn.rs:120-133: RFC4648 standard alphabet with padding.
+// RFC4648 standard alphabet with padding.
 fn data_dyn_bytes_text(sequence: I64) -> I64 {
     length :: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
     data :: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
@@ -898,8 +896,8 @@ fn data_dyn_bytes_text(sequence: I64) -> I64 {
 fn data_dyn_datetime_clone(value: I64) -> I64 {
     time_glue_clone(value, DYN_DATETIME_BYTES)
 }
-// foundation/Dyn.rs:32-56. Split seconds into days/remainder before adding
-// the frozen i32 offset, retaining Rust's i128 sum at both i64 extremes.
+// Split seconds into days/remainder before adding the frozen i32 offset,
+// retaining Rust's i128 sum at both i64 extremes.
 fn data_dyn_datetime_text(value: I64) -> I64 {
     seconds :: data_tree_word(wrapping(value + DYN_DATETIME_SECS))
     offset :: data_tree_word(wrapping(value + DYN_DATETIME_OFFSET))

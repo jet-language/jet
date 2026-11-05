@@ -1,10 +1,10 @@
-// EnvInit.rs:6-35 owns one OnceLock<RwLock<JetEnvEntries>>. Native main
-// captures startup before threads and creates this one logical cell; the
-// first reader or writer (each calls jet_rt_logical_env_seed) seeds it, once,
-// from the immutable startup byte index, which logical writes never change.
-// Shared's existing reader/writer protocol occupies bytes 0..79; once is @80.
-// The cell uses @56=head and @64=tail. Each owned entry is
-// [next, compact key bytes, key length, compact value bytes, value length].
+// The Rust original owns one OnceLock<RwLock<JetEnvEntries>>. Native main
+// captures startup before threads and creates this one logical cell; the first
+// reader or writer (each calls jet_rt_logical_env_seed) seeds it, once, from
+// the immutable startup byte index, which logical writes never change. Shared's
+// existing reader/writer protocol occupies bytes 0..79; once is @80. The cell
+// uses @56=head and @64=tail. Each owned entry is [next, compact key bytes, key
+// length, compact value bytes, value length].
 logical_env_root := I64{0}
 
 fn logical_environment_copy(bytes: I64, length: I64) -> I64 {
@@ -87,8 +87,8 @@ fn logical_environment_startup() {
     logical_environment_seed()
 }
 
-// FSIoEnvOsTesting.rs:569-570 is Option<String>, not Result: absent and a
-// present non-Unicode value both return None. Raw OS lookup preserves bytes.
+// The Rust original is Option<String>, not Result: absent and a present
+// non-Unicode value both return None. Raw OS lookup preserves bytes.
 #Export(c) fn jet_rt_logical_env_get(key: I64) -> I64 {
     jet_rt_logical_env_seed()
     shared_acquire(logical_env_root, false)

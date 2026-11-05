@@ -1,8 +1,7 @@
-// core.font shaping on the static native runtime: Core/HostServices.rs:1891
-// jet_font_shape_raw through the default headless host (:2404-2417), whose
-// jet_font_shape_with_fallback (:927-1006) validates the request and then
-// reaches the HarfBuzz kernel. That kernel dlopens libharfbuzz
-// (HostServices.rs:228-533), which a static musl executable cannot do, so
+// core.font shaping on the static native runtime: jet_font_shape_raw through
+// the default headless host (:2404-2417), whose jet_font_shape_with_fallback
+// (:927-1006) validates the request and then reaches the HarfBuzz kernel. That
+// kernel dlopens libharfbuzz, which a static musl executable cannot do, so
 // every valid request is the host's CapabilityUnavailable fallback:
 // jet_font_shape_fallback (:188-217). Errors are the host error's Debug text.
 

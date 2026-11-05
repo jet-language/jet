@@ -1,12 +1,10 @@
-// Ports of the registry-row gates from the deleted tests/diagnostics_coverage.rs
-// and tests/marker_registry_coverage.rs (#6096, #5902 C4), run against the Jet
-// registries that replaced the Rust ones.
+// Ports of the registry-row gates from the deleted (#6096, #5902 C4), run
+// against the Jet registries that replaced the Rust ones.
 use {
     registry_coverage_files :: core.files
     jet_foundation.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, DiagnosticRegistryStatus, FOUNDATION_FACT_READ_ROWS, FactRead, MARKER_SOURCE, REGISTRATION_FACT_ROWS, REGISTRATION_TRUTH_ROWS, RegistrationFactTarget, diagnostic_explanation, diagnostic_registry_row, diagnostic_registry_rows, diagnostic_stage_is_registered, fact_read_reflection_kind, lint_code_for_name, lint_name_for_code, lint_registered_lints, marker_source_read]
 }
 
-// tests/diagnostics_coverage.rs:571-589.
 fn registry_coverage_is_snake_case(name: String) -> Bool Never! {
     bytes :: name.bytes()
     if bytes.len() == 0 -> return false
@@ -31,7 +29,6 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
     false
 }
 
-// tests/diagnostics_coverage.rs:514.
 #Test("registered_codes_keep_explicit_severity_and_lint_names") {
     loop expected in [(code: "E2930", severity: DIAGNOSTIC_LINT), (code: "W0410", severity: DIAGNOSTIC_LINT), (code: "R0801", severity: DIAGNOSTIC_ERROR), (code: "E0003", severity: DIAGNOSTIC_ERROR)] {
         row :: diagnostic_registry_row(expected.code) ?? panic("{expected.code} must stay registered")
@@ -43,7 +40,6 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
     }
 }
 
-// tests/diagnostics_coverage.rs:544.
 #Test("semantic_guidance_lints_round_trip_through_the_registry") {
     loop expected in [
         (code: "L0516", name: "message_text"),
@@ -67,7 +63,6 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
     }
 }
 
-// tests/diagnostics_coverage.rs:592.
 #Test("every_registered_lint_has_a_unique_snake_case_name") {
     registered := [String]{}
     loop row in diagnostic_registry_rows() {
@@ -92,7 +87,6 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
     assert_eq(codes.join(" "), registered.join(" "))
 }
 
-// tests/diagnostics_coverage.rs:1723.
 #Test("diagnostics_registry_has_no_duplicate_code_rows") {
     seen := [String]{}
     duplicates := [String]{}
@@ -149,8 +143,8 @@ REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS :: [String]{"E1296", "E1317"}
     }
 }
 
-// tests/diagnostics_coverage.rs:1947 (I4c): `jet explain` resolves every
-// registered row, with the row's own stage and meaning.
+// (I4c): `jet explain` resolves every registered row, with the row's own stage
+// and meaning.
 #Test("every_registered_code_has_explain_page") {
     missing := [String]{}
     loop row in diagnostic_registry_rows() {
@@ -163,8 +157,8 @@ REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS :: [String]{"E1296", "E1317"}
     assert_eq(missing.join("\n"), "")
 }
 
-// tests/marker_registry_coverage.rs:395 (D-MARK-REPEAT1=A): the repeatable
-// column is the only place repetition is decided, and it stays a minority.
+// (D-MARK-REPEAT1=A): the repeatable column is the only place repetition is
+// decided, and it stays a minority.
 #Test("repeatable_rows_are_declared_not_assumed") {
     repeatable := [String]{}
     loop rule in marker_source_read(MARKER_SOURCE) {
@@ -173,10 +167,9 @@ REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS :: [String]{"E1296", "E1317"}
     assert_eq(repeatable.join(" "), "Pre Post Allow")
 }
 
-// tests/marker_registry_coverage.rs:413 (D-META-REG1=A): the registration
-// rows hold every kind: written-code marker rows, value planes, scope rights,
-// build facts, corpus truths and diagnostic rows; each marker row is one
-// declaration with at least one site.
+// (D-META-REG1=A): the registration rows hold every kind: written-code marker
+// rows, value planes, scope rights, build facts, corpus truths and diagnostic
+// rows; each marker row is one declaration with at least one site.
 #Test("the_one_table_holds_every_kind") {
     rules :: marker_source_read(MARKER_SOURCE)
     assert(rules.len() > 0, "the one table holds no Marker row")
@@ -206,9 +199,9 @@ REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS :: [String]{"E1296", "E1317"}
     assert(diagnostic_registry_rows().len() > 0, "the one table holds no Diagnostic row")
 }
 
-// tests/marker_registry_coverage.rs:552 (D-FACT-LAW1=B): every row states which
-// way is safe; a row with no meaningful direction states `none` and has no
-// gate to move it, and a prover-published row is read-only.
+// (D-FACT-LAW1=B): every row states which way is safe; a row with no meaningful
+// direction states `none` and has no gate to move it, and a prover-published
+// row is read-only.
 #Test("every_row_states_the_one_way_law") {
     violations := [String]{}
     loop row in REGISTRATION_FACT_ROWS {
@@ -226,8 +219,8 @@ REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS :: [String]{"E1296", "E1317"}
     assert_eq(violations.join("\n"), "")
 }
 
-// tests/marker_registry_coverage.rs:567 (D-ONCE-LAW1=A): a registered truth
-// names a home that exists and a guard that the named file defines.
+// (D-ONCE-LAW1=A): a registered truth names a home that exists and a guard that
+// the named file defines.
 #Test("every_registered_truth_names_a_home_and_a_guard_that_exist") {
     violations := [String]{}
     loop row in REGISTRATION_TRUTH_ROWS {
@@ -245,8 +238,8 @@ REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS :: [String]{"E1296", "E1317"}
     assert_eq(violations.join("\n"), "")
 }
 
-// tests/marker_registry_coverage.rs:611 (D-FACT-OWN1=A): the ownership prover
-// publishes read-only rows with no plane algebra.
+// (D-FACT-OWN1=A): the ownership prover publishes read-only rows with no plane
+// algebra.
 #Test("a_prover_publishes_read_only_rows") {
     loop name in ["Sendability", "ViewProvenance", "Movedness"] {
         found := false
@@ -261,8 +254,8 @@ REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS :: [String]{"E1296", "E1317"}
     }
 }
 
-// tests/marker_registry_coverage.rs:627: each orphan fact plane has exactly
-// one value-targeted home, and prover state is not a registered plane.
+// Each orphan fact plane has exactly one value-targeted home, and prover state
+// is not a registered plane.
 #Test("orphan_fact_rows_have_one_home") {
     loop name in ["Sendability", "Attribution", "Origin", "ViewProvenance", "UnitScaleProvenance", "Maturity"] {
         homes := 0
@@ -278,13 +271,12 @@ REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS :: [String]{"E1296", "E1317"}
     }
 }
 
-// tests/marker_registry_coverage.rs:465: every registered value plane has one
-// home and a typed FactRead projection that covers it, and the plane's source
-// read reports the same reflection kind as that projection row.
-// Not ported: the Rust `build_registered_fact_info` aggregate check. Jet builds
-// FactInfo only inside comptime evaluation (JetSema Comptime/Reflection.jet
-// `sema_comptime_reflection_fact_info`) from this same reflection string; no
-// standalone builder exists to call from a registry test.
+// Every registered value plane has one home and a typed FactRead projection
+// that covers it, and the plane's source read reports the same reflection kind
+// as that projection row. Not ported: the Rust `build_registered_fact_info`
+// aggregate check. Jet builds FactInfo only inside comptime evaluation (JetSema
+// Comptime/Reflection.jet `sema_comptime_reflection_fact_info`) from this same
+// reflection string; no standalone builder exists to call from a registry test.
 #Test("every_registered_plane_is_reflectable") {
     violations := [String]{}
     planes := 0

@@ -1,5 +1,5 @@
-// Pure foreign body conversion and the shared scalar expression engine.
-// Source/CmdImport.rs; no filesystem, source execution, or guessed adapters.
+// Pure foreign body conversion and the shared scalar expression engine. no
+// filesystem, source execution, or guessed adapters.
 #Error
 struct JetCLIImportBodyError { line: Int, message: String }
 
@@ -584,13 +584,12 @@ fn jet_cli_import_push_piece(output: &[U8], piece: String) Never! {
     loop byte in piece.bytes() -> &output.push(byte)
 }
 
-// Rust `assignment` (CmdImport.rs:3394-3400).
 fn jet_cli_import_assignment(line: String) -> (left: String, right: String)? Never! {
     pair :: jet_cli_import_split_top(line, "=") ?? return None
     if pair.right.starts_with("=") || pair.left.ends_with("!") || pair.left.ends_with("<") || pair.left.ends_with(">") -> return None
     Val((left: pair.left.trim().copy(), right: pair.right.trim().copy()))
 }
-// Rust `indentation` (CmdImport.rs:3432-3434), spaces/tabs only, measured in bytes.
+// Rust `indentation`, spaces/tabs only, measured in bytes.
 fn jet_cli_import_indentation(line: String) -> Int Never! {
     at := 0
     bytes :: line.bytes()

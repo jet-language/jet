@@ -152,10 +152,10 @@ fn sema_call_value_checked_from_type(state: &SemaOwnershipState, callee: Expr, c
     value :: sema_call_with_binder_pins(^pins, ^contracted, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return None
     facts := sema_call_facts(resolved_signature, [Type]{}, resolved_binding) ?? return None
-    // Rust `helpers_call_values.rs`: a call through a function-typed
-    // parameter with no declared effect row contributes no effect; the
-    // callback's effects are the argument's, accounted where it is passed.
-    // Any other unannotated function value stays an unknown callee.
+    // A call through a function-typed parameter with no declared effect row
+    // contributes no effect; the callback's effects are the argument's,
+    // accounted where it is passed. Any other unannotated function value stays
+    // an unknown callee.
     if facts.effect_bound == None && sema_call_value_is_parameter(callee, scopes) -> facts.effect_bound = Val([EffectRowEntry]{})
     return_view_facts :: if sema_call_value_undeclared_view_provenance(callee, resolved_signature, scopes) == {
         .Val(provenance) -> sema_call_return_view_facts(Type.Fn{params: [Type]{}, ret: Val(result_type_raw), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: Val(provenance)}, None, checked_args, resolved_binding, scopes, &state, span, &diagnostics)

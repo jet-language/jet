@@ -1,8 +1,8 @@
-// Source/CmdProve.rs `run_prove` after its front, in the default form
-// (D-JPROOF1=A): the checked front end, the unit-test producer, the canonical
-// ProofReport, its `.jetproof` artifact and record index row, and the human
-// or `--json` output. Capture and replay add their preflight
-// (ProveReplay.jet); lenses, save and unsave are other forms.
+// `run_prove` after its front, in the default form (D-JPROOF1=A): the checked
+// front end, the unit-test producer, the canonical ProofReport, its `.jetproof`
+// artifact and record index row, and the human or `--json` output. Capture and
+// replay add their preflight (ProveReplay.jet); lenses, save and unsave are
+// other forms.
 use {
     cli_files :: core.files
     cli_process :: core.process
@@ -23,7 +23,7 @@ use {
     jet_pkg_model.[ClaimsGrade, WorkspaceDeclarationCache]
 }
 
-// crates/jet-foundation/src/ExitCodes.rs `RUNTIME`: a program stop.
+// `RUNTIME`: a program stop.
 JET_CLI_EXIT_RUNTIME_STOP :: 70
 
 // Bound on one existing `.jetproof` read back for comparison.
@@ -468,8 +468,8 @@ fn jet_cli_prove_triple() -[Env]> String Never! {
     jet_cli_host_triple(cli_sys.arch(), cli_sys.name())
 }
 
-// MIR.rs `MirProgramIdentity::unavailable(..).canonical_json()`: source map
-// ids count members from 1; the identity digest hashes the numeric-id payload.
+// `MirProgramIdentity::unavailable(..).canonical_json()`: source map ids count
+// members from 1; the identity digest hashes the numeric-id payload.
 fn jet_cli_prove_mir_json(digest: String, members: [JetCLIProveMember]) -> String Never! {
     numeric := [String]{}
     quoted := [String]{}
@@ -1333,7 +1333,7 @@ fn jet_cli_prove_contract_json(contract: JetCLIProveContract) -[FS]> String Neve
     "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":\"E3005\",\"context\":[],\"frames\":[],\"message\":{foundation_json_quote(item.message)},\"notes\":{notes},\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{width + 1},\"endLine\":{item.line},\"path\":{foundation_json_quote(item.path)},\"sourceLine\":{shown},\"startColumn\":1,\"startLine\":{item.line}}},\"type\":\"runtime\"}}"
 }
 
-// A property row's `property` object (Rust CmdProve.rs `render_report`).
+// A property row's `property` object.
 fn jet_cli_prove_property_json(run: JetCLIProveProperty, item: JetCLIProveTestItem) -> String Never! {
     trace :: if run.minimized == "" -> "[]" else -> "[{{\"name\":\"minimized_inputs\",\"value\":{foundation_json_quote(run.minimized)}}}]"
     "{{\"caseIndex\":{run.case_index},\"effectiveSeed\":{run.seed},\"generatedCases\":{run.cases},\"shrinkTrace\":{trace},\"source\":{{\"column\":1,\"line\":{if item.line > 1 -> item.line else -> 1},\"path\":{foundation_json_quote(item.path)}}},\"toolchain\":{{\"jet\":{foundation_json_quote(JET_CLI_VERSION)},\"targetTriple\":{foundation_json_quote(jet_cli_prove_triple())}}}}}"

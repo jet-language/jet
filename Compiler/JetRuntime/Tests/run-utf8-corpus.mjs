@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Native pack symbol proof for the UTF-8 validator, then the Rust utf8-corpus.rs
-// acceptance witness. That witness is retired: this runner reports UNCOVERED
-// with cardRequired:true and exits 2 without invoking rustc. The producer must
-// supply this exact tree's freshly emitted Jet object and same-tree runtime pack.
+// Native pack symbol proof for the UTF-8 validator, then the Rust utf8-
+// acceptance witness. That witness is retired: this runner reports UNCOVERED with
+// cardRequired:true and exits 2 without invoking rustc. The producer must supply
+// this exact tree's freshly emitted Jet object and same-tree runtime pack.
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';

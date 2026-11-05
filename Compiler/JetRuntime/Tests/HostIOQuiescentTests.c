@@ -67,8 +67,8 @@ int main(void) {
     pthread_t reader;
     assert(!pthread_create(&reader, NULL, read_once, &attempt));
     await_pipe_read(&attempt, pipe_fd[0]);
-    // Scheduler.rs:2653 confines all three seed counters to Windows IOCP;
-    // Observe.rs:1051-1052 therefore returns true even with this Linux read.
+    // The Rust original confines all three seed counters to Windows IOCP; the
+    // Rust original therefore returns true even with this Linux read.
     assert(jet_rt_observe_io_quiescent());
     assert(write(pipe_fd[1], "Q", 1) == 1);
     assert(!pthread_join(reader, NULL));

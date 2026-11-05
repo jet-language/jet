@@ -823,7 +823,7 @@ fn __route_shape(segments: [__HTTPSegment]) -> String Never! {
 }
 
 // The OpenAPI path of a parsed route: static segments percent-encoded,
-// parameters as `{name}` (HTTPRoute.rs jet_http_route_openapi_path).
+// parameters as `{name}` (jet_http_route_openapi_path).
 fn __route_openapi_path(segments: [__HTTPSegment]) -> String Never! {
     path := "/"
     loop (index, segment) in segments {
@@ -838,8 +838,8 @@ fn __route_openapi_path(segments: [__HTTPSegment]) -> String Never! {
 }
 
 // A registration's checked contract, completed and checked once
-// (HTTPServer.rs jet_http_mux_register): a dynamic pattern's contract
-// (`"pattern":""`) gets its path inputs from the pattern registered.
+// (jet_http_mux_register): a dynamic pattern's contract (`"pattern":""`) gets
+// its path inputs from the pattern registered.
 fn __route_contract(method: String, pattern: String, segments: [__HTTPSegment], contract: String) -> String Never! {
     completed :: if contract.contains("\"pattern\":\"\"") -> __route_complete_contract(method, pattern, segments, contract) else -> contract
     __route_require_contract(method, pattern, completed)
@@ -877,7 +877,6 @@ fn __contract_set(fields: [(key: String, value: Dyn)], name: String, value: Dyn)
     out
 }
 
-// HTTPServer.rs jet_http_route_complete_contract.
 fn __route_complete_contract(method: String, pattern: String, segments: [__HTTPSegment], contract: String) -> String Never! {
     parsed :: json_codec.parse(contract) ?? panic("invalid checked HTTP route descriptor")
     fields := if parsed == {
@@ -933,8 +932,8 @@ fn __route_complete_contract(method: String, pattern: String, segments: [__HTTPS
     json_codec.dump(Dyn.Object(fields)) ?? panic("checked HTTP route descriptor does not render: {err.reason}")
 }
 
-// HTTPServer.rs jet_http_require_route_contract, for a mux route: its
-// responses may be empty at registration; `web.openapi` refuses that later.
+// jet_http_require_route_contract, for a mux route: its responses may be empty
+// at registration; `web.openapi` refuses that later.
 fn __route_require_contract(method: String, pattern: String, contract: String) Never! {
     route :: "route `{method} {pattern}`"
     parsed :: json_codec.parse(contract) ?? panic("E2805: {route} has an invalid checked endpoint contract")

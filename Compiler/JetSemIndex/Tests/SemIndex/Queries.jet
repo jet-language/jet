@@ -1,5 +1,5 @@
-// Pure Rust Types.rs:994–1070 algorithms: genuine typed input records, not a
-// fabricated checked-source producer. Full checked oracles below require S4/C4.
+// Pure algorithms: genuine typed input records, not a fabricated checked-source
+// producer. Full checked oracles below require S4/C4.
 fn semindex_query_test_member(name: String, kind: MemberKind, origin: MemberOrigin, module_path: String, start: Int, identity: String) -> MemberFact Never! {
     MemberFact{owner: "Widget", name: name, identity: identity, kind: kind, origin: origin, signature: "retained", module_path: module_path, span: SourceSpan{start: start, end: start + 1}}
 }
@@ -208,7 +208,7 @@ fn semindex_query_test_index(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[Ca
 
 // Checked integration oracles: these consume real indices opened from the
 // original Rust fixtures. Register through S4/C4 rather than fake snapshots.
-// Rust tests/semindex.rs:1036–1060, original Point.x Int -> Float fixture.
+// Original Point.x Int -> Float fixture.
 fn semindex_test_structural_audit_reports_signature_change(before: SemIndex, after: SemIndex) {
     audit :: before.structural_audit(after)
     assert_eq(audit.added.len(), 0)
@@ -217,8 +217,8 @@ fn semindex_test_structural_audit_reports_signature_change(before: SemIndex, aft
     loop identity in audit.changed { if identity.contains("Point") -> found = true }
     assert(found)
 }
-// Rust tests/semindex.rs:1063–1104, original score(String)->Int changes to
-// score(String,Int)->Float. A signature edit is changed, not added/removed.
+// Original score(String)->Int changes to score(String,Int)->Float. A signature
+// edit is changed, not added/removed.
 fn semindex_test_structural_audit_tracks_callable_signature_changes(before: SemIndex, after: SemIndex) {
     audit :: before.structural_audit(after)
     loop identity in audit.added -> assert(!(identity.starts_with("fn:") && identity.ends_with("::score")))
@@ -227,7 +227,7 @@ fn semindex_test_structural_audit_tracks_callable_signature_changes(before: SemI
     loop identity in audit.changed { if identity.starts_with("fn:") && identity.ends_with("::score") -> found = true }
     assert(found)
 }
-// Rust tests/semindex.rs:1378–1427, original Widget/DrawThing fixture.
+// Original Widget/DrawThing fixture.
 fn semindex_test_dossier_stitches_scattered_members(index: SemIndex) {
     dossier :: index.dossier("Widget")
     signatures := [String]{}
@@ -243,7 +243,7 @@ fn semindex_test_dossier_stitches_scattered_members(index: SemIndex) {
     }
     assert(label && size && render)
 }
-// Rust tests/semindex.rs:1435–1473, original Client.connect fixture.
+// Original Client.connect fixture.
 fn semindex_test_dossier_preserves_method_call_contract(index: SemIndex) {
     dossier :: index.dossier("Client")
     found := false
@@ -257,8 +257,8 @@ fn semindex_test_dossier_preserves_method_call_contract(index: SemIndex) {
     }
     assert(found)
 }
-// Rust tests/semindex.rs:1476–1543, original Invoice/risky_fn/fetch_it fixture.
-// JSON/text consumer assertions1545–1551 need S17–S20, not copied wire strings.
+// Original Invoice/risky_fn/fetch_it fixture. JSON/text consumer
+// assertions1545–1551 need S17–S20, not copied wire strings.
 fn semindex_test_dossier_bypass_facts(index: SemIndex) {
     dossier :: index.dossier("run")
     kinds := [String]{}

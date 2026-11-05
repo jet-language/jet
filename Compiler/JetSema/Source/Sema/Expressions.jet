@@ -590,8 +590,8 @@ fn sema_expr_operator_resolution(op: BinOp, lhs: Type, rhs: Type, span: Span, en
     None
 }
 
-// Rust CheckerInfer/binary.rs:1820-1826: `<` is `== Less`, `<=` is
-// `!= Greater`, `>` is `== Greater`, `>=` is `!= Less`; `==`/`!=` test Equal.
+// `<` is `== Less`, `<=` is `!= Greater`, `>` is `== Greater`, `>=` is `!=
+// Less`; `==`/`!=` test Equal.
 fn sema_expr_operator_ordering_variant(op: BinOp) -> String Never! {
     if op == BinOp.Lt || op == BinOp.Ge -> return "Less"
     if op == BinOp.Gt || op == BinOp.Le -> return "Greater"
@@ -629,9 +629,9 @@ fn sema_expr_check_operator(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs:
         }
     }
     resolved :: resolution ?? return None
-    // E0361 (Rust binary.rs operator hooks and relational chains): inside the
-    // hook itself, the operator on a value of the hook's own receiver type
-    // dispatches back to the same hook.
+    // E0361 (operator hooks and relational chains): inside the hook itself, the
+    // operator on a value of the hook's own receiver type dispatches back to
+    // the same hook.
     relational :: op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge
     hook_method :: sema_expr_operator_method(op) ?? ""
     if (relational || op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && environment.function_name == hook_method {
@@ -930,8 +930,8 @@ fn sema_expr_binary_type(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostic
             &diagnostics.push(sema_error("E0109", span, "both sides of this comparison must have the same type", "equality compares values of one type", "convert one side or compare values with matching types"))
             return None
         }
-        // Rust `infer_binary` Eq/Ne (binary.rs:2736 @ 6083377777): float `==`
-        // is almost always a bug (D-SMELLLINT1, L0502).
+        // Rust `infer_binary` Eq/Ne: float `==` is almost always a bug
+        // (D-SMELLLINT1, L0502).
         if lhs == Type.Float || lhs == Type.Float32 -> &diagnostics.push(sema_lint("L0502", span, "Comparing floats with `{sema_expr_binary_name(op)}` is unreliable", "Floating-point arithmetic is inexact; two values computed differently may not be bit-identical even when mathematically equal", "Compare within a tolerance: `(a - b).abs() < 1e-9`"))
         if (lhs == Type.Int || lhs == Type.Float || lhs == Type.Float32 || lhs == Type.Bool || lhs == Type.String || lhs == Type.Char) || sema_expr_is_integer(lhs) || sema_expr_precise_name(lhs) != None -> return Val(Type.Bool)
         return None
@@ -2402,11 +2402,10 @@ fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?,
     sema_expr_expected(bounded, expected, environment, program, &diagnostics)
 }
 
-// Rust CheckerInfer/expr.rs interpolation check: each numeric or text
-// selector names the one value family its Core/Text/Fmt.jet formatter takes,
-// and any other value is E0112 at the interpolated value. Every integer
-// width meets the integer formatters as an exact `Int`, and padding takes a
-// scalar's Display text.
+// Interpolation check: each numeric or text selector names the one value family
+// its Core/Text/Fmt.jet formatter takes, and any other value is E0112 at the
+// interpolated value. Every integer width meets the integer formatters as an
+// exact `Int`, and padding takes a scalar's Display text.
 fn sema_expr_check_format_selector(checked: TExpr, format: StrFormat, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     ty :: checked.ty
     shown :: sema_type_show(ty)
@@ -2655,8 +2654,8 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
     true
 }
 
-// Rust `direct_calls.rs` an extern callee (`#FFI(<lang>)` body or
-// foreign row) carries its one foreign effect root; a Jet callee has none.
+// An extern callee (`#FFI(<lang>)` body or foreign row) carries its one foreign
+// effect root; a Jet callee has none.
 fn sema_expr_call_foreign_effect_root(program: SemaProgramTables, callee: SymbolID?) -> String? {
     symbol :: callee ?? return None
     if program.registration_graph == .Val(graph) {
@@ -3018,9 +3017,9 @@ fn sema_expr_number_type_argument_text(expr: Expr) -> String Never! {
     }
 }
 
-// Rust direct_calls.rs:2354-2375 then :2815: after a type-argument count
-// mismatch (E0119) the arguments are still checked, against the callee's
-// declared parameter types with its type parameters unbound (E0112).
+// then: after a type-argument count mismatch (E0119) the arguments are still
+// checked, against the callee's declared parameter types with its type
+// parameters unbound (E0112).
 fn sema_expr_check_mismatched_type_arg_call(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     signature :: sema_call_direct_type_arg_mismatch_signature(call.name, call.type_args, environment, program, scopes) ?? return
     params :: sema_call_params_from_type(signature) ?? return
@@ -3195,7 +3194,7 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
 
 fn sema_expr_check_take_pattern_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if method != "take_pattern" || (receiver_value.ty != Type.Named{name: "Cursor"} && receiver_value.ty != Type.Named{name: "Reader"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    // Rust method_calls.rs resolves `take_pattern` beside `Arena.alloc` with no
+    // The Rust original resolves `take_pattern` beside `Arena.alloc` with no
     // receiver gate: the cursor's position is runtime-owned handle state, so
     // the unmarked receiver of a `::` Cursor or Reader binding is read here.
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
@@ -3353,9 +3352,9 @@ fn sema_expr_core_module_method_checked(receiver: Expr, method: String, method_s
     if route_value == {
         .SharedSite(lifetime) -> return SemaMethodSpecialCheck{handled: true, value: sema_call_core_global_shared(lifetime, method, type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
         .Source(target) -> {
-            // Rust core_call.rs ("core.mem", "volatile_read" | "volatile_write"):
-            // an audited `core.mem` operation outside `#Unsafe` is E3101 at the
-            // call, before its arguments are checked.
+            // ("core.mem", "volatile_read" | "volatile_write"): an audited
+            // `core.mem` operation outside `#Unsafe` is E3101 at the call, before
+            // its arguments are checked.
             if module_name == "core.mem" && (method == "volatile_read" || method == "volatile_write") {
                 _ :: sema_expr_require_unsafe(method, method_span, &context, &diagnostics)
             }
@@ -3763,9 +3762,9 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if !exempt_view_receiver && method != "starts_with" && method != "ends_with" && method != "contains" && sema_string_view_owning_read(receiver, Type.String, scopes) && receiver == .Ident(view_name, view_span, _) {
         receiver_checked = sema_string_view_materialize(view_name, view_span, None, environment, program, &scopes, &state, &context, &diagnostics)
     } else {
-        // Rust `allocator_view_preserving_receiver` (method_calls.rs): `alloc`
-        // and `reset` on an allocator name run no owner read on it, or a live
-        // arena view would be E0220 before `reset` can invalidate it.
+        // Rust `allocator_view_preserving_receiver`: `alloc` and `reset` on an
+        // allocator name run no owner read on it, or a live arena view would be
+        // E0220 before `reset` can invalidate it.
         previous_root_read :: context.suppress_partial_move_root_read
         if sema_expr_allocator_view_receiver(receiver, method, environment, scopes) -> context.suppress_partial_move_root_read = true
         receiver_checked = sema_check_expression(receiver, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3776,9 +3775,9 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     receiver_value :: receiver_checked ?? return None
     if method == "text" -> sema_expr_lint_default_body_text(receiver, receiver_value.ty, args, scopes, &diagnostics)
     if method == "replace" -> sema_expr_lint_fixed_cleanup(receiver, receiver_value.ty, args, method_span, &diagnostics)
-    // `.call(...)` on a function-typed receiver is the builtin
-    // call projection, checked exactly like calling the value directly
-    // (mirrors Rust CheckerInfer/calls/method_calls.rs METHOD_CALL on Type::Fn).
+    // `.call(...)` on a function-typed receiver is the builtin call projection,
+    // checked exactly like calling the value directly (mirrors METHOD_CALL on
+    // Type::Fn).
     receiver_signature :: sema_call_resolved_type(receiver_value.ty, environment, program)
     if method == "call" && sema_call_type_is_function(receiver_signature) {
         call_end := method_span.end
@@ -4060,10 +4059,9 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
                 context.allow_string_view_read = previous_string_view_read
                 checked :: checked_value ?? return None
                 if format == StrFormat.Display && !sema_expression_interpolation_display(checked, environment, program, &scopes, &diagnostics) -> return None
-                // Rust interpolation check (CheckerInfer/expr.rs:3985-4126): bare
-                // Display uses the relation above and the Debug family uses
-                // `is_debuggable`; only the numeric and text selectors use the
-                // primitive table.
+                // Rust interpolation check: bare Display uses the relation above
+                // and the Debug family uses `is_debuggable`; only the numeric and
+                // text selectors use the primitive table.
                 debug_family :: format == StrFormat.Debug || format == StrFormat.Pretty
                 if debug_family && !sema_call_debug_traceable(checked.ty, environment, program) {
                     selector :: if format == StrFormat.Debug -> "Debug" else -> "Pretty"
@@ -4214,9 +4212,9 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
             else -> {}
         }
         if !sema_expr_is_numeric(value.ty) {
-            // Rust CheckerInfer/expr.rs UnOp::Neg: no user or Core type has a
-            // negation hook (Duration has `.negated()`), so every other operand
-            // is this report, never an unreported incomplete check.
+            // UnOp::Neg: no user or Core type has a negation hook (Duration has
+            // `.negated()`), so every other operand is this report, never an
+            // unreported incomplete check.
             &diagnostics.push(sema_error("E0109", span, "`-` needs a number, but this is {sema_type_show(value.ty)}", "only Int and Float values can be negated", "use a number here"))
             return None
         }
@@ -4657,7 +4655,7 @@ fn sema_expr_lint_ident(expr: Expr) -> String Never! {
     ""
 }
 
-// Rust `simple_text_operand` (binary.rs): a bare name, looking through parentheses.
+// Rust `simple_text_operand`: a bare name, looking through parentheses.
 fn sema_expr_simple_text_operand(expr: Expr) -> String Never! {
     if expr == {
         .Paren(inner, _, _) -> return sema_expr_simple_text_operand(inner)
@@ -4666,7 +4664,7 @@ fn sema_expr_simple_text_operand(expr: Expr) -> String Never! {
     }
 }
 
-// Rust binary.rs:2619: text joined with `+` teaches interpolation (S8).
+// Text joined with `+` teaches interpolation (S8).
 fn sema_expr_text_plus(left: Expr, right: Expr, span: Span) -> Diagnostic {
     left_name :: sema_expr_simple_text_operand(left)
     right_name :: sema_expr_simple_text_operand(right)
@@ -4850,7 +4848,7 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     if op == BinOp.And || op == BinOp.Or {
-        // Rust binary.rs:1207-1246: each side of `||`/`&&` is reported at its own span (D-S25-RETIRE1=A).
+        // Each side of `||`/`&&` is reported at its own span (D-S25-RETIRE1=A).
         if lhs.ty != Type.Bool -> &diagnostics.push(sema_error("E0110", lhs.span, "the left side of `{sema_expr_binary_name(op)}` must be {sema_type_show(Type.Bool)}, but this is {sema_type_show(lhs.ty)}", "logic joins yes/no values", "compare the value to something first"))
         if rhs.ty != Type.Bool -> &diagnostics.push(sema_error("E0110", rhs.span, "the right side of `{sema_expr_binary_name(op)}` must be {sema_type_show(Type.Bool)}, but this is {sema_type_show(rhs.ty)}", "each side of a logic operator must be a yes/no comparison", "write the full comparison, e.g. `x == 2`"))
         if lhs.ty != Type.Bool || rhs.ty != Type.Bool -> return None
@@ -4982,9 +4980,9 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
     geometry := sema_expr_check_geometry_binary(op, lhs, rhs, span, line, &diagnostics)
     if geometry != None -> return sema_expr_expected(geometry ?? lhs, expected, environment, program, &diagnostics)
     if geometry_present -> return None
-    // Rust binary.rs operator hooks: a same-typed exact number that implements
-    // `Comparable` (`Decimal`, `Fraction`) orders through its `compare` method;
-    // the arithmetic and equality operators stay on the precise route below.
+    // Operator hooks: a same-typed exact number that implements `Comparable`
+    // (`Decimal`, `Fraction`) orders through its `compare` method; the
+    // arithmetic and equality operators stay on the precise route below.
     if sema_expr_precise_orders_by_compare(op, lhs.ty, rhs.ty) {
         argument :: CallArg{convention: AccessConvention.Read, expr: right, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
         call :: Expr.MethodCall{receiver: left, method: "compare", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}
@@ -5015,9 +5013,8 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
         return sema_expr_expected(compared, expected, environment, program, &diagnostics)
     }
     if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && (sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty)) {
-        // Rust binary.rs: only a named left operand owns a missing hook
-        // (E0360); a built-in left operand (`2 - debt`) has no rule for the
-        // pair (E0109).
+        // Only a named left operand owns a missing hook (E0360); a built-in
+        // left operand (`2 - debt`) has no rule for the pair (E0109).
         if lhs.ty == {
             .Named(_) -> &diagnostics.push(sema_expr_missing_operator_hook(op, lhs.ty, span))
             else -> &diagnostics.push(sema_expr_op_mismatch(op, lhs.ty, rhs.ty, span))
@@ -5285,10 +5282,10 @@ fn sema_expr_has_literal_hook(environment: SemaScopeEnvironment, program: SemaPr
     false
 }
 
-// Rust CheckerInfer/expr.rs: an unconstrained goal continues as Int, but
-// its goal row's card still says "(unknown)". Consumers read the function's
-// checked goal rows, never infer a type from the source spelling. `line` is
-// the goal's source line, which its E3011 stop names.
+// An unconstrained goal continues as Int, but its goal row's card still says
+// "(unknown)". Consumers read the function's checked goal rows, never infer a
+// type from the source spelling. `line` is the goal's source line, which its
+// E3011 stop names.
 fn sema_expression_todo(expected: Type?, span: Span, line: Int, context: &SemaCheckContext) -> TExpr? Never! {
     card :: if expected == .Val(ty) -> type_name(ty) else -> "(unknown)"
     &context.typed_goals.push(TTypedGoal{span: span, expected: card})
@@ -5496,10 +5493,10 @@ fn sema_expr_check_list_literal(elements: [Expr], span: Span, expected: Type?, e
     checked
 }
 
-// L0523 (Rust CheckerInfer/expr.rs repeated_struct_list_edit): two or more
-// elements that each spell the same struct head (`[Point{…}, Point{…}]`,
-// parsed as typed literals with field bodies, or `alias.Type{…}`).
-// The head named in the message is the written one.
+// L0523 (repeated_struct_list_edit): two or more elements that each spell the
+// same struct head (`[Point{…}, Point{…}]`, parsed as typed literals with field
+// bodies, or `alias.Type{…}`). The head named in the message is the written
+// one.
 fn sema_expr_repeated_list_head(elements: [Expr]) -> String? Never! {
     if elements.len() < 2 -> return None
     head := ""

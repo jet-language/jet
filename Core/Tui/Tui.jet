@@ -85,7 +85,7 @@ fn capabilities() -> TUICapabilities Never! {
     capabilities_from_inputs(capability_inputs())
 }
 
-// Ui.rs:499-543 samples host facts. Runtime leaves do not choose a
+// The Rust original samples host facts. Runtime leaves do not choose a
 // presentation profile, parse dimensions, or apply the NO_COLOR override.
 struct TUICapabilityInputs {
     columns: String?
@@ -134,12 +134,12 @@ fn capability_stdout_terminal() -> Bool Never! {
 }
 
 fn capability_inputs() -> TUICapabilityInputs Never! {
-    // env::var: invalid UTF-8 is absent (Ui.rs:500,516-519).
+    // env::var: invalid UTF-8 is absent.
     columns :: capability_env_text("COLUMNS")
     lines :: capability_env_text("LINES")
     term :: capability_env_text("TERM")
     color_term :: capability_env_text("COLORTERM")
-    // env::var_os: presence and raw != "0" (Ui.rs:508,520,534-535).
+    // env::var_os: presence and raw != "0".
     ascii :: capability_env_flag("JET_TUI_ASCII")
     forced :: capability_env_flag("FORCE_COLOR")
     no_color :: capability_env_bytes("NO_COLOR") != None

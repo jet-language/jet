@@ -300,10 +300,9 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
     I64{1}
 }
 
-// FSIoEnvOsTesting.rs jet_std_io_args: std::env::args().collect(), argv[0]
-// first, through the generated list-out ABI (an exact count*8 buffer of owned
-// Text words, 0 when empty). Args::next unwraps into_string, so a non-UTF-8
-// argument panics.
+// jet_std_io_args: std::env::args().collect(), argv[0] first, through the
+// generated list-out ABI (an exact count*8 buffer of owned Text words, 0 when
+// empty). Args::next unwraps into_string, so a non-UTF-8 argument panics.
 #Export(c) fn jet_std_io_args(output: I64) -> I64 {
     host_arguments_require()
     count :: host_argc

@@ -1,17 +1,15 @@
-// Rust: Source/LSP/Features.rs:664–973. Explicit-value checked migration.
+// Explicit-value checked migration.
 use {
     jet_foundation.[Span]
     jet_lexer.[Token, lex, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_LBRACE, TOKEN_RBRACE]
     jet_semindex.[SymbolDB, SourceSpan]
 }
 
-// Rust: Source/LSP/Features.rs:665
 struct SignatureChangeEdit {
     path: String
     span: Span
     new_text: String
 }
-// Rust: Source/LSP/Features.rs:672
 struct SignatureChangeCaller {
     identity: String
     path: String
@@ -19,7 +17,6 @@ struct SignatureChangeCaller {
     value: String?
     status: String
 }
-// Rust: Source/LSP/Features.rs:680
 struct SignatureChangePreview {
     identity: String
     qualified_name: String
@@ -31,7 +28,6 @@ struct SignatureChangePreview {
     unknown: [String]
     edits: [SignatureChangeEdit]
 
-    // Rust: Source/LSP/Features.rs:693
     fn can_apply(self) -> Bool Never! {
         if !self.unknown.is_empty() || self.edits.is_empty() -> return false
         loop caller in self.callers { if caller.value == None -> return false }
@@ -47,7 +43,6 @@ struct LSPSignatureCallSpan {
     end: Int
 }
 
-// Rust: Source/LSP/Features.rs:708
 fn lsp_compute_signature_change_preview(db: SymbolDB, sources: [String:String], identity: String, parameter_name: String, parameter_type: String, caller_values: [String:String]) -> SignatureChangePreview Err! {
     if !is_valid_ident(parameter_name) -> return Err("`{parameter_name}` is not a valid parameter identifier") // 0737 Rust name pending.
     type_text := parameter_type.trim() // #4303
@@ -155,7 +150,6 @@ fn lsp_compute_signature_change_preview(db: SymbolDB, sources: [String:String], 
     Ok(preview)
 }
 
-// Rust: Source/LSP/Features.rs:935
 fn lsp_next_paren(tokens: [Token], from: Int) -> Int? Never! {
     loop index in from.saturating_add(1)..<tokens.len() {
         if tokens[index].kind == TOKEN_LPAREN -> return Val(index)
@@ -163,7 +157,6 @@ fn lsp_next_paren(tokens: [Token], from: Int) -> Int? Never! {
     None
 }
 
-// Rust: Source/LSP/Features.rs:943
 fn lsp_matching_paren(tokens: [Token], open: Int) -> Int? Never! {
     depth := 0
     loop index in open..<tokens.len() {
@@ -178,7 +171,6 @@ fn lsp_matching_paren(tokens: [Token], open: Int) -> Int? Never! {
     None
 }
 
-// Rust: Source/LSP/Features.rs:960
 fn lsp_call_open(tokens: [Token], call_span: SourceSpan) -> Int? Never! {
     callee := Int?{None}
     loop (index, token) in tokens {

@@ -1,8 +1,8 @@
-// Source/CmdPkg.rs: package dependency commands share the existing checked
-// Package carrier, source editor, Foundation publisher and Publication fetch.
-// The front owns root discovery and the distinct script-lock/toolchain routes.
-// Success is plain stdout even in machine mode; source-owned parse/fetch errors
-// remain direct, uncolored diagnostics, unlike spanless CLI input/IO errors.
+// Package dependency commands share the existing checked Package carrier,
+// source editor, Foundation publisher and Publication fetch. The front owns
+// root discovery and the distinct script-lock/toolchain routes. Success is
+// plain stdout even in machine mode; source-owned parse/fetch errors remain
+// direct, uncolored diagnostics, unlike spanless CLI input/IO errors.
 use {
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput]
     jet_pkg_model.[
@@ -44,8 +44,8 @@ fn jet_cli_dependency_source_error(path: String, raw: String, report: Diagnostic
     JetCLIDependencyError{output: JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(path, raw, [Diagnostic]{report}, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
 }
 
-// main.rs flag_value accepts only the separate-token spelling and returns the
-// next token verbatim, even a flag. Keep this distinct from frontend options.
+// flag_value accepts only the separate-token spelling and returns the next
+// token verbatim, even a flag. Keep this distinct from frontend options.
 fn jet_cli_dependency_flag(raw: [String], flag: String) -> String? Never! {
     loop (index, word) in raw {
         if word == flag -> return raw.get(index + 1)

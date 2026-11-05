@@ -1,25 +1,22 @@
-// core.files raw leaves. Rust providers: Core/FSWalk8Raw.rs:132-256 (the
-// source-DFS entry identities), CoreLib/JetStd/FileHandles.rs:703-1073 (path
-// kind, held-directory link text, extended attributes), CoreLib/Top/
-// FSRuntimeOps.rs:126-369 (temp dir/file paths, chown), Text.rs:1813-1830
-// (create_dir_all, remove_dir) and FSWriteOps.rs:171 (write_at). Core owns
-// the fault checkpoints and policy; each leaf does the one host step with
-// io_error_at's mapping (compiler_fs_errno) and std's CString refusal.
+// core.files raw leaves. Rust providers: (the source-DFS entry identities),
+// (path kind, held-directory link text, extended attributes), CoreLib/Top/
+// (temp dir/file paths, chown), (create_dir_all, remove_dir):171 (write_at).
+// Core owns the fault checkpoints and policy; each leaf does the one host step
+// with io_error_at's mapping (compiler_fs_errno) and std's CString refusal.
 
 // ---------------------------------------------------------------------------
-// Source-DFS entries (FSWalk8Raw.rs:132-256). One process table of monotonic
-// keys (from 1, never reused) to shared contexts; every operation retains its
-// context from the table before taking the context lock, so a close drops
-// only the table's reference. A key that is not live panics "live entries
-// context", a released slot "live entry slot".
-// Root24: mutex @0, next key @8, list head @16. Node24: next @0, key @8,
-// context (the table's reference) @16.
-// Context64: lock @0, slot words @8, count @16, capacity @24, free indexes
-// @32, free count @40, free capacity @48, references @56.
-// Slot64: live @0, owned path bytes @8 (length+1, NUL-terminated) / length
-// @16, owned destination bytes or 0 @24 / length @32, name length @40 (-1:
-// no name; the name is the path's suffix), retained d_type @48 (-1: no
-// DirEntry), directory stream (FilesWalk Stream40) or 0 @56.
+// Source-DFS entries. One process table of monotonic keys (from 1, never
+// reused) to shared contexts; every operation retains its context from the
+// table before taking the context lock, so a close drops only the table's
+// reference. A key that is not live panics "live entries context", a released
+// slot "live entry slot". Root24: mutex @0, next key @8, list head @16. Node24:
+// next @0, key @8, context (the table's reference) @16. Context64: lock @0,
+// slot words @8, count @16, capacity @24, free indexes @32, free count @40,
+// free capacity @48, references @56. Slot64: live @0, owned path bytes @8
+// (length+1, NUL-terminated) / length @16, owned destination bytes or 0 @24 /
+// length @32, name length @40 (-1: no name; the name is the path's suffix),
+// retained d_type @48 (-1: no DirEntry), directory stream (FilesWalk Stream40)
+// or 0 @56.
 ENTRIES_CONTEXT_BYTES :: I64{64}
 ENTRIES_SLOT_BYTES :: I64{64}
 ENTRIES_NUL :: I64{-5000}
@@ -115,9 +112,9 @@ fn entries_slot_take(context: I64) -> I64 {
     count
 }
 
-// FSWalk8Raw.rs:168 jet_entries8_error: Unsupported (EOPNOTSUPP, or the
-// ENOSYS kind) 7, AlreadyExists 6, else jet_walk8_error's kind; the raw OS
-// code; the Display text.
+// jet_entries8_error: Unsupported (EOPNOTSUPP, or the ENOSYS kind) 7,
+// AlreadyExists 6, else jet_walk8_error's kind; the raw OS code; the Display
+// text.
 fn entries_errno_kind(code: I64) -> I64 {
     if (code == I64{95} || code == I64{38}) -> return I64{7}
     if (code == I64{17}) -> return I64{6}
@@ -423,9 +420,9 @@ fn entries_destination_text(context: I64, slot: I64) -> I64 {
     result
 }
 
-// ---------------------------------------------------------------------------
-// FileHandles.rs:703: symlink_metadata classification, 0 file, 1 dir,
-// 2 link, 7 other; failures are io_error_at(Read, path).
+// ---------------------------------------------------------------------------:
+// symlink_metadata classification, 0 file, 1 dir, 2 link, 7 other; failures are
+// io_error_at(Read, path).
 #Export(c) fn jet_fs_path_kind(path: I64, ok: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
     mode :: files_lstat_mode(path)
@@ -441,9 +438,8 @@ fn entries_destination_text(context: I64, slot: I64) -> I64 {
     I64{1}
 }
 
-// FileHandles.rs:894: readlinkat of the final part inside the held
-// directory (256 bytes, doubled until the text fits); non-UTF-8 link text is
-// InvalidInput.
+// Readlinkat of the final part inside the held directory (256 bytes, doubled
+// until the text fits); non-UTF-8 link text is InvalidInput.
 #Export(c) fn jet_fs_read_link_at(handle: I64, name: I64, ok: I64, error: I64) -> I64 {
     key :: host_native_int(handle)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -514,8 +510,8 @@ fn files_name_valid(text: I64, operation: I64, shown: I64, error: I64) -> Bool {
     true
 }
 
-// FileHandles.rs:930: llistxattr sized first (ERANGE resizes again),
-// ENOTSUP lists nothing; nonempty names, UTF-8 checked, sorted.
+// Llistxattr sized first (ERANGE resizes again), ENOTSUP lists nothing;
+// nonempty names, UTF-8 checked, sorted.
 #Export(c) fn jet_fs_xattr_names(path: I64, ok: I64, ok_len: I64, error: I64) -> I64 {
     if !files_name_valid(path, HOST_IO_OP_READ, path, error) -> return I64{0}
     name :: fd_c_path(path)
@@ -589,10 +585,9 @@ fn files_name_valid(text: I64, operation: I64, shown: I64, error: I64) -> Bool {
     I64{1}
 }
 
-// FileHandles.rs:994: lgetxattr on the path itself, sized first (ERANGE
-// sizes again). Option<[U8]> through some, data, length: None when the
-// attribute is absent (ENODATA), or, at sizing, when the file system has no
-// attributes (ENOTSUP).
+// Lgetxattr on the path itself, sized first (ERANGE sizes again). Option<[U8]>
+// through some, data, length: None when the attribute is absent (ENODATA), or,
+// at sizing, when the file system has no attributes (ENOTSUP).
 #Export(c) fn jet_fs_xattr_get(path: I64, attribute: I64, some: I64, data: I64, length: I64, error: I64) -> I64 {
     if !files_name_valid(path, HOST_IO_OP_READ, path, error) -> return I64{0}
     if !files_name_valid(attribute, HOST_IO_OP_READ, path, error) -> return I64{0}
@@ -668,7 +663,7 @@ fn files_texts_sort(data: I64, count: I64) {
     }
 }
 
-// FileHandles.rs:1049: lsetxattr(path, name, value, flags 0).
+// lsetxattr(path, name, value, flags 0).
 #Export(c) fn jet_fs_xattr_set(path: I64, name: I64, data: I64, length: I64, error: I64) -> I64 {
     if !files_name_valid(path, HOST_IO_OP_WRITE, path, error) -> return I64{0}
     if !files_name_valid(name, HOST_IO_OP_WRITE, path, error) -> return I64{0}
@@ -685,7 +680,7 @@ fn files_texts_sort(data: I64, count: I64) {
     I64{1}
 }
 
-// FSRuntimeOps.rs:126: create_dir(path) (mode 0777), then the path itself.
+// create_dir(path) (mode 0777), then the path itself.
 #Export(c) fn jet_std_fs_temp_dir_path_raw(path: I64, ok: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
     name :: fd_c_path(path)
@@ -696,11 +691,10 @@ fn files_texts_sort(data: I64, count: I64) {
     I64{1}
 }
 
-// FSRuntimeOps.rs:144/182: OpenOptions create_new(true).write(true)
 // (O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0666, EINTR retried), closed at once,
-// then FileHandleOwners.rs JetTempFileOwner: TempFile16 = shared refs @0,
-// owned path E4 @8. Clones share the Rc-like owner; the last owner's drop
-// runs remove_file(path) and ignores its result.
+// then JetTempFileOwner: TempFile16 = shared refs @0, owned path E4 @8. Clones
+// share the Rc-like owner; the last owner's drop runs remove_file(path) and
+// ignores its result.
 #Export(c) fn jet_std_fs_temp_file_raw(path: I64, ok: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
     name :: fd_c_path(path)
@@ -734,9 +728,8 @@ fn files_texts_sort(data: I64, count: I64) {
 // Out is a borrowed read/clone-only stack Text header.
 #Export(c) fn jet_rt_handle_field_jet_temp_file_owner_path(owner: I64, out: I64) { coll_copy(rt_text_word(wrapping(owner + I64{8})), out, I64{24}) }
 
-// FSRuntimeOps.rs:316 (unix): -1 keeps an id, other ids must be u32; the
-// range refusals precede the CString refusal; chown(2) failures are
-// io_error_at(Write, path).
+// (unix): -1 keeps an id, other ids must be u32; the range refusals precede the
+// CString refusal; chown(2) failures are io_error_at(Write, path).
 #Export(c) fn jet_std_fs_chown_raw(path: I64, owner: I64, group: I64, error: I64) -> I64 {
     uid :: jet_int_owned_to_i64(owner)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -758,10 +751,9 @@ fn files_texts_sort(data: I64, count: I64) {
     I64{1}
 }
 
-// Text.rs:1813: std::fs::create_dir_all, the shared create_dirs leaf.
+// std::fs::create_dir_all, the shared create_dirs leaf.
 #Export(c) fn jet_std_fs_create_dir_all_raw(path: I64, error: I64) -> I64 { jet_files_create_dirs_os(path, error) }
 
-// Text.rs:1828: std::fs::remove_dir (rmdir).
 #Export(c) fn jet_std_fs_remove_dir_raw(path: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
     name :: fd_c_path(path)
@@ -771,7 +763,7 @@ fn files_texts_sort(data: I64, count: I64) {
     I64{1}
 }
 
-// FSWriteOps.rs:171: OpenOptions create(true).write(true) (O_WRONLY|O_CREAT|
+// OpenOptions create(true).write(true) (O_WRONLY|O_CREAT|
 // O_CLOEXEC, 0666), seek(Start(offset as u64)), write_all; every failure is
 // io_error_at(Write, path).
 #Export(c) fn jet_files_write_at_os(path: I64, offset: I64, data: I64, length: I64, error: I64) -> I64 {

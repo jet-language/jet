@@ -1,12 +1,12 @@
-// . One World-lifetime state, shared by controlled descendants.
-// World128: refs0 mutex8 condSeq16 monotonicNs24 wallOriginMs32 rng40
-// nextSequence48 live56 runnable64 budget72 timers List<I64>@80 (triples
-// deadlineNs, sequence, OWNED ParkSlot), history List<owned E4>@104.
-// TCB104 borrows active World;112 flags (active1/waiting2);120 owns parked slot.
-// Task edges never reset clocks, RNG, timers, history or the execution budget.
-// Ordering reference: Scheduler.rs:820-865 releases one due timer then waits
-// idle; :930-950 finishes waiting tasks before provider/world restoration;
-// :1073-1079/:1108-1120 restore provider first, then the previous World.
+// One World-lifetime state, shared by controlled descendants. World128: refs0
+// mutex8 condSeq16 monotonicNs24 wallOriginMs32 rng40 nextSequence48 live56
+// runnable64 budget72 timers List<I64>@80 (triples deadlineNs, sequence, OWNED
+// ParkSlot), history List<owned E4>@104. TCB104 borrows active World;112 flags
+// (active1/waiting2);120 owns parked slot. Task edges never reset clocks, RNG,
+// timers, history or the execution budget. Ordering reference (the Rust
+// scheduler): it releases one due timer then waits idle, finishes waiting tasks
+// before provider/world restoration, and restores provider first, then the
+// previous World.
 
 fn world_require(world: I64) {
     if (world == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})

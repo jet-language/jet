@@ -230,7 +230,7 @@ fn sema_call_arity_diagnostic(callee: String, expected: Int, actual: Int, variad
     }
 }
 
-// Rust `CheckerCoreLib/serde_diags.rs:715`: a Core method's arity names the call, not a user definition.
+// A Core method's arity names the call, not a user definition.
 fn sema_call_core_arity_diagnostic(callee: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
     sema_error("E0104", span, "`{callee}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a standard library function parameter", "check the call to `{callee}`")
 }
@@ -546,13 +546,13 @@ fn sema_call_binding_slot(binding: SemaCallBinding, source_index: Int, arg: Call
     if source_index >= 0 && source_index < binding.slots.len() -> binding.slots[source_index] else -> -1
 }
 
-// Rust `bare_arg_name` (direct_calls.rs), `check_callable_argument_ownership`,
-// and the cross-file call check (imports.rs): an unmarked argument is an
-// implicit clone (owning parameter) or a missing write-access marker (write
-// parameter) only when it is a bare name. Any other unmarked argument (a call
-// result, literal, field, or other temporary) passes: an owning parameter
-// takes it as a move and a write parameter edits it in place. The move marker
-// `^` on a read or write parameter is always rejected.
+// Rust `bare_arg_name`, `check_callable_argument_ownership`, and the cross-file
+// call check: an unmarked argument is an implicit clone (owning parameter) or a
+// missing write-access marker (write parameter) only when it is a bare name.
+// Any other unmarked argument (a call result, literal, field, or other
+// temporary) passes: an owning parameter takes it as a move and a write
+// parameter edits it in place. The move marker `^` on a read or write parameter
+// is always rejected.
 fn sema_call_argument_convention(param: SemaCallParam, arg: CallArg) -> SemaCallConventionDecision Never! {
     if {
         arg.convention == AccessConvention.Move && param.convention != AccessConvention.Move -> SemaCallConventionDecision.RejectsMove

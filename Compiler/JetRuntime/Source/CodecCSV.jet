@@ -1,11 +1,10 @@
-// Typed CSV kernel with a checked native Decode callback (CAbiRoutes.rs
-// jet_rt_codec_csv). Records come from CsvKernel.rs:77-376 parse with the
-// whole-value options (comma, no header skip, blank records kept); rows are
-// EncodingTypes.rs:120-165 jet_enc_csv_decode_rows: the first record names
-// the fields, every later record decodes as an object of Text cells (missing
-// cells are empty, extra cells ignored) inside the text-cell scope
-// (EncodingTraits.rs:741-742), and each failed row's errors are framed under
-// `row N`. Word lists are [len, cap, data] of 8-byte words.
+// Typed CSV kernel with a checked native Decode callback (jet_rt_codec_csv).
+// Records come:77-376 parse with the whole-value options (comma, no header
+// skip, blank records kept); rows are jet_enc_csv_decode_rows: the first record
+// names the fields, every later record decodes as an object of Text cells
+// (missing cells are empty, extra cells ignored) inside the text-cell scope,
+// and each failed row's errors are framed under `row N`. Word lists are [len,
+// cap, data] of 8-byte words.
 
 fn csv_words_new() -> I64 {
     list :: jet_rt_alloc(I64{24}, I64{8})
@@ -58,7 +57,7 @@ fn csv_records_free(records: I64) {
     csv_words_free(records)
 }
 
-// CsvKernel.rs parser state, one word each.
+// Parser state, one word each.
 CSV_FIELDS :: I64{0}
 CSV_FIELD :: I64{8}
 CSV_QUOTED :: I64{16}
@@ -199,9 +198,9 @@ fn csv_finish(state: I64) -> I64 {
     I64{0}
 }
 
-// CsvKernel.rs:364-376 parse over the borrowed text. Status 1 writes the
-// owned record list (records of owned field Strings) to `out`; status 0
-// writes the owned error message.
+// The Rust original parse over the borrowed text. Status 1 writes the owned
+// record list (records of owned field Strings) to `out`; status 0 writes the
+// owned error message.
 fn csv_parse(text: I64, out: I64) -> I64 {
     state :: jet_rt_alloc(CSV_STATE_BYTES, I64{8})
     coll_zero(state, CSV_STATE_BYTES)

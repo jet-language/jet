@@ -11,6 +11,7 @@ export function nativeSuiteCommands({ root, jet, head, scratch, evidence, node =
     const definitions = [
         ['unsafe-ratchet', jet, 'UnsafeRatchet.jet', []],
         ['agent-doc-flags', jet, 'AgentDocFlags.jet', []],
+        ['rust-era-ratchet', jet, 'RustEraRatchet.jet', []],
         ['decision-index', jet, 'DecisionIndex.jet', ['--check']],
         ['core-coverage', node, 'core-coverage-census.mjs', ['--check']],
         ['core-module-check', node, 'core-module-check.mjs', ['--check']],

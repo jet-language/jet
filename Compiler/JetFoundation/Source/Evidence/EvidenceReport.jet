@@ -319,8 +319,8 @@ fn evidence_record_with_expectation(record: ^EvidenceRecord, expectation: Eviden
     Ok(value)
 }
 
-// Evidence.rs:708–727. Consuming builders retain the record's single owner;
-// the setters borrow only the canonical payload/reference.
+// Consuming builders retain the record's single owner; the setters borrow only
+// the canonical payload/reference.
 fn evidence_record_with_facet(record: ^EvidenceRecord, facet: EvidenceFacet) -> EvidenceRecord Never! {
     value := record
     value.facet = facet
@@ -473,8 +473,8 @@ fn evidence_report_try_from_records(report_id: String, records: ^[EvidenceRecord
     Ok(report)
 }
 
-// Evidence.rs:842–852: infallible construction is an assertion, not a
-// fabricated empty report or a swallowed merge error.
+// Infallible construction is an assertion, not a fabricated empty report or a
+// swallowed merge error.
 fn evidence_report_from_records(report_id: String, records: ^[EvidenceRecord]) -> EvidenceReport Never! {
     evidence_report_try_from_records(report_id, ^records, [DerivationRecord]{}) ?? panic("evidence records in one report must share report identity")
 }
@@ -578,8 +578,8 @@ fn evidence_sorted_record_indices(report: EvidenceReport) -> [Int] Never! {
     indices
 }
 
-// EvidenceIO.rs record_from_test_codes, with the host's environment-derived
-// provenance supplied explicitly. Encoding/inspection needs no Core.files.
+// record_from_test_codes, with the host's environment-derived provenance
+// supplied explicitly. Encoding/inspection needs no Core.files.
 fn evidence_record_from_test_codes(kind_code: Int, state: Int, name: String, message: String, file: String, line: U32, report_id: String, build: EvidenceBuild, revision: EvidenceRevision) -> EvidenceRecord EvidenceCodecError! {
     kind :: evidence_kind_from_code(kind_code) ?? return Err(evidence_codec_error("unknown evidence kind {kind_code}"))
     outcome :: if kind == EvidenceKind.Property && state == 0 -> EvidenceOutcome.Generated else -> evidence_outcome_from_test_state(state) ?? return Err(evidence_codec_error("unknown evidence state {state}"))

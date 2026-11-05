@@ -1,11 +1,10 @@
-// The `jet inspect` group (Source/CmdInspect.rs, the Source/main.rs arms its
-// dispatch words reach, CmdCompile.rs `run_build_query`/`run_compiler_api`,
-// and crates/jet-cli CLI.rs `parse_inspect_args`): the eight planes (`jet
-// inspect <plane> [TARGET] [--live PID | --replay ARTIFACT]`) and the
-// `graph`, `query`, `explain-build`, `compiler`, `impact`, and `provenance`
-// actions. The other inspect actions belong to InspectB.jet. A plane, scope,
-// or action whose Jet port has not landed is refused with E2104, never
-// guessed.
+// The `jet inspect` group (the arms its dispatch words reach,
+// `run_build_query`/`run_compiler_api`, and crates/jet-cli
+// `parse_inspect_args`): the eight planes (`jet inspect <plane> [TARGET]
+// [--live PID | --replay ARTIFACT]`) and the `graph`, `query`, `explain-build`,
+// `compiler`, `impact`, and `provenance` actions. The other inspect actions
+// belong to InspectB.jet. A plane, scope, or action whose Jet port has not
+// landed is refused with E2104, never guessed.
 use {
     cli_files :: core.files
     cli_sys :: core.sys
@@ -57,10 +56,10 @@ use {
     jetpack_artifact_store.[ArtifactStore]
 }
 
-// CLI.rs `InspectPlane::ALL`, in order.
+// `InspectPlane::ALL`, in order.
 JET_CLI_INSPECT_PLANES :: [String]{"types", "rights", "claims", "shapes", "decisions", "structure", "build", "gates"}
 
-// CLI.rs `InspectScope`: `Target` is a source file or a package directory.
+// `InspectScope`: `Target` is a source file or a package directory.
 enum JetCLIInspectScope {
     Package
     Target(target: String)
@@ -68,8 +67,8 @@ enum JetCLIInspectScope {
     Replay(artifact: String)
 }
 
-// CLI.rs `InspectRequest`: the plane, its scope, and the plane flags kept
-// for the projection.
+// `InspectRequest`: the plane, its scope, and the plane flags kept for the
+// projection.
 struct JetCLIInspectRequest {
     plane: String
     scope: JetCLIInspectScope
@@ -81,7 +80,7 @@ enum JetCLIInspectParse {
     Failed(message: String)
 }
 
-// CLI.rs `parse_inspect_pid`: a positive `u32`.
+// `parse_inspect_pid`: a positive `u32`.
 fn jet_cli_inspect_pid(value: String) -> Int? Never! {
     bytes :: value.bytes()
     start := 0
@@ -97,13 +96,13 @@ fn jet_cli_inspect_pid(value: String) -> Int? Never! {
     Val(pid)
 }
 
-// CLI.rs `inspect_flag_takes_value`: only a bare flag consumes the next
-// word; a joined `--flag=value` leaves the target intact.
+// `inspect_flag_takes_value`: only a bare flag consumes the next word; a joined
+// `--flag=value` leaves the target intact.
 fn jet_cli_inspect_flag_takes_value(argument: String) -> Bool Never! {
     [String]{"--before", "--color", "--facts", "--gate", "--kind", "--output", "--profile", "--scope", "--set", "--target", "--topic", "--threads"}.contains(argument)
 }
 
-// CLI.rs `parse_inspect_args` over the normalized argv (`inspect <plane> ...`).
+// `parse_inspect_args` over the normalized argv (`inspect <plane> ...`).
 fn jet_cli_inspect_parse(argv: [String]) -> JetCLIInspectParse Never! {
     if argv.len() < 2 -> return JetCLIInspectParse.Failed{message: "missing inspect plane; choose types, rights, claims, shapes, decisions, structure, build, or gates"}
     plane :: argv[1]
@@ -176,8 +175,7 @@ fn jet_cli_inspect_parse(argv: [String]) -> JetCLIInspectParse Never! {
     JetCLIInspectParse.Parsed{request: JetCLIInspectRequest{plane: plane, scope: scope, options: options}}
 }
 
-// Source/main.rs `"inspect"`: parse the plane request, then run its
-// projection (CmdInspect.rs `run_inspect`).
+// `"inspect"`: parse the plane request, then run its projection.
 fn jet_cli_inspect_plane(argv: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan Never! {
     if jet_cli_inspect_parse(argv) == {
         .Failed(message) -> return jet_cli_fail("E2104", message, jet_cli_why("E2104"), "run `jet inspect <types|rights|claims|shapes|decisions|structure|build|gates> [TARGET] [--live PID | --replay ARTIFACT]`", color, JET_DRIVER_EXIT_USAGE)
@@ -185,10 +183,9 @@ fn jet_cli_inspect_plane(argv: [String], color: Bool, json: Bool, threads: Int?)
     }
 }
 
-// CmdInspect.rs `run_inspect`: one parsed plane request. Accel routes before
-// the scopes, then the live and replay scopes, the build coverage table
-// before the entry, and every other plane reads the entry
-// `inspect_entry_path` resolves.
+// `run_inspect`: one parsed plane request. Accel routes before the scopes, then
+// the live and replay scopes, the build coverage table before the entry, and
+// every other plane reads the entry `inspect_entry_path` resolves.
 fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan Never! {
     plane :: request.plane
     if request.scope == .Live(pid) -> return jet_cli_inspect_live(plane, pid, color, json)
@@ -213,22 +210,22 @@ fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, t
             notice = written
         }
     }
-    // CmdInspect.rs `run_inspect` Rights arm: a bare or directory scope is a
-    // project check; a named file keeps explicit-file scope.
+    // `run_inspect` Rights arm: a bare or directory scope is a project check; a
+    // named file keeps explicit-file scope.
     project := true
     if request.scope == .Target(target) -> project = cli_files.is_dir(target)
     if plane == {
         "types" | "shapes" | "rights" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
-        // CmdStructure.rs: `--core` reports the canonical Core catalog after
-        // the target resolves, without compiling the entry.
+        // `--core` reports the canonical Core catalog after the target
+        // resolves, without compiling the entry.
         "structure" -> {
             if request.options.contains("--core") -> return jet_cli_with_notices([String]{notice}, JetCLIPlan.Done{output: jet_cli_structure_core(json)})
             return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "structure", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
         }
         "claims" -> return jet_cli_with_notices([String]{notice}, jet_cli_inspect_claims_manifest(file, json, color))
         "build" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "graph", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
-        // CmdInspect.rs Gates arm: CmdGates.rs `run` over the resolved entry
-        // followed by the plane flags (filters and invocation writers).
+        // Gates arm: `run` over the resolved entry followed by the plane flags
+        // (filters and invocation writers).
         "gates" -> {
             // copy: `file` stays with `file`, which is read again at line 229, and the new value
             // owns its own.
@@ -299,8 +296,8 @@ fn jet_cli_inspect_decisions(request: JetCLIInspectRequest, color: Bool, json: B
     JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: target, json: json, color: color, threads: threads, notice: notice, project: project, profile: profile, build: build, scope: scope}}
 }
 
-// CmdInspect.rs run_inspect_live: one securely retained, validated snapshot
-// supplies the text renderer and all identity/shape/decision JSON projections.
+// run_inspect_live: one securely retained, validated snapshot supplies the text
+// renderer and all identity/shape/decision JSON projections.
 fn jet_cli_inspect_live(plane: String, pid: Int, color: Bool, json: Bool) -[FS, Env, Time]> JetCLIPlan Never! {
     fix :: "start the program with --observe, then run `jet inspect {plane} --live {pid}`"
     snapshot :: jet_cli_live_read(pid) ?? return jet_cli_inspect_b_report("E2105", err.message, jet_cli_why("E2105"), fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
@@ -343,9 +340,9 @@ fn jet_cli_inspect(argv: [String], jet_argv: [String], args: [String], color: Bo
     jet_cli_not_ported(command, color)
 }
 
-// Source/CmdImpact.rs `run_impact` up to the check: `--depth=N` and exactly
-// an entry file and a symbol; the host checks the absolute entry and walks
-// its semantic index (`jet_cli_inspect_impact_report`).
+// `run_impact` up to the check: `--depth=N` and exactly an entry file and a
+// symbol; the host checks the absolute entry and walks its semantic index
+// (`jet_cli_inspect_impact_report`).
 fn jet_cli_inspect_impact(argv: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     input_fix :: "correct the named argument or input, then run the command again"
     depth := 3
@@ -364,9 +361,9 @@ fn jet_cli_inspect_impact(argv: [String], color: Bool, json: Bool, threads: Int?
 }
 
 // One inspect projection the host carries out after compiling `file`
-// (CmdInspect.rs `run_types`/`run_shapes`, CmdCompile.rs `run_build_query`):
-// `action` is `types`, `shapes`, `graph`, `query`, or `explain-build`, and
-// `subject` the explain-build subject.
+// (`run_types`/`run_shapes`, `run_build_query`): `action` is `types`, `shapes`,
+// `graph`, `query`, or `explain-build`, and `subject` the explain-build
+// subject.
 struct JetCLIInspectJob {
     action: String
     file: String
@@ -377,8 +374,8 @@ struct JetCLIInspectJob {
     threads: Int?
     // The stderr notices entry resolution wrote, which go out first.
     notice: String
-    // A bare or directory scope (a project check, CmdInspect.rs
-    // `CheckScope::Project`) rather than an explicitly named file.
+    // A bare or directory scope (a project check, `CheckScope::Project`) rather
+    // than an explicitly named file.
     project: Bool
     // The `jet inspect impact` transitive walk limit (`--depth=N`).
     depth: Int{3}
@@ -399,13 +396,13 @@ enum JetCLIInspectEntry {
     Refused(plan: JetCLIPlan)
 }
 
-// Source/main.rs `write_mode_diagnostic` then exit: one plain stderr line,
-// with its E2104 report for `--json` (jet_cli_plain_failure).
+// `write_mode_diagnostic` then exit: one plain stderr line, with its E2104
+// report for `--json` (jet_cli_plain_failure).
 fn jet_cli_inspect_plain_error(text: String, what: String, fix: String, exit_code: Int) -> JetCLIPlan Never! {
     JetCLIPlan.Done{output: jet_cli_plain_failure(text, "E2104", what, fix, exit_code)}
 }
 
-// Source/main.rs `absolutize`: `path` joined onto the working directory.
+// `absolutize`: `path` joined onto the working directory.
 fn jet_cli_inspect_absolute(path: String) -[FS, Env]> String Never! {
     // copy: `path` stays with the caller (`path` is a read parameter: no move out of it, E0201) and
     // the new value owns its own.
@@ -414,8 +411,8 @@ fn jet_cli_inspect_absolute(path: String) -[FS, Env]> String Never! {
     "{cwd}/{path}"
 }
 
-// Loader.rs `find_package_root_checked` over `package.jet` manifests: the
-// canonical directory at or above `start` that holds one.
+// `find_package_root_checked` over `package.jet` manifests: the canonical
+// directory at or above `start` that holds one.
 fn jet_cli_inspect_package_root(start: String) -[FS, Env]> String? Never! {
     directory :: cli_files.realpath(start) ?? return None
     jet_cli_manifest_root(directory)
@@ -429,9 +426,8 @@ fn jet_cli_inspect_require_root(start: String, hint: String, color: Bool) -[FS, 
     }
 }
 
-// CmdInspect.rs `inspect_entry_path`: a file target as typed; a package
-// directory, or the working directory's package for every other scope,
-// through its project entry (main.rs `find_project_entry`).
+// `inspect_entry_path`: a file target as typed; a package directory, or the
+// working directory's package for every other scope, through its project entry.
 fn jet_cli_inspect_entry(scope: JetCLIInspectScope, plane: String, color: Bool) -[FS, Env]> JetCLIInspectEntry Never! {
     start := cli_files.cwd() ?? "."
     hint := "error: no package.jet found — run inspect inside a project"
@@ -455,8 +451,8 @@ fn jet_cli_inspect_entry(scope: JetCLIInspectScope, plane: String, color: Bool) 
     JetCLIInspectEntry.File{path: jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE), notice: notices.join("")}
 }
 
-// crates/jet-foundation Coverage.rs `CoverageFact`: one plane's repair
-// coverage over the active diagnostic rows.
+// crates/jet-foundation `CoverageFact`: one plane's repair coverage over the
+// active diagnostic rows.
 struct JetCLICoverageFact {
     plane: String
     rows: Int
@@ -468,7 +464,7 @@ struct JetCLICoverageFact {
     uncovered: Int
 }
 
-// Coverage.rs `CoverageBaselineRow`, keyed by its plane.
+// `CoverageBaselineRow`, keyed by its plane.
 struct JetCLICoverageBaselineRow {
     plane: String
     edit_covered: Int
@@ -486,10 +482,10 @@ enum JetCLICoverageBaseline {
     Invalid(message: String)
 }
 
-// Registry.rs `diagnostic_coverage_entries` folded by Coverage.rs
-// `try_facts`: one fact per source stage of the active rows, in plane order.
-// A row's structured fix is edit coverage when the fix has an applicability
-// grade (every fix but `CryptoMisuse`).
+// `diagnostic_coverage_entries` folded by `try_facts`: one fact per source
+// stage of the active rows, in plane order. A row's structured fix is edit
+// coverage when the fix has an applicability grade (every fix but
+// `CryptoMisuse`).
 fn jet_cli_coverage_facts() -> JetCLICoverageFacts Never! {
     slots := [String:Int]{}
     facts := [JetCLICoverageFact]{}
@@ -547,8 +543,8 @@ fn jet_cli_inspect_count(text: String) -> Int? Never! {
     Val(value)
 }
 
-// Coverage.rs `CoverageBaseline::parse`: `plane edit reason total` rows,
-// blank lines and `#` comments skipped, in plane order.
+// `CoverageBaseline::parse`: `plane edit reason total` rows, blank lines and
+// `#` comments skipped, in plane order.
 fn jet_cli_coverage_baseline(text: String) -> JetCLICoverageBaseline Never! {
     rows := [JetCLICoverageBaselineRow]{}
     loop (index, raw) in text.split("\n").to_list() {
@@ -581,7 +577,6 @@ fn jet_cli_coverage_baseline(text: String) -> JetCLICoverageBaseline Never! {
     JetCLICoverageBaseline.Rows{rows: ordered}
 }
 
-// Coverage.rs `validate_non_decreasing_row`.
 fn jet_cli_coverage_non_decreasing(plane: String, previous: JetCLICoverageBaselineRow, current: JetCLICoverageBaselineRow) -> String? Never! {
     if current.edit_covered < previous.edit_covered || current.reason_covered < previous.reason_covered || current.total < previous.total {
         return Val("coverage baseline decreased for plane `{plane}`")
@@ -596,7 +591,7 @@ fn jet_cli_inspect_saturating_sub(a: Int, b: Int) -> Int Never! {
     a - b
 }
 
-// Coverage.rs `CoverageBaseline::validate`: the first ratchet failure.
+// `CoverageBaseline::validate`: the first ratchet failure.
 fn jet_cli_coverage_validate(baseline: [JetCLICoverageBaselineRow], facts: [JetCLICoverageFact]) -> String? Never! {
     loop previous in baseline {
         found := JetCLICoverageFact?{None}
@@ -622,7 +617,6 @@ fn jet_cli_coverage_validate(baseline: [JetCLICoverageBaselineRow], facts: [JetC
     None
 }
 
-// CmdInspect.rs `coverage_fact_value`.
 fn jet_cli_coverage_fact_value(fact: JetCLICoverageFact) -> JetCLIStatusValue Never! {
     jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("plane", jet_cli_status_text(fact.plane)),
@@ -636,11 +630,10 @@ fn jet_cli_coverage_fact_value(fact: JetCLICoverageFact) -> JetCLIStatusValue Ne
     })
 }
 
-// CmdInspect.rs `run_build_coverage`: the diagnostic repair-coverage table
-// and its ratchet against the checked-in floor (Registry.rs
-// `DIAGNOSTIC_COVERAGE_BASELINE`, which the Jet host reads from the
-// toolchain tree). A registry or baseline that cannot form facts is Jet's
-// own defect.
+// `run_build_coverage`: the diagnostic repair-coverage table and its ratchet
+// against the checked-in floor (`DIAGNOSTIC_COVERAGE_BASELINE`, which the Jet
+// host reads from the toolchain tree). A registry or baseline that cannot form
+// facts is Jet's own defect.
 fn jet_cli_inspect_coverage(json: Bool, color: Bool) -[FS, Env]> JetCLIPlan Never! {
     facts := [JetCLICoverageFact]{}
     if jet_cli_coverage_facts() == {
@@ -674,7 +667,7 @@ fn jet_cli_inspect_coverage(json: Bool, color: Bool) -[FS, Env]> JetCLIPlan Neve
     jet_cli_done(out, "", JET_DRIVER_EXIT_OK)
 }
 
-// crates/jet-pkg-model Manifest.rs `current_release_status`.
+// crates/jet-pkg-model `current_release_status`.
 JET_CLI_RELEASE_CHANNEL :: "prerelease"
 JET_CLI_RELEASE_DISPOSITION :: "current"
 JET_CLI_RELEASE_READINESS :: "not-ready"
@@ -682,12 +675,11 @@ JET_CLI_RELEASE_POLICY :: "future-1.0"
 JET_CLI_RELEASE_POLICY_DISPOSITION :: "planned"
 JET_CLI_RELEASE_POLICY_ACTIVE :: false
 
-// CmdInspect.rs `CAPABILITY_RELATION_SCHEMA` and `RELEASE_CLAIM_SOURCE`.
 JET_CLI_CAPABILITY_RELATION_SCHEMA :: "jet.capability.relation.v1"
 JET_CLI_RELEASE_CLAIM_SOURCE :: "manifest.capability_relation.rows"
 
-// CmdCompile.rs `run_build_query`: graph/subject queries evaluate a checked
-// build; the bare node view consumes authenticated workspace last-run evidence.
+// `run_build_query`: graph/subject queries evaluate a checked build; the bare
+// node view consumes authenticated workspace last-run evidence.
 fn jet_cli_inspect_build_query(command: String, args: [String], color: Bool, json: Bool, threads: Int?) -[FS]> JetCLIPlan Never! {
     query :: jet_cli_tail(args, 1)
     explain_nodes :: command == "explain-build" && query.len() <= 1
@@ -710,8 +702,8 @@ fn jet_cli_inspect_build_query(command: String, args: [String], color: Bool, jso
     JetCLIPlan.Inspect{job: JetCLIInspectJob{action: command, file: path, subject: subject, json: json, color: color, threads: threads, notice: "", project: false}}
 }
 
-// Compiler.rs `compiler_api_error_json`: the versioned error document of one
-// `jet inspect compiler` operation.
+// `compiler_api_error_json`: the versioned error document of one `jet inspect
+// compiler` operation.
 fn jet_cli_inspect_compiler_error(operation: String, file: String, message: String) -> JetCLIPlan Never! {
     error :: jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("code", jet_cli_status_text("E0956")),
@@ -738,11 +730,11 @@ fn jet_cli_inspect_reads_bytes(file: String) -[FS]> Bool Never! {
     bytes.len() >= 0
 }
 
-// CmdCompile.rs `run_compiler_api`: an unknown operation and an unreadable
-// input are versioned error documents (Rust `io::Error` wording); lex and
-// parse project the Jet lexer and parser over the inline-package-masked
-// source, source-map reads the `// jet:` markers of generated Rust, and check
-// projects the checked file (InspectCompiler.jet, Compiler.rs `checked_value`).
+// `run_compiler_api`: an unknown operation and an unreadable input are
+// versioned error documents (Rust `io::Error` wording); lex and parse project
+// the Jet lexer and parser over the inline-package-masked source, source-map
+// reads the `// jet:` markers of generated Rust, and check projects the checked
+// file (InspectCompiler.jet, `checked_value`).
 fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS, Env, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
     operation :: if args.len() > 1 -> args[1] else -> ""
     file :: if args.len() > 2 -> args[2] else -> ""
@@ -756,8 +748,8 @@ fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS, Env, Exec, IO, FF
     }
     if operation == "check" -> return JetCLIPlan.Done{output: jet_cli_inspect_compiler_check(file, cli_files.read(file) ?? "")}
     source :: cli_files.read(file) ?? ""
-    // Compiler.rs `compiler_json` names source-map `source_map` in both the
-    // action and the payload.
+    // `compiler_json` names source-map `source_map` in both the action and the
+    // payload.
     name :: if operation == "source-map" -> "source_map" else -> operation
     value := JetCLIStatusValue.Null
     if operation == "lex" {
@@ -776,7 +768,7 @@ fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS, Env, Exec, IO, FF
     jet_cli_done("{jet_cli_status_render("inspect.compiler.{name}", true, [JetCLIStatusField]{jet_cli_status_field("compiler", payload)})}\n", "", JET_DRIVER_EXIT_OK)
 }
 
-// Compiler.rs `status_source_map` over the shared marker reader
+// `status_source_map` over the shared marker reader
 // (jet_eval_compiler_services_source_map).
 fn jet_cli_compiler_source_map(rust_source: String) -> JetCLIStatusValue Never! {
     map :: jet_eval_compiler_services_source_map(rust_source)
@@ -796,7 +788,7 @@ fn jet_cli_compiler_source_map(rust_source: String) -> JetCLIStatusValue Never! 
     })
 }
 
-// Compiler.rs `token_kind_name`, indexed by the jet_lexer `TOKEN_*` tag.
+// `token_kind_name`, indexed by the jet_lexer `TOKEN_*` tag.
 JET_CLI_TOKEN_KIND_NAMES :: [String]{
     "", "identifier", "literal.raw_string", "literal.string", "literal.int", "literal.float",
     "literal.unit_number", "literal.char", "literal.true", "literal.false", "keyword.self",
@@ -830,13 +822,12 @@ fn jet_cli_compiler_span(start: Int, end: Int) -> JetCLIStatusValue Never! {
     jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(start)), jet_cli_status_field("end", jet_cli_status_int(end))})
 }
 
-// Compiler.rs `status_span` of an optional span.
+// `status_span` of an optional span.
 fn jet_cli_compiler_optional_span(span: Span?) -> JetCLIStatusValue Never! {
     found :: span ?? return JetCLIStatusValue.Null
     jet_cli_compiler_span(found.start, found.end)
 }
 
-// Compiler.rs `status_diagnostic`.
 fn jet_cli_compiler_diagnostics(diagnostics: [Diagnostic]) -> JetCLIStatusValue Never! {
     values := [JetCLIStatusValue]{}
     loop diagnostic in diagnostics {
@@ -853,9 +844,8 @@ fn jet_cli_compiler_diagnostics(diagnostics: [Diagnostic]) -> JetCLIStatusValue 
     jet_cli_status_array(values)
 }
 
-// Compiler.rs `SourcePositionIndex::line_col` for every byte offset: lines
-// and columns count Unicode scalars from 1; an offset inside a scalar
-// counts that scalar.
+// `SourcePositionIndex::line_col` for every byte offset: lines and columns
+// count Unicode scalars from 1; an offset inside a scalar counts that scalar.
 struct JetCLIPositions {
     lines: [Int]
     columns: [Int]
@@ -889,11 +879,10 @@ fn jet_cli_compiler_position(positions: JetCLIPositions, offset: Int) -> JetCLIS
     jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("line", jet_cli_status_int(positions.lines[index])), jet_cli_status_field("column", jet_cli_status_int(positions.columns[index]))})
 }
 
-// Compiler.rs `lex_source` + `status_lexed`: every token of the source with
-// its inline `package { }` carrier masked (Package
-// `mask_inline_package_source`; a malformed carrier is the only
-// diagnostic), with its kind, exact source text, byte span, and line/column
-// ends, then the lexer diagnostics.
+// `lex_source` + `status_lexed`: every token of the source with its inline
+// `package { }` carrier masked (Package `mask_inline_package_source`; a
+// malformed carrier is the only diagnostic), with its kind, exact source text,
+// byte span, and line/column ends, then the lexer diagnostics.
 fn jet_cli_compiler_lexed(source: String) -> JetCLIStatusValue Never! {
     bytes :: source.bytes()
     carrier :: jet_driver_inline_package(source)
@@ -927,7 +916,7 @@ fn jet_cli_compiler_lexed(source: String) -> JetCLIStatusValue Never! {
     })
 }
 
-// Compiler.rs `item_node`: one top-level item's kind, name, and name span.
+// `item_node`: one top-level item's kind, name, and name span.
 fn jet_cli_compiler_item(item: Item) -> JetCLIStatusValue Never! {
     kind := ""
     name := String?{None}
@@ -1091,10 +1080,10 @@ fn jet_cli_compiler_item(item: Item) -> JetCLIStatusValue Never! {
     })
 }
 
-// Compiler.rs `parse_source` + `status_syntax_tree`: lexer diagnostics (or a
-// malformed inline carrier) stop before the parse of the masked source; a
-// parse with errors keeps only its error diagnostics and no items; a clean
-// parse lists every top-level item and its advisories.
+// `parse_source` + `status_syntax_tree`: lexer diagnostics (or a malformed
+// inline carrier) stop before the parse of the masked source; a parse with
+// errors keeps only its error diagnostics and no items; a clean parse lists
+// every top-level item and its advisories.
 fn jet_cli_compiler_syntax_tree(source: String) -> JetCLIStatusValue Never! {
     carrier :: jet_driver_inline_package(source)
     masked :: jet_driver_mask_inline_package(source, carrier).bytes()
@@ -1124,7 +1113,7 @@ fn jet_cli_compiler_syntax_tree(source: String) -> JetCLIStatusValue Never! {
     })
 }
 
-// Traits.rs `OperatorImpl`, with its operand and result types by name.
+// `OperatorImpl`, with its operand and result types by name.
 struct JetCLIOperatorImpl {
     left: String
     trait_name: String
@@ -1133,13 +1122,12 @@ struct JetCLIOperatorImpl {
     explicit_rhs: Bool
 }
 
-// CmdInspect.rs `plain_number`.
 fn jet_cli_inspect_plain_number(name: String) -> Bool Never! {
     name == "Int" || name == "Float" || name == "Decimal"
 }
 
-// CmdInspect.rs `operator_symbol`: the source operator of an arithmetic
-// operator trait, `+` for `Add`.
+// `operator_symbol`: the source operator of an arithmetic operator trait, `+`
+// for `Add`.
 fn jet_cli_inspect_operator_symbol(trait_name: String) -> String? Never! {
     if !owned_trait_arithmetic(trait_name) -> return None
     owned :: owned_trait(trait_name) ?? return None
@@ -1153,7 +1141,7 @@ fn jet_cli_inspect_operator_method(trait_name: String) -> String Never! {
     owned_trait_operator_hook(trait_name) ?? ""
 }
 
-// Traits.rs `impl_owner_type`: the owner applied to its own type parameters.
+// `impl_owner_type`: the owner applied to its own type parameters.
 fn jet_cli_inspect_owner_type(owner: String, params: [String:[TypeParam]]) -> Type Never! {
     found :: params.get(owner) ?? return Type.Named{name: owner}
     if found.len() == 0 -> return Type.Named{name: owner}
@@ -1161,7 +1149,6 @@ fn jet_cli_inspect_owner_type(owner: String, params: [String:[TypeParam]]) -> Ty
     Type.Apply{name: owner, args: args}
 }
 
-// Traits.rs `operator_rhs_is_local`.
 fn jet_cli_inspect_rhs_local(ty: Type, local: [String]) -> Bool Never! {
     if ty == {
         .Named(name) -> return local.contains(name)
@@ -1178,9 +1165,9 @@ fn jet_cli_inspect_has_operator(impls: [JetCLIOperatorImpl], left: String, trait
     false
 }
 
-// Traits.rs `validate_trait_impl` for an arithmetic hook of a checked
-// program: a duplicate (left, trait, rhs) or an orphan registers nothing;
-// otherwise the hook method's declared result is the row's result.
+// `validate_trait_impl` for an arithmetic hook of a checked program: a
+// duplicate (left, trait, rhs) or an orphan registers nothing; otherwise the
+// hook method's declared result is the row's result.
 fn jet_cli_inspect_register_trait(owner: String, trait_name: String, methods: [Func], operator_rhs: Type?, local: [String], params: [String:[TypeParam]], impls: &[JetCLIOperatorImpl]) {
     method_name :: jet_cli_inspect_operator_method(trait_name)
     if method_name == "" -> return
@@ -1198,9 +1185,9 @@ fn jet_cli_inspect_register_trait(owner: String, trait_name: String, methods: [F
     }
 }
 
-// Traits.rs `register_impl`: a field-delegated arithmetic hook results in
-// its owner; every other impl is validated as written. A top-level impl and
-// a trait block in a type body register the same way.
+// `register_impl`: a field-delegated arithmetic hook results in its owner;
+// every other impl is validated as written. A top-level impl and a trait block
+// in a type body register the same way.
 fn jet_cli_inspect_register_impl(owner: String, trait_name: String, methods: [Func], operator_rhs: Type?, delegation: String?, local: [String], params: [String:[TypeParam]], impls: &[JetCLIOperatorImpl]) {
     if delegation != None {
         if jet_cli_inspect_operator_method(trait_name) == "" -> return
@@ -1212,17 +1199,17 @@ fn jet_cli_inspect_register_impl(owner: String, trait_name: String, methods: [Fu
     jet_cli_inspect_register_trait(owner, trait_name, methods, operator_rhs, local, params, &impls)
 }
 
-// Traits.rs `register_synthetic_operators`: Core's typed vector/scalar hook
-// rows unless the module declares the same hook.
+// `register_synthetic_operators`: Core's typed vector/scalar hook rows unless
+// the module declares the same hook.
 fn jet_cli_inspect_synthetic_operator(impls: &[JetCLIOperatorImpl], left: String, trait_name: String, rhs: String, result: String) {
     if jet_cli_inspect_has_operator(impls, left, trait_name, rhs) -> return
     &impls.push(JetCLIOperatorImpl{left: left, trait_name: trait_name, rhs: rhs, result: result, explicit_rhs: true})
 }
 
-// One module's operator rows: Traits.rs `TraitRegistry::auto_derives_for_items`
-// then `register_synthetic_operators`. Nominal names register first; impls
-// register in item order (an owner's type parameters count once its
-// declaration has been read), then the trait blocks of structs and enums.
+// One module's operator rows: `TraitRegistry::auto_derives_for_items` then
+// `register_synthetic_operators`. Nominal names register first; impls register
+// in item order (an owner's type parameters count once its declaration has been
+// read), then the trait blocks of structs and enums.
 fn jet_cli_inspect_operator_impls(program: Program) -> [JetCLIOperatorImpl] Never! {
     local := [String]{}
     loop item in program.items {
@@ -1287,9 +1274,9 @@ fn jet_cli_inspect_programs(snapshot: JetDriverAuthorizedSourceSnapshot) -> [Pro
     programs
 }
 
-// CmdInspect.rs `run_types`: every checked operator hook, and the
-// mixed-operand mirror an untyped-reverse Add or Mul hook implies, grouped by
-// the type that owns the row.
+// `run_types`: every checked operator hook, and the mixed-operand mirror an
+// untyped-reverse Add or Mul hook implies, grouped by the type that owns the
+// row.
 fn jet_cli_inspect_types(programs: [Program], json: Bool) -> JetDriverVerbOutput Never! {
     registered := [JetCLIOperatorImpl]{}
     loop program in programs {
@@ -1346,10 +1333,10 @@ fn jet_cli_inspect_types(programs: [Program], json: Bool) -> JetDriverVerbOutput
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// CmdInspect.rs `render_check_failure` (types, shapes) and CmdCompile.rs
-// `report_problems` (the build queries, which end in the problem count).
-// Under `--json` the reports are one failed status line on stdout: the
-// `inspect` action, or `diagnostics` for the build queries.
+// `render_check_failure` (types, shapes) and `report_problems` (the build
+// queries, which end in the problem count). Under `--json` the reports are one
+// failed status line on stdout: the `inspect` action, or `diagnostics` for the
+// build queries.
 fn jet_cli_inspect_check_failed(job: JetCLIInspectJob, source: String, errors: [Diagnostic]) -[FS, Env]> JetDriverVerbOutput Never! {
     build_query :: job.action == "graph" || job.action == "query" || job.action == "explain-build"
     if job.json {
@@ -1360,16 +1347,15 @@ fn jet_cli_inspect_check_failed(job: JetCLIInspectJob, source: String, errors: [
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
-// ProveReplay.rs `emit_diag`: one spanless report, the `cli` status line on
-// stdout under `--json`.
+// `emit_diag`: one spanless report, the `cli` status line on stdout under
+// `--json`.
 fn jet_cli_replay_fail(job: JetCLIInspectJob, code: String, what: String, why: String, fix: String, exit_code: Int) -> JetDriverVerbOutput Never! {
     if job.json -> return JetDriverVerbOutput{stdout: jet_cli_fail_json(code, what, why, fix), stderr: "", exit_code: exit_code}
     jet_cli_report_output("", code, what, why, fix, job.color, exit_code)
 }
 
-// ProveReplay.rs `validate_replay_path`: a forward-slash path of non-empty,
-// safe components ending in `.jetproof-replay` (Rust `Path::components`
-// drops an interior `.`).
+// `validate_replay_path`: a forward-slash path of non-empty, safe components
+// ending in `.jetproof-replay` (Rust `Path::components` drops an interior `.`).
 fn jet_cli_replay_path_problem(path: String) -> String? Never! {
     if path == "" -> return Val("replay artifact path is empty")
     loop byte in path.bytes() {
@@ -1392,7 +1378,6 @@ fn jet_cli_replay_path_problem(path: String) -> String? Never! {
     None
 }
 
-// ProveReplay.rs `replay_path_for_name`.
 fn jet_cli_replay_name_problem(name: String) -> String? Never! {
     valid := name != ""
     loop byte in name.bytes() {
@@ -1408,8 +1393,7 @@ fn jet_cli_replay_in_project_cache(path: String) -> Bool Never! {
     path == ".jet" || path.starts_with(".jet/")
 }
 
-// ProveReplay.rs `ensure_read_parent`: every ancestor of the artifact is a
-// real directory.
+// `ensure_read_parent`: every ancestor of the artifact is a real directory.
 fn jet_cli_replay_parent_problem(path: String) -[FS]> String? Never! {
     parent :: jet_cli_parent(path) ?? return None
     absolute :: parent.starts_with("/")
@@ -1425,11 +1409,10 @@ fn jet_cli_replay_parent_problem(path: String) -[FS]> String? Never! {
     None
 }
 
-// CmdInspect.rs `run_inspect_replay` through ProveReplay.rs
-// `open_named_replay`: the replay identity of the project entry (its bytes,
-// its path inside the working directory, and a clean check), the named or
-// written artifact path, then the artifact's parents and file. Reading and
-// verifying a present artifact is not ported yet.
+// `run_inspect_replay` through `open_named_replay`: the replay identity of the
+// project entry (its bytes, its path inside the working directory, and a clean
+// check), the named or written artifact path, then the artifact's parents and
+// file. Reading and verifying a present artifact is not ported yet.
 fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     artifact :: job.subject ?? ""
     identity_what :: "replay semantic identity could not be established"
@@ -1460,7 +1443,7 @@ fn jet_cli_inspect_replay_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
 
 // The replay artifact named by `artifact` for the checked entry at `absolute`.
 fn jet_cli_inspect_replay_artifact(job: JetCLIInspectJob, artifact: String, absolute: String) -> JetDriverVerbOutput {
-    // Loader.rs `selected_project_root` of the entry's directory.
+    // `selected_project_root` of the entry's directory.
     directory :: jet_cli_parent(absolute) ?? "."
     root := directory
     if jet_cli_find_package_root(directory, job.color) == .Root(found) -> root = found
@@ -1473,7 +1456,6 @@ fn jet_cli_inspect_replay_artifact(job: JetCLIInspectJob, artifact: String, abso
         if jet_cli_replay_name_problem(artifact) == .Val(problem) -> return jet_cli_replay_fail(job, "E2104", "invalid replay name", problem, name_fix, JET_DRIVER_EXIT_USAGE)
         path = jet_cli_entry_join(root, ".jet/replays/{artifact}.jetproof-replay")
     }
-    // ProveReplay.rs `prepare_replay`.
     unavailable :: "replay artifact is corrupt or unavailable"
     recapture :: "recapture the target and retry"
     if jet_cli_replay_path_problem(path) == .Val(problem) -> return jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR)
@@ -1582,11 +1564,11 @@ struct JetCLIImpactEdge {
     span: Span
 }
 
-// CmdImpact.rs over jet-impact `ImpactReport::analyze`: the symbol's
-// definition (`module::name` matches a module suffix), its references and
-// direct call sites, and the transitive callers and callees to the depth
-// limit, each edge once, breadth first. The explicit-file check result
-// (CmdInspect.rs `check_result_text`/`check_result_value`) leads the report.
+// Over jet-impact `ImpactReport::analyze`: the symbol's definition
+// (`module::name` matches a module suffix), its references and direct call
+// sites, and the transitive callers and callees to the depth limit, each edge
+// once, breadth first. The explicit-file check result
+// (`check_result_text`/`check_result_value`) leads the report.
 fn jet_cli_inspect_impact_report(job: JetCLIInspectJob, result: JetDriverCompileResult, diagnostics: Int, elapsed_ms: Int) -> JetDriverVerbOutput {
     symbol :: job.subject ?? ""
     index :: jet_cli_checked_semindex(result)
@@ -1666,8 +1648,8 @@ fn jet_cli_inspect_impact_report(job: JetCLIInspectJob, result: JetDriverCompile
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: status}
 }
 
-// CmdInspect.rs `check_result_value` for a passed explicit-file check: the
-// `jet.check/v1` record impact and expand carry.
+// `check_result_value` for a passed explicit-file check: the `jet.check/v1`
+// record impact and expand carry.
 fn jet_cli_inspect_check_value(source: String, elapsed_ms: Int, diagnostics: Int) -> JetCLIStatusValue Never! {
     jet_cli_status_object(jet_cli_check_result_fields(source, elapsed_ms, diagnostics))
 }
@@ -1703,7 +1685,7 @@ fn jet_cli_check_result_fields(source: String, elapsed_ms: Int, diagnostics: Int
     }
 }
 
-// CmdInspect.rs `check_result_text` for a passed explicit-file check.
+// `check_result_text` for a passed explicit-file check.
 fn jet_cli_inspect_check_text(source: String, elapsed_ms: Int, diagnostics: Int) -> String Never! {
     out := "check: passed (source={source}, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms={elapsed_ms}, front_end={JET_CLI_CHECK_FRONT_END}, programmable_build=not-selected, diagnostics={diagnostics})\n"
     loop row in JET_CLI_EXPLICIT_FILE_PROOF_ROWS {
@@ -1712,10 +1694,10 @@ fn jet_cli_inspect_check_text(source: String, elapsed_ms: Int, diagnostics: Int)
     out
 }
 
-// CmdExpand.rs `run_expand` after the check: the selected lens projected from
-// the checked program (Expand.jet, ExpandFacts.jet). The web lens and the
-// bare all-lens view need the checked application graph the Doc result does
-// not carry yet, so they are refused rather than reported empty.
+// `run_expand` after the check: the selected lens projected from the checked
+// program (Expand.jet, ExpandFacts.jet). The web lens and the bare all-lens
+// view need the checked application graph the Doc result does not carry yet, so
+// they are refused rather than reported empty.
 fn jet_cli_inspect_expand_report(job: JetCLIInspectJob, result: JetDriverCompileResult, diagnostics: Int, elapsed_ms: Int) -> JetDriverVerbOutput {
     selection :: job.subject ?? return jet_cli_not_ported_output("inspect expand <all lenses>", false)
     index :: jet_cli_checked_semindex(result)
@@ -1742,7 +1724,7 @@ fn jet_cli_inspect_expand_report(job: JetCLIInspectJob, result: JetDriverCompile
     JetDriverVerbOutput{stdout: jet_cli_expand_text(index, lens, facts, jet_cli_inspect_check_text(job.file, elapsed_ms, diagnostics)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// CmdInspect.rs `explicit_file_proof_rows`: name, detail, diagnostic.
+// `explicit_file_proof_rows`: name, detail, diagnostic.
 JET_CLI_EXPLICIT_FILE_PROOF_ROWS :: [[String]]{
     [String]{"entry resolution", "explicit-file checks resolve only the named source file", "E2389"},
     [String]{"module graph", "explicit-file checks keep semantic scope and do not promise a project graph", "E2390"},
@@ -1750,7 +1732,7 @@ JET_CLI_EXPLICIT_FILE_PROOF_ROWS :: [[String]]{
     [String]{"tier lowering", "explicit-file checks keep semantic scope and do not promise project tier lowering", "E2392"},
 }
 
-// CmdInspect.rs `check_projection_with_options_and_preflight` front end.
+// `check_projection_with_options_and_preflight` front end.
 JET_CLI_CHECK_FRONT_END :: "Driver::check_file_with_effect_facts_profile"
 
 fn jet_cli_impact_edges_value(edges: [JetCLIImpactEdge]) -> JetCLIStatusValue Never! {

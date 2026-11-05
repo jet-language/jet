@@ -11,9 +11,8 @@ use {
     Compiler.JetLSP.Tests.Integration.Canvas.[temp_dir, write_fixture, json_field, json_array_field, json_top_level_objects, graph_object_for_title, graph_id_for_title, field_before, CANVAS_FIXTURE, CANVAS_FUNCTION_EVENT_FIXTURE]
 }
 
-// GATE #4494: real filesystem, symlink, process and git providers.
-// GATE #4483: Unix-only symlink test dispatches on selected target family.
-// Rust: tests/canvas.rs:3551
+// GATE #4494: real filesystem, symlink, process and git providers. GATE #4483:
+// Unix-only symlink test dispatches on selected target family.
 #Test("canvas_core_catalog_classifies_every_action_for_palette_placement") {
     path :: write_fixture("core_catalog_statuses", "fn run() {{\n    print(\"core\")\n}}\n")
     source :: fs.read_to_string(path).unwrap()
@@ -69,7 +68,6 @@ use {
     }
 }
 
-// Rust: tests/canvas.rs:3675
 #Test("canvas_projects_function_metadata_and_callback_event_views") {
     path :: write_fixture("function_events", CANVAS_FUNCTION_EVENT_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
@@ -93,7 +91,6 @@ use {
     }
 }
 
-// Rust: tests/canvas.rs:3699
 #Test("canvas_preserves_via_effect_row_for_signature_edits") {
     path :: write_fixture("function_via_effect", "fn invoke(act: fn() -[IO]>) -[via act]> {{ act() }}\nfn run() {{}}\n")
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
@@ -101,7 +98,6 @@ use {
     assert(graph.contains("\"effect_via\":\"act\""), "{graph}")
 }
 
-// Rust: tests/canvas.rs:3713
 #Test("canvas_preserves_pure_effect_row_for_signature_edits") {
     path :: write_fixture("function_pure_effect", "fn adjust(value: Int) -[]> Int {{ return value }}\nfn run() {{ print(adjust(1)) }}\n")
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
@@ -116,7 +112,6 @@ use {
     assert(!after.contains("fn adjust(next: Int) -> Int ->"), "{after}")
 }
 
-// Rust: tests/canvas.rs:3739
 #Test("canvas_projects_meta_attribute_on_functions_and_bindings") {
     path :: write_fixture("meta_attribute", "#Meta(category: \"Movement\", tunable)\nfn run() {{\n    #Meta(category: \"Movement\", tunable)\n    speed :: 3\n    print(\"{{speed}}\")\n}}\n")
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
@@ -125,7 +120,6 @@ use {
     }
 }
 
-// Rust: tests/canvas.rs:3762
 #Test("canvas_details_editor_facts_and_checked_value_edits") {
     path :: write_fixture("details_editor_facts", "enum Mode {{\n    Fast\n    Slow\n}}\n\nfn edit() {{\n    #Meta(category: \"Tuning\", tunable)\n    amount :: 3\n    other :: 9\n    mode :: Mode.Fast\n    alias :: amount\n    needs_int(amount)\n    print(alias)\n}}\n\nfn needs_int(value: Int) {{}}\n\nfn run() {{\n    edit()\n}}\n")
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
@@ -171,7 +165,6 @@ use {
     assert(after_reference.contains("print(alias)"), "reference consumers lost: {after_reference}")
 }
 
-// Rust: tests/canvas.rs:3882
 #Test("canvas_details_collection_values_keep_inline_provenance_and_refuse_bad_nested_source") {
     path :: write_fixture("details_collection_editor", "fn edit() {{\n    matrix :: [[1, 2], [3, 4]]\n    settings :: Point{{x: 4, y: [5, 6]}}\n    lookup :: [\"first\": 7, \"second\": 8]\n    print(matrix[0][0])\n}}\n\nstruct Point {{\n    x: Int\n    y: [Int]\n}}\n\nfn run() {{\n    edit()\n}}\n")
     graph :: Canvas.graph_json_for_file(path).expect("collection Details graph")
@@ -200,7 +193,6 @@ use {
     assert_eq(Formatter.format_source(before_invalid).unwrap(), before_invalid, "nested collection edit must reload in canonical Jet spelling")
 }
 
-// Rust: tests/canvas.rs:3966
 #Test("canvas_function_transactions_write_source_and_reproject_calls") {
     path :: write_fixture("function_transactions", CANVAS_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
@@ -230,7 +222,6 @@ use {
     assert(graph.contains("\"title\":\"helper\""), "{graph}")
 }
 
-// Rust: tests/canvas.rs:4023
 #Test("canvas_source_control_reports_git_text_diff") {
     dir :: temp_dir("source_control")
     if Command.new("git").arg("--version").output().map((o) -> !o.status.success()).unwrap_or(true) {
@@ -253,7 +244,6 @@ use {
     assert(scm.contains("initial"), "{scm}")
 }
 
-// Rust: tests/canvas.rs:4075
 #Test("canvas_source_control_reports_project_file_set") {
     dir :: temp_dir("source_control_project")
     if Command.new("git").arg("--version").output().map((o) -> !o.status.success()).unwrap_or(true) {
@@ -284,7 +274,6 @@ use {
     assert(scm.contains("+fn helper() -> Int"), "{scm}")
 }
 
-// Rust: tests/canvas.rs:4143
 #Test("canvas_proof_lens_reports_revision_check_git_and_missing_receipts") {
     dir :: temp_dir("proof_lens")
     entry :: dir.join("main.jet")
@@ -319,7 +308,6 @@ use {
     assert(diagnostic.contains("\"diagnostics_count\":"), "{diagnostic}")
 }
 
-// Rust: tests/canvas.rs:4230
 #Test("canvas_proof_projects_canonical_budget_report_read_only") {
     dir :: temp_dir("proof_budget_projection")
     fs.create_dir_all(dir.join("src")).unwrap()
@@ -343,7 +331,6 @@ use {
     assert_eq(fs.read_dir(dir.join(".jet/perf/reports")).unwrap().count(), before, "stale Canvas projection refreshed measurement")
 }
 
-// Rust: tests/canvas.rs:4316
 #Test("canvas_project_json_reports_single_file_without_manifest") {
     path :: write_fixture("project_single", CANVAS_FIXTURE)
     json :: Canvas.project_json_for_entry(path)
@@ -357,7 +344,6 @@ use {
     assert(json.contains("\"semantic\":\"source\""), "{json}")
 }
 
-// Rust: tests/canvas.rs:4333
 #Test("canvas_project_capabilities_follow_checked_package_target") {
     dir :: temp_dir("project_capabilities")
     fs.write(dir.join("package.jet"), "name: \"canvas_capabilities\"\nversion: \"0.1.0\"\ntarget: \"web\"\noutputs: {{ app: Executable{{ entry: run }} }}\n").unwrap()
@@ -374,7 +360,6 @@ use {
     assert(!json.contains("\"terminal\":"), "{json}")
 }
 
-// Rust: tests/canvas.rs:4355
 #Test("canvas_and_semindex_share_composed_package_facts") {
     dir :: temp_dir("package_facts_parity")
     entry :: dir.join("main.jet")
@@ -388,7 +373,6 @@ use {
     fs.write(entry, "fn run() {{}}\n").unwrap()
     graph :: Canvas.graph_json_for_file(entry).expect("Canvas graph")
     project :: Canvas.project_json_for_entry(entry)
-    // Rust: tests/canvas.rs:4383
     digest :: (json: String) -> {
         json.split_once("\"semantic_digest\":\"")
             .and_then((pair) -> pair.1.split_once('"').map((parts) -> parts.0.to_string()))
@@ -411,7 +395,6 @@ use {
     assert(graph.contains("\"required_effects\":[]") && graph.contains("\"granted_effects\":[\"FS\"]") && graph.contains("\"denied_effects\":[\"Net\"]") && graph.contains("\"authority\":\"package.jet authority\""), "Canvas effect projection lost a role: {graph}")
 }
 
-// Rust: tests/canvas.rs:4415
 #Test("canvas_composes_discovered_config_and_rejects_ambiguous_config_before_projection") {
     dir :: temp_dir("package_config_discovery_boundary")
     entry :: dir.join("main.jet")
@@ -429,7 +412,6 @@ use {
     assert(!ambiguous.contains("\"version\":\"1\""), "{ambiguous}")
 }
 
-// Rust: tests/canvas.rs:4438
 #Test("canvas_project_reports_and_filters_internal_parts") {
     dir :: temp_dir("project_internal_parts")
     entry :: dir.join("main.jet")
@@ -450,7 +432,6 @@ use {
     assert_eq(Canvas.project_path_for_source_id(entry, "bench.jet"), Val(internal))
 }
 
-// Rust: tests/canvas.rs:4472
 #Test("canvas_project_discovery_requires_declared_workspace_membership") {
     dir :: temp_dir("project_workspace_membership_boundary")
     member :: dir.join("packages/member")
@@ -492,7 +473,6 @@ use {
     assert(member_json.contains("\"path\":\".jet/lock\""), "{member_json}")
 }
 
-// Rust: tests/canvas.rs:4564
 #Test("canvas_project_discovery_keeps_malformed_root_workspace_visible") {
     no_pkg :: temp_dir("project_malformed_workspace_root")
     fs.write(no_pkg.join("workspace.jet"), "").unwrap()
@@ -517,7 +497,6 @@ use {
     assert(with_pkg_json.contains("\"manifest\":\"package.jet\""), "{with_pkg_json}")
 }
 
-// Rust: tests/canvas.rs:4624
 #Test("canvas_project_discovery_preserves_malformed_ancestor_workspace") {
     dir :: temp_dir("project_malformed_workspace_ancestor")
     nested :: dir.join("scratch")
@@ -535,7 +514,6 @@ use {
     assert(json.contains("\"name\":\"scratch\""), "{json}")
 }
 
-// Rust: tests/canvas.rs:4658
 #Test("canvas_project_discovery_does_not_promote_lock_only_roots") {
     populated :: temp_dir("project_lock_only_populated")
     member :: populated.join("packages/app")
@@ -566,7 +544,6 @@ use {
     assert(empty_json.contains("\"locks\":[]"), "{empty_json}")
 }
 
-// Rust: tests/canvas.rs:4721
 #Test("canvas_project_discovery_accepts_workspace_root_member") {
     dir :: temp_dir("project_workspace_root_member")
     fs.write(dir.join("workspace.jet"), "module workspace {{\n    members: [\".\"]\n}}\n").unwrap()
@@ -579,7 +556,6 @@ use {
     assert(json.contains("\"manifest\":\"package.jet\""), "{json}")
 }
 
-// Rust: tests/canvas.rs:4742
 #Test("canvas_project_json_projects_workspace_packages_and_files") {
     dir :: temp_dir("project_workspace")
     hello :: dir.join("packages/hello")
@@ -611,7 +587,6 @@ use {
     assert(json.contains("\"kind\":\"source\""), "{json}")
 }
 
-// Rust: tests/canvas.rs:4812
 #Test("canvas_projects_typed_member_after_package_transition") {
     dir :: temp_dir("package_transition_canvas_member")
     fs.write(dir.join("package.jet"), "name: \"workspace\"\napp :: Config{{ version: \"1\" }}\n").unwrap()
@@ -631,7 +606,6 @@ use {
     assert(fs.read_to_string(dir.join("package.jet")).unwrap().contains("app :: Config"))
 }
 
-// Rust: tests/canvas.rs:4860
 #Test("canvas_project_json_projects_env_services_and_diagnostics") {
     dir :: temp_dir("project_env_services")
     fs.write(dir.join("package.jet"), "name: \"svcapp\"\nversion: \"0.1.0\"\n").unwrap()
@@ -652,7 +626,6 @@ use {
     assert(json.contains("\"diagnostics\":[{{\"code\":\"E0966\""), "{json}")
 }
 
-// Rust: tests/canvas.rs:4896
 #Test("canvas_project_transactions_preview_apply_and_conflict_on_touched_files") {
     dir :: temp_dir("project_txn")
     app :: dir.join("packages/app")
@@ -706,7 +679,6 @@ use {
     assert(!fs.read_to_string(app.join("package.jet")).unwrap().contains("extra"))
 }
 
-// Rust: tests/canvas.rs:5015
 #Test("canvas_project_transactions_reject_reserved_create_package_path") {
     dir :: temp_dir("project_reserved_path")
     fs.create_dir_all(dir.join("packages/app")).unwrap()
@@ -722,7 +694,6 @@ use {
     assert(!dir.join(".git/hooks/package.jet").exists(), "reserved path write escaped source truth")
 }
 
-// Rust: tests/canvas.rs:5048
 #Test("canvas_project_transactions_reject_symlink_package_path") {
     if selected_family() != "unix" -> return // GATE #4483: Rust #[cfg(unix)].
     dir :: temp_dir("project_symlink_path")
@@ -743,7 +714,6 @@ use {
     _ :: fs.remove_dir_all(dir)
 }
 
-// Rust: tests/canvas.rs:5084
 #Test("canvas_project_transactions_roll_back_when_later_write_fails") {
     dir :: temp_dir("project_rollback")
     fs.create_dir_all(dir.join("packages/app")).unwrap()
@@ -762,7 +732,6 @@ use {
     assert_eq(fs.read_to_string(dir.join("packages/tools/nested")).unwrap(), "not a directory")
 }
 
-// Rust: tests/canvas.rs:5122
 #Test("canvas_project_transactions_remove_dependency") {
     dir :: temp_dir("project_remove_dep")
     fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{\n    logging: logging#0.1.0,\n    tools: ../tools,\n}}\n").unwrap()
@@ -785,7 +754,6 @@ use {
     assert(PackageFacts.parse(manifest, "test").is_ok(), "{manifest}")
 }
 
-// Rust: tests/canvas.rs:5170
 #Test("canvas_project_transactions_edit_pkg_field_and_add_target") {
     dir :: temp_dir("project_pkg_fields")
     fs.write(dir.join("package.jet"), "name: \"app\",\nversion: \"0.1.0\"\npackages: {{\n}}\n").unwrap()
@@ -810,7 +778,6 @@ use {
     assert(PackageFacts.parse(manifest, "test").is_ok(), "{manifest}")
 }
 
-// Rust: tests/canvas.rs:5216
 #Test("canvas_project_transactions_add_env_service") {
     dir :: temp_dir("project_add_env_service")
     fs.write(dir.join("package.jet"), "name: \"svcapp\"\nversion: \"0.1.0\"\n").unwrap()
@@ -837,7 +804,6 @@ use {
     assert(project.contains("\"ports\":[6380]"), "{project}")
 }
 
-// Rust: tests/canvas.rs:5265
 #Test("canvas_project_transactions_create_package_from_workspace") {
     dir :: temp_dir("project_create_package")
     fs.create_dir_all(dir.join("packages/app")).unwrap()

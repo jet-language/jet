@@ -69,7 +69,6 @@ fn run() {}
     loop site in MARKER_SOURCE_SITES -> _ :: marker_test_decl("struct Uses {{ impl Marker {{ sites :: [.{site}] }} }}\nfn run() {{}}\n")
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:981
 #Test("fact_declaration_parses_its_law_columns") {
     program :: parser_test_program(`fact Exactness($holds: .Value, $safe: .Gain, $gates: [approx, raw], $decision: "D-TEST")
 fn run() {}
@@ -161,7 +160,6 @@ fn run() {}
     assert_eq(codes, [String]{"E0937", "E0936", "E0907"})
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1108
 #Test("nested_state_section_is_stored_on_struct_not_as_an_item") {
     program :: parser_test_program(`struct Door {
     state { Open, Closed }
@@ -176,7 +174,6 @@ fn run() {}
     assert_eq(names, [String]{"Open", "Closed"})
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1129
 #Test("top_level_state_companion_is_rejected_with_a_spanned_rewrite") {
     source :: `state Door { Open, Closed }
 struct Door { value: Int }
@@ -195,7 +192,6 @@ fn run() {}
     assert_eq(formatted.diagnostics[0].code, "E0157")
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1152
 #Test("inline_code_module_companion_uses_the_same_rewrite") {
     source :: `module ledger { state Order { Draft, Confirmed } }
 `
@@ -207,7 +203,6 @@ fn run() {}
     _ :: parser_test_diagnostic(formatted.diagnostics, "E0157")
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1178
 #Test("ineligible_state_section_uses_one_registered_parser_diagnostic") {
     loop testcase in [
         (source: `enum Door { state { Open } }
@@ -246,7 +241,6 @@ fn run() {}
     }
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1212
 #Test("repeated_state_section_points_at_the_second_section") {
     source :: `struct Door { state { Ready } state { Open } }
 fn run() {}
@@ -257,7 +251,6 @@ fn run() {}
     assert_eq(diagnostic.span, Val(Span{start: start, end: finish}))
 }
 
-// Rust: crates/jet-parser/tests/sigil_algebra.rs
 #Test("distinct_markers_select_the_type_site_before_module_bindings") {
     loop source in ([String]{"#Numeric Meters :: distinct Float", "#Numeric\nMeters :: distinct Float"}) {
         program :: parser_test_program(source)

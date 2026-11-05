@@ -425,8 +425,8 @@ fn ir_compiler_owned_enum_payload(name: String, variant: String) -> IRCompilerOw
         if variant == "Budget" -> return ir_compiler_owned_named([TypeTupleField]{TypeTupleField{name: "limit", ty: Type.Named{name: "PluginLimit"}}, TypeTupleField{name: "fault", ty: Type.Named{name: "PluginFault"}}})
         return ir_compiler_owned_single(Type.Named{name: "PluginFault"})
     }
-    // The canonical twelve DataEvent payloads are the
-    // generated Core payload rows (Rust core_types.rs data_event_payload).
+    // The canonical twelve DataEvent payloads are the generated Core payload
+    // rows (data_event_payload).
     if name == "DataEvent" {
         payload :: core_enum_variant_payload(name, variant) ?? return IRCompilerOwnedPayload.Unit
         if payload.len() == 1 -> return ir_compiler_owned_single(payload[0])

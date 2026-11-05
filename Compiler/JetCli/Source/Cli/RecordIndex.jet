@@ -1,7 +1,7 @@
-// Source/RecordIndex.rs. All candidate changes are transactional: failed
-// validation leaves the old snapshot intact. The stored form lives under
-// `<project>/.jet/records` and is read and published only through the rooted
-// store (RootedStore.jet), never by pathname.
+// All candidate changes are transactional: failed validation leaves the old
+// snapshot intact. The stored form lives under `<project>/.jet/records` and is
+// read and published only through the rooted store (RootedStore.jet), never by
+// pathname.
 use {
     cli_files :: core.files
     cli_process :: core.process
@@ -66,8 +66,8 @@ fn jet_cli_record_links_to(entry: JetCLIRecordIndexEntry, target: JetCLIRecordIn
 }
 
 // Connected disposable groups cannot leave a protected record with a dangling
-// link. This is Source/RecordIndex.rs eviction_groups/apply_eviction, not a
-// separate recency policy: FIFO sequence, then artifact id, never timestamps.
+// link. This is eviction_groups/apply_eviction, not a separate recency policy:
+// FIFO sequence, then artifact id, never timestamps.
 fn jet_cli_record_index_evict(entries: &[JetCLIRecordIndexEntry], budget: U64) JetCLIReadError! {
     loop {
         total := U64{0}

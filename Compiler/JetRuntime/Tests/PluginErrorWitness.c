@@ -80,7 +80,7 @@ int main(void) {
             }
         }
         // All 4 variants, all 5 budget limits, empty/two-frame vectors: actual
-        // pinned rustc derives (PluginWire.rs:28-50) and Display(:65-68).
+        // pinned rustc derives and Display(:65-68).
         expect(jet_rt_handle_debug_plugin_error(a),plugin_goldens[i].debug,plugin_goldens[i].debug_length);
         Text *show=jet_rt_handle_show_plugin_error(a),*display=jet_rt_handle_display_plugin_error(a);
         assert(show!=a->fault->message && display!=a->fault->message && show!=display);

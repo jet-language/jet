@@ -167,12 +167,11 @@ fn sema_call_shared_owner_guard(receiver: Expr, receiver_value: TExpr, inner: Ty
     sema_call_shared_owner_nullary(receiver, receiver_value, method, result, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
 }
 
-// Rust builtin_methods.rs (`Cell` receivers), CheckerOwnership.rs
-// `finish_cell_*` and Collections.rs `cell_method_return` /
+// (`Cell` receivers), `finish_cell_*` and `cell_method_return` /
 // `cell_guard_method_return`: a local `Cell<T>` mutates through a read
-// receiver. `get` hands out an independent owned value, so the stored type
-// must copy. Guard `map`/`split` consume the source guard so only the
-// projected guards keep the original dynamic loan.
+// receiver. `get` hands out an independent owned value, so the stored type must
+// copy. Guard `map`/`split` consume the source guard so only the projected
+// guards keep the original dynamic loan.
 fn sema_call_cell_guard_type(editable: Bool, inner: Type) -> Type Never! {
     Type.Apply{name: if editable -> "CellEditGuard" else -> "CellReadGuard", args: [Type]{inner}}
 }

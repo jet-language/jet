@@ -488,8 +488,8 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
     reflection :: sema_fact_reflection_field(base, member, span, context)
     if reflection == .Val(value) -> return sema_expr_expected(value, expected, environment, program, &diagnostics)
     // D-COMPUTE-VJP1=A (syntax-decisions.md:6950-6954): a `VJPRun` carries
-    // `.value`, `.pull(seed)` and `.grads` (Rust core_types.rs field_type);
-    // any other member falls through to the undeclared-field error below.
+    // `.value`, `.pull(seed)` and `.grads` (field_type); any other member falls
+    // through to the undeclared-field error below.
     if owner_name == "VJPRun" && owner_args.len() == 1 {
         if sema_expression_vjp_run_field(owner_args[0], member) == .Val(run_field_ty) {
             run_reference :: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: run_field_ty, boxed: false}

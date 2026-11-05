@@ -20,110 +20,76 @@ use {
     core.encoding.[Dyn]
 }
 
-// Rust: crates/jet-devserver/src/Session.rs:43
 DEVTOOLS_TEXT_LIMIT :: comptime { USize{JET_DEVTOOLS_MAX_TEXT_BYTES} }
-// Rust: crates/jet-devserver/src/Session.rs:44
 MAX_CLIENT_ID :: USize{128}
-// Rust: crates/jet-devserver/src/Session.rs:45
 MAX_CLIENTS :: USize{256}
-// Rust: crates/jet-devserver/src/Session.rs:46
 CLIENT_TTL_MS :: U64{160}
-// Rust: crates/jet-devserver/src/Session.rs:47
 CLIENT_TTL :: comptime { Duration.from_millis(CLIENT_TTL_MS) }
-// Rust: crates/jet-devserver/src/Session.rs:48
 MAX_RECEIPTS :: USize{128}
-// Rust: crates/jet-devserver/src/Session.rs:49
 MAX_RETAINED_VIEW_BYTES :: comptime { USize{2 * 1024 * 1024} }
-// Rust: crates/jet-devserver/src/Session.rs:50
 // GATE #4494: canonical atomic storage and relaxed fetch-add.
 NEXT_SESSION_ID :: AtomicU64.new(1)
-// Rust: crates/jet-devserver/src/Session.rs:54
 struct LiveLineage { protocol: String; session_id: String; source_id: String; build_id: String; revision: String; world_id: String }
-// Rust: crates/jet-devserver/src/Session.rs:64
 struct LiveValueFact { value_id: String; type_identity: String; disposition: String; reason: String }
-// Rust: crates/jet-devserver/src/Session.rs:76
 enum CaptureSessionFact { Start(CaptureStartFact); Skip(CaptureSkip); Fault(CaptureFaultFact) }
-// Rust: crates/jet-devserver/src/Session.rs:82
 struct LiveReceipt { lineage: LiveLineage; values: [LiveValueFact] }
-// Rust: crates/jet-devserver/src/Session.rs:87
 struct Receipt { kind: String; status: String; before: String; after: String; client: String; output: String; live: LiveReceipt? }
-// Rust: crates/jet-devserver/src/Session.rs:98
 struct DebuggerSnapshot { state: String; session_id: String; source_id: String; revision: String; tier: String }
-// Rust: crates/jet-devserver/src/Session.rs:107
 struct RetainedView { revision: String; source_id: String; payload: String }
-// Rust: crates/jet-devserver/src/Session.rs:114
 struct DevtoolsSelectionFact { panel_id: String; item_key: String }
-// Rust: crates/jet-devserver/src/Session.rs:119 `DevtoolsSessionState` is `JetDevtoolsLifecycleState`
-// Rust: crates/jet-devserver/src/Session.rs:122
+// The Rust `DevtoolsSessionState` is `JetDevtoolsLifecycleState`
 struct DevtoolsStatusFact {
     state: JetDevtoolsLifecycleState; diagnostic_code: String?; diagnostic: String?
     accepted_revision: String?; last_good_revision: String?; run_target: String?; run_output: String?; test_state: String?
 }
-// Rust: crates/jet-devserver/src/Session.rs:137
 struct DevtoolsCommandCapabilities { project_rebuild: Bool; project_rebuild_reason: String? }
-// Rust: crates/jet-devserver/src/Session.rs:142
 struct ProjectRebuildExecutorGuard { available: Arc<Mutex<Bool>> }
 impl ProjectRebuildExecutorGuard {
-    // Rust: crates/jet-devserver/src/Session.rs:147
     fn drop(self: Self) -> Unit {
         // GATE #4494: mutex poison-aware locking.
         if self.available.lock() == .Ok(available) -> *available = false
     }
 }
-// Rust: crates/jet-devserver/src/Session.rs:157
 struct DevtoolsProjection {
     protocol: String; session_id: String; source_id: String?; build_id: String?; revision: String; world_id: String?
     sequence: U64; observed_at: U64; panels: [JetDevtoolsEvent]; selection: DevtoolsSelectionFact?
     status: DevtoolsStatusFact; command_capabilities: DevtoolsCommandCapabilities
     command_receipts: [JetDevtoolsCommandReceipt]; reset: Bool; truncation: Bool
 }
-// Rust: crates/jet-devserver/src/Session.rs:176
 struct DevtoolsRecordingDivergence {
     divergent: Bool; reason: String?; identity: SessionIdentity; expected_sequence: U64?; actual_sequence: U64?
     retained_events: USize; dropped_events: U64; truncation: TruncationFacts
 }
-// Rust: crates/jet-devserver/src/Session.rs:187
 struct ResidentRecordingState { recording: SessionRecording; cursor: ReplayCursor; checkpoints: [String:SessionCheckpoint]; first_sequence: U64? }
 impl ResidentRecordingState {
-    // Rust: crates/jet-devserver/src/Session.rs:195
     fn new(recording: SessionRecording, first_sequence: U64?) -> Self {
         cursor :: recording.replay()
         Self { recording: ^recording, cursor: ^cursor, checkpoints: {}, first_sequence }
     }
 }
-// Rust: crates/jet-devserver/src/Session.rs:206
 BROWSER_ASSET_WATCH_MAX_FILES :: USize{4096}
-// Rust: crates/jet-devserver/src/Session.rs:207
 BROWSER_ASSET_WATCH_MAX_EVENTS :: USize{256}
-// Rust: crates/jet-devserver/src/Session.rs:208
 BROWSER_ASSET_WATCH_MAX_PATH_BYTES :: USize{1024}
-// Rust: crates/jet-devserver/src/Session.rs:211
 struct BrowserAssetStamp { modified: SystemTime?; len: U64 }
-// Rust: crates/jet-devserver/src/Session.rs:217
 struct BrowserAssetChange { path: OSPath; kind: String }
-// Rust: crates/jet-devserver/src/Session.rs:222
 struct BrowserAssetWatcher { root: OSPath; known: [OSPath:BrowserAssetStamp] }
 impl BrowserAssetWatcher {
-    // Rust: crates/jet-devserver/src/Session.rs:228
     fn for_entry(entry: String) -> Self {
         parent :: OSPath.new(entry).parent().unwrap_or(OSPath.new("."))
         watcher := Self { root: parent.join("assets"), known: {} }
         watcher.snapshot()
         watcher
     }
-    // Rust: crates/jet-devserver/src/Session.rs:240
     fn reopen(self: Self, entry: String) -> Unit {
         self.root = OSPath.new(entry).parent().unwrap_or(OSPath.new(".")).join("assets")
         self.snapshot()
     }
-    // Rust: crates/jet-devserver/src/Session.rs:247
     fn stamp(path: OSPath) -> BrowserAssetStamp? {
         // GATE #4494: filesystem metadata and timestamps.
         metadata :: fs.symlink_metadata(path).ok()
         if !metadata.file_type().is_file() -> return .None
         .Val(BrowserAssetStamp { modified: metadata.modified().ok(), len: metadata.len() })
     }
-    // Rust: crates/jet-devserver/src/Session.rs:258
     fn collect(path: OSPath, files: [OSPath:BrowserAssetStamp], skipped: USize) -> Unit {
         if files.len() >= BROWSER_ASSET_WATCH_MAX_FILES { *skipped = skipped.saturating_add(1); return }
         metadata :: fs.symlink_metadata(path) ?? return
@@ -143,14 +109,12 @@ impl BrowserAssetWatcher {
             if files.len() >= BROWSER_ASSET_WATCH_MAX_FILES -> break
         }
     }
-    // Rust: crates/jet-devserver/src/Session.rs:305
     fn snapshot(self: Self) -> Unit {
         files := [OSPath:BrowserAssetStamp]{}
         skipped := USize{0}
         Self.collect(&self.root, &files, &skipped)
         self.known = ^files
     }
-    // Rust: crates/jet-devserver/src/Session.rs:312
     fn poll(self: Self) -> ([BrowserAssetChange], USize) {
         current := [OSPath:BrowserAssetStamp]{}
         skipped := USize{0}
@@ -176,7 +140,6 @@ impl BrowserAssetWatcher {
         self.known = ^current
         (_0: changes, _1: skipped)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:343
     fn frame(self: Self, session_id: String) -> String {
         (changes, skipped) :: self.poll()
         events :: changes.into_iter().filter_map((change) -> {
@@ -188,13 +151,10 @@ impl BrowserAssetWatcher {
         "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"{foundation_json_escape(session_id)}\",\"started_at_ms\":{unix_time_ms()},\"direction\":\"host_to_runtime\",\"events\":[{events}],\"skipped\":{skipped}}}"
     }
 }
-// Rust: crates/jet-devserver/src/Session.rs:371
 struct DevtoolsState { envelope: JetDevtoolsEnvelope }
 impl DevtoolsState {
-    // Rust: crates/jet-devserver/src/Session.rs:376
     fn new(session_id: String) -> Self { Self { envelope: JetDevtoolsEnvelope.new(session_id, unix_time_ms()) } }
 }
-// Rust: crates/jet-devserver/src/Session.rs:388
 // GATE #4494: mutex/Arc ownership is retained across all resident state.
 struct ResidentDevSession {
     source_transactions: SessionBroker
@@ -210,13 +170,10 @@ struct ResidentDevSession {
     project_rebuild_executor: Arc<Mutex<Bool>>
 }
 impl ResidentDevSession {
-    // Rust: crates/jet-devserver/src/Session.rs:426
     fn new(entry: String, canvas_port: U16, application_port: U16) -> Self { Self.new_with_canvas_host(entry, "127.0.0.1", canvas_port, application_port) }
-    // Rust: crates/jet-devserver/src/Session.rs:430
     fn new_with_canvas_host(entry: String, canvas_host: String, canvas_port: U16, application_port: U16) -> Self {
         Self.new_with_hosts(entry, canvas_host, canvas_port, "127.0.0.1", application_port)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:445
     fn new_with_hosts(entry: String, canvas_host: String, canvas_port: U16, application_host: String, application_port: U16) -> Self {
         serial :: NEXT_SESSION_ID.fetch_add(1, Ordering.Relaxed)
         // GATE #4494: process identity.
@@ -233,7 +190,6 @@ impl ResidentDevSession {
             browser_asset_watcher: Mutex.new(BrowserAssetWatcher.for_entry(entry)), recording: Mutex.new(.None), project_rebuild_executor: Arc.new(Mutex.new(false))
         }
     }
-    // Rust: crates/jet-devserver/src/Session.rs:495
     fn note_client(self: Self, client: String) -> Unit {
         if !client_id_is_valid(client) -> return
         now :: Instant.now()
@@ -242,7 +198,6 @@ impl ResidentDevSession {
         if !clients.contains_key(client) && clients.len() >= MAX_CLIENTS -> return
         clients.insert(client, now)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:508
     fn drop_client(self: Self, client: String) -> Unit {
         if !client_id_is_valid(client) -> return
         now :: Instant.now()
@@ -250,7 +205,6 @@ impl ResidentDevSession {
         expire_clients(&clients, now)
         clients.remove(client)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:520
     fn browser_game_control_frame(self: Self) -> String Err! {
         queued :: self.browser_game_controls.lock().unwrap()
         frame := JetDevtoolsCommandEnvelope.new(self.id.copy(), unix_time_ms())
@@ -271,19 +225,16 @@ impl ResidentDevSession {
             }
         }
     }
-    // Rust: crates/jet-devserver/src/Session.rs:551
     fn browser_game_asset_frame(self: Self) -> String Err! {
         watcher :: self.browser_asset_watcher.lock() ?? return .Err("browser asset watcher is poisoned")
         watcher.frame(self.id)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:562
     fn reopen_game_asset_watcher(self: &Self, entry: String) Err! {
         trimmed := entry.trim() // #4303
         if trimmed.is_empty() -> return .Err("browser game asset watcher entry must not be empty")
         watcher :: self.browser_asset_watcher.lock() ?? return .Err("browser asset watcher is poisoned")
         watcher.reopen(entry)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:577
     fn devtools_events_since(self: Self, cursor: JetDevtoolsTimeCursor?) -> DevtoolsProjection {
         current_revision :: (*self.current_revision.lock().unwrap()).copy()
         observed_at :: unix_time_ms()
@@ -315,21 +266,18 @@ impl ResidentDevSession {
             status: ^status, command_capabilities: self.devtools_command_capabilities(), command_receipts: self.devtools_command_receipts(), reset, truncation
         }
     }
-    // Rust: crates/jet-devserver/src/Session.rs:652
     fn observe_source(self: Self, revision: String) -> Unit {
         if revision.is_empty() -> return
         *self.current_revision.lock().unwrap() = revision
         accepted :: self.accepted_revision.lock().unwrap()
         if accepted.is_empty() -> *accepted = revision
     }
-    // Rust: crates/jet-devserver/src/Session.rs:666
     fn set_live_lineage(self: &Self, source_id: String, build_id: String, revision: String, world_id: String) Err! {
         if [source_id, build_id, revision, world_id].iter().any((value) -> value.is_empty() || value.chars().any((ch) -> ch.is_control())) -> return .Err("live lineage is incomplete")
         *self.live_lineage.lock().unwrap() = .Val(LiveLineage { protocol: "jet.live.v1", session_id: self.id.copy(), source_id, build_id, revision, world_id })
         self.observe_source(revision)
         self.set_devtools_source_identity(.Val(source_id), .Val(build_id), .Val(revision), .Val(world_id))
     }
-    // Rust: crates/jet-devserver/src/Session.rs:699
     fn record_capture_start(self: &Self, fact: &CaptureStartFact) Err! {
         self.validate_capture_identity(&fact.identity)
         facts :: self.capture_facts.lock().unwrap()
@@ -337,16 +285,13 @@ impl ResidentDevSession {
         if fact.eligibility.skip() == .Val(skip) -> facts.push(.Skip(skip.copy()))
         trim_capture_facts(&facts)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:711
     fn record_capture_fault(self: &Self, fact: &CaptureFaultFact) Err! {
         self.validate_capture_identity(&fact.identity)
         facts :: self.capture_facts.lock().unwrap()
         facts.push(.Fault(fact.copy()))
         trim_capture_facts(&facts)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:719
     fn capture_facts(self: Self) -> [CaptureSessionFact] { (*self.capture_facts.lock().unwrap()).copy() }
-    // Rust: crates/jet-devserver/src/Session.rs:723
     fn validate_capture_identity(self: &Self, identity: &CaptureIdentity) Err! {
         if !identity.is_exact() -> return .Err("capture identity is incomplete")
         if identity.session_id != self.id -> return .Err("capture fact session does not match live session")
@@ -354,7 +299,6 @@ impl ResidentDevSession {
         lineage :: locked.as_ref() ?? return .Err("capture fact has no live lineage")
         if identity.source_id != lineage.source_id || identity.build_id != lineage.build_id || identity.revision != lineage.revision -> return .Err("capture fact does not match live lineage")
     }
-    // Rust: crates/jet-devserver/src/Session.rs:745
     fn record_live_transaction(self: &Self, snapshot: &SessionSnapshot, decisions: &[PersistOutcome]) Err! {
         before :: (*self.accepted_revision.lock().unwrap()).copy()
         self.set_live_lineage(snapshot.source_id, snapshot.build_id, snapshot.revision, snapshot.world_id)
@@ -365,12 +309,10 @@ impl ResidentDevSession {
         self.push_receipt(Receipt { kind: "live_swap", status: "committed", before: ^before, after: snapshot.revision.copy(), client: "", output: "",
             live: .Val(LiveReceipt { lineage: ^lineage, values: ^values }) })
     }
-    // Rust: crates/jet-devserver/src/Session.rs:781
     fn mark_building(self: Self) -> Unit {
         *self.state.lock().unwrap() = "building"
         self.publish_session_state("building", "", "")
     }
-    // Rust: crates/jet-devserver/src/Session.rs:786
     fn mark_ready(self: Self) -> Unit {
         *self.state.lock().unwrap() = "ready"
         self.diagnostic_code.lock().unwrap().clear()
@@ -378,7 +320,6 @@ impl ResidentDevSession {
         self.diagnostic_revision.lock().unwrap().clear()
         self.publish_session_state("ready", "", "")
     }
-    // Rust: crates/jet-devserver/src/Session.rs:793
     fn mark_error(self: Self, code: String, diagnostic: String) -> Unit {
         *self.state.lock().unwrap() = "error"
         *self.diagnostic_code.lock().unwrap() = code
@@ -386,32 +327,24 @@ impl ResidentDevSession {
         *self.diagnostic_revision.lock().unwrap() = (*self.current_revision.lock().unwrap()).copy()
         self.publish_session_state("error", code, diagnostic)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:801
     fn mark_stopped(self: Self) -> Unit {
         *self.state.lock().unwrap() = "stopped"
         self.publish_session_state("stopped", "", "")
     }
-    // Rust: crates/jet-devserver/src/Session.rs:812
     fn devtools_json(self: Self) -> String { self.devtools_lock().envelope.serialize().expect("resident devtools envelope must remain serializable") }
-    // Rust: crates/jet-devserver/src/Session.rs:819
     fn devtools_panel_catalog(self: Self) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! { JetDevtoolsPanelCatalog.canonical() }
-    // Rust: crates/jet-devserver/src/Session.rs:825
     fn devtools_panels(self: Self, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelProjection] JetDevtoolsPanelCatalogError! {
         catalog :: self.devtools_panel_catalog()
         state :: self.devtools_lock()
         catalog.project(&state.envelope, host, grants)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:837
     fn current_revision(self: Self) -> String { (*self.current_revision.lock().unwrap()).copy() }
-    // Rust: crates/jet-devserver/src/Session.rs:841
     fn devtools_command_receipts(self: Self) -> [JetDevtoolsCommandReceipt] { jet_foundation.DevtoolsControl.jet_devtools_command_receipts(self.id) }
-    // Rust: crates/jet-devserver/src/Session.rs:845
     fn devtools_command_capabilities(self: Self) -> DevtoolsCommandCapabilities {
         reason :: if !self.project_rebuild_executor_available() -> .Val("no rebuild executor is registered for this host")
             else if self.current_revision().is_empty() -> .Val("source revision is unavailable") else -> .None
         DevtoolsCommandCapabilities { project_rebuild: reason.is_none(), project_rebuild_reason: ^reason }
     }
-    // Rust: crates/jet-devserver/src/Session.rs:859
     fn register_project_rebuild_executor(self: Self) -> ProjectRebuildExecutorGuard Err! {
         available :: self.project_rebuild_executor.lock() ?? return .Err("project rebuild executor state is poisoned")
         if *available -> return .Err("a project rebuild executor is already registered")
@@ -419,9 +352,7 @@ impl ResidentDevSession {
         drop(available)
         ProjectRebuildExecutorGuard { available: Arc.clone(&self.project_rebuild_executor) }
     }
-    // Rust: crates/jet-devserver/src/Session.rs:876
     fn project_rebuild_executor_available(self: Self) -> Bool { self.project_rebuild_executor.lock().map((available) -> *available).unwrap_or(false) }
-    // Rust: crates/jet-devserver/src/Session.rs:883
     fn validate_devtools_command_admission(self: &Self, command: &JetDevtoolsCommand) Err! {
         command.validate()
         if command.session_id() != self.id -> return .Err("jet.devtools.v1 command session identity mismatch")
@@ -430,12 +361,10 @@ impl ResidentDevSession {
             if request.expected_revision != self.current_revision() -> return .Err("source changed since this rebuild was requested")
         }
     }
-    // Rust: crates/jet-devserver/src/Session.rs:902
     fn enqueue_devtools_command(self: &Self, command: JetDevtoolsCommand) Err! {
         self.validate_devtools_command_admission(&command)
         jet_foundation.DevtoolsControl.jet_devtools_enqueue_command(^command)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:907
     fn take_project_rebuild(self: Self) -> JetDevtoolsProjectRebuildRequest? Err! {
         command :: self.poll_devtools_command() ?? return .None
         if command == .ProjectRebuild(request) {
@@ -460,7 +389,6 @@ impl ResidentDevSession {
             .None
         }
     }
-    // Rust: crates/jet-devserver/src/Session.rs:939
     fn finish_project_rebuild(self: &Self, request: &JetDevtoolsProjectRebuildRequest, result: Result<Unit,String>) Err! {
         request.validate()
         if request.session_id != self.id -> return .Err("jet.devtools.v1 command session identity mismatch")
@@ -469,19 +397,13 @@ impl ResidentDevSession {
             .Err(error) -> jet_foundation.DevtoolsControl.jet_devtools_update_command_receipt(self.id, request.request_id, "failed", .Val(^error))
         }
     }
-    // Rust: crates/jet-devserver/src/Session.rs:968
     fn publish_devtools_event_typed(self: Self, event: JetDevtoolsEvent) -> U64 Err! { self.push_devtools_event(^event) }
-    // Rust: crates/jet-devserver/src/Session.rs:972
     fn enqueue_game_control(self: &Self, request: JetDevtoolsGameControlRequest) Err! { self.enqueue_devtools_command(.GameControl(^request)) }
-    // Rust: crates/jet-devserver/src/Session.rs:979
     fn poll_devtools_command(self: Self) -> JetDevtoolsCommand? { jet_foundation.DevtoolsControl.jet_devtools_poll_command(self.id) }
-    // Rust: crates/jet-devserver/src/Session.rs:983
     fn poll_database_explain(self: Self) -> JetDevtoolsDatabaseExplainRequest? { jet_foundation.DevtoolsControl.jet_devtools_poll_database_explain(self.id) }
-    // Rust: crates/jet-devserver/src/Session.rs:987
     fn update_command_receipt(self: Self, request_id: String, status: String, error: String?) -> Unit {
         _ :: jet_foundation.DevtoolsControl.jet_devtools_update_command_receipt(self.id, request_id, status, ^error)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1003
     fn dispatch_pending_devtools_commands(self: Self) -> USize Err! {
         pending :: jet_foundation.DevtoolsControl.jet_devtools_command_count(self.id).min(32)
         dispatched := USize{0}
@@ -555,16 +477,13 @@ impl ResidentDevSession {
         }
         dispatched
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1152
     fn dispatch_pending_database_explain(self: Self) -> USize Err! { self.dispatch_pending_devtools_commands() }
-    // Rust: crates/jet-devserver/src/Session.rs:1159
     fn publish_database_explain_result(self: Self, result: JetDevtoolsDatabaseExplainResult, timestamp_ms: U64, source: String) -> U64 Err! {
         if result.session_id != self.id -> return .Err("jet.devtools.v1 EXPLAIN result session identity mismatch")
         result.validate()
         event :: JetDevtoolsEvent.from_parts(timestamp_ms, source, "DatabaseExplainResult", result.statement_identity.copy(), result.render_json())
         self.publish_devtools_event_typed(^event)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1179
     fn ingest_devtools_envelope(self: Self, decoded: JetDevtoolsDecodedEnvelope) -> USize Err! {
         decoded.validate()
         if decoded.session_id() != self.id -> return .Err("jet.devtools.v1 envelope session identity mismatch")
@@ -614,7 +533,6 @@ impl ResidentDevSession {
             }
         }
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1254
     fn publish_panel_events(self: Self, events: IntoIterator<JetDevtoolsEvent>) -> USize Err! {
         count := USize{0}
         loop event in events {
@@ -623,12 +541,10 @@ impl ResidentDevSession {
         }
         count
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1266
     fn publish_job_fact(self: Self, fact: JetDevtoolsJobPanelFact, source: String) -> U64 Err! {
         event :: fact.to_protocol_event(source)
         self.publish_devtools_event_typed(^event)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1276
     fn scrub(self: Self, sequence: U64) -> ReplayProjection Err! {
         projection :: (() -> {
             recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
@@ -638,7 +554,6 @@ impl ResidentDevSession {
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1296
     fn scrub_time(self: Self, timestamp_ms: U64) -> ReplayProjection Err! {
         projection :: (() -> {
             recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
@@ -648,7 +563,6 @@ impl ResidentDevSession {
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1316
     fn step(self: Self) -> ReplayProjection Err! {
         projection :: (() -> {
             recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
@@ -658,7 +572,6 @@ impl ResidentDevSession {
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1336
     fn skip(self: Self, count: U64) -> ReplayProjection Err! {
         projection :: (() -> {
             recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
@@ -669,7 +582,6 @@ impl ResidentDevSession {
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1362
     fn checkpoint(self: Self, name: String) -> SessionCheckpoint Err! {
         validate_devtools_text(name, "checkpoint name")
         recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
@@ -678,7 +590,6 @@ impl ResidentDevSession {
         state.checkpoints.insert(name, checkpoint.copy())
         checkpoint
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1381
     fn restore(self: Self, name: String) -> ReplayProjection Err! {
         validate_devtools_text(name, "checkpoint name")
         projection :: (() -> {
@@ -691,7 +602,6 @@ impl ResidentDevSession {
         if projection.as_ref() == .Ok(value) -> self.sync_replay_cursor(value)
         projection
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1411
     fn divergence(self: Self) -> DevtoolsRecordingDivergence Err! {
         (envelope_sequence, envelope_identity) :: (() -> {
             state :: self.devtools_lock()
@@ -711,7 +621,6 @@ impl ResidentDevSession {
         DevtoolsRecordingDivergence { divergent: reason.is_some(), reason: ^reason, identity: state.recording.identity().copy(),
             expected_sequence, actual_sequence, retained_events: state.recording.event_count(), dropped_events: truncation.dropped_events, truncation }
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1454
     fn recording_control(self: Self, payload: String) -> String Err! {
         root :: parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return .Err("recording control must be valid bounded JSON")
         object :: object_map(&root) ?? return .Err("recording control must be a JSON object")
@@ -747,7 +656,6 @@ impl ResidentDevSession {
         }
         self.recording_json()
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1522
     fn recording_json(self: Self) -> String {
         divergence :: self.divergence().ok()
         recording :: self.recording.lock() ?? return recording_unavailable_json(self.id, "devtools recording state is unavailable because its lock is poisoned")
@@ -755,7 +663,6 @@ impl ResidentDevSession {
         projection :: state.recording.projection(&state.cursor) ?? return recording_unavailable_json(self.id, err.to_string())
         recording_json_for_state(self.id, state, &projection, divergence.as_ref())
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1546
     fn set_devtools_source_identity(self: &Self, source_id: String?, build_id: String?, revision: String?, world_id: String?) Err! {
         recording_identity :: if {
             source_id.as_ref() == .Val(source) && build_id.as_ref() == .Val(build) -> .Val(SessionIdentity.new(source, build).map_err(recording_error)?)
@@ -772,7 +679,6 @@ impl ResidentDevSession {
         })()
         self.set_recording_identity(^recording_identity, first_sequence)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1576
     fn set_recording_identity(self: &Self, identity: SessionIdentity?, first_sequence: U64?) Err! {
         recording :: self.recording.lock() ?? return .Err("devtools recording state is unavailable because its lock is poisoned")
         if (_0: recording.as_ref(), _1: identity.as_ref()) == (_0: .Val(state), _1: .Val(identity)) {
@@ -783,7 +689,6 @@ impl ResidentDevSession {
             .None -> .None
         }
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1602
     fn publish_hot_swap_decision(self: &Self, decision: &HotSwapDecision) Err! {
         validate_devtools_text(decision.module_ref, "HotSwap module")
         compatibility :: if decision.is_compatible() -> "compatible" else -> "incompatible"
@@ -797,7 +702,6 @@ impl ResidentDevSession {
         event :: JetDevtoolsEvent.from_parts(unix_time_ms(), "sema", "HotSwap", "module", ^fields)
         _ :: self.publish_devtools_event_typed(^event)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1664
     fn set_devtools_selection(self: &Self, request: String) Err! {
         root :: parse_json(request) ?? return .Err("devtools selection must be valid JSON")
         object :: object_map(&root) ?? return .Err("devtools selection must be an object")
@@ -843,7 +747,6 @@ impl ResidentDevSession {
         event :: JetDevtoolsEvent.from_parts(unix_time_ms(), origin, "Selection", "session", ^fields)
         _ :: self.publish_devtools_event_typed(^event)
     }
-    // Rust: crates/jet-devserver/src/Session.rs:1773
     fn set_devtools_cursor(self: &Self, request: String) Err! {
         root :: parse_json(request) ?? return .Err("devtools cursor must be valid JSON")
         object :: object_map(&root) ?? return .Err("devtools cursor must be an object")

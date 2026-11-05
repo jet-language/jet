@@ -673,9 +673,9 @@ function jet_ui_host_project_accessibility(node, nodeId) {
   return jet_ui_web_ok(projection);
 }
 
-// Source ABI for the generated HarfBuzz Wasm asset. HostServices.rs owns
-// shaping and font selection; this module only adapts opaque handles and
-// copies bytes between the app and HarfBuzz memories.
+// Source ABI for the generated HarfBuzz Wasm asset. The Rust original owns
+// shaping and font selection; this module only adapts opaque handles and copies
+// bytes between the app and HarfBuzz memories.
 const JET_UI_HARFBUZZ_WASM_ARTIFACT = "wasm/jet_harfbuzz.wasm";
 const JET_UI_HARFBUZZ_ABI_VERSION = 2;
 const JET_UI_HARFBUZZ_MAX_TEXT_BYTES = 4 * 1024 * 1024;
@@ -941,9 +941,9 @@ function jet_ui_web_font_host_copy_glyph_array(
   }
 }
 
-// Return the imports expected by HostServices.rs and attach the app memory
-// immediately after jetDom.instantiateWasm returns. No shaping path can run
-// before attach: every import checks this invariant.
+// Return the imports expected and attach the app memory immediately after
+// jetDom.instantiateWasm returns. No shaping path can run before attach: every
+// import checks this invariant.
 let jet_ui_web_harfbuzz_app = null;
 let jet_ui_web_harfbuzz_import_object = null;
 

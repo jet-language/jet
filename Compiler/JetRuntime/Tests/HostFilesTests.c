@@ -176,7 +176,7 @@ int main(void) {
     jet_fd_stat_at_raw(directory,&absent,facts,error); assert(posix(error,ENOENT));
     assert(jet_fd_directory_raw(directory,bytes,sizeof bytes,error)>0 && success(error));
     // Compare the exact held-inode syscall, not a broad allowed-error set.
-    // link(2): no CAP_DAC_READ_SEARCH => ENOENT. FileHandles.rs does not try
+    // link(2): no CAP_DAC_READ_SEARCH => ENOENT. The Rust original does not try
     // /proc/self/fd + AT_SYMLINK_FOLLOW, so the native leaf must not either.
     int reference_link=linkat((int)jet_fd_number_raw(reader),"",
                              (int)jet_fd_number_raw(directory),"hard",AT_EMPTY_PATH);

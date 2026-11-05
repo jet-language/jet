@@ -1,5 +1,5 @@
-// Linux parent observations reproduce Process.rs's typed memory/open-file
-// exhaustion classification. Kernel rlimits are installed by HostSpawn.
+// Linux parent observations reproduce typed memory/open-file exhaustion
+// classification. Kernel rlimits are installed by HostSpawn.
 fn process_execution_proc_path(pid: I64, suffix: I64) -> I64 {
     text :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("/proc/"))
@@ -89,7 +89,7 @@ fn process_execution_files_used(pid: I64, scratch: I64) -> I64 {
 fn process_execution_live_limit(child: I64, scratch: I64) -> I64 {
     process_spec_live_limit(fd_word(process_execution_native(child), I64{8}), fd_word(child, I64{24}), scratch)
 }
-// Process.rs:2530-2557 for one live pid under `spec` (borrowed).
+// For one live pid under `spec` (borrowed).
 fn process_spec_live_limit(pid: I64, spec: I64, scratch: I64) -> I64 {
     memory :: fd_word(spec, PROCESS_SPEC_MEMORY_LIMIT)
     if (memory != I64{0}) {

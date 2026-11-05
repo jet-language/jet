@@ -1,9 +1,8 @@
-// Source/CmdCodemod.rs `jet inspect codemod`: version-1 renames, version-2
-// batch plans (symbol renames and typed AST rewrites over jet_cli's one
-// semantic index, SemIndexBuild.jet), and replay-log undo. The destination
-// checks are Source/CmdCodemod/Transaction.rs's, run before the held
-// transaction (SourceTransaction.jet) publishes anything. Every refusal is one
-// E2105 report after whatever the plan already printed.
+// `jet inspect codemod`: version-1 renames, version-2 batch plans (symbol
+// renames and typed AST rewrites over jet_cli's one semantic index,
+// SemIndexBuild.jet), and replay-log undo. The destination checks are, run
+// before the held transaction (SourceTransaction.jet) publishes anything. Every
+// refusal is one E2105 report after whatever the plan already printed.
 use {
     cli_files :: core.files
     codemod_hex :: core.encoding.hex
@@ -408,7 +407,7 @@ fn jet_cli_codemod_secure_existing_project_file(project: String, raw: String) -[
     Ok(canonical)
 }
 
-// ---- Transaction.rs destination checks ----
+// ---- destination checks ----
 
 fn jet_cli_codemod_canonical_project(project: String) -[FS, Env]> String JetCLIReadError! {
     info :: cli_files.stat(project) ?? return Err(jet_cli_codemod_error(jet_cli_io_error_text(err)))
@@ -1733,7 +1732,7 @@ fn jet_cli_codemod_replay_project(path: String) -[FS, Env]> String JetCLIReadErr
     Ok(cli_files.realpath(project) ?? return Err(jet_cli_codemod_error("could not canonicalize replay project: {jet_cli_io_error_text(err)}")))
 }
 
-// Transaction.rs read_replay_log: the reason only; the caller wraps it.
+// read_replay_log: the reason only; the caller wraps it.
 fn jet_cli_codemod_read_replay_log(project: String, path: String) -[FS, Env]> String JetCLIReadError! {
     canonical :: jet_cli_codemod_canonical_project(project)
     dot_jet :: jet_cli_rooted_join(canonical, ".jet")

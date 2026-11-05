@@ -1,12 +1,12 @@
 // COMPILER-NEEDED jet_std_json_parse: raw E4 -> canonical ordered native Dyn.
-// Canonical oracle JetStd/JSONDyn.rs::parse_json_dyn delegates to
-// EncodingJson.rs::parse_json_exact_numbers(text,true): all numbers Number.
-// EncodingJson.rs:123-425 supplies grammar, consumption order and depth=64;
-// EncodingErrors.rs supplies reason bytes. Adapter always emits JSON/Syntax,
-// offset=0, Some(line), None column, empty path, None cause, even at limits.
-// No Core policy-parser 16MiB/depth256/path/column semantics are substituted.
-// E4 is valid UTF-8 as Rust &str was; walk scalars without a chars Vec copy.
-// State words: borrowed data/length, byte cursor, consumed-LF line, owned error.
+// Canonical oracle `parse_json_dyn` delegates to
+// `parse_json_exact_numbers`(text,true): all numbers Number. The Rust original
+// supplies grammar, consumption order and depth=64; the Rust original supplies
+// reason bytes. Adapter always emits JSON/Syntax, offset=0, Some(line), None
+// column, empty path, None cause, even at limits. No Core policy-parser
+// 16MiB/depth256/path/column semantics are substituted. E4 is valid UTF-8 as
+// Rust &str was; walk scalars without a chars Vec copy. State words: borrowed
+// data/length, byte cursor, consumed-LF line, owned error.
 fn compiler_json_peek(state: I64) -> I64 {
     at :: rt_text_word(wrapping(state + I64{16}))
     if (at == rt_text_word(wrapping(state + I64{8}))) -> return I64{-1}
@@ -163,8 +163,8 @@ fn compiler_json_number(state: I64) -> I64 {
         if (byte >= I64{48} && byte <= I64{57}) -> digits += I64{1}
         at += I64{1}
     }
-    // JSONNumber.rs:10-28 validates total digits first, then i64 exponent,
-    // then abs(exponent)<=1e6. Finite-f64 restrictions do not apply to Number.
+    // The Rust original validates total digits first, then i64 exponent, then
+    // abs(exponent)<=1e6. Finite-f64 restrictions do not apply to Number.
     if (digits > I64{1000000}) -> return compiler_json_error(state, rt_static_text("JSON number exceeds the 1000000-digit limit"))
     if (exponent_start != I64{-1}) {
         limit :: if exponent_negative -> I64{-9223372036854775808} else -> I64{-9223372036854775807}

@@ -562,8 +562,8 @@ fn jet_driver_manifest_field_value(source: String, tokens: [Token], start_index:
     JetDriverManifestFieldValue{text: text.trim(), next_index: cursor}
 }
 
-// Rust `Blocks.rs` `parse_allocator_bytes`: the unit suffix follows the last
-// `.` (`rsplit_once`), and the count is a `u64` spelling (one optional `+`).
+// `parse_allocator_bytes`: the unit suffix follows the last `.`
+// (`rsplit_once`), and the count is a `u64` spelling (one optional `+`).
 fn jet_driver_parse_allocator_bytes(value: String, span: Span, diagnostics: &[Diagnostic]) -> Int? {
     value_bytes :: value.bytes()
     dot := -1
@@ -616,8 +616,8 @@ fn jet_driver_parse_allocator_bytes(value: String, span: Span, diagnostics: &[Di
     Val(count * multiplier)
 }
 
-// Rust `Blocks.rs` `top_level_commas`: split on commas outside `()`/`[]`/`{}`
-// and string literals; a final blank component is dropped.
+// `top_level_commas`: split on commas outside `()`/`[]`/`{}` and string
+// literals; a final blank component is dropped.
 fn jet_driver_top_level_commas(body: String) -> [String] Never! {
     parts := [String]{}
     current := [U8]{}
@@ -1566,9 +1566,9 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
             // suffix (the CLI authorizes it by name); every other file must be
             // `.jet`. Project configuration (`package.jet`, `workspace.jet`,
             // `env.jet`; spec "Project configuration") and a manifest-declared
-            // Config compose project facts and are never source units (Rust
-            // Package/mod.rs `source_files_checked`). A `package.jet` is
-            // manifest syntax, so it is no source even when selected.
+            // Config compose project facts and are never source units. A
+            // `package.jet` is manifest syntax, so it is no source even when
+            // selected.
             selected_entry :: root.identity == snapshot.entry_root_identity && file.path == snapshot.entry_path
             configuration :: jet_driver_is_project_configuration(file.relative_path) && (!selected_entry || jet_driver_path_leaf(file.relative_path) == "package.jet")
             if configuration || file.relative_path == "jet.toml" || package.configs.contains(file.relative_path) || (!file.relative_path.ends_with(".jet") && !selected_entry) -> next
@@ -2245,7 +2245,7 @@ fn jet_driver_unit_is_namespace_member(unit: JetDriverSourceUnit) -> Bool Never!
 
 // The project configuration files (spec "Project configuration"): a
 // `package.jet`, `workspace.jet` or `env.jet` at any depth configures its
-// project, never as package source (Rust Package/mod.rs `source_files_checked`).
+// project, never as package source.
 fn jet_driver_is_project_configuration(relative_path: String) -> Bool Never! {
     parts := relative_path.split("/").to_list()
     file_name :: &parts.pop() ?? ""
@@ -2277,9 +2277,8 @@ fn jet_driver_lookup_file_target(source_units: [JetDriverSourceUnit], importing_
     jet_driver_find_source_path(source_units, importing_unit.root_index, [String]{resolved.path}, &diagnostics, span)
 }
 
-// E0603 for a file import that names no checked file (Rust Loader.rs
-// `resolve_file_import`). The fix names the file the import expects, as the
-// importing file's own path shows it.
+// E0603 for a file import that names no checked file. The fix names the file
+// the import expects, as the importing file's own path shows it.
 fn jet_driver_missing_file_import(unit: JetDriverSourceUnit, import_path: String, span: Span) -> Diagnostic {
     resolved :: jet_driver_file_import_path(unit.relative_path, import_path)
     prefix :: if unit.path.ends_with(unit.relative_path) -> unit.path.slice(0, unit.path.len() - unit.relative_path.len()) else -> ""
@@ -2764,10 +2763,10 @@ fn jet_driver_bind_package_namespaces(
 // user's program; no authorized disk file ever carries this prefix.
 JET_DRIVER_CORE_SOURCE_ROOT :: "<corelib>"
 
-// A Core library module the loader placed in the graph (Rust Loader.rs
-// 2531-2683). It has no authority root. `file_index` selects its row in
-// `request.core_sources`, or is -1 for a Core module the host implements
-// entirely, whose empty module keeps every member a host row.
+// A Core library module the loader placed in the graph (2531-2683). It has no
+// authority root. `file_index` selects its row in `request.core_sources`, or is
+// -1 for a Core module the host implements entirely, whose empty module keeps
+// every member a host row.
 fn jet_driver_unit_is_core(unit: JetDriverSourceUnit) -> Bool Never! {
     unit.root_index < 0 && unit.source_origin == SemaSourceOrigin.CompilerGenerated && unit.path.starts_with("{JET_DRIVER_CORE_SOURCE_ROOT}/")
 }
@@ -3265,11 +3264,11 @@ struct JetDriverCoreIdentifierDemand {
     codec_decode: Bool{false}
     // Rust sema checks a qualified `core.<module>.<member>` call through a root
     // `use core :: core` alias by its fixed typed row and lowers it to the
-    // member's Core ABI host function (fixed_sigs.rs:5488 hmac_sha256,
-    // SHA256Raw.rs:103). Natively that member's body is its Core source
-    // module, so the scan records each `<head>.<segment>` (and
-    // `<head>.<segment>.<segment>`) chain whose first segment names a Core
-    // module, and the loader loads that module when `<head>` aliases `core`.
+    // member's Core ABI host function (hmac_sha256). Natively that member's
+    // body is its Core source module, so the scan records each
+    // `<head>.<segment>` (and `<head>.<segment>.<segment>`) chain whose first
+    // segment names a Core module, and the loader loads that module when
+    // `<head>` aliases `core`.
     core_paths: [String]
 }
 
@@ -3546,8 +3545,8 @@ fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverPar
     tokens :: lexed.tokens.len()
     line_starts :: parser_line_starts(source)
     lines :: line_starts.len() - 1
-    // Rust Driver/mod.rs:7147: a lexer error ends the frontend before the
-    // parse, so a broken token never cascades into parse errors.
+    // A lexer error ends the frontend before the parse, so a broken token never
+    // cascades into parse errors.
     if jet_driver_has_errors(lexed.diagnostics) -> return JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: lexed.diagnostics}, demand: ^demand, lines: lines, tokens: tokens, line_starts: ^line_starts}
     parsed :: parse_lexed_with_source(^lexed, source, line_starts)
     JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens, line_starts: ^line_starts}
@@ -3569,7 +3568,7 @@ fn jet_driver_parse_user_unit_threads(text: String, retain_demand: Bool, threads
     lexed := lex_threads(source, threads)
     tokens :: lexed.lexed.tokens.len()
     lines :: lexed.line_starts.len() - 1
-    // Rust Driver/mod.rs:7147: a lexer error ends the frontend before the parse.
+    // A lexer error ends the frontend before the parse.
     if jet_driver_has_errors(lexed.lexed.diagnostics) -> return JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: lexed.lexed.diagnostics}, demand: jet_driver_empty_core_identifier_demand(), lines: lines, tokens: tokens, line_starts: ^lexed.line_starts}
     comments :: jet_driver_comment_spans(lexed.lexed.tokens)
     scanned := jet_driver_collect_core_identifier_demand_threads(^lexed.lexed, lexed.runs, retain_demand, true, threads)
@@ -4271,11 +4270,11 @@ fn jet_driver_place_core_module(modules: [JetDriverLoadedModule], source_units: 
     }
 }
 
-// Rust Loader.rs 2633-2785 appends the Core source modules after every user
-// module: first the Core modules user code imports (or reaches by naming a
-// bare `URL`), in Core table order, each followed by the private parts it
-// owns; then, breadth first, the Core modules those import, in import order.
-// Host-only Core modules, which Rust never loads, come last in load order.
+// 2633-2785 appends the Core source modules after every user module: first the
+// Core modules user code imports (or reaches by naming a bare `URL`), in Core
+// table order, each followed by the private parts it owns; then, breadth first,
+// the Core modules those import, in import order. Host-only Core modules, which
+// Rust never loads, come last in load order.
 fn jet_driver_order_core_modules(modules: ^[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], core_sources: [JetDriverCoreSource], bare_modules: [String]) -> [JetDriverLoadedModule] Never! {
     // Discover the complete index order before taking any module. Pop and
     // keyed removal transfer ownership without shifting a vector per module.

@@ -723,7 +723,7 @@ struct JetCompilerServicesGeneratedLine {
     source_line: Int
 }
 
-// Compiler.rs `SourceMap`: every opened source once, in first-seen order.
+// `SourceMap`: every opened source once, in first-seen order.
 struct JetCompilerServicesSourceMap {
     sources: [String]
     generated_lines: [JetCompilerServicesGeneratedLine]
@@ -756,9 +756,9 @@ fn jet_eval_compiler_services_count(text: String) -> Int? Never! {
     Val(value)
 }
 
-// Compiler.rs `source_map_from_generated_rust`: the one reader of generated
-// Rust markers, for `jet inspect compiler source-map` and
-// `core.compiler.source_map`. Lines split as Rust `str::lines` does.
+// `source_map_from_generated_rust`: the one reader of generated Rust markers,
+// for `jet inspect compiler source-map` and `core.compiler.source_map`. Lines
+// split as Rust `str::lines` does.
 fn jet_eval_compiler_services_source_map(rust_source: String) -> JetCompilerServicesSourceMap Never! {
     sources := [String]{}
     current := String?{None}
@@ -786,7 +786,7 @@ fn jet_eval_compiler_services_source_map(rust_source: String) -> JetCompilerServ
     JetCompilerServicesSourceMap{sources: sources, generated_lines: lines}
 }
 
-// Compiler.rs `source_map_value`: the `CompilerSourceMap` comptime value.
+// `source_map_value`: the `CompilerSourceMap` comptime value.
 fn jet_eval_compiler_services_source_map_value(map: JetCompilerServicesSourceMap) -> TComptimeValue Never! {
     lines := [TComptimeValue]{}
     loop line in map.generated_lines {

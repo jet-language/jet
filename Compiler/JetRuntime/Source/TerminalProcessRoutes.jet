@@ -1,9 +1,8 @@
-// Process.rs:2943-2984; ProcessPty.rs:172-184,304-324;
-// CAbiRoutes.rs:21729-21733. Native Linux process-terminal route only.
-// TerminalSession8 owns one retained HostSpawn Child72*, not a Rust Rc/File.
-// TerminalSize16 is the existing UiCarriersBasic raw {cols,rows} record.
-// Session aliases compare the descriptor owner's identity and keep it alive
-// independently of ProcessChild handles. Explicit stream close stays shared.
+// Native Linux process-terminal route only. TerminalSession8 owns one retained
+// HostSpawn Child72*, not a Rust Rc/File. TerminalSize16 is the existing
+// UiCarriersBasic raw {cols,rows} record. Session aliases compare the
+// descriptor owner's identity and keep it alive independently of ProcessChild
+// handles. Explicit stream close stays shared.
 #Export(c) fn jet_terminal_session_from_child_raw(child: I64) -> I64 {
     session :: jet_rt_alloc(I64{8}, I64{8})
     fd_put(session, I64{0}, jet_process_retain_raw(child))

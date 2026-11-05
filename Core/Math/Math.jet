@@ -1127,7 +1127,7 @@ fn __decimal_decoded(text: String) -> Decimal [FieldError]! {
     value :: __decimal_parse(text) ?? return Err([FieldError]{FieldError{path: "", reason: "expected Decimal: invalid Decimal string"}})
     Ok(value)
 }
-// The decode failure for a Dyn value of `kind` (DynKind.rs dyn_kind vocabulary).
+// The decode failure for a Dyn value of `kind` (dyn_kind vocabulary).
 fn __decimal_rejected(kind: String) -> Decimal [FieldError]! {
     Err([FieldError]{FieldError{path: "", reason: "expected Decimal, found {kind}"}})
 }
@@ -1229,9 +1229,8 @@ fn __decimal_from_float(value: Float) -> Decimal Never! {
     __decimal_try_fraction(__fraction_from_float(value)) ?? panic("Float is not finite")
 }
 
-// A checked unit conversion (Rust ExactUnitConversion.rs): `value` times the
-// declared exact `scale`, plus `offset`, each a "numerator/denominator" ratio
-// text, as one exact Fraction.
+// A checked unit conversion: `value` times the declared exact `scale`, plus
+// `offset`, each a "numerator/denominator" ratio text, as one exact Fraction.
 fn __unit_converted(value: Float, scale: String, offset: String) -> Fraction Never! {
     __fraction_add(__fraction_mul(__fraction_from_float(value), __unit_ratio(scale)), __unit_ratio(offset))
 }
@@ -3706,9 +3705,9 @@ impl Transform2 {
             from_frame: self.to_frame, to_frame: self.from_frame,
         })
     }
-    // Rust geometry_method_return (CheckerCoreLib/math_layout.rs:759-800):
-    // a Float-scalar Transform2's `then` and `inverse` return the Float
-    // `Transform`. The checker routes those calls here.
+    // Rust geometry_method_return: a Float-scalar Transform2's `then` and
+    // `inverse` return the Float `Transform`. The checker routes those calls
+    // here.
     fn __then_float<Next>(self, next: Transform2<T, To, Next>) -> Transform<From, Next> TransformError! {
         composed :: self.then<Next>(next) ?? return Err(err)
         Ok(Transform<From, Next>{m00: composed.m00, m01: composed.m01, m10: composed.m10, m11: composed.m11, tx: composed.tx, ty: composed.ty, from_frame: composed.from_frame, to_frame: composed.to_frame})

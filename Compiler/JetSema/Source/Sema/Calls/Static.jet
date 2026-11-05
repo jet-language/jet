@@ -871,10 +871,9 @@ fn sema_call_static_alias_target(graph: SemaRegistrationGraph, row: SemaRegistra
     Val(SemaStaticAliasTarget{symbol: target, owner_type_args: args})
 }
 
-// Rust options_rng.rs:19-135 check_option_lift2 (method_calls.rs:3559):
-// `Option.lift2(f, a, b)` is `f(a, b)` when both optionals are present and
-// absent otherwise. `a` and `b` are checked first, since `f`'s parameter types
-// are their payload types.
+// check_option_lift2: `Option.lift2(f, a, b)` is `f(a, b)` when both optionals
+// are present and absent otherwise. `a` and `b` are checked first, since `f`'s
+// parameter types are their payload types.
 fn sema_call_option_lift2(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     if args.len() != 3 {
@@ -967,8 +966,8 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
     if method == "new" && args.len() == 3 && type_name == "ExpiringSecret" && sema_module_is_core_source(owner_symbol.module_name) {
         if !sema_call_expiring_secret_new_accepts(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    // E2938 (D-FOUND-PLATFORM1=A, Rust method_calls.rs `UIShortcut.cmd`): the
-    // command-key constructor fixes its key before code generation.
+    // E2938 (D-FOUND-PLATFORM1=A, `UIShortcut.cmd`): the command-key
+    // constructor fixes its key before code generation.
     if method == "cmd" && args.len() == 1 && type_name == "UIShortcut" && sema_module_is_core_source(owner_symbol.module_name) {
         sema_call_ui_shortcut_cmd_key(args[0], &diagnostics)
     }

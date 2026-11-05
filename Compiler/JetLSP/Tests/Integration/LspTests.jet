@@ -11,7 +11,6 @@ use {
 // Helpers and transcript parser remain solely in Lsp.jet.
 // GATE #4494: real child processes, pipes, mutex/thread poisoning and filesystem.
 
-// Rust: tests/lsp.rs:42
 #Test("lsp_process_lock_recovers_from_poison") {
     mutex :: Arc.new(Mutex.new(_))
     poisoned_mutex :: Arc.clone(mutex)
@@ -23,7 +22,6 @@ use {
     _guard :: lock_unpoisoned(mutex)
 }
 
-// Rust: tests/lsp.rs:788
 #Test("lsp_json_transcripts") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -35,7 +33,6 @@ use {
     loop path in files -> run_json_transcript_file(jet, path)
 }
 
-// Rust: tests/lsp.rs:807
 #Test("lsp_initialize_capabilities_have_named_test_coverage") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -67,7 +64,6 @@ use {
     _ :: child.wait()
 }
 
-// Rust: tests/lsp.rs:861
 #Test("lsp_mcp_environment_resources_are_read_only") {
     _guard :: lock_lsp_process()
     project :: Scratch.new("lsp-mcp-environment")
@@ -116,7 +112,6 @@ use {
     assert(status.success(), "LSP exited unsuccessfully: {status}")
 }
 
-// Rust: tests/lsp.rs:1091
 #Test("lsp_incremental_sync_range_edit_updates_document") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -148,7 +143,6 @@ use {
     _ :: child.wait()
 }
 
-// Rust: tests/lsp.rs:1172
 #Test("lsp_incremental_sync_rejects_stale_and_malformed_edits") {
     _guard :: lock_lsp_process()
     child := Command.new(jet_bin()).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
@@ -196,7 +190,6 @@ use {
     _ :: child.wait()
 }
 
-// Rust: tests/lsp.rs:1347
 #Test("lsp_workspace_symbols_follow_all_roots_and_folder_changes") {
     _guard :: lock_lsp_process()
     root :: env.temp_dir().join("lsp multi root {process.id()}")
@@ -244,7 +237,6 @@ use {
     _ :: fs.remove_dir_all(root)
 }
 
-// Rust: tests/lsp.rs:1472
 #Test("lsp_check_json_matches_jet_check_json_for_diagnostic_fixture") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -261,7 +253,6 @@ use {
     _ :: fs.remove_file(path)
 }
 
-// Rust: tests/lsp.rs:1515
 #Test("lsp_diagnostic_and_code_action_match_all_tier_reports") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -349,7 +340,6 @@ use {
     _ :: fs.remove_file(path)
 }
 
-// Rust: tests/lsp.rs:1732
 #Test("lsp_formatting_and_range_formatting_return_edits") {
     jet :: jet_bin()
     if !jet.exists() -> return

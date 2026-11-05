@@ -1,10 +1,9 @@
-// Package-authored
-// templates (user `derive T.Name` providers, declared marker bodies and root
-// `comptime loop` declarations) expand through the same typed template engine as
-// the Prelude providers (Registration/Derives.jet). Generated items re-enter
-// ordinary registration as written items; nothing is serialized or re-lexed.
-// Rust: `Bundle/Pipeline/CheckInner.rs` (user derives, marker bodies) and
-// `Bundle/Pipeline.rs` `expand_item_template_loops`.
+// Package-authored templates (user `derive T.Name` providers, declared marker
+// bodies and root `comptime loop` declarations) expand through the same typed
+// template engine as the Prelude providers (Registration/Derives.jet). Generated
+// items re-enter ordinary registration as written items; nothing is serialized
+// or re-lexed. Rust: (user derives, marker bodies) and
+// `expand_item_template_loops`.
 use jet_foundation.[
     CallLabel,
     CtEnumArg,
@@ -489,10 +488,10 @@ fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int
             }
         }
     }
-    // A `.Block` rule receives the text inside Jet's closed
-    // braces as its `target` value. The rule body can check that text and
-    // emit ordinary Jet items through the same typed path as a type or
-    // function rule (Rust `CheckInner.rs` declared text blocks).
+    // A `.Block` rule receives the text inside Jet's closed braces as its
+    // `target` value. The rule body can check that text and emit ordinary Jet
+    // items through the same typed path as a type or function rule (declared
+    // text blocks).
     source :: graph.modules[module_index].source
     block_spans :: graph.modules[module_index].program.block_spans
     blocks := [SemaUserTextBlock]{}
@@ -506,8 +505,8 @@ fn sema_user_rule_collect_module(graph: SemaRegistrationGraph, module_index: Int
 }
 
 // ---------------------------------------------------------------------------
-// Declared text blocks (Rust `Bundle/Pipeline.rs` `block_source`,
-// `collect_declared_text_blocks`, `collect_item_declared_text_blocks`).
+// Declared text blocks (`block_source`, `collect_declared_text_blocks`,
+// `collect_item_declared_text_blocks`).
 
 // `span` covers the whole block, `site` its `#Name` use site, where a
 // rejection reports.

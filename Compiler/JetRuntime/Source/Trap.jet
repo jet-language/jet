@@ -1,8 +1,8 @@
-// Native process-edge stops. Core.rs and RuntimeDiagnosticCore.rs are the
-// behavioral reference: registered stops exit 70; IR Never is a defect (101).
-// Text handles borrow the one E4 JetText ABI: [ptr, byte length, capacity],
-// three 8-byte words. No String/Vec Rust layout is read here. These exports
-// replace the corresponding Rust exports when E2 cuts the pack over.
+// Native process-edge stops. The Rust originals are the behavioral reference:
+// registered stops exit 70; IR Never is a defect (101). Text handles borrow the
+// one E4 JetText ABI: [ptr, byte length, capacity], three 8-byte words. No
+// String/Vec Rust layout is read here. These exports replace the corresponding
+// Rust exports when E2 cuts the pack over.
 
 fn trap_word(address: I64) -> I64 {
     #Unsafe("the caller borrows an initialized word of a live JetText or static require descriptor") {
@@ -237,7 +237,7 @@ fn trap_footer(code: I64) {
 }
 fn trap_footer_bytes(code: I64) {
     // Exact active registry rows; backticks protect the raw message from the
-    // sentence-case pass in RuntimeDiagnosticCore.rs.
+    // sentence-case pass.
     if {
         (code == I64{0}) -> trap_footer_e3001()
         (code == I64{1}) -> trap_footer_e3010()
@@ -258,8 +258,8 @@ fn trap_root_panic_report(message: I64) -> I64 {
 }
 
 fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
-    // Core.rs jet_runtime_stop_unwind carries the raw message into the task
-    // runner, not this process report (Scheduler.rs jet_scheduler_panic_message).
+    // jet_runtime_stop_unwind carries the raw message into the task runner, not
+    // this process report (jet_scheduler_panic_message).
     comptime_serve_stop(I64{1}, message, message_len, I64{0}, I64{0})
     if rt_task_panic_publish(message, message_len, code) -> return
     trap_header(code)
@@ -327,9 +327,9 @@ fn trap_process_stop(code: I64, message: I64, message_len: I64) {
     trap_exit(I64{70})
 }
 
-// FixedArithmetic.rs ShiftOutOfRange: "Shifting {left|right} by {count} bits
-// is out of range (this type is {bits} bits wide)". The count prints in the
-// shifted type's signedness (1 = unsigned), as the seed's i128 operand does.
+// ShiftOutOfRange: "Shifting {left|right} by {count} bits is out of range (this
+// type is {bits} bits wide)". The count prints in the shifted type's signedness
+// (1 = unsigned), as the seed's i128 operand does.
 #Export(c) fn jet_rt_fixed_shift_stop(direction: I64, count: I64, count_unsigned: I64, bits: I64, file: I64, file_len: I64, line: I64) {
     comptime_serve_stop(I64{2}, count, count_unsigned, bits, I64{0})
     message :: jet_rt_string_builder_new()
@@ -348,8 +348,8 @@ fn trap_process_stop(code: I64, message: I64, message_len: I64) {
     jet_rt_string_drop(message)
 }
 
-// CAbiRoutes.rs:11-12: publish the seed's raw native-Int range reason.
-// Root rendering stays separate so task publication never prints a report.
+// Publish the seed's raw native-Int range reason. Root rendering stays separate
+// so task publication never prints a report.
 fn trap_native_index_range_stop() {
     message :: trap_msg_native_index_range_text()
     if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1}) -> return
@@ -414,8 +414,8 @@ fn trap_native_index_range_root() {
     trap_footer(I64{1})
 }
 
-// Outcome.rs:2463-2466 supplies the one list-index reason, as an owned
-// String. Reuse the existing decimal formatter, including I64.MIN.
+// The Rust original supplies the one list-index reason, as an owned String.
+// Reuse the existing decimal formatter, including I64.MIN.
 fn trap_list_bounds_reason(len: I64, index: I64) -> I64 {
     message :: jet_rt_string_builder_new()
     trap_build_msg_list_head(message)
@@ -439,8 +439,8 @@ fn trap_build_msg_list_noun(builder: I64, len: I64) {
     if (len != I64{1}) { trap_build_msg_list_plural(builder) }
 }
 
-// The list-index stop of compiled code (Core.rs jet_runtime_stop): the IR's
-// native word index, reported at the indexing file and line.
+// The list-index stop of compiled code (jet_runtime_stop): the IR's native word
+// index, reported at the indexing file and line.
 #Export(c) fn jet_rt_list_bounds_stop(len: I64, index: I64, file: I64, file_len: I64, line: I64) {
     comptime_serve_stop(I64{3}, len, index, I64{0}, I64{0})
     message :: trap_list_bounds_reason(len, index)
@@ -467,9 +467,9 @@ fn trap_build_msg_list_noun(builder: I64, len: I64) {
     trap_msg_report_list_end()
 }
 
-// CAbi.rs:91-98: an uncaught host payload is a defect, not an E3001 stop.
-// Rust's thread/source/backtrace panic-hook framing is host implementation
-// detail; retain the payload bytes and the host-fault exit class. Like
+// An uncaught host payload is a defect, not an E3001 stop. Rust's
+// thread/source/backtrace panic-hook framing is host implementation detail;
+// retain the payload bytes and the host-fault exit class. Like
 // jet_rt_unreachable it exits at once: no program stop publication.
 fn trap_host_fault(message: I64, length: I64) {
     trap_defect_prepare()
@@ -534,10 +534,10 @@ fn rt_seq_index_oob_stop(length: I64, index: I64) {
     trap_simple(I64{0}, trap_word(file), trap_word(wrapping(file + I64{8})), trap_line(line), trap_word(message), trap_word(wrapping(message + I64{8})))
 }
 
-// Core/CAbi.rs record_index_stop publishes this exact seed reason:
-// "record variant index out of range". jet_rt_panic_message owns the one
-// task-publication path. At root its header + message + prelude_end + footer
-// is byte-identical to jet_panic("<core.prelude>", 0, message).
+// record_index_stop publishes this exact seed reason: "record variant index out
+// of range". jet_rt_panic_message owns the one task-publication path. At root
+// its header + message + prelude_end + footer is byte-identical to
+// jet_panic("<core.prelude>", 0, message).
 fn rt_record_variant_panic() {
     message :: rt_static_text("record variant index out of range")
     jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
@@ -545,7 +545,7 @@ fn rt_record_variant_panic() {
 
 fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, caret: I64, message: I64, locals: I64) {
     // Task bodies receive the original message, never the rendered report
-    // (architecture.md TaskFailure.Panicked; Core.rs jet_runtime_stop_unwind).
+    // (architecture.md TaskFailure.Panicked.
     if rt_task_panic_publish(trap_word(message), trap_word(wrapping(message + I64{8})), I64{0}) -> return
     trap_header(I64{0})
     trap_write_handle(message)

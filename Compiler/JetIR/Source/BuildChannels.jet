@@ -43,8 +43,8 @@ fn ir_channel_new(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, bo
     if bounded {
         capacity = ir_expr(&m, p, &b, args[0])
         if ir_failed(b) || capacity < 0 -> return -1
-        // The reference scheduler stops a bound below 1 (Scheduler.rs:3557);
-        // the native channel export only clamps it.
+        // The reference scheduler stops a bound below 1; the native channel
+        // export only clamps it.
         word_row :: ir_word_row(&m)
         bound :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{capacity}, word_row)
         one :: ir_word_const(&m, &b, 1)

@@ -37,7 +37,7 @@ struct NetReady {
 }
 
 
-// NetHTTP.rs JetNetErrorDetail: public construction is already supported.
+// JetNetErrorDetail: public construction is already supported.
 struct NetErrorDetail {
     operation: String
     address: String?
@@ -79,8 +79,8 @@ enum NetError {
     }
 }
 
-// Prelude/Core/NetError.rs: every ordinary variant
-// displays its detail message; DNS NotFound alone adds the canonical prefix.
+// Every ordinary variant displays its detail message; DNS NotFound alone adds
+// the canonical prefix.
 fn net_error_text(err: NetError) -> String Never! {
     if err == .DNS(dns) {
         return if dns == {
@@ -562,8 +562,8 @@ fn dns_srv_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [SRVReco
     }
 }
 
-// NetHTTP.rs jet_net_dns_result: prefix tests precede the timeout substring
-// test, preserving cancellation/protocol precedence and DNS-specific payloads.
+// jet_net_dns_result: prefix tests precede the timeout substring test,
+// preserving cancellation/protocol precedence and DNS-specific payloads.
 fn dns_error(name: String, message: String) -> NetError Never! {
     if starts_with(message, "DNS name not found") -> return NetError.DNS(NetDNSError.NotFound(name))
     detail :: NetErrorDetail{operation: "dns", address: None, name: Val(name), message: message, os_code: None}

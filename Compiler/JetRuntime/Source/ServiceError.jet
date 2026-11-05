@@ -1,5 +1,5 @@
-// ServiceAuthority.rs:198-216 declaration order; private native tag/Text owner.
-// CAbiRoutes.rs:11191-11303: ctors borrow Text, getters clone after variant check.
+// Private native tag/Text owner. Ctors borrow Text, getters clone after variant
+// check.
 fn service_error_new(ordinal: I64, payload: I64) -> I64 {
     result :: jet_rt_alloc(SERVICE_ERROR_BYTES, I64{8})
     encoding_store(wrapping(result + SERVICE_ERROR_TAG), ordinal)
@@ -22,7 +22,7 @@ fn service_error_get(value: I64, ordinal: I64) -> I64 {
     encoding_word(wrapping(a + SERVICE_ERROR_TAG)) == encoding_word(wrapping(b + SERVICE_ERROR_TAG))
         && jet_rt_string_eq(encoding_word(wrapping(a + SERVICE_ERROR_PAYLOAD)), encoding_word(wrapping(b + SERVICE_ERROR_PAYLOAD)))
 }
-// Services.rs:1248-1263: ALL ten variants return m.clone(), no label/quoting.
+// ALL ten variants return m.clone(), no label/quoting.
 #Export(c) fn jet_rt_handle_show_jet_service_error(value: I64) -> I64 { jet_rt_string_clone(encoding_word(wrapping(value + SERVICE_ERROR_PAYLOAD))) }
 #Export(c) fn jet_rt_record_tag_jet_service_error(value: I64) -> I64 { encoding_word(wrapping(value + SERVICE_ERROR_TAG)) }
 #Export(c) fn jet_rt_record_new_jet_service_error_full(payload: I64) -> I64 { service_error_new(I64{0}, payload) }

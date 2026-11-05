@@ -79,22 +79,21 @@ fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) Never! {
     }
 }
 
-// Policy.rs `marker_argument_shape_error`: E0930 names the rule's registered
-// signature at the marker span without its `#`, as sema's shape error does.
+// `marker_argument_shape_error`: E0930 names the rule's registered signature at
+// the marker span without its `#`, as sema's shape error does.
 fn parser_marker_shape_error(state: &JetParserState, marker: Marker) {
     expected :: "{marker.name}{marker_registered_signature(marker.name)}"
     parser_add_error_code(&state, "E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{expected}`")
 }
 
-// The layout fact of a
-// struct's `#Layout(…)` marker, or the refusal of an enum's. `grouped` is the
-// `#[…]` list spelling (Rust `marker_groups.rs`), whose refusals are ordinary
+// The layout fact of a struct's `#Layout(…)` marker, or the refusal of an
+// enum's. `grouped` is the `#[…]` list spelling, whose refusals are ordinary
 // errors; the bare `#Layout(…)` spelling (Rust `layout_type_def`) refuses
-// fatally, ending the declaration. `c` and `columnar` are supported,
-// `align(N)` / `align(target, N)` is the second argument of `#Layout(c)`, a
-// bare second identifier is an enum's C tag width, and `packed` and the
-// first-argument `align` stay reserved. Sema owns positivity, power-of-two,
-// and target facts. None when there is no layout fact.
+// fatally, ending the declaration. `c` and `columnar` are supported, `align(N)`
+// / `align(target, N)` is the second argument of `#Layout(c)`, a bare second
+// identifier is an enum's C tag width, and `packed` and the first-argument
+// `align` stay reserved. Sema owns positivity, power-of-two, and target facts.
+// None when there is no layout fact.
 fn parser_layout_marker_fact(state: &JetParserState, markers: [Marker], grouped: Bool, is_enum: Bool) -> StructLayout? {
     marker :: loop candidate in markers {
         if candidate.name == "Layout" -> break candidate
@@ -216,8 +215,8 @@ fn parser_layout_struct_bare_argument(state: &JetParserState, name: String, span
     parser_layout_refusal(&state, fatal, span, "`{name}` isn't a `#Layout` argument for a struct", "after the layout kind, a struct takes only `align(N)` or `align(target, N)`; a bare type name there is an enum's tag width", "write `#Layout(c, align(64))`, or remove `{name}`")
 }
 
-// Rust `marker_groups.rs`: `#Layout(…)` inside a `#[…]` list. Its arguments
-// are read positionally and its refusals do not end the declaration.
+// `#Layout(…)` inside a `#[…]` list. Its arguments are read positionally and
+// its refusals do not end the declaration.
 fn parser_layout_grouped_fact(state: &JetParserState, marker: Marker, is_enum: Bool) -> StructLayout? {
     second :: parser_marker_expression(marker, 1)
     if is_enum {

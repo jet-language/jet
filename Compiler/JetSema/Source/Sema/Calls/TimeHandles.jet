@@ -427,11 +427,10 @@ struct SemaTimeHandleContract {
     required: [Type]
 }
 
-// Rust `deterministic_world_method_return` (jet-foundation
-// Collections.rs:2042) with the checked-tree ops of `handle_method_op`
-// (subset/handles.rs:191-194). The world is read through its receiver, and
-// Rust gives its arguments no declared type, so `advance(2s)` checks its
-// argument as written.
+// Rust `deterministic_world_method_return` (jet-foundation) with the
+// checked-tree ops of `handle_method_op`. The world is read through its
+// receiver, and Rust gives its arguments no declared type, so `advance(2s)`
+// checks its argument as written.
 fn sema_time_world_contract(method: String, argc: Int) -> SemaTimeHandleContract? {
     return if {
         method == "now" && argc == 0 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldNow, result: Type.Int, required: [Type]{}})

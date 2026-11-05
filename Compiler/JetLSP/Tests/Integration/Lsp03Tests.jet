@@ -16,7 +16,6 @@ use {
 }
 // GATE #4494: actual child processes, pipes, filesystem, clock and process mutex.
 
-// Rust: tests/lsp.rs:3569
 // Rust #[ignore]: measurement receipt; run explicitly with --ignored --nocapture.
 #Test("lsp_repeated_edit_stream_latency") {
     EDITS :: 200i64
@@ -84,7 +83,6 @@ use {
     print("peak client requests awaiting an answer: {peak_waiting}; server loop checks one request at a time")
 }
 
-// Rust: tests/lsp.rs:3684
 #Test("lsp_accepts_hidden_generic_constructor_arguments") {
     source :: "struct Box<T> {{\n    value: T\n}}\nimpl Box {{\n    fn new(value: ^T) -> Box<T> {{ return Box<T>{{ value: value }} }}\n}}\nfn run() {{\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n}}\n"
     uri :: "file:///tmp/lsp_generic_constructor_infer.jet"
@@ -97,7 +95,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:3721
 #Test("lsp_hover_preserves_via_effect_row") {
     source :: "fn invoke(act: fn() -[IO]>) -[via act]> {{ act() }}\nfn run() {{}}\n"
     uri :: "file:///tmp/lsp_hover_effect_via.jet"
@@ -110,7 +107,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:3758
 #Test("lsp_rename_produces_workspace_edit") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -125,7 +121,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:3804
 #Test("lsp_checked_identity_and_versioned_rename") {
     _guard :: lock_lsp_process()
     root :: Scratch.new("lsp-checked-rename")
@@ -205,7 +200,6 @@ use {
     assert(child.wait().unwrap().success())
 }
 
-// Rust: tests/lsp.rs:3934
 #Test("lsp_checked_imported_diagnostics_and_repairs") {
     _guard :: lock_lsp_process()
     root :: Scratch.new("lsp-imported-reports")
@@ -271,7 +265,6 @@ use {
     assert(child.wait().unwrap().success())
 }
 
-// Rust: tests/lsp.rs:4038
 #Test("lsp_definition_returns_location") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -286,7 +279,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:4079
 #Test("lsp_checked_text_contract_survives_editor_navigation") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -305,7 +297,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:4200
 #Test("lsp_definition_foreign_declaration_uses_checked_jet_boundary") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -333,7 +324,6 @@ use {
     assert(child.wait().unwrap().success())
 }
 
-// Rust: tests/lsp.rs:4286
 #Test("lsp_definition_imported_identity_collisions_are_exact") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -382,7 +372,6 @@ use {
     assert(child.wait().unwrap().success())
 }
 
-// Rust: tests/lsp.rs:4421
 #Test("lsp_definition_uses_build_graph_generated_source") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -400,7 +389,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:4477
 #Test("lsp_generated_definition_uses_selected_buildplan_identity") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -428,7 +416,6 @@ use {
     run_case(source_for("left", "right", "right"), "right")
 }
 
-// Rust: tests/lsp.rs:4564
 #Test("lsp_semantic_tokens_returns_data") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -443,7 +430,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:4605
 #Test("lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -510,7 +496,6 @@ use {
     _ :: child.wait()
 }
 
-// Rust: tests/lsp.rs:4791
 #Test("lsp_inlay_hints_returns_type_labels") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -525,7 +510,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:4832
 #Test("lsp_inlay_hints_return_call_parameter_names") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -540,7 +524,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:4877
 #Test("lsp_inlay_hints_include_scattered_method_breadcrumbs") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -555,7 +538,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:4921
 #Test("lsp_references_finds_all_uses") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -570,7 +552,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:4962
 #Test("lsp_enum_variant_navigation_completion_and_rename") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -764,7 +745,6 @@ use {
     assert(child.wait().expect("wait for jet self lsp").success())
 }
 
-// Rust: tests/lsp.rs:5461
 #Test("c40_is_keyword_retired_words_not_keywords") {
     diags :: check_document("c40_retired.jet", "fn run() {{\n    switch_count :: 0\n    import_count :: 1\n}}\n")
     assert(!diags.iter().any(d -> {
@@ -773,7 +753,6 @@ use {
     }), "switch_count should not be rejected as a keyword: {diags}")
 }
 
-// Rust: tests/lsp.rs:5482
 #Test("c40_is_keyword_real_keywords_recognized") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -788,13 +767,11 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:5533
 #Test("c40_value_literal_is_not_a_keyword") {
     assert_eq(Syntax.LIT_VALUE, "Val")
     assert(!Syntax.JET_KEYWORD_LIST.contains(Syntax.LIT_VALUE))
 }
 
-// Rust: tests/lsp.rs:5542
 #Test("c40_is_keyword_switch_not_a_keyword") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -809,7 +786,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:5586
 #Test("c40_is_keyword_import_not_a_keyword") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -824,7 +800,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:5630
 #Test("c40_keyword_like_identifier_usable_as_variable") {
     diags :: check_document("c40_kw_in_ident.jet", "fn run() {{\n    printer :: \"hp\"\n    in_count :: 3\n    sprint :: 9.8\n}}\n")
     loop d in diags {
@@ -835,7 +810,6 @@ use {
     }
 }
 
-// Rust: tests/lsp.rs:5654
 #Test("c40_drift_guard_foreign_words_not_blocked_in_rename") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -850,7 +824,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:5715
 #Test("c44_lsp_keywords_derive_from_syntax") {
     kw_ptr :: Syntax.JET_KEYWORD_LIST.as_ptr()
     required :: [
@@ -876,7 +849,6 @@ use {
     _ :: kw_ptr
 }
 
-// Rust: tests/lsp.rs:5787
 #Test("c44_lsp_types_derive_from_syntax") {
     required_types :: [
         Syntax.TYPE_INT, Syntax.TYPE_FLOAT, Syntax.TYPE_BOOL, Syntax.TYPE_STRING, Syntax.TYPE_CHAR,
@@ -888,7 +860,6 @@ use {
     assert(!Syntax.JET_TYPE_LIST.contains(Syntax.TYPE_RESULT), "JET_TYPE_LIST must not contain legacy TYPE_RESULT; use T !E syntax")
 }
 
-// Rust: tests/lsp.rs:5819
 #Test("c44_impure_builtins_complete") {
     required :: [Syntax.BUILTIN_PRINT, Syntax.BUILTIN_INPUT, "eprint", "read_all_input"]
     loop name in required {
@@ -896,7 +867,6 @@ use {
     }
 }
 
-// Rust: tests/lsp.rs:5838
 #Test("c44_prelude_idents_canonical") {
     names :: CorePrelude.names().collect()
     assert_eq(names, ["print", "input", "panic", "assert", "assert_eq", "min", "max", "clamp", "eprint",
@@ -909,7 +879,6 @@ use {
     assert_eq(comptime_ref, ["embed_file", "embed_bytes", "find", "fetch"])
 }
 
-// Rust: tests/lsp.rs:5883
 #Test("lsp_bench_reports_deterministic_cache_and_memory") {
     src :: embed_file("Examples/features/collections/wordcount.jet")
     report :: LSP.measure_bench(src, 10)

@@ -223,10 +223,10 @@ fn sema_data_check_encode(receiver: Expr, receiver_value: TExpr, args: [CallArg]
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
-// (Rust method_calls.rs `FieldError.under`): one shared
-// transform frames every error of a child Result under a path segment while
-// keeping its success type. Generated codecs use it at each field boundary;
-// it is an error-list helper, not another decode API.
+// (`FieldError.under`): one shared transform frames every error of a child
+// Result under a path segment while keeping its success type. Generated codecs
+// use it at each field boundary; it is an error-list helper, not another decode
+// API.
 fn sema_data_check_field_error_under(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 2 {
         sema_data_arity_diagnostic("FieldError.under", 2, args.len(), span, &diagnostics)
@@ -308,8 +308,8 @@ fn sema_data_without_user_tags(ty: Type) -> Type Never! {
     }
 }
 
-// Rust arg_expect.rs `expect_core_arg`: the argument is checked against the
-// parameter type and a mismatch the checker did not already report is E0112.
+// `expect_core_arg`: the argument is checked against the parameter type and a
+// mismatch the checker did not already report is E0112.
 fn sema_data_expect_core_arg(name: String, index: Int, required: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     value :: sema_data_check_argument(name, index, argument, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if sema_call_host_callback_assignable(required, value.ty, environment, program) == (.Val(false)) {
@@ -334,12 +334,12 @@ fn sema_data_fn_has_empty_effect_bound(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust core_call.rs `infer_query_callback`: a one-row query callback (`map`,
-// `min`, `max`, the join keys, `group_by`, a grouped reducer) whose result is
-// open. The row seeds the lambda parameter and the callback keeps its own
-// result type, so keys and values keep their nominal or exact types. The
-// expected callback carries an explicit empty effect bound: a maintained query
-// replays its callbacks after each source delta (`check_query_callback_effect`).
+// `infer_query_callback`: a one-row query callback (`map`, `min`, `max`, the
+// join keys, `group_by`, a grouped reducer) whose result is open. The row seeds
+// the lambda parameter and the callback keeps its own result type, so keys and
+// values keep their nominal or exact types. The expected callback carries an
+// explicit empty effect bound: a maintained query replays its callbacks after
+// each source delta (`check_query_callback_effect`).
 fn sema_data_infer_query_callback(call_name: String, row: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDataQueryCallback {
     required :: Type.Fn{params: [Type]{row}, ret: None, effect_bound: Val([EffectRowEntry]{}), param_contract: None, call_metadata: None, return_view_provenance: None}
     checked :: sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDataQueryCallback{value: None, result: None}
@@ -394,13 +394,13 @@ fn sema_data_group_sum_numeric(value: Type?) -> Bool Never! {
     }
 }
 
-// Rust method_calls.rs (the Query family of `infer_method_call`): `Query<T>`
-// methods keep the deferred carrier and only `collect` turns it back into a
-// list. `group_by` yields the internal `DataGroupedQuery<T, K>` carrier whose
-// reducers return `Query<Group<K, V>>`; keys and values keep the callback
-// result types, never a String/Float projection. `DataTracked` and `DataWatch`
-// are the maintained sources and live views of the same rows. Every call lowers
-// onto its receiver Core row with the receiver as the first argument.
+// (the Query family of `infer_method_call`): `Query<T>` methods keep the
+// deferred carrier and only `collect` turns it back into a list. `group_by`
+// yields the internal `DataGroupedQuery<T, K>` carrier whose reducers return
+// `Query<Group<K, V>>`; keys and values keep the callback result types, never a
+// String/Float projection. `DataTracked` and `DataWatch` are the maintained
+// sources and live views of the same rows. Every call lowers onto its receiver
+// Core row with the receiver as the first argument.
 fn sema_data_try_query_method(receiver: Expr, receiver_value: TExpr, name: String, parameters: [Type], method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     receiver_type :: sema_data_query_receiver(name, parameters, method)
     if receiver_type == "" -> return SemaMethodSpecialCheck{handled: false, value: None}
@@ -577,15 +577,15 @@ fn sema_data_group_sum_target(value: Type) -> String Never! {
     }
 }
 
-// The compiler-owned receiver key of the checked-SQL list door (Rust
-// package_files.rs `INTERNAL_LIST_QUERY_HANDLE`); it has no source spelling.
+// The compiler-owned receiver key of the checked-SQL list door; it has no
+// source spelling.
 fn sema_data_list_query_handle() -> String Never! {
     String.from_bytes([U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{113}, U8{117}, U8{101}, U8{114}, U8{121}, U8{46}, U8{108}, U8{105}, U8{115}, U8{116}}) ?? ""
 }
 
-// Rust method_calls.rs (`[T].query(sql)`): an in-memory row list runs one
-// checked SQL query into the deferred `Query<T>` carrier. The call lowers onto
-// the list-query receiver row with the list as its first argument.
+// (`[T].query(sql)`): an in-memory row list runs one checked SQL query into the
+// deferred `Query<T>` carrier. The call lowers onto the list-query receiver row
+// with the list as its first argument.
 fn sema_data_check_list_query(receiver: Expr, receiver_value: TExpr, row: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if args.len() != 1 {
         &diagnostics.push(sema_wrong_core_arity("query", 1, args.len(), span))
@@ -801,7 +801,7 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
         sema_data_check_labels("Dyn.from", args, [String]{}, span, &diagnostics)
         if args[0].convention == AccessConvention.Move -> &diagnostics.push(sema_error("E0203", args[0].span, "a value was passed with the move marker `^` to a parameter that does not consume", "Dyn.from reads the value's Encode contract", "remove the move marker `^` here"))
         value :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        // Rust core_literals.rs `Dyn.from`: the unencodable value is the error, at that value.
+        // `Dyn.from`: the unencodable value is the error, at that value.
         if !sema_serde_type_is_admissible(environment, program, value.ty, SemaSerdeDirection.Encode) {
             &diagnostics.push(sema_error("E0905", args[0].span, "`{type_name(value.ty)}` does not implement `Encode`", "`Dyn.from` calls the value's Encode contract", "derive or implement `Encode` on this type"))
             return SemaMethodSpecialCheck{handled: true, value: None}
@@ -996,8 +996,7 @@ fn sema_data_core_emit_with_accesses(record: CoreCallRecord, call_name: String, 
     sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)
 }
 
-// Rust core_call.rs `exactly_one_type_arg`: a typed decode/query call names one
-// target type.
+// `exactly_one_type_arg`: a typed decode/query call names one target type.
 fn sema_data_core_target_type(type_args: [Type], name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Type? {
     if type_args.len() != 1 {
         &diagnostics.push(sema_error("E0119", span, "`{name}` expects exactly one type argument, got {type_args.len()}", "a typed decode call needs one target type", "write `{name}<Target>(...)` with one target type"))
@@ -1169,8 +1168,7 @@ fn sema_data_core_decode_member(module_name: String, member: String) -> Bool Nev
 fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck? {
     updated_args := args
     if !sema_data_core_decode_member(module_name, member) -> return None
-    // Rust core_call.rs:3741: an untyped `cbor.decode(bytes)` is the Dyn
-    // parse row, not a typed decode.
+    // An untyped `cbor.decode(bytes)` is the Dyn parse row, not a typed decode.
     if module_name == "core.encoding.cbor" && type_args.len() == 0 -> return None
     if module_name == "core.encoding.json" && type_args.len() == 0 {
         if updated_args.len() != 1 {
@@ -1463,11 +1461,10 @@ fn sema_data_check_analytics_sql_schema(row: Type, query: Expr, span: Span, envi
     }
 }
 
-// Rust core_call.rs `infer_core_call`, the typed `core.data` arms: the loader
-// declarations and `snapshot`, `plot` and its renderers, the beginner `csv` /
-// `json` facade and the bounded `csv_reader` / `json_reader` streams. Each
-// names its row type with one explicit `<T>`; without one the call stays on
-// its ordinary route.
+// `infer_core_call`, the typed `core.data` arms: the loader declarations and
+// `snapshot`, `plot` and its renderers, the beginner `csv` / `json` facade and
+// the bounded `csv_reader` / `json_reader` streams. Each names its row type
+// with one explicit `<T>`; without one the call stays on its ordinary route.
 fn sema_data_core_plot_view(member: String) -> Bool Never! {
     member == "inspect" || member == "inspect_json" || member == "text" || member == "svg" || member == "show" || member == "render"
 }
@@ -1519,8 +1516,8 @@ fn sema_data_core_typed_result(member: String, row: Type) -> Type Never! {
     }
 }
 
-// Rust arg_expect.rs `expect_core_arg_moving`: the owning reader slot takes
-// an explicit `^`; a mismatch the checker did not already report is E0112.
+// `expect_core_arg_moving`: the owning reader slot takes an explicit `^`; a
+// mismatch the checker did not already report is E0112.
 fn sema_data_expect_core_arg_moving(name: String, index: Int, required: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     value :: sema_check_expression(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if sema_call_host_callback_assignable(required, value.ty, environment, program) == (.Val(false)) {

@@ -1,8 +1,7 @@
 // D-COMPUTE-BACKEND1=D / I9: browser WebGPU is a host adapter for the one
 // compute family. The adapter owns WebGPU's asynchronous queue and buffer ABI;
 // placement, precision, operation names, and typed outcomes stay on this
-// Prelude boundary. Native hosts keep the typed fail-closed provider in
-// CoreLib/Top/Compute.rs.
+// Prelude boundary. Native hosts keep the typed fail-closed provider.
 
 const JET_WEBGPU_PROFILE = "F32Strict+Reproducible";
 const JET_WEBGPU_CAPABILITIES = Object.freeze([

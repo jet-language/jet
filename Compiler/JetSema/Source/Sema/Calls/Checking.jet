@@ -607,11 +607,10 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
                 next
             }
         }
-        // E3211 (Rust direct_calls.rs:2216 @ 6083377777): a written String
-        // literal with a NUL byte can never reach a C-boundary `String`
-        // parameter intact, since C strings end at the first NUL. The slot is
-        // the declaration slot the binder chose, so a labelled call is
-        // checked against the parameter it actually reaches.
+        // E3211: a written String literal with a NUL byte can never reach a
+        // C-boundary `String` parameter intact, since C strings end at the
+        // first NUL. The slot is the declaration slot the binder chose, so a
+        // labelled call is checked against the parameter it actually reaches.
         if abi == .Val(callable_abi) {
             if callable_abi.is_c_abi && required == Type.String && sema_call_literal_has_nul(args[index].expr) {
                 row :: diagnostic_registry_row("E3211") ?? panic("E3211 must have a registry row")
@@ -894,9 +893,9 @@ fn sema_crypto_argument_index(params: [SemaCallParam], slots: [Int], parameter: 
 // (Rust `check_call_args`): an argument that does not fit its parameter is
 // E0112 about the call, after a checked typed-text rejection.
 fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offered: Type, span: Span) -> Diagnostic {
-    // Rust core_call.rs ("core.mem", "volatile_read" | "volatile_write"): the
-    // pointer argument is not a typed pointer, or the written value is not
-    // the pointer's element type.
+    // ("core.mem", "volatile_read" | "volatile_write"): the pointer argument is
+    // not a typed pointer, or the written value is not the pointer's element
+    // type.
     if callee == "core.mem.volatile_read" || callee == "core.mem.volatile_write" {
         operation :: sema_call_reflection_leaf_name(callee)
         if index == 0 {

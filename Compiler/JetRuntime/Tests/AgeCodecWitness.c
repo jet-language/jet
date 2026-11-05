@@ -1,4 +1,4 @@
-// age0.10.1 x25519.rs TEST_SK/TEST_PK and RFC4648 unpadded vectors.
+// age0.10.1 TEST_SK/TEST_PK and RFC4648 unpadded vectors.
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>

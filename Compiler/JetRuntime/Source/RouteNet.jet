@@ -1,6 +1,6 @@
-// NetHTTP.rs:2809-2942 UDP receive kernels and the UDPPacket carrier.
-// Packet96: inline Socket56 addr@0, truncated@56, native List<U8> header
-// @64 [length, capacity, data], original_len@88.
+// UDP receive kernels and the UDPPacket carrier. Packet96: inline Socket56
+// addr@0, truncated@56, native List<U8> header @64 [length, capacity, data],
+// original_len@88.
 NET_UDP_PACKET_BYTES :: I64{96}
 
 #Export(c) fn jet_rt_handle_clone_jet_udp_packet(value: I64) -> I64 {
@@ -15,7 +15,7 @@ NET_UDP_PACKET_BYTES :: I64{96}
     data_u8_list_drop_fields(wrapping(value + I64{64}))
     jet_rt_free(value, NET_UDP_PACKET_BYTES, I64{8})
 }
-// NetHTTP.rs:594 "UDPPacket({len} bytes from {addr})".
+// "UDPPacket({len} bytes from {addr})".
 #Export(c) fn jet_rt_handle_show_jet_udp_packet(value: I64) -> I64 {
     result :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(result, rt_static_text("UDPPacket("))
@@ -49,7 +49,6 @@ NET_UDP_PACKET_BYTES :: I64{96}
     jet_rt_string_builder_finish(text)
 }
 
-// NetHTTP.rs:2853 packet.addr.clone()
 #Export(c) fn jet_net_raw_udp_packet_addr(packet: I64) -> I64 { net_copy(packet, I64{56}) }
 
 // recv_from into a 65535-byte buffer, waiting on WouldBlock/Interrupted
@@ -103,12 +102,12 @@ fn net_udp_receive(value: I64, limit: I64, positive: Bool, ceiling: I64, explici
     result
 }
 
-// NetHTTP.rs:2809: a positive limit, kept bytes capped at 1 MiB.
+// A positive limit, kept bytes capped at 1 MiB.
 #Export(c) fn jet_net_udp_recv_from(value: I64, limit: I64, output: I64, error: I64) -> I64 {
     net_udp_receive(value, limit, true, I64{1048576}, false, I64{0}, output, error)
 }
 
-// NetHTTP.rs:2905: a non-negative limit, kept bytes capped at 65535.
+// A non-negative limit, kept bytes capped at 65535.
 #Export(c) fn jet_net_udp_receive(value: I64, limit: I64, output: I64, error: I64) -> I64 {
     net_udp_receive(value, limit, false, I64{65535}, false, I64{0}, output, error)
 }

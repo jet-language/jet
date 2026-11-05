@@ -123,10 +123,10 @@ fn sema_stream_handle_encoding_error() -> Type Never! {
     Type.Named{name: "EncodingError"}
 }
 
-// `effect_name` is Rust's exact handle-method row: `method_calls.rs` records
-// only `receiver_effect_leaf` (`Time.Wait` on the blocking file, stdout and
-// channel methods) for these receivers. Authority is checked where the
-// handle is acquired (`files.open`, `term.stdout`), not on each method.
+// `effect_name` is Rust's exact handle-method row: records only
+// `receiver_effect_leaf` (`Time.Wait` on the blocking file, stdout and channel
+// methods) for these receivers. Authority is checked where the handle is
+// acquired (`files.open`, `term.stdout`), not on each method.
 fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -> SemaStreamHandleSpec? {
     unit := Type.Named{name: "Unit"}
     string := Type.String
@@ -259,11 +259,11 @@ fn sema_stream_handle_known_wrong_direction(owner: String, method: String) -> Bo
     (owner == "FileReader" && (method == "write_line" || method == "flush" || method == "write_all" || method == "fsync" || method == "set_mode")) || (owner == "FileWriter" && (method == "lines" || method == "read_line" || method == "read"))
 }
 
-// Rust `file_handle_method_return` (method_calls.rs E2-M7) types the methods
-// of these handles without recording a receiver convention, so an unmarked
-// `reader.read(n)` or `writer.write_all(bytes)` needs no `&`, and a written
-// mark has no convention to be checked against. `text_cursor_method_return`
-// and `binary_reader_method_return` record none either, so `&c.skip_ws()` and
+// Rust `file_handle_method_return` (E2-M7) types the methods of these handles
+// without recording a receiver convention, so an unmarked `reader.read(n)` or
+// `writer.write_all(bytes)` needs no `&`, and a written mark has no convention
+// to be checked against. `text_cursor_method_return` and
+// `binary_reader_method_return` record none either, so `&c.skip_ws()` and
 // `&r.take(n)` keep their mark. `Stdout`/`Stderr` dispatch to their `&self`
 // source methods instead.
 fn sema_stream_handle_reports_no_receiver_convention(owner: String) -> Bool Never! {

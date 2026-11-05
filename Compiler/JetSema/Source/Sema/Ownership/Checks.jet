@@ -2428,7 +2428,7 @@ fn sema_ownership_one_pass_note(place: String, ty: Type) -> String Never! {
     " Note: `{place}` is one-pass — materialize it first with `{place}{materializer}`, or create a fresh source for the second drive"
 }
 
-// Rust Diagnostics.rs aliasing_while_mut (the conflicting access writes) and
+// aliasing_while_mut (the conflicting access writes) and
 // aliasing_mut_after_read (it reads and this access writes).
 fn sema_ownership_diag_alias(place: String, active_write: Bool, span: Span) -> Diagnostic {
     if {
@@ -2499,8 +2499,8 @@ fn sema_ownership_diag_invalidated_view(fact: SemaOwnershipViewFact, span: Span)
     sema_error("E0632", span, "`{owner}` was {verb} here, so the value `{fact.carrier}` points into is gone", "`{fact.carrier}` is a view into `{owner}`; `{owner}.{verb}()` invalidated everything stored in `{owner}`, so reading `{fact.carrier}` now would read freed memory", "use `{fact.carrier}` before `{owner}.{verb}()`, or re-`alloc` after the {verb} to get a fresh value")
 }
 
-// D-ALLOC2 (Rust `report_view_escape`, CheckerOwnership.rs): E0631 when a name
-// holding an `arena.alloc` view would leave the arena's region.
+// D-ALLOC2 (Rust `report_view_escape`): E0631 when a name holding an
+// `arena.alloc` view would leave the arena's region.
 fn sema_ownership_report_arena_view_escape(state: &SemaOwnershipState, expr: Expr, what: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if expr == {
         .Ident(name, span, _) -> {
@@ -3397,10 +3397,10 @@ fn sema_ownership_diag_place_alias_move(name: String, consumer: String, span: Sp
 }
 
 // `borrowed_read` is Rust `check_call_argument_access`'s flag: a read argument
-// of a non-scalar read parameter keeps its loan through the call.
-// `single_use` is false for a receiver call: E0142 belongs to direct calls and
-// function values (Rust direct_calls.rs, check_callable_argument_ownership),
-// never to a Core route or a method call.
+// of a non-scalar read parameter keeps its loan through the call. `single_use`
+// is false for a receiver call: E0142 belongs to direct calls and function
+// values (check_callable_argument_ownership), never to a Core route or a method
+// call.
 fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, diagnostics: &[Diagnostic], initial_accesses: ^[SemaOwnershipCallAccess], initial_accepted: Bool, initial_complete: Bool, borrowed_read: Bool, single_use: Bool) -> SemaOwnershipCheckResult {
     accesses := initial_accesses
     accepted := initial_accepted
@@ -4035,9 +4035,9 @@ fn sema_receiver_mark_written(state: SemaOwnershipState, receiver: Expr) -> Bool
     false
 }
 
-// Rust's handle builders (`ProcessSpec` methods, method_calls.rs) report no
-// receiver convention, so the written mark is not checked against one: a
-// builder chain `spec = spec.env(…)` needs no `^`.
+// Rust's handle builders (`ProcessSpec` methods) report no receiver convention,
+// so the written mark is not checked against one: a builder chain `spec =
+// spec.env(…)` needs no `^`.
 fn sema_receiver_mark_forget(state: &SemaOwnershipState, receiver: Expr) {
     span :: expr_span(receiver)
     index := state.receiver_frames.len() - 1
@@ -4201,13 +4201,13 @@ fn sema_ownership_owner_of_captured_window(state: SemaOwnershipState, owner: Str
 // ────────────────────────────────────────────────────────────────────────────
 // Evaluated access walk
 //
-// What one call argument reads and writes while it is evaluated, and what
-// its lambdas capture when they are built (Rust CheckerOwnership.rs
-// push_evaluated_access through check_call_argument_captures). `bound`
-// holds the names a lambda parameter or a body binding shadows. A call
-// nested in the argument was checked before this call's accesses existed,
-// so with `nested` the walk replays that call's receiver and argument checks
-// against them, as Rust checks every call against each active call frame.
+// What one call argument reads and writes while it is evaluated, and what its
+// lambdas capture when they are built (push_evaluated_access through
+// check_call_argument_captures). `bound` holds the names a lambda parameter or
+// a body binding shadows. A call nested in the argument was checked before this
+// call's accesses existed, so with `nested` the walk replays that call's
+// receiver and argument checks against them, as Rust checks every call against
+// each active call frame.
 
 enum SemaOwnershipAccessWalk {
     EvaluateNow

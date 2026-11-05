@@ -1,9 +1,8 @@
-// core.web runtime stops (CoreSlice7WebRaw.rs).
+// core.web runtime stops.
 
-// CoreSlice7WebRaw.rs:4-6: jet_runtime_stop("E2805", "", 0, message). E2805 has
-// no active runtime row, so this stop is the host form: one `internal error:`
-// line naming the code, with status 101 (RuntimeDiagnosticCore.rs:229-231).
-// Core.rs:1106-1113: a task body receives the raw message instead.
+// jet_runtime_stop("E2805", "", 0, message). E2805 has no active runtime row,
+// so this stop is the host form: one `internal error:` line naming the code,
+// with status 101. A task body receives the raw message instead.
 #Export(c) fn jet_openapi_contract_stop_raw(message: I64) {
     if rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{3}) -> return
     trap_root_prepare()

@@ -185,9 +185,9 @@ partial matches from name references/calls:
     assert_eq(report.to_json(), expected_json)
 }
 
-// Original checked fixtures, lib.rs:296–313. S4/C4 must supply the index opened
-// from Examples/features/effects/effects.jet. Do not replace it with graph inputs
-// or mark these helpers as exercised #Test blocks before the real open exists.
+// Original checked fixtures. S4/C4 must supply the index opened from
+// Examples/features/effects/effects.jet. Do not replace it with graph inputs or
+// mark these helpers as exercised #Test blocks before the real open exists.
 fn impact_test_checked_effects(index: SemIndex) Never! {
     // impact_finds_report_callers
     report :: ImpactReport.analyze(index, "report", 3)
@@ -205,11 +205,11 @@ fn impact_test_checked_effects(index: SemIndex) Never! {
     assert(json.contains("\"downstream_callees\""))
 }
 
-// tests/impact.rs CLI assertions belong to the inspect-impact front door owner.
-// These helpers retain the report/exit assertions for a real CLI invocation;
-// they are not called with a raw report in place of a status-envelope response.
-// The independent tests/impact.rs:50–53 machine-record decoder assertion remains
-// at the CLI owner's seam until the canonical read_machine_output port exists.
+// CLI assertions belong to the inspect-impact front door owner. These helpers
+// retain the report/exit assertions for a real CLI invocation; they are not
+// called with a raw report in place of a status-envelope response. The
+// independent machine-record decoder assertion remains at the CLI owner's seam
+// until the canonical read_machine_output port exists.
 fn impact_test_cli_upstream(exit_code: Int, stdout: String) Never! {
     assert_eq(exit_code, 0)
     assert(stdout.contains("blast radius for `report`"))

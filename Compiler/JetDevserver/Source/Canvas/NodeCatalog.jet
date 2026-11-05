@@ -3,30 +3,24 @@ use {
     jet_devserver.Canvas.ValidationJson.[json_str]
 }
 
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:5
 struct NodeDescriptor {
     id: String; kind: String; archetype: String
     projected: Bool; presentation: PresentationFacts; palette: PaletteFacts
     transaction: String?; default_editor: String
 }
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:16
 struct PresentationFacts {
     label: String; glyph: String; hover: String; accent: String; header: String
     style_archetype: String; layout_family: String; shape: String
 }
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:27
 struct PaletteFacts {
     visible: Bool; insertable: Bool; category: String; rank: I32; rank_terms: [String]
 }
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:35
 fn presentation(label: String, glyph: String, hover: String, accent: String, header: String, style_archetype: String, layout_family: String, shape: String) -> PresentationFacts {
     PresentationFacts { label: label, glyph: glyph, hover: hover, accent: accent, header: header, style_archetype: style_archetype, layout_family: layout_family, shape: shape }
 }
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:57
 fn palette(visible: Bool, insertable: Bool, category: String, rank: I32, rank_terms: [String]) -> PaletteFacts {
     PaletteFacts { visible: visible, insertable: insertable, category: category, rank: rank, rank_terms: rank_terms }
 }
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:73
 NODE_DESCRIPTORS :: comptime { [NodeDescriptor]{[} }
     NodeDescriptor { id: "entry", kind: "entry", archetype: "entry", projected: true,
         presentation: presentation("Entry", "ƒ", "Starts this function.", "archetype", "archetype", "entry", "entry", "node"),
@@ -83,7 +77,6 @@ NODE_DESCRIPTORS :: comptime { [NodeDescriptor]{[} }
         presentation: presentation("Pure function", "ƒ", "Computes a value.", "archetype", "archetype", "function_pure", "normal", "node"),
         palette: palette(false, false, "Values", 0, ["expression", "value"]), transaction: .None, default_editor: "inline_expr" }
 ]
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:436
 fn descriptor_for(kind: String, archetype: String) -> NodeDescriptor {
     validate_catalog() ?? {
         message :: err
@@ -92,7 +85,6 @@ fn descriptor_for(kind: String, archetype: String) -> NodeDescriptor {
     NODE_DESCRIPTORS.iter().find((descriptor) -> descriptor.kind == kind && descriptor.archetype == archetype)
         .unwrap_or_else(() -> panic("missing Canvas node descriptor for {kind}/{archetype}"))
 }
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:444
 fn descriptor_for_id(id: String) -> NodeDescriptor {
     validate_catalog() ?? {
         message :: err
@@ -101,7 +93,6 @@ fn descriptor_for_id(id: String) -> NodeDescriptor {
     NODE_DESCRIPTORS.iter().find((descriptor) -> descriptor.id == id)
         .unwrap_or_else(() -> panic("missing Canvas node descriptor `{id}`"))
 }
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:452
 fn insert_descriptor_id(transaction: String, pure: Bool) -> String {
     descriptor := if transaction == "insert_call" -> descriptor_for_id(if pure -> "function_pure" else -> "function_exec") else
         NODE_DESCRIPTORS.iter().find((descriptor) -> descriptor.transaction == Val((transaction)))
@@ -109,13 +100,11 @@ fn insert_descriptor_id(transaction: String, pure: Bool) -> String {
     assert(descriptor.palette.insertable, "Canvas action descriptor `{descriptor.id}` is not insertable")
     descriptor.id
 }
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:476
 fn palette_rank_fields(id: String) -> String {
     descriptor := descriptor_for_id(id)
     terms := descriptor.palette.rank_terms.iter().map((term) -> json_str(term)).collect().join(",")
     ",\"rank\":{descriptor.palette.rank},\"rank_terms\":[{terms}]"
 }
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:491
 fn catalog_json() -> String {
     validate_catalog() ?? {
         message :: err
@@ -123,7 +112,6 @@ fn catalog_json() -> String {
     }
     "[{NODE_DESCRIPTORS.iter().map((descriptor) -> descriptor_json(descriptor)).collect().join(",")}]"
 }
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:503
 fn validate_catalog() Err! {
     ids := HashSet.new()
     // GATE #4499: retain exact pair equality/hash for catalog identities.
@@ -140,7 +128,6 @@ fn validate_catalog() Err! {
         }
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/node_catalog.rs:553
 fn descriptor_json(descriptor: NodeDescriptor) -> String {
     projected := if descriptor.projected -> "true" else -> "false"
     visible := if descriptor.palette.visible -> "true" else -> "false"

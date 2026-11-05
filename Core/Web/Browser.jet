@@ -163,8 +163,8 @@ struct BrowserTestConfig {
     fn report_path(self) -> String Never! { self.report_path }
 }
 
-// BrowserTest.rs:17-22, 310-377: the report data model a browser run records.
-// Lines, columns, sequences and byte counts are the Rust u32/usize facts.
+// The report data model a browser run records. Lines, columns, sequences and
+// byte counts are the Rust u32/usize facts.
 struct BrowserTestSource {
     path: String
     line: Int
@@ -246,8 +246,8 @@ fn config_from_env() -[Env, FS]> BrowserTestConfig BrowserError! {
 
 fn make_profile(name: String) -> BrowserProfile BrowserError! { profile(name) }
 
-// Browser.rs:578-594: no trimming, case folding, timeout clamping, or fallback.
-// Profile refusal uses the BrowserError kind carrier, not protocol enum variants.
+// No trimming, case folding, timeout clamping, or fallback. Profile refusal uses
+// the BrowserError kind carrier, not protocol enum variants.
 fn profile(name: String) -> BrowserProfile BrowserError! {
     version :: if name == {
         "bidi-2025.5" -> "2025.5"
@@ -345,8 +345,8 @@ fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser
 
 
 fn selected(config: BrowserTestConfig, name: String) -> Bool Never! {
-    // BrowserTest.rs:262-271: an empty filter selects everything; otherwise any
-    // comma- or ASCII-whitespace-separated glob pattern may match the name.
+    // An empty filter selects everything; otherwise any comma- or
+    // ASCII-whitespace-separated glob pattern may match the name.
     if config.filter.trim().len() == 0 -> return true
     value :: name.bytes()
     pattern := [U8]{}
@@ -363,7 +363,7 @@ fn selected(config: BrowserTestConfig, name: String) -> Bool Never! {
 }
 
 fn glob_match(pattern: [U8], value: [U8]) -> Bool Never! {
-    // BrowserTest.rs:273-300: `*` matches any run and `?` any one byte.
+    // `*` matches any run and `?` any one byte.
     p := 0
     v := 0
     star := -1
@@ -418,12 +418,11 @@ fn generate_source(name: String, body: String, base_url: String) -> String Brows
 }
 
 fn report_new(config: BrowserTestConfig) -> BrowserTestReport Never! {
-    // BrowserTest.rs:379-387.
     BrowserTestReport{source_root: config.source_root, reporter: config.reporter, ui: config.ui, watch: config.watch, cases: [BrowserTestCase]{}}
 }
 
 fn report_add_case(report: BrowserTestReport, case: BrowserTestCase) -> BrowserTestReport Never! {
-    // BrowserTest.rs:831-838: append, then order the cases by name.
+    // Append, then order the cases by name.
     out := report
     &out.cases.push(case)
     &out.cases.sort_by((left: BrowserTestCase, right: BrowserTestCase) -> left.name <=> right.name)
@@ -437,7 +436,7 @@ fn report_json(report: BrowserTestReport) -> String Never! { core.web.browser.__
 fn report_text(report: BrowserTestReport) -> String Never! { core.web.browser.__report_text(report) }
 
 fn report_exit_code(report: BrowserTestReport) -> Int Never! {
-    // BrowserTest.rs:840-851: a selected case fails unless its last attempt passed.
+    // A selected case fails unless its last attempt passed.
     loop case in report.cases {
         if case.selected {
             if case.attempts.len() == 0 -> return 1
@@ -448,8 +447,8 @@ fn report_exit_code(report: BrowserTestReport) -> Int Never! {
 }
 
 fn write_report(report: BrowserTestReport, path: String) BrowserError! {
-    // BrowserTest.rs:1136-1155: report choice precedes the first write; the
-    // HTML companion is written afterwards, including when target is HTML.
+    // Report choice precedes the first write; the HTML companion is written
+    // afterwards, including when target is HTML.
     options :: core.web.browser.__report_options(report)
     rendered :: if options.reporter == {
         "json" -> core.web.browser.__report_json(report)

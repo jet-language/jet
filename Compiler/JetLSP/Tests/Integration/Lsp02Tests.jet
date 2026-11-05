@@ -12,7 +12,6 @@ use {
 }
 // GATE #4494: real process/pipe/mutex/filesystem operations, no mock server.
 
-// Rust: tests/lsp.rs:1783
 #Test("lsp_on_type_formatting_returns_brace_edits") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -44,7 +43,6 @@ use {
     }
 }
 
-// Rust: tests/lsp.rs:1889
 #Test("lsp_execute_command_impact_returns_report") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -59,7 +57,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:1935
 #Test("lsp_budget_reports_projects_canonical_report_without_measuring") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -104,7 +101,6 @@ use {
     _ :: fs.remove_dir_all(root)
 }
 
-// Rust: tests/lsp.rs:2158
 #Test("lsp_completion_returns_items") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -119,7 +115,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:2204
 #Test("lsp_builtin_member_completion_uses_shared_semantic_symbol_docs") {
     src :: "fn run() {{\n    items :: [1, 2, 3]\n    items.f\n}}\n"
     uri :: "file:///tmp/lsp_shared_symbols.jet"
@@ -131,7 +126,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:2240
 #Test("lsp_completion_returns_snippets_and_auto_imports") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -155,7 +149,6 @@ use {
     _ :: fs.remove_dir_all(root)
 }
 
-// Rust: tests/lsp.rs:2302
 #Test("lsp_completion_uses_local_discovery_index_for_packages_and_options") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -220,7 +213,6 @@ use {
     _ :: fs.remove_dir_all(root)
 }
 
-// Rust: tests/lsp.rs:2444
 #Test("lsp_document_links_and_code_lenses") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -247,7 +239,6 @@ use {
     _ :: fs.remove_dir_all(root)
 }
 
-// Rust: tests/lsp.rs:2522
 #Test("lsp_signature_help_returns_active_parameter") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -268,7 +259,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:2585
 #Test("lsp_document_symbol_returns_checked_outline") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -283,7 +273,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:2633
 #Test("lsp_document_symbol_returns_symbols_for_imported_package_module") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -328,7 +317,6 @@ use {
     _ :: child.wait()
 }
 
-// Rust: tests/lsp.rs:2756
 #Test("lsp_wave2_navigation_features") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -346,7 +334,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:2840
 #Test("lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -368,7 +355,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:2946
 #Test("lsp_type_hierarchy_trait_impls") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -387,7 +373,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:3012
 #Test("lsp_prepare_rename_accepts_paused_teaching_words") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -402,7 +387,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:3053
 #Test("lsp_semantic_tokens_delta_returns_full_fallback") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -417,7 +401,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:3097
 #Test("lsp_hover_returns_signature") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -432,7 +415,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:3139
 #Test("lsp_hover_projects_typestate_graph_facts") {
     source :: "struct Door {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) fn close() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door {{ return self }}\n}}\nfn run() {{}}\n"
     uri :: "file:///tmp/lsp_typestate_graph_test.jet"
@@ -446,7 +428,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:3187
 #Test("lsp_late_cancel_does_not_poison_a_reused_request_id") {
     source :: "fn add(a: Int, b: Int) -> Int {{ return a + b }}\n"
     uri :: "file:///tmp/lsp_cancel_test.jet"
@@ -460,7 +441,6 @@ use {
     ])
 }
 
-// Rust: tests/lsp.rs:3230
 #Test("lsp_overlapping_edits_latest_checked_revision_wins") {
     jet :: jet_bin()
     if !jet.exists() -> return
@@ -513,7 +493,6 @@ use {
     _ :: child.wait()
 }
 
-// Rust: tests/lsp.rs:3376
 // #3196: an imported sibling edit re-checks the importer, not unrelated documents.
 #Test("lsp_sibling_import_edit_never_publishes_stale_verdict") {
     _guard :: lock_lsp_process()
@@ -565,7 +544,6 @@ use {
     assert(child.wait().unwrap().success())
 }
 
-// Rust: tests/lsp.rs:3483
 // #3196: suppress the cancelled response without preempting computation.
 #Test("lsp_cancelled_costly_request_returns_32800_and_never_publishes") {
     _guard :: lock_lsp_process()

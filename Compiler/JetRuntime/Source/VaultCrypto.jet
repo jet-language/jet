@@ -1,7 +1,7 @@
-// SecretsCrypto.rs:25-83,1520-1524,2744-2747. Persistence orchestration only:
-// all age wire/crypto is the shared accepted AgeCodec/AgeV1 implementation.
-// Private leaves are fallible; the PUBLIC infallible keygen boundary must retain
-// the seed's canonical entropy panic, never expose this private error signature.
+// Persistence orchestration only: all age wire/crypto is the shared accepted
+// AgeCodec/AgeV1 implementation. Private leaves are fallible; the PUBLIC
+// infallible keygen boundary must retain the seed's canonical entropy panic,
+// never expose this private error signature.
 fn vault_crypto_key_text(key: I64, identity: Bool) -> I64 {
     length :: if identity -> I64{74} else -> I64{62}
     text :: rt_text_with_length(length, length)
@@ -93,9 +93,9 @@ fn vault_crypto_uniform(pool: I64, count: I64) -> I64 {
         if (byte < limit) -> return byte % count
     }
 }
-// age-core0.10.0 format.rs:97-129 and340-376: tag1..8 graphic ASCII +
-// -grease, args0..4 of1..8 graphic ASCII, body0..99 random bytes. Base64 is
-// unpadded at64 columns; a final short (possibly empty) line is always emitted.
+// age-core0.10.0 and340-376: tag1..8 graphic ASCII + -grease, args0..4 of1..8
+// graphic ASCII, body0..99 random bytes. Base64 is unpadded at64 columns; a
+// final short (possibly empty) line is always emitted.
 // Grease192/body104/encoded136/pool72 are disjoint caller-owned scratch spans.
 fn vault_crypto_grease(grease: I64, body: I64, encoded: I64, pool: I64) -> I64 {
     rt_text_store(pool, I64{64})
@@ -222,9 +222,9 @@ fn vault_crypto_decrypt(identity: I64, ciphertext: I64, out: I64) -> I64 {
     I64{0}
 }
 
-// SecretsCrypto.rs:1453-1490. Private temporary slots hold key32 records (not a
-// List<U8>). At transfer the same buffer/header adopts canonical packed U8
-// length/capacity in BYTES, whose only stride is RT_HOST_U8_STRIDE.
+// Private temporary slots hold key32 records (not a List<U8>). At transfer the
+// same buffer/header adopts canonical packed U8 length/capacity in BYTES, whose
+// only stride is RT_HOST_U8_STRIDE.
 VAULT_RECIPIENT_SLOT_BYTES :: I64{32}
 fn vault_recipient_slots_drop(slots: I64) {
     capacity :: rt_text_word(wrapping(slots + DATA_SEQUENCE_CAPACITY))

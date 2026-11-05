@@ -1,11 +1,10 @@
-// crates/jet-driver/src/BudgetView.rs `read_compatible`
-// (D-PERFBUDGET-INTEGRATION1): a read-only projection of the canonical
-// performance budget reports under `<root>/.jet/perf/reports`. It never
-// measures, creates or rewrites a report. The budget engine's own verifier
-// checks each `.json` report, and only a report whose recorded member sources
-// all match the requested sources (path and SHA-256) is projected. When two
-// compatible reports decide one budget, the less favorable decision wins, so
-// a passing report never hides a failing one of the same program. A report
+// `read_compatible` (D-PERFBUDGET-INTEGRATION1): a read-only projection of the
+// canonical performance budget reports under `<root>/.jet/perf/reports`. It
+// never measures, creates or rewrites a report. The budget engine's own
+// verifier checks each `.json` report, and only a report whose recorded member
+// sources all match the requested sources (path and SHA-256) is projected. When
+// two compatible reports decide one budget, the less favorable decision wins,
+// so a passing report never hides a failing one of the same program. A report
 // that can't be read or verified is rejected with its reason, never skipped.
 // Every read goes through a directory held open from `root`, so a link can't
 // redirect it (RootedStore.jet).
@@ -13,7 +12,7 @@ use {
     jet_foundation.[CanonicalJSON, canonical_json_parse, perf_verify_budget_report]
 }
 
-// BudgetView.rs MAX_REPORT_BYTES: a larger report is not projected.
+// MAX_REPORT_BYTES: a larger report is not projected.
 JET_CLI_BUDGET_REPORT_LIMIT :: 16777216
 
 // One requested source: its root-relative path and SHA-256.
@@ -197,8 +196,7 @@ fn jet_cli_budget_array(value: CanonicalJSON, key: String) -> [CanonicalJSON]? N
     None
 }
 
-// A report path as BudgetView.rs `normalize` compares it: `/` separators and
-// no leading `./`.
+// A report path as `normalize` compares it: `/` separators and no leading `./`.
 fn jet_cli_budget_normal(path: String) -> String Never! {
     path.replace("\\", "/").removeprefix("./")
 }

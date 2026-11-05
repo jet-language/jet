@@ -1,4 +1,4 @@
-// Frozen by the actual Foundation PreludeDataFlow.rs policy; no Rust at witness time.
+// Frozen by the actual Foundation policy; no Rust at witness time.
 typedef struct {const unsigned char *input; size_t input_len; const unsigned char *expected; size_t expected_len;} PublicGolden;
 static const unsigned char parameter_goldens_0_in[]={0};
 static const unsigned char parameter_goldens_0_out[]={118,97,108,117,101,45,115,104,97,50,53,54,45,101,51,98,48,99,52,52,50,57,56,102,99,49,99,49,52,57,97,102,98,102,52,99,56,57,57,54,102,98,57,50,52,50,55,97,101,52,49,101,52,54,52,57,98,57,51,52,99,97,52,57,53,57,57,49,98,55,56,53,50,98,56,53,53,0};

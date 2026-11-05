@@ -1,9 +1,8 @@
 // Lookups and renders over the shared foundation CLICommands.jet table: usage
 // page, the greeting, per-command and per-group help, command usage shapes,
-// command-scoped flags, retired spellings, and "did you mean" suggestions.
-// Each render returns the exact bytes the Rust host prints for the same
-// request (crates/jet-cli/src/CLI.rs, Source/main.rs), so both front doors
-// mean one thing (I9).
+// command-scoped flags, retired spellings, and "did you mean" suggestions. Each
+// render returns the exact bytes the Rust host prints for the same request, so
+// both front doors mean one thing (I9).
 use jet_foundation.[JET_CLI_COMMANDS, JET_CLI_HANDLERS, JET_CLI_FLAGS, JET_CLI_JOB_INVOCATION_HELP, JetCLIActionSpec, JetCLIFlagSpec]
 
 // jet-foundation Syntax `BINARY_NAME` and `LANG_NAME`; the `jet` package version.
@@ -11,7 +10,7 @@ JET_CLI_BINARY :: "jet"
 JET_CLI_LANG_NAME :: "Jet"
 JET_CLI_VERSION :: "0.1.0"
 
-// The flags every command accepts (CLI.rs `flags_for_command`).
+// The flags every command accepts.
 JET_CLI_GLOBAL_FLAGS :: [String]{"--json", "--quiet", "--color"}
 
 // One nested action: `JET_CLI_COMMANDS[group].actions[action]`.
@@ -184,7 +183,7 @@ fn jet_cli_group_usage(name: String) -> String Never! {
     out
 }
 
-// The usage shape of a live command (CLI.rs `command_usage`).
+// The usage shape of a live command.
 fn jet_cli_command_usage(name: String) -> String Never! {
     if jet_cli_group_index(name) == .Val(index) {
         if JET_CLI_COMMANDS[index].usage == .Val(usage) -> return "{JET_CLI_BINARY} {usage}"
@@ -217,9 +216,8 @@ fn jet_cli_flag_scope(help: String) -> [String]? Never! {
     Val([String]{parts[0], rest.slice(parts[0].len() + 1..<rest.len()).trim()})
 }
 
-// Flags attached to one command (CLI.rs `flags_for_command`): the scoped
-// flags that name it plus the global output flags, each with its help text
-// after the scope prefix.
+// Flags attached to one command: the scoped flags that name it plus the global
+// output flags, each with its help text after the scope prefix.
 fn jet_cli_flags_for_command(name: String) -> [JetCLIFlagSpec] Never! {
     flags := [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FLAGS {
@@ -348,7 +346,7 @@ fn jet_cli_group_help(name: String) -> String Never! {
     "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n{jet_cli_group_usage(name)}"
 }
 
-// `jet <cmd> --help` and `jet help <cmd>` (Source/main.rs `command_help`).
+// `jet <cmd> --help` and `jet help <cmd>`.
 fn jet_cli_command_help(name: String) -> String Never! {
     // `diff`/`merge` carry their own structural usage (StructuralMerge.jet).
     if jet_cli_structural_help(name) == .Val(bespoke) -> return bespoke

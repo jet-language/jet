@@ -259,9 +259,9 @@ struct JetDriverCompileRequest {
     // When set, every Tier-1 comptime input this compile reads (path and
     // SHA-256), in read order, for the comptime input lock.
     comptime_input_log: Shared<JetDriverComptimeInputLog>?{None}
-    // The `[build.stamp]` of the entry root's `.jet/lock`, read by the host
-    // (Lock.rs `build_stamp`): the provenance `$build.stamp.*` folds from.
-    // None keeps the default stamp (jet_driver_build_facts).
+    // The `[build.stamp]` of the entry root's `.jet/lock`, read by the host:
+    // the provenance `$build.stamp.*` folds. None keeps the default stamp
+    // (jet_driver_build_facts).
     build_stamp: BuildStamp?{None}
     // The `[[build.contribution]]` rows of that lock (D-CONF-SPLIT1): what
     // `fn build` contributed to declared settings, which
@@ -575,11 +575,10 @@ struct JetDriverLoadResult {
 }
 
 // The entry package's written authority policy, for the host's application
-// authority check (Source/CmdCompile.rs `resolve_application_authority`).
-// `manifest_path` is None for a file with no `package.jet`; `allow`/`deny`
-// are None when the manifest writes no `authority` row.
-// `inline_package` marks a leading `package { … }` block, whose carrier file
-// is `manifest_path`.
+// authority check. `manifest_path` is None for a file with no `package.jet`;
+// `allow`/`deny` are None when the manifest writes no `authority` row.
+// `inline_package` marks a leading `package { … }` block, whose carrier file is
+// `manifest_path`.
 struct JetDriverAuthorityPolicy {
     manifest_path: String?
     inline_package: Bool

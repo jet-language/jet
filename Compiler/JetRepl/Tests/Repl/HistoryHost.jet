@@ -6,7 +6,7 @@ use {
     repl_history_host_test_paths :: core.files.runtime.kernel_path_components
 }
 
-// Original HistoryPlatform.rs:122–257. ABI checks are NOT filesystem proof.
+// ABI checks are NOT filesystem proof.
 fn repl_history_test_flags(os: String, arch: String) -> ReplHistoryUnixFlags Never! {
     repl_history_flags_for_target(os, arch) ?? panic("missing ABI table for {os}/{arch}")
 }
@@ -77,8 +77,8 @@ fn repl_history_host_test_remove(root: String) Never! -[FS]> {
     repl_history_host_test_files.remove_all(root).drop("original best-effort remove_dir_all of this test's unique root")
 }
 
-// History.rs:273–286, same actual two replacements, codec read and corruption
-// assertions. R10 is the sole codec; native test never invents rendered rows.
+// Same actual two replacements, codec read and corruption assertions. R10 is
+// the sole codec; native test never invents rendered rows.
 fn atomic_replacement_supports_repeated_writes() Never! -[FS, Env, Time, Time.Wait]> {
     root :: repl_history_host_test_root("replace")
     repl_history_host_test_remove(root) {
@@ -96,8 +96,8 @@ fn atomic_replacement_supports_repeated_writes() Never! -[FS, Env, Time, Time.Wa
     repl_history_host_test_remove(root)
 }
 
-// History.rs:290–309, Unix-only original. Two independent opens are essential:
-// dup of the same directory is the SAME flock open-file description.
+// Two independent opens are essential: dup of the same directory is the SAME
+// flock open-file description.
 fn transaction_lock_times_out_then_recovers_after_release() Never! -[FS, Env, Time, Time.Wait]> {
     root :: repl_history_host_test_root("lock")
     repl_history_host_test_remove(root) {
@@ -121,8 +121,8 @@ fn transaction_lock_times_out_then_recovers_after_release() Never! -[FS, Env, Ti
     }
 }
 
-// tests/repl.rs:171–199. Original linked/state fixture, visible fallback,
-// outside noncreation and no chmod of attacker's 0755 directory.
+// Original linked/state fixture, visible fallback, outside noncreation and no
+// chmod of attacker's 0755 directory.
 fn repl_history_rejects_symlinked_state_parent_without_chmod_or_escape() Never! -[FS, Env, Exec, Time.Wait]> {
     root :: repl_history_host_test_root("link")
     outside :: repl_history_host_test_root("outside")
@@ -141,8 +141,8 @@ fn repl_history_rejects_symlinked_state_parent_without_chmod_or_escape() Never! 
     repl_history_host_test_remove(outside)
 }
 
-// tests/repl.rs:203–239. The actual child opens its root before the directory is
-// renamed and replaced with a symlink. Submit only AFTER that live swap.
+// The actual child opens its root before the directory is renamed and replaced
+// with a symlink. Submit only AFTER that live swap.
 fn repl_history_parent_swap_stays_on_held_directory() Never! -[FS, Env, Exec, Time, Time.Wait]> {
     state :: repl_history_host_test_root("swap")
     outside :: repl_history_host_test_root("swap_out")

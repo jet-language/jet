@@ -9,12 +9,10 @@ use {
     SHA256 :: jet_foundation.SHA256
 }
 // GATE #4494: real filesystem, thread, clock and process primitives in the reference tests.
-// Rust: crates/jet-devserver/src/WatchService.rs:2157
 fn tmp_dir(name: String) -> OSPath {
     dir :: env.temp_dir().join("jet_watch_{name}_{std.process.id()}_{SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()}")
     fs.create_dir_all(dir).unwrap(); dir
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:2170
 #Test("typed_graph_records_kinds_reverse_edges_and_receipts") {
     dir :: tmp_dir("graph"); entry :: dir.join("app.jet"); lib :: dir.join("lib.jet"); css :: dir.join("app.css")
     html :: dir.join("app.html"); manifest :: dir.join("package.jet"); lock :: dir.join(".jet")
@@ -38,7 +36,6 @@ fn tmp_dir(name: String) -> OSPath {
     assert(!receipt.closure.is_empty()); assert(receipt.render().contains("\"generation\":")); assert(within_budget(receipt))
     &session.acknowledge(receipt).unwrap(); _ :: fs.remove_dir_all(dir)
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:2231
 #Test("html_shell_tracks_local_assets_and_future_creates") {
     dir :: tmp_dir("html_assets"); entry :: dir.join("app.jet"); shell :: dir.join("shell.html")
     stylesheet :: dir.join("theme.css"); image :: dir.join("logo.png")
@@ -52,7 +49,6 @@ fn tmp_dir(name: String) -> OSPath {
     assert(graph.reverse_edges().get(stylesheet).unwrap().contains_key(entry)); assert(graph.reverse_edges().get(image).unwrap().contains_key(entry))
     _ :: fs.remove_dir_all(dir)
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:2261
 #Test("runtime_file_inputs_track_generator_directories_and_files") {
     dir :: tmp_dir("runtime_inputs"); entry :: dir.join("generate.jet"); assets :: dir.join("assets"); image :: assets.join("logo.png")
     fs.create_dir_all(assets).unwrap(); fs.write(image, "asset").unwrap()
@@ -63,7 +59,6 @@ fn tmp_dir(name: String) -> OSPath {
     assert(graph.reverse_edges().get(assets).unwrap().contains_key(entry)); assert(graph.reverse_edges().get(image).unwrap().contains_key(entry))
     _ :: fs.remove_dir_all(dir)
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:2287
 #Test("rename_delete_atomic_and_stale_events") {
     dir :: tmp_dir("events"); entry :: dir.join("main.jet"); a :: dir.join("a.jet"); b :: dir.join("b.jet")
     fs.write(entry, "fn run() {{}}\n").unwrap(); fs.write(a, "fn a() {{}}\n").unwrap()
@@ -89,7 +84,6 @@ fn tmp_dir(name: String) -> OSPath {
     if &session.poll() == .Val(r) -> assert(r.change_kinds.contains("stale") || r.closure.is_empty())
     _ :: fs.remove_dir_all(dir)
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:2359
 #Test("persist_migration_and_hot_replace_transaction") {
     Persist.shared_clear(); store := PersistStore.new()
     &store.put(PersistEntry{module_ref: "app", name: "counter", shape: "Int", payload: "{{\"shape\":\"Int\",\"value\":7}}"})
@@ -117,7 +111,6 @@ fn tmp_dir(name: String) -> OSPath {
     next :: txn.commit().expect("commit")
     assert_eq(next.generation, 4); assert_eq(next.artifact_token, "gen-4"); assert_eq(next.revision, "rev-4")
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:2424
 #Test("crash_reconnect_recovers_stamps") {
     dir :: tmp_dir("recover"); entry :: dir.join("app.jet"); fs.write(entry, "fn run() {{}}\n").unwrap()
     session := WatchSession.open(entry).unwrap(); thread.sleep(Duration.from_millis(20))
@@ -126,7 +119,6 @@ fn tmp_dir(name: String) -> OSPath {
     &session.mark_edit_started(); receipt :: &session.poll().expect("post-reconnect edit"); assert(within_budget(receipt))
     _ :: fs.remove_dir_all(dir)
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:2444
 #Test("in_place_save_settles_past_truncation") {
     dir :: tmp_dir("truncate"); entry :: dir.join("app.jet"); fs.write(entry, "fn run() {{}}\n").unwrap()
     session := WatchSession.open(entry).unwrap(); thread.sleep(Duration.from_millis(20))

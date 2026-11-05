@@ -120,7 +120,7 @@ static void capture_fixtures(void) {
     for (int i = 0; i < 8; i++) assert(pthread_join(threads[i], NULL) == 0);
     expect_wire(jet_rt_test_capture_take(), "parent\n");
 }
-// Core.rs:678-860 policy witnesses against the Jet cells, not a C substitute.
+// Policy witnesses against the Jet cells, not a C substitute.
 static void scope_fixtures(void) {
     Text *code = text("E3010", 5), *message = text("index 99", 8);
     Text *wrong = text("E3001", 5), *needle = text("99", 2);

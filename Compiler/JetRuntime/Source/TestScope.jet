@@ -1,4 +1,3 @@
-// Rust: crates/jet-codegen/src/Prelude/Core.rs:678-860.
 // One TestCapture TLS136 owns all these cells; never a second key or TCB slot.
 // expect rows=[scope, expected?, expectedMessage?, stopCode?, stopMessage?],
 // completed=[scope, ownedCode], timeouts=[scope, seconds, nanos, limit, depth].
@@ -87,8 +86,8 @@ fn test_scope_state_drop(state: I64) {
     test_scope_list_free(wrapping(state + I64{88}))
 }
 
-// Rust Core.rs:701-715: replacement drops the previous pair; take is atomic
-// with respect to this thread, writes both output words only when Some.
+// Replacement drops the previous pair; take is atomic with respect to this
+// thread, writes both output words only when Some.
 #Export(c) fn jet_rt_testing_record_failure(message: I64, detail: I64) {
     state :: test_state_ensure()
     owned_message :: test_text_clone(message)
@@ -124,7 +123,6 @@ fn test_scope_pending_failure() -> I64 {
     state
 }
 
-// Rust Core.rs:718-727.
 #Export(c) fn jet_rt_test_expect_fail_enter_scope(scope: I64, expected: I64, expected_message: I64) {
     state :: test_state_ensure()
     row :: test_scope_push(wrapping(state + I64{32}), I64{5})
@@ -133,7 +131,7 @@ fn test_scope_pending_failure() -> I64 {
     trap_store(wrapping(row + I64{16}), test_scope_clone(expected_message))
 }
 
-// Rust Core.rs:729-752. Null denotes None; a live but unstopped frame stays.
+// Null denotes None; a live but unstopped frame stays.
 #Export(c) fn jet_rt_test_expect_fail_leave_scope(scope: I64) -> I64 {
     state :: test_capture_state()
     if (state == I64{0}) -> return I64{0}
@@ -165,7 +163,7 @@ fn test_scope_pending_failure() -> I64 {
     I64{0}
 }
 
-// Rust Core.rs:754-762: first stop wins on EVERY active expectation frame.
+// First stop wins on EVERY active expectation frame.
 #Export(c) fn jet_rt_test_record_stop(code: I64, message: I64) {
     state :: test_capture_state()
     if (state == I64{0}) -> return
@@ -240,7 +238,7 @@ fn test_scope_stopped_index(state: I64) -> I64 {
     I64{-1}
 }
 
-// Rust Core.rs:763-773: scope zero is valid; Bool distinguishes it from None.
+// Scope zero is valid; Bool distinguishes it from None.
 #Export(c) fn jet_rt_test_expect_fail_stopped_scope(output: I64) -> Bool {
     state :: test_capture_state()
     if (state == I64{0}) -> return false
@@ -291,8 +289,8 @@ fn test_scope_code_word(code: I64) -> I64 {
 }
 
 // The compiler enters the canonical expectation exit after deeper frames
-// unwind. Its own cleanup is outside the caught closure (MIRRust.rs:15056),
-// so the caught stop is cleared here, before that frame's own cleanup.
+// unwind. Its own cleanup is outside the caught closure, so the caught stop is
+// cleared here, before that frame's own cleanup.
 #Export(c) fn jet_rt_test_catch_boundary(scope: I64) {
     control :: scheduler_control_current()
     if (control == I64{0} || scheduler_control_status(control) != I64{5}) -> return
@@ -316,15 +314,15 @@ fn test_scope_quoted(builder: I64, text: I64) {
     test_text_drop(quoted)
 }
 
-// Rust Outcome.rs:2502-2524: a stop meets the expectation when its code and
-// raw message (never rendered text) match; a region that never stopped fails.
+// A stop meets the expectation when its code and raw message (never rendered
+// text) match; a region that never stopped fails.
 fn test_scope_expectation_met(expected: I64, expected_message: I64, code: I64, message: I64) -> Bool {
     if (code == I64{0}) -> return false
     code_matches :: expected == I64{0} || jet_rt_string_eq(expected, code)
     code_matches && (expected_message == I64{0} || jet_string_contains(message, expected_message))
 }
 
-// Rust Outcome.rs:2502-2524. Raw stop message substring, never rendered text.
+// Raw stop message substring, never rendered text.
 #Export(c) fn jet_rt_test_expect_fail_error(expected: I64, expected_message: I64, code: I64, message: I64) -> I64 {
     if test_scope_expectation_met(expected, expected_message, code, message) -> return I64{0}
     stopped :: code != I64{0}
@@ -355,8 +353,8 @@ fn test_scope_fail(message: I64) {
     test_text_drop(message)
 }
 
-// Rust Core.rs:775-806. Remove caught+children, clear parent stops, retain
-// timeouts entered outside the caught expectation, then enqueue completion.
+// Remove caught+children, clear parent stops, retain timeouts entered outside
+// the caught expectation, then enqueue completion.
 #Export(c) fn jet_rt_test_expect_fail_catch_scope(output: I64) -> Bool {
     test_scope_catch(output, false)
 }
@@ -416,7 +414,6 @@ fn test_scope_catch(output: I64, native: Bool) -> Bool {
     true
 }
 
-// Rust Core.rs:808-818.
 #Export(c) fn jet_rt_test_expect_fail_abort() {
     state :: test_capture_state()
     if (state != I64{0}) -> test_scope_expect_clear(state)
@@ -428,8 +425,8 @@ fn test_scope_catch(output: I64, native: Bool) -> Bool {
     test_scope_fail(jet_rt_test_expect_fail_error(expected, expected_message, I64{0}, I64{0}))
 }
 
-// Rust Core.rs:820-837. std::Instant is HOST monotonic even inside World.
-// Store seconds/nanos, not absolute ns, so a long uptime cannot overflow.
+// std::Instant is HOST monotonic even inside World. Store seconds/nanos, not
+// absolute ns, so a long uptime cannot overflow.
 #Export(c) fn jet_rt_test_timeout_enter(scope: I64, limit_ns: I64) {
     state :: test_state_ensure()
     sample :: time_clock_read(I64{1})
@@ -473,7 +470,6 @@ fn test_scope_catch(output: I64, native: Bool) -> Bool {
     false
 }
 
-// Rust Core.rs:839-860 / Outcome.rs:2527-2528.
 #Export(c) fn jet_rt_test_timeout_abort() {
     state :: test_capture_state()
     if (state != I64{0}) -> trap_store(wrapping(state + I64{88}), I64{0})

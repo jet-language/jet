@@ -1,9 +1,8 @@
-// D-DX-PLUGIN1=D: the typed devtools publication gate (Rust
-// Sema/DevtoolsPanel.rs `check_devtools_publish`). Source spells only
+// D-DX-PLUGIN1=D: the typed devtools publication gate. Source spells only
 // `devtools.publish(field: .state_field, value: v)`. The selector must name a
 // state field of the package's `#DevPanel` panel; the compiler then supplies
-// the package/module/panel identity as the hidden leading ABI strings of
-// Core's source `publish(package, module_name, panel, field, value)`.
+// the package/module/panel identity as the hidden leading ABI strings of Core's
+// source `publish(package, module_name, panel, field, value)`.
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -133,10 +132,10 @@ fn sema_call_devtools_state_declares(graph: SemaRegistrationGraph, package: Stri
     false
 }
 
-// Rust Sema/DevtoolsPanel.rs `check_devtools_panels`: a `#DevPanel` function
-// is the package's public `panel(state: State) -> UINode`, marked once with a
-// bare marker, whose state struct gives every field a value before its first
-// publication (a default, or an optional type).
+// `check_devtools_panels`: a `#DevPanel` function is the package's public
+// `panel(state: State) -> UINode`, marked once with a bare marker, whose state
+// struct gives every field a value before its first publication (a default, or
+// an optional type).
 fn sema_check_devtools_panel(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     marker_span := Span?{None}
     marker_valid := true

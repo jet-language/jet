@@ -1,16 +1,14 @@
-// core.encoding / core.data raw leaves. Rust providers: Core/StringBytes.rs:28
-// (text into bytes), CoreLib/Top/EncodingStream.rs:4197-4274 (coerce clock and
-// audit line, stream writes), CoreLib/Top/EncodingHostileIo.rs (the hostile
-// streaming law seam, active only when JET_ENC_HOSTILE_IO is set) and
-// CoreLib/Top/DataStats.rs:11 (host path metadata). Codec policy is Jet.
+// core.encoding / core.data raw leaves. Rust providers: (text into bytes),
+// (coerce clock and audit line, stream writes), (the hostile streaming law
+// seam, active only when JET_ENC_HOSTILE_IO is set):11 (host path metadata).
+// Codec policy is Jet.
 
-// StringBytes.rs:28: text.into_bytes() as a fresh List<U8>.
+// text.into_bytes() as a fresh List<U8>.
 #Export(c) fn jet_raw_text_into_bytes(value: I64, output: I64) -> I64 { jet_string_bytes(value, output) }
 
-// EncodingStream.rs:4197: SystemTime ms since the epoch (0 before it).
+// SystemTime ms since the epoch (0 before it).
 #Export(c) fn jet_raw_json_coerce_now() -> I64 { jet_int_owned_from_i64(deadline_wall_now_ms()) }
 
-// EncodingStream.rs:4204: eprintln!("{}", line).
 #Export(c) fn jet_raw_json_coerce_emit(line: I64) { _ := host_stdio_text_failure(line, true, true, false) }
 
 // format!("{:?}", io::Error::from_raw_os_error(code).kind()) on Linux (the
@@ -68,7 +66,7 @@ fn encoding_cause_take(kind: I64, present: Bool, code: I64, message: I64) -> I64
     result
 }
 
-// EncodingStream.rs:4220 jet_raw_encoding_cause of an OS error.
+// jet_raw_encoding_cause of an OS error.
 fn encoding_cause_errno(code: I64) -> I64 { encoding_cause_take(rt_io_error_kind_name(code), true, code, host_errno_cause(code)) }
 
 fn encoding_cause_custom(kind: I64, message: I64) -> I64 { encoding_cause_take(kind, false, I64{0}, jet_rt_string_clone(message)) }
@@ -78,14 +76,13 @@ fn encoding_fail(cause: I64, error: I64) -> I64 {
     I64{0}
 }
 
-// ---------------------------------------------------------------------------
-// EncodingHostileIo.rs: one thread_local state. Hostile32... words:
-// active0 (0: no plan read yet, 1: no plan, 2: plan), read_one8 write_chunk16
-// interrupt_reads24 interrupt_writes32 fail_read_present40 fail_read48
-// fail_write_present56 fail_write64, stats: read_calls72 write_calls80
-// flush_calls88 bytes_read96 bytes_written104 interrupts112, read_total120
-// write_total128, read plan words136/len144/cap152 + idx160, write plan
-// words168/len176/cap184 + idx192.
+// ---------------------------------------------------------------------------:
+// one thread_local state. Hostile32... words: active0 (0: no plan read yet, 1:
+// no plan, 2: plan), read_one8 write_chunk16 interrupt_reads24
+// interrupt_writes32 fail_read_present40 fail_read48 fail_write_present56
+// fail_write64, stats: read_calls72 write_calls80 flush_calls88 bytes_read96
+// bytes_written104 interrupts112, read_total120 write_total128, read plan
+// words136/len144/cap152 + idx160, write plan words168/len176/cap184 + idx192.
 ENCODING_HOSTILE_BYTES :: I64{200}
 ENCODING_IO_CHUNK :: I64{65536}
 encoding_hostile_key := I64{0}
@@ -246,7 +243,7 @@ fn encoding_file_write(writer: I64, bytes: I64, length: I64) -> I64 {
     encoding_cause_errno(-failure)
 }
 
-// The hostile write of EncodingHostileIo.rs:277; a cause or 0.
+// The hostile write; a cause or 0.
 fn encoding_hostile_write(state: I64, writer: I64, bytes: I64, length: I64) -> I64 {
     rt_text_store(wrapping(state + I64{80}), rt_text_word(wrapping(state + I64{80})) + I64{1})
     pending :: rt_text_word(wrapping(state + I64{32}))
@@ -280,7 +277,7 @@ fn encoding_hostile_write(state: I64, writer: I64, bytes: I64, length: I64) -> I
     I64{0}
 }
 
-// EncodingHostileIo.rs:265 jet_encoding_file_write_all; a cause or 0.
+// A cause or 0.
 fn encoding_write_all(writer: I64, bytes: I64, length: I64) -> I64 {
     if jet_fault_should_fail(rt_static_text("FS.Write")) -> return encoding_cause_custom(rt_static_text("Other"), rt_static_text("fault injected: FS.Write"))
     state :: encoding_hostile_state()
@@ -299,8 +296,7 @@ fn encoding_write_all(writer: I64, bytes: I64, length: I64) -> I64 {
     I64{0}
 }
 
-// EncodingHostileIo.rs:316 jet_encoding_file_flush; a cause or 0. The seam
-// flushes the File itself (a no-op), not the BufWriter.
+// A cause or 0. The seam flushes the File itself (a no-op), not the BufWriter.
 fn encoding_flush(writer: I64) -> I64 {
     if jet_fault_should_fail(rt_static_text("FS.Write")) -> return encoding_cause_custom(rt_static_text("Other"), rt_static_text("fault injected: FS.Write"))
     state :: encoding_hostile_state()
@@ -320,7 +316,7 @@ fn encoding_flush(writer: I64) -> I64 {
     encoding_cause_errno(-failure)
 }
 
-// EncodingStream.rs:4258 (a borrowed List<U8>), :4262 and :4272.
+// (a borrowed List<U8>), and.
 #Export(c) fn jet_raw_encoding_write_bytes(writer: I64, data: I64, length: I64, error: I64) -> I64 {
     temporary :: RT_HOST_U8_STRIDE != I64{1} && length != I64{0}
     packed :: if temporary -> jet_rt_alloc(length, I64{8}) else -> data
@@ -369,8 +365,8 @@ fn encoding_fd_read(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 {
     I64{-1}
 }
 
-// EncodingHostileIo.rs:227 jet_encoding_file_read: the count, or -1 with the
-// EncodingCause stored at `cause`.
+// jet_encoding_file_read: the count, or -1 with the EncodingCause stored at
+// `cause`.
 fn encoding_file_read(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 {
     if jet_fault_should_fail(rt_static_text("FS.Read")) {
         rt_text_store(cause, encoding_cause_custom(rt_static_text("Other"), rt_static_text("fault injected: FS.Read")))
@@ -404,7 +400,7 @@ fn encoding_file_read(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 {
     count
 }
 
-// EncodingStream.rs:4228: one byte, None at end of input.
+// One byte, None at end of input.
 #Export(c) fn jet_raw_encoding_read_byte(reader: I64, some: I64, value: I64, error: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{16}, I64{8})
     count :: encoding_file_read(reader, scratch, I64{1}, wrapping(scratch + I64{8}))
@@ -417,9 +413,9 @@ fn encoding_file_read(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 {
     I64{1}
 }
 
-// EncodingStream.rs:4237: one read on the reader's own stream into the empty
-// List<U8> at `header` (len, capacity, data), at most `max` bytes, without
-// growing it. The List's length becomes the count; an error leaves it empty.
+// One read on the reader's own stream into the empty List<U8> at `header` (len,
+// capacity, data), at most `max` bytes, without growing it. The List's length
+// becomes the count; an error leaves it empty.
 #Export(c) fn jet_raw_encoding_read_into(reader: I64, header: I64, max: I64, value: I64, error: I64) -> I64 {
     limit :: jet_int_owned_to_i64(max)
     capacity :: rt_text_word(wrapping(header + I64{8}))
@@ -447,8 +443,8 @@ fn encoding_file_read(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 {
     I64{1}
 }
 
-// DataStats.rs:11: std::fs::metadata (stat, following links) of the raw path
-// bytes; a NUL is std's CString refusal.
+// std::fs::metadata (stat, following links) of the raw path bytes; a NUL is
+// std's CString refusal.
 #Export(c) fn jet_data_host_path_is_file(data: I64, length: I64, ok: I64, error: I64) -> I64 {
     count :: if (length < I64{0} || data == I64{0}) -> I64{0} else -> length
     name :: jet_rt_alloc(count + I64{1}, I64{1})

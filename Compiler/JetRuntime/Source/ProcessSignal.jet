@@ -1,8 +1,8 @@
-// Interrupt.rs: the one process-signal mechanism behind core.process.on_signal
-// (Process.rs:58 jet_process_signal_arm_raw). Mask bits INT=1, HUP=2, TERM=4.
-// The handler only updates preallocated words (async-signal-safe); a
-// dispatcher thread polls every 10 ms and cancels the process root task
-// control once per delivered signal (Scheduler.jet scheduler_root_task_control).
+// The one process-signal mechanism behind core.process.on_signal
+// (jet_process_signal_arm_raw). Mask bits INT=1, HUP=2, TERM=4. The handler only
+// updates preallocated words (async-signal-safe); a dispatcher thread polls
+// every 10 ms and cancels the process root task control once per delivered
+// signal (Scheduler.jet scheduler_root_task_control).
 #Import(c) fn process_signal_install(signal: I64, handler: I64) -> I64 = "signal"
 
 // Checked FunctionAddress intrinsics in the canonical RuntimeLibrary table.
@@ -37,8 +37,8 @@ fn process_signal_bit(signal: I64) -> I64 {
     I64{0}
 }
 
-// Interrupt.rs:116 jet_interrupt_mark: SIGINT also counts a pending
-// interrupt; every armed signal ORs its bit into the pending set.
+// jet_interrupt_mark: SIGINT also counts a pending interrupt; every armed
+// signal ORs its bit into the pending set.
 #Export(c) fn jet_rt_process_signal_mark(signal: I64) -> I64 {
     state :: process_signal_state
     if (state == I64{0}) -> return I64{0}
@@ -58,7 +58,7 @@ fn process_signal_error(error: I64, text: I64) -> I64 {
     I64{0}
 }
 
-// Interrupt.rs:143 arm_mask (unix): install the handler once per bit.
+// arm_mask (unix): install the handler once per bit.
 fn process_signal_arm_mask(state: I64, mask: I64, error: I64) -> I64 {
     if (mask.bit_and(I64{-8}) != I64{0}) -> return process_signal_error(error, jet_rt_string_clone(rt_static_text("invalid process signal")))
     sync_mutex_lock(wrapping(state + I64{24}))
@@ -83,8 +83,8 @@ fn process_signal_arm_mask(state: I64, mask: I64, error: I64) -> I64 {
     I64{1}
 }
 
-// Interrupt.rs:245 JET_PROCESS_SIGNAL_DISPATCHER: started once; a start
-// failure is cached and reported on every later arm.
+// JET_PROCESS_SIGNAL_DISPATCHER: started once; a start failure is cached and
+// reported on every later arm.
 fn process_signal_dispatcher_start(state: I64, error: I64) -> I64 {
     sync_mutex_lock(wrapping(state + I64{24}))
     status := sync_load(wrapping(state + I64{72}))
@@ -108,16 +108,16 @@ fn process_signal_dispatcher_start(state: I64, error: I64) -> I64 {
     process_signal_error(error, jet_rt_string_clone(status))
 }
 
-// Scheduler.rs:1746 root lookup, then cancel: Process.rs:61's callback.
+// Root lookup, then cancel: callback.
 fn process_signal_cancel_root() {
     control :: scheduler_root_task_control()
     scheduler_control_cancel(control)
     scheduler_control_drop(control)
 }
 
-// Interrupt.rs:287 jet_process_signal_dispatch: take the pending bits that
-// have a registered callback (TERM, HUP, INT order), keep the rest pending,
-// then run one callback per delivered signal under the dispatch lock.
+// jet_process_signal_dispatch: take the pending bits that have a registered
+// callback (TERM, HUP, INT order), keep the rest pending, then run one callback
+// per delivered signal under the dispatch lock.
 fn process_signal_dispatch(state: I64) {
     sync_mutex_lock(wrapping(state + I64{32}))
     deliverable := I64{0}
@@ -157,9 +157,9 @@ fn process_signal_dispatch(state: I64) {
     }
 }
 
-// Process.rs:58 jet_process_signal_arm_raw: look up (or replace) the root
-// task control, then register the root-cancel callback for one signal; the
-// slot is replaced, never accumulated. Core formats the failure text.
+// jet_process_signal_arm_raw: look up (or replace) the root task control, then
+// register the root-cancel callback for one signal; the slot is replaced, never
+// accumulated. Core formats the failure text.
 #Export(c) fn jet_process_signal_arm_raw(mask: I64, error: I64) -> I64 {
     native :: jet_int_owned_to_i64(mask)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}

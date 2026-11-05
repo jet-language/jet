@@ -1,10 +1,10 @@
 // The driver request the Jet-hosted `jet` builds for one entry file, the way
-// the Rust bootstrap host does (Compiler/Bootstrap/Host/Native.rs
-// `open_authorized_sources` and `__jet_bootstrap_request_from_host`): the
-// entry root and its declared path-dependency closure, the Core library rows
-// with their bodies, the canonical effect source, and the host facts. The
-// entry root is the nearest directory at or above the entry that holds
-// `package.jet`, or the entry's own directory for a loose file.
+// the Rust bootstrap host does (`open_authorized_sources` and
+// `__jet_bootstrap_request_from_host`): the entry root and its declared
+// path-dependency closure, the Core library rows with their bodies, the
+// canonical effect source, and the host facts. The entry root is the nearest
+// directory at or above the entry that holds `package.jet`, or the entry's own
+// directory for a loose file.
 use {
     cli_files :: core.files
     cli_sys :: core.sys
@@ -290,22 +290,19 @@ fn jet_cli_toolchain_root(input: String) -> JetCLIToolchainRoot Never! {
     }
 }
 
-// crates/jet-foundation/src/SHA256.rs `MAX_TREE_DEPTH`.
 JET_CLI_MAX_TREE_DEPTH :: 256
 JET_CLI_MAX_SOURCE_BYTES :: 536870912
 JET_CLI_MAX_SOURCE_TOTAL :: 4294967296
 JET_CLI_MAX_SOURCE_FILES :: 1000000
 
-// A directory holding one of these is its own project, outside the walk
-// (Authority.rs `has_nested_project_boundary`).
+// A directory holding one of these is its own project, outside the walk.
 JET_CLI_PROJECT_MARKERS :: [String]{"package.jet", "pkg.jet", "workspace.jet", ".jet/lock"}
 
-// Names the source walk never enters or reads (Authority.rs
-// `discover_source_files_from`), besides every name that starts with `.`.
+// Names the source walk never enters or reads, besides every name that starts
+// with `.`.
 JET_CLI_SKIPPED_NAMES :: [String]{"target", "build", "node_modules", "bin"}
 
-// Generated foreign-binding caches and the sidecars each binding may carry
-// (Native.rs `collect_authorized_foreign_cache_files`).
+// Generated foreign-binding caches and the sidecars each binding may carry.
 JET_CLI_FOREIGN_CACHE_DIRECTORIES :: [String]{".jet/bindings/c", ".jet/bindings/cpp"}
 JET_CLI_FOREIGN_CACHE_SIDECARS :: [String]{"metadata", "provenance"}
 
@@ -327,8 +324,8 @@ fn jet_cli_authority_path(root: String, relative: String) -> String Never! {
     "{root}/{relative}"
 }
 
-// Native.rs `identity_key` over Authority.rs `FileIdentity::from_metadata`.
-// Directory identity is pinned to the opened object, not its mutable listing.
+// `identity_key` over `FileIdentity::from_metadata`. Directory identity is
+// pinned to the opened object, not its mutable listing.
 fn jet_cli_identity_key(kind: String, stat: cli_files.Stat) -> String Never! {
     if kind == "directory" -> return "authority-file-v1;kind=directory;length=0;modified_ns=none;device={stat.id.device};inode={stat.id.inode}"
     modified :: if stat.modified.to_unix_ns() == {
@@ -346,11 +343,11 @@ fn jet_cli_is_project_boundary(directory: String) -[FS]> Bool Never! {
     false
 }
 
-// Authority.rs `discover_source_files_from`: entries in name order, so the
-// files come out in relative-path order; a symlinked directory is skipped and
-// any other symlink refused; dot names, build output, and nested projects stay
-// out. With `retain_directories`, every walked directory's complete immediate
-// listing (taken before those filters, empty directories included) goes to
+// `discover_source_files_from`: entries in name order, so the files come out in
+// relative-path order; a symlinked directory is skipped and any other symlink
+// refused; dot names, build output, and nested projects stay out. With
+// `retain_directories`, every walked directory's complete immediate listing
+// (taken before those filters, empty directories included) goes to
 // `directories` for App convention routing. Returns the problem that stopped
 // the walk.
 struct JetCLISourceBudget {
@@ -494,9 +491,9 @@ fn jet_cli_cache_file(root: String, relative: String, budget: &JetCLISourceBudge
     Ok(JetCLICacheSource{relative_path: relative, read: read})
 }
 
-// Native.rs `collect_authorized_foreign_cache_files`: every generated C and
-// C++ binding (not the `.adapted.jet` views) with its `.metadata` and
-// `.provenance` sidecars, in relative-path order.
+// `collect_authorized_foreign_cache_files`: every generated C and C++ binding
+// (not the `.adapted.jet` views) with its `.metadata` and `.provenance`
+// sidecars, in relative-path order.
 fn jet_cli_foreign_cache_files(root: String, caches: &[JetDriverAuthorizedSourceFile], budget: &JetCLISourceBudget) -[FS]> String? Never! {
     collected := [JetCLICacheSource]{}
     loop cache_directory in JET_CLI_FOREIGN_CACHE_DIRECTORIES {
@@ -595,8 +592,8 @@ fn jet_cli_dependency_within(path: String, root: String) -> Bool Never! {
     path == root || path.starts_with(if root.ends_with("/") -> root else -> "{root}/")
 }
 
-// Loader.rs `RootPathReach`: the entry's relative declarations, canonicalized
-// once, and the canonical sibling directories they open outside its tree.
+// `RootPathReach`: the entry's relative declarations, canonicalized once, and
+// the canonical sibling directories they open outside its tree.
 struct JetCLIRootPathReach {
     declared: [String]
     sibling_dirs: [String]
@@ -681,8 +678,7 @@ JET_CLI_BATTERIES_DIR :: "Jetpack/Provider/Batteries"
 
 // The canonical root of the first-party battery a version dependency `name`
 // (`source`, its selector) names, or None. Like the Rust jetpack's embedded
-// batteries registry (crates/jetpack/build.rs generated
-// batteries_registry.rs from crates/jetpack/batteries/*), the toolchain
+// batteries registry (generated from crates/jetpack/batteries/*), the toolchain
 // ships the batteries: `<toolchain root>/Jetpack/Provider/Batteries/<name>`
 // (jet_cli_toolchain_root of `entry`, the entry root) resolves only when its
 // package.jet declares that name and a version the selector matches.
@@ -734,7 +730,6 @@ fn jet_cli_source_root(entry_path: String) -[FS]> String Never! {
     }
 }
 
-// Layout.rs `TargetLayout::host_triple`.
 fn jet_cli_host_triple(arch: String, os: String) -> String Never! {
     known_arch :: arch == "x86_64" || arch == "aarch64"
     if os == "linux" && known_arch -> return "{arch}-unknown-linux-gnu"
@@ -950,10 +945,10 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
     }
 }
 
-// The entry root's `.jet/lock` (Lock.rs `load`), whose `[build.stamp]` and
+// The entry root's `.jet/lock`, whose `[build.stamp]` and
 // `[[build.contribution]]` rows a compile folds. A missing or unparsable lock
-// is None: the compile keeps the driver's default stamp, never captures a
-// fresh one from git and the clock, and folds no contribution.
+// is None: the compile keeps the driver's default stamp, never captures a fresh
+// one from git and the clock, and folds no contribution.
 fn jet_cli_entry_lock(snapshot: JetDriverAuthorizedSourceSnapshot) -[FS]> LockFile? {
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
@@ -1529,31 +1524,30 @@ fn jet_cli_prepare_snapshot(anchor: String, entry: String, overlays: [JetCLIOver
 // ---- The compiler's streaming trace: `--trace[=FILE]` and JET_TRACE_FILE ----
 //
 // The native `jet` implements the driver's CompilerTraceSink
-// (Compiler/JetFoundation/Source/Trace.jet) itself. A file target receives
-// the Chrome trace-event lines the Rust host's writer produces
-// (crates/jet-driver/src/Trace.rs): the `[` header, `process_name`,
-// `trace.start` (`unix_ms`, `functions`), one `B`/`E` event per span, with
-// `rss_kb`/`peak_rss_kb` (VmRSS/VmHWM) and the span's CPU time (`cpu_ns` of
-// its thread, `proc_cpu_ns` of every thread, `majflt` major faults; this
-// writer only) on every phase close and a `memory` counter after a phase,
-// while an item's close (`begin_item`, or an indexed `begin`) carries only
-// its thread's `cpu_ns`, and nested phases closer than
+// (Compiler/JetFoundation/Source/Trace.jet) itself. A file target receives the
+// Chrome trace-event lines the Rust host's writer produces: the `[` header,
+// `process_name`, `trace.start` (`unix_ms`, `functions`), one `B`/`E` event per
+// span, with `rss_kb`/`peak_rss_kb` (VmRSS/VmHWM) and the span's CPU time
+// (`cpu_ns` of its thread, `proc_cpu_ns` of every thread, `majflt` major
+// faults; this writer only) on every phase close and a `memory` counter after a
+// phase, while an item's close (`begin_item`, or an indexed `begin`) carries
+// only its thread's `cpu_ns`, and nested phases closer than
 // JET_CLI_TRACE_PROCESS_MS share one process read, so per-item events stay
-// cheap; throttled `C` progress events,
-// `<phase>.<name>` counter events, and `JET_PHASE_COUNTERS` stderr lines
-// when that variable is set, so Tools/perf and Tools/agent read either
-// compiler's trace. `-` or `stderr` streams one readable line per event to
-// stderr instead. The target stays open for the whole compile and every line
-// is flushed as soon as its event happens, so a running compile can be
-// followed. A failed write stops the trace, never the compile. The sink's
-// calls stay inside the trait's FS row: monotonic time is `/proc/uptime`
-// (CLOCK_BOOTTIME, 10 ms resolution) and stderr is written as `/dev/stderr`.
+// cheap; throttled `C` progress events, `<phase>.<name>` counter events, and
+// `JET_PHASE_COUNTERS` stderr lines when that variable is set, so Tools/perf
+// and Tools/agent read either compiler's trace. `-` or `stderr` streams one
+// readable line per event to stderr instead. The target stays open for the
+// whole compile and every line is flushed as soon as its event happens, so a
+// running compile can be followed. A failed write stops the trace, never the
+// compile. The sink's calls stay inside the trait's FS row: monotonic time is
+// `/proc/uptime` (CLOCK_BOOTTIME, 10 ms resolution) and stderr is written as
+// `/dev/stderr`.
 JET_CLI_TRACE_FILE_ENV :: "JET_TRACE_FILE"
 JET_CLI_TRACE_DETAIL_ENV :: "JET_TRACE_DETAIL"
 JET_CLI_PHASE_COUNTERS_ENV :: "JET_PHASE_COUNTERS"
 JET_CLI_TRACE_STDERR :: "/dev/stderr"
-// Minimum spacing of the progress events of one kind; the last item is
-// always written (Trace.rs `PROGRESS_INTERVAL`).
+// Minimum spacing of the progress events of one kind; the last item is always
+// written.
 JET_CLI_TRACE_PROGRESS_MS :: 200
 // A progress kind reads the clock on its first call and then once every this
 // many calls (and on its last item), so a per-item kind costs no clock read
@@ -1872,8 +1866,8 @@ fn jet_cli_trace_close_line(sink: JetCLITraceSink, span: JetCLITraceSpan, named:
     line
 }
 
-// `{"name":..,"cat":..,"ph":..,"ts":..,"pid":..,"tid":..` without the
-// closing brace, so the caller appends `args` (Trace.rs `push_event_head`).
+// `{"name":..,"cat":..,"ph":..,"ts":..,"pid":..,"tid":..` without the closing
+// brace, so the caller appends `args`.
 fn jet_cli_trace_head(name: String, kind: String?, phase: String, ts: Int, pid: Int, thread: Int) -> String Never! {
     category :: if kind == .Val(text) -> ",\"cat\":{foundation_json_quote(text)}" else -> ""
     "{{\"name\":{foundation_json_quote(name)}{category},\"ph\":\"{phase}\",\"ts\":{ts},\"pid\":{pid},\"tid\":{thread}"

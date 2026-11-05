@@ -13,7 +13,6 @@ use {
 }
 
 // GATE #4494: actual filesystem/CLI/pipe/thread/channel/lldb providers.
-// Rust: tests/debug.rs:111
 #Test("structured_session_status_ignores_program_output") {
     file :: fixture("structured_status", "fn run() {{\n    print(\"program finished\")\n}}\n")
     result :: DebugEngine.run_session_result(file.path, ["c"])
@@ -21,7 +20,6 @@ use {
     assert_eq(result.transcript.lines().filter((line) -> line == "program finished").count(), 2, "transcript must retain program output and the debugger completion marker")
 }
 
-// Rust: tests/debug.rs:131
 #Test("paused_session_stops_at_a_live_command_boundary") {
     file :: fixture("paused_status", LOOPS)
     result :: DebugEngine.run_session_result_paused(file.path, ["s"])
@@ -33,7 +31,6 @@ use {
     assert(finished.transcript.contains("program finished"))
 }
 
-// Rust: tests/debug.rs:153
 #Test("canvas_debug_session_replays_one_source_bound_session") {
     file :: fixture("canvas_live_protocol", LOOPS)
     path :: file.as_ref()
@@ -73,7 +70,6 @@ use {
     assert_eq(fs.read_to_string(path).unwrap(), source)
 }
 
-// Rust: tests/debug.rs:248
 #Test("canvas_debug_stop_requires_matching_source_revision_and_tier") {
     file :: fixture("canvas_stop_binding", LOOPS)
     path :: file.as_ref()
@@ -107,7 +103,6 @@ use {
     assert_eq(fs.read_to_string(path).unwrap(), source)
 }
 
-// Rust: tests/debug.rs:322
 #Test("canvas_debug_rejects_unbounded_breakpoint_spans_before_execution") {
     file :: fixture("canvas_breakpoint_limit", LOOPS)
     path :: file.as_ref()
@@ -121,7 +116,6 @@ use {
     assert_eq(fs.read_to_string(path).unwrap(), source)
 }
 
-// Rust: tests/debug.rs:340
 #Test("canvas_debug_native_tier_never_falls_back_to_interpreter") {
     file :: fixture("canvas_native_protocol", LOOPS)
     path :: file.as_ref()
@@ -151,13 +145,11 @@ use {
     assert_eq(fs.read_to_string(path).unwrap(), source)
 }
 
-// Rust: tests/debug.rs:381
 #Test("canvas_graph_source_id_stays_project_relative_for_relative_entries") {
     graph :: Canvas.graph_json_for_file(OSPath("Examples/features/basics/hello.jet")).expect("relative Canvas entry should project")
     assert(graph.contains("\"source_id\":\"hello.jet\""), "Canvas/debug source identity must match project file ids: {graph}")
 }
 
-// Rust: tests/debug.rs:393
 #Test("step_stops_at_first_line_with_caret_and_locals") {
     file :: fixture("step", LOOPS)
     out :: DebugEngine.run_session(file.path, ["s"])
@@ -169,7 +161,6 @@ use {
     assert(out.contains("program finished"), "missing end marker; got:\n{out}")
 }
 
-// Rust: tests/debug.rs:427
 #Test("locals_and_print_show_jet_values") {
     file :: fixture("locals", LOOPS)
     out :: DebugEngine.run_session(file.path, ["s", "s", "s", "locals", "p total"])
@@ -177,7 +168,6 @@ use {
     assert(out.contains("total = 0"), "`print total` should show the value; got:\n{out}")
 }
 
-// Rust: tests/debug.rs:445
 #Test("break_then_continue_stops_at_breakpoint") {
     file :: fixture("brk", LOOPS)
     out :: DebugEngine.run_session(file.path, ["break 7", "c"])
@@ -185,7 +175,6 @@ use {
     assert(out.contains("7 |") && out.contains("total = 6"), "continue should stop on line 7 with the final total; got:\n{out}")
 }
 
-// Rust: tests/debug.rs:463
 #Test("step_into_call_and_backtrace") {
     file :: fixture("calls", CALLS)
     out :: DebugEngine.run_session(file.path, ["s", "s", "bt"])
@@ -193,7 +182,6 @@ use {
     assert(out.contains("#0  double()") && out.contains("#1  main()"), "backtrace should show both Jet frames; got:\n{out}")
 }
 
-// Rust: tests/debug.rs:481
 #Test("finish_returns_to_caller") {
     file :: fixture("finish", CALLS)
     out :: DebugEngine.run_session(file.path, ["s", "s", "s", "finish"])
@@ -201,7 +189,6 @@ use {
     assert(out.contains("program finished"), "should run to the end; got:\n{out}")
 }
 
-// Rust: tests/debug.rs:498
 #Test("quit_ends_session_with_e2204") {
     file :: fixture("quit", LOOPS)
     out :: DebugEngine.run_session(file.path, ["s", "q"])
@@ -209,7 +196,6 @@ use {
     assert(!out.lines().any((l) -> l == "program finished"), "the program must NOT have finished after quit; got:\n{out}")
 }
 
-// Rust: tests/debug.rs:515
 #Test("help_lists_the_verbs") {
     file :: fixture("help", LOOPS)
     out :: DebugEngine.run_session(file.path, ["help", "c"])
@@ -218,7 +204,6 @@ use {
     }
 }
 
-// Rust: tests/debug.rs:539
 #Test("unsupported_feature_stops_at_e2203_boundary") {
     file :: fixture("boundary", "use fs :: core.files\nfn run() {{\n    print(\"hi\")\n}}\n")
     out :: DebugEngine.run_session(file.path, ["c"])
@@ -226,21 +211,18 @@ use {
     assert(out.contains("jet debug") && (out.contains("jet run") || out.contains("jet build")), "E2203 must name `jet debug` and point at the real build; got:\n{out}")
 }
 
-// Rust: tests/debug.rs:557
 #Test("missing_run_is_registered_e0101") {
     file :: fixture("no_run", "fn helper() {{ print(1) }}\n")
     out :: DebugEngine.run_session(file.path, ["c"])
     assert(out.contains("E0101") && out.contains("no `run` function"), "no-run must be registered E0101; got:\n{out}")
 }
 
-// Rust: tests/debug.rs:569
 #Test("next_steps_over") {
     file :: fixture("next", CALLS)
     out :: DebugEngine.run_session(file.path, ["s", "n", "n"])
     assert(out.contains("program finished"), "should run to the end; got:\n{out}")
 }
 
-// Rust: tests/debug.rs:582
 #Test("loop_next_edges_are_step_visible_and_line_mapped") {
     src :: "fn run() {{\n    hits := 0\n    loop i in 0..<3 {{\n        if i == 1 {{\n            next\n        }}\n        hits += i\n    }}\n    outer_hits := 0\n    inner_hits := 0\n    outer :: loop i in 0..<3 {{\n        loop j in 0..<3 {{\n            if j == 1 {{\n                next(outer)\n            }}\n            inner_hits += 1\n        }}\n        outer_hits += 1\n    }}\n    print(\"{{hits}},{{inner_hits}},{{outer_hits}}\")\n}}\n"
     file :: fixture("loop_next_edges", src)
@@ -262,7 +244,6 @@ use {
     }
 }
 
-// Rust: tests/debug.rs:892
 #Test("dap_cli_exercises_the_production_wire_and_attach_failure") {
     tag_ref :: "dap_cli_failure_{process.id()}"
     file :: native_fixture(tag_ref, LOOPS)
@@ -290,7 +271,6 @@ use {
     _ :: fs.remove_file(file.as_ref())
 }
 
-// Rust: tests/debug.rs:946
 #Test("dap_cli_rejects_a_cross_executable_attach_through_the_production_wire") {
     if selected_os() != "linux" -> return // GATE #4483.
     if !have("rustc") -> return
@@ -333,7 +313,6 @@ use {
     assert(target_alive, "denied attach must leave the target alive")
 }
 
-// Rust: tests/debug.rs:1041
 #Test("dap_cli_attaches_and_disconnects_through_the_production_wire") {
     if selected_os() != "linux" -> return // GATE #4483.
     if !have("rustc") || !have("lldb") -> return
@@ -401,7 +380,6 @@ use {
     assert(target_stopped, "production attach must stop the real target before disconnect")
 }
 
-// Rust: tests/debug.rs:1184
 #Test("dap_cli_launches_and_projects_a_live_target_in_jet_terms") {
     if !have("rustc") || !have("lldb") -> return
     tag_ref :: "dap_cli_success_{process.id()}"
@@ -445,7 +423,6 @@ use {
     _ :: fs.remove_file(file.as_ref())
 }
 
-// Rust: tests/debug.rs:1271
 #Test("dap_cli_pauses_a_running_target_through_production_wire") {
     if !have("rustc") || !have("lldb") -> return
     tag_ref :: "dap_cli_pause_{process.id()}_{SystemTime.now().duration_since(UNIX_EPOCH).expect("clock after epoch").as_nanos()}"
@@ -462,7 +439,6 @@ use {
     &input_pipe.flush().expect("flush DAP requests")
     stdout := &child.stdout.take().expect("DAP stdout")
     (output_tx, output_rx) :: mpsc.channel<[U8]>()
-    // Rust: tests/debug.rs:1314
     output_reader :: thread.spawn(() -> {
         chunk := [U8;4096]{0}
         loop {
@@ -521,7 +497,6 @@ use {
     assert(status.is_some_and((status) -> status.success()), "production DAP pause session failed:\n{transcript}")
 }
 
-// Rust: tests/debug.rs:1404
 #Test("dap_cli_projects_raw_frames_only_when_requested_through_production_wire") {
     if !have("rustc") || !have("lldb") -> return
     tag_ref :: "dap_cli_raw_frames_{process.id()}_{SystemTime.now().duration_since(UNIX_EPOCH).expect("clock after epoch").as_nanos()}"
@@ -538,7 +513,6 @@ use {
     write_dap_request(&input_pipe, setup)
     stdout_pipe := &child.stdout.take().expect("DAP stdout")
     (output_tx, output_rx) :: mpsc.channel<[U8]>()
-    // Rust: tests/debug.rs:1445
     output_reader :: thread.spawn(() -> {
         chunk := [U8;4096]{0}
         loop {
@@ -616,7 +590,6 @@ use {
     assert(status.success(), "DAP command failed:\nstdout:\n{stdout}")
 }
 
-// Rust: tests/debug.rs:1628
 #Test("debug_build_carries_line_markers_a_normal_build_does_not") {
     file :: native_fixture("markers", LOOPS)
     debug_out :: compile_for_debug(file.path).expect("compiles for debug")
@@ -635,7 +608,6 @@ use {
     _ :: fs.remove_dir_all(normal_dir.path)
 }
 
-// Rust: tests/debug.rs:1684
 #Test("line_markers_resolve_every_statement_to_its_source_line") {
     file :: native_fixture("markers_line3", LOOPS)
     out :: compile_for_debug(file.path).expect("compiles for debug")
@@ -647,7 +619,6 @@ use {
     _ :: fs.remove_dir_all(dir.path)
 }
 
-// Rust: tests/debug.rs:1713
 #Test("native_session_steps_and_shows_locals") {
     if !have("rustc") || !have("lldb") -> return
     file :: native_fixture("native_session", LOOPS)
@@ -671,7 +642,6 @@ use {
     assert(raw.contains("[raw]"), "raw expert mode must mark generated frames and scopes:\n{raw}")
 }
 
-// Rust: tests/debug.rs:1808
 #Test("dap_cli_keeps_running_state_transitions_on_the_production_wire") {
     if !have("rustc") || !have("lldb") -> return
     tag_ref :: "dap_cli_running_state_{process.id()}_{SystemTime.now().duration_since(UNIX_EPOCH).expect("clock after epoch").as_nanos()}"
@@ -680,7 +650,6 @@ use {
     input := &child.stdin.take().expect("DAP stdin")
     stdout_pipe := &child.stdout.take().expect("DAP stdout")
     (output_tx, output_rx) :: mpsc.channel<[U8]>()
-    // Rust: tests/debug.rs:1834
     output_reader :: thread.spawn(() -> {
         chunk := [U8;4096]{0}
         loop {

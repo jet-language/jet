@@ -1,7 +1,7 @@
-// OsExtra.rs (core.sys identity, facts and POSIX control) and its libc doors.
-// Every call goes through the same musl function Rust's libc binding names;
-// the C int/long results are read at their declared width. Samples set errno
-// to 0 first, call, then read errno, as jet_sys_call_sample does.
+// (core.sys identity, facts and POSIX control) and its libc doors. Every call
+// goes through the same musl function Rust's libc binding names; the C int/long
+// results are read at their declared width. Samples set errno to 0 first, call,
+// then read errno, as jet_sys_call_sample does.
 #Import(c) fn sys_fork() -> I64 = "fork"
 #Import(c) fn sys_getgroups(size: I64, list: I64) -> I64 = "getgroups"
 #Import(c) fn sys_initgroups(user: I64, group: I64) -> I64 = "initgroups"
@@ -30,19 +30,19 @@ fn sys_some(some: I64, value: I64) -> I64 {
     I64{1}
 }
 
-// OsExtra.rs:101-162 unix identity calls cannot fail, so each is Some.
+// Unix identity calls cannot fail, so each is Some.
 #Export(c) fn jet_sys_getppid_raw(some: I64) -> I64 { sys_some(some, host_call(I64{110}, I64{0}, I64{0}, I64{0})) }
 #Export(c) fn jet_sys_geteuid_raw(some: I64) -> I64 { sys_some(some, host_call(I64{107}, I64{0}, I64{0}, I64{0})) }
 #Export(c) fn jet_sys_getgid_raw(some: I64) -> I64 { sys_some(some, host_call(I64{104}, I64{0}, I64{0}, I64{0})) }
 #Export(c) fn jet_sys_getegid_raw(some: I64) -> I64 { sys_some(some, host_call(I64{108}, I64{0}, I64{0}, I64{0})) }
 #Export(c) fn jet_sys_getpgrp_raw(some: I64) -> I64 { sys_some(some, host_call(I64{111}, I64{0}, I64{0}, I64{0})) }
 
-// OsExtra.rs:131 getgroups(0, NULL): the raw libc count (or -1).
+// The Rust original getgroups(0, NULL): the raw libc count (or -1).
 #Export(c) fn jet_sys_groups_count_raw(some: I64) -> I64 { sys_some(some, net_i32(sys_getgroups(I64{0}, I64{0}))) }
 
-// OsExtra.rs:140: capacity is already checked against the nonnegative i32
-// range by Core. The List is [count, gid0, ..., gid(capacity-1)], every slot
-// an owned exact Int; failure is never interpreted here.
+// Capacity is already checked against the nonnegative i32 range by Core. The
+// List is [count, gid0..., gid(capacity-1)], every slot an owned exact Int;
+// failure is never interpreted here.
 #Export(c) fn jet_sys_groups_fill_raw(capacity: I64, data_out: I64) -> I64 {
     native :: jet_int_owned_to_i64(capacity)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -63,15 +63,15 @@ fn sys_some(some: I64, value: I64) -> I64 {
     length
 }
 
-// OsExtra.rs:169 fork(). Pending stdout is drained first so the child never
-// re-emits bytes the parent already printed (Rust's line writer holds none).
+// Pending stdout is drained first so the child never re-emits bytes the parent
+// already printed (Rust's line writer holds none).
 #Export(c) fn jet_sys_fork_raw(available: I64, value: I64, errno: I64) {
     jet_rt_stdout_flush()
     sys_errno_clear()
     sys_sample(net_i32(sys_fork()), available, value, errno)
 }
 
-// OsExtra.rs:205 initgroups(user, group as u32); Core checked NUL absence.
+// The Rust original initgroups(user, group as u32); Core checked NUL absence.
 #Export(c) fn jet_sys_initgroups_raw(user: I64, group: I64, available: I64, value: I64, errno: I64) {
     native :: jet_int_owned_to_i64(group)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
@@ -82,7 +82,7 @@ fn sys_some(some: I64, value: I64) -> I64 {
     sys_sample(result, available, value, errno)
 }
 
-// OsExtra.rs:264 mkfifo(path, mode as u32).
+// mkfifo(path, mode as u32).
 #Export(c) fn jet_sys_mkfifo_raw(path: I64, mode: I64, available: I64, value: I64, errno: I64) {
     native :: jet_int_owned_to_i64(mode)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
@@ -93,8 +93,8 @@ fn sys_some(some: I64, value: I64) -> I64 {
     sys_sample(result, available, value, errno)
 }
 
-// OsExtra.rs:297 getloadavg(avg, 3): (true, count, avg0, avg1, avg2). The
-// three doubles cross as their raw f64 bits in the Float out slots.
+// getloadavg(avg, 3): (true, count, avg0, avg1, avg2). The three doubles cross
+// as their raw f64 bits in the Float out slots.
 #Export(c) fn jet_sys_loadavg_raw(available: I64, count: I64, first: I64, second: I64, third: I64) {
     averages :: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(averages, I64{24})
@@ -109,7 +109,7 @@ fn sys_some(some: I64, value: I64) -> I64 {
     jet_rt_free(averages, I64{24}, I64{8})
 }
 
-// OsExtra.rs:307 utime(path, {actime, modtime}).
+// utime(path, {actime, modtime}).
 #Export(c) fn jet_sys_utime_raw(path: I64, atime: I64, mtime: I64, available: I64, value: I64, errno: I64) {
     access :: jet_int_owned_to_i64(atime)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
@@ -126,8 +126,8 @@ fn sys_some(some: I64, value: I64) -> I64 {
     sys_sample(result, available, value, errno)
 }
 
-// OsExtra.rs:317 times(&tms) and sysconf(_SC_CLK_TCK):
-// (true, utime, stime, cutime, cstime, elapsed, ticks).
+// The Rust original times(&tms) and sysconf(_SC_CLK_TCK): (true, utime, stime,
+// cutime, cstime, elapsed, ticks).
 #Export(c) fn jet_sys_times_raw(available: I64, user: I64, system: I64, child_user: I64, child_system: I64, elapsed: I64, ticks: I64) {
     buffer :: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(buffer, I64{32})
@@ -145,8 +145,8 @@ fn sys_some(some: I64, value: I64) -> I64 {
     jet_rt_free(buffer, I64{32}, I64{8})
 }
 
-// OsExtra.rs:351 std::env::set_current_dir: a NUL byte is std's CString
-// refusal; otherwise chdir and io::Error's Display of the errno.
+// std::env::set_current_dir: a NUL byte is std's CString refusal; otherwise
+// chdir and io::Error's Display of the errno.
 #Export(c) fn jet_sys_set_current_dir_raw(path: I64, error: I64) -> I64 {
     length :: rt_text_len(path)
     at := I64{0}
@@ -193,9 +193,9 @@ fn sys_some(some: I64, value: I64) -> I64 {
     I64{0}
 }
 
-// OsExtra.rs:19 std::env::var_os(name).into_encoded_bytes(): the process
-// environment (the logical overlay never writes it). musl getenv finds no
-// name holding '=' (or empty); std refuses an interior NUL as absent.
+// std::env::var_os(name).into_encoded_bytes(): the process environment (the
+// logical overlay never writes it). musl getenv finds no name holding '=' (or
+// empty); std refuses an interior NUL as absent.
 #Export(c) fn jet_sys_host_env_raw(name: I64, data_out: I64, length_out: I64) -> I64 {
     host_arguments_require()
     length :: rt_text_len(name)

@@ -1,8 +1,7 @@
-// crates/jet-debug/src/EventObservation.rs:1-150: debugger projection of the
-// runtime-owned Event observation sequence. Runtime records are payload-free;
-// this consumer accepts only the closed schema and preserves every numeric and
-// runtime enum fact exactly. The closed value lists below are Rust's own
-// consumer validators (EventObservation.rs:31-114); the runtime producer
+// Debugger projection of the runtime-owned Event observation sequence. Runtime
+// records are payload-free; this consumer accepts only the closed schema and
+// preserves every numeric and runtime enum fact exactly. The closed value lists
+// below are Rust's own consumer validators; the runtime producer
 // (Observe/jet_event_observe) has no Jet owner yet, so no real feed runs here.
 use {
     core.encoding.[Dyn]
@@ -21,7 +20,7 @@ fn debug_event_error(message: String) -> DebugEventObservationError Never! {
     DebugEventObservationError{message: message}
 }
 
-// Rust `render`, public as lib.rs `render_event_observations`.
+// Rust `render`, public as `render_event_observations`.
 fn render_event_observations(snapshot: String) -> String DebugEventObservationError! {
     if snapshot.bytes().len() > DEBUG_EVENT_MAX_SNAPSHOT_BYTES {
         return Err(debug_event_error("runtime observation exceeds the 1 MiB debugger limit"))

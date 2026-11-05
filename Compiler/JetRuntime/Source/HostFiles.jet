@@ -350,10 +350,10 @@ fn fd_operation(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
     jet_rt_free(state, I64{72}, I64{8})
 }
 
-// Historical FileHandles.rs (958047768^, JetStd/FileHandles.rs) owns plain
-// std::fs::File in JetFsHeld, not a buffered writer. Its descriptor duplicates
-// therefore see every preceding write. Flush our private buffer before dup
-// to preserve that visibility; the new state never copies pending bytes.
+// Historical (958047768^) owns plain std::fs::File in JetFsHeld, not a buffered
+// writer. Its descriptor duplicates therefore see every preceding write. Flush
+// our private buffer before dup to preserve that visibility; the new state
+// never copies pending bytes.
 #Export(c) fn jet_fd_dup_raw(state: I64, errno: I64) -> I64 {
     fd_lock(state)
     result := fd_flush_locked(state)
@@ -446,9 +446,9 @@ fn fd_zero(result: I64, zero: I64) {
     if (result < I64{0}) -> I64{0} else -> fd_new(result, path, (bits.bit_and(I64{3})) != I64{0})
 }
 
-// FileHandles.rs:711-758: a held-directory entry is statted without following
-// its final symlink and without requiring read access. Source resolves/validates
-// the plain final name; the empty name means stat the directory itself.
+// A held-directory entry is statted without following its final symlink and
+// without requiring read access. Source resolves/validates the plain final name;
+// the empty name means stat the directory itself.
 #Export(c) fn jet_fd_stat_at_raw(directory: I64, path: I64, stat: I64, error: I64) {
     if (rt_text_len(path) == I64{0}) {
         jet_fd_stat_raw(directory, stat, error)
@@ -484,8 +484,8 @@ fn fd_dup_number(state: I64) -> I64 {
 }
 
 // link(2): AT_EMPTY_PATH requires CAP_DAC_READ_SEARCH (otherwise ENOENT).
-// Historical FileHandles.rs::jet_fs_link_fd_at_raw passes 0x1000 once and
-// returns errno, with no /proc/self/fd + AT_SYMLINK_FOLLOW fallback. Match it.
+// Historical `jet_fs_link_fd_at_raw` passes 0x1000 once and returns errno, with
+// no /proc/self/fd + AT_SYMLINK_FOLLOW fallback. Match it.
 #Export(c) fn jet_fd_link_at_raw(source: I64, directory: I64, path: I64, errno: I64) {
     a :: fd_dup_number(source)
     if (a < I64{0}) {
@@ -578,9 +578,9 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
     fd_error(result, errno)
 }
 
-// FileHandles.rs:988-1031: lgetxattr queries the path itself. Size query is
-// bytes=0,length=0. Source owns absence/Unsupported mapping, allocation and
-// ERANGE retry; this leaf reports exactly one syscall's count or POSIX error.
+// Lgetxattr queries the path itself. Size query is bytes=0,length=0. Source
+// owns absence/Unsupported mapping, allocation and ERANGE retry; this leaf
+// reports exactly one syscall's count or POSIX error.
 #Export(c) fn jet_fs_xattr_get_raw(path: I64, attribute: I64, bytes: I64, length: I64, error: I64) -> I64 {
     requested :: host_native_int(length)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}

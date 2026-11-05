@@ -299,7 +299,7 @@ fn sema_expression_struct_type(type_name: String, type_args: [Type], expected: T
     }
     owner :: sema_expression_type_symbol(&scopes, environment, program, type_name) ?? {
         unknown :: sema_expression_unknown_type(type_name, span, environment, program)
-        // Rust CheckerItems.rs:3399: a struct literal head that names no struct is E0119.
+        // A struct literal head that names no struct is E0119.
         &diagnostics.push(if unknown.code == "E0107" -> sema_error("E0119", span, "there's no type called `{type_name}`", "struct literals need a struct type name", "define the struct first, or check the spelling") else -> unknown)
         return None
     }
@@ -1218,7 +1218,7 @@ fn sema_expression_compiler_unit_enum_literal(enum_name: String, variants: [Stri
 fn sema_expression_enum_payload_mismatch(enum_name: String, variant: String, field: String?, declared: Type, offered: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
     required :: sema_expr_expected_type(declared, environment, program)
     actual :: sema_expr_expected_type(offered, environment, program)
-    // Rust CheckerItems.rs:4071: a hook decision's payload is checked against the hook's declared payload or error type.
+    // A hook decision's payload is checked against the hook's declared payload or error type.
     if field == None && (enum_name == "HookDecision" || enum_name == "HookOutcome") && (variant == "Transform" || variant == "Continue" || variant == "Fail") {
         return sema_error("E0108", span, "`{enum_name}.{variant}` needs {sema_type_show(required)}, not {sema_type_show(actual)}", "the decision payload must match the hook's declared payload or error type", sema_type_fix_hint(required, actual))
     }

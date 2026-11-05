@@ -183,7 +183,7 @@ fn sema_call_generic_count_diagnostic(name: String, expected: Int, actual: Int, 
     sema_error("E0119", span, "`{name}` expects {expected} type argument{if expected == 1 -> "" else -> "s"}, got {actual}", "generic parameters and call-site type arguments have to line up", "provide exactly the declared type arguments")
 }
 
-// Rust direct_calls.rs (explicit call-site type arguments of a direct call).
+// (explicit call-site type arguments of a direct call).
 fn sema_call_direct_type_arg_count_diagnostic(name: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
     plural :: if expected == 1 -> "" else -> "s"
     sema_error("E0119", span, "`{name}` expects {expected} type argument{plural}, got {actual}", "a generic call must provide one type for every declared type parameter", "write {name} with {expected} type argument{plural}")
@@ -302,10 +302,10 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
     SemaCallDirectTarget{symbol: symbol, signature: specialized, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
 }
 
-// Rust direct_calls.rs:2354-2375: a call whose type-argument count doesn't
-// match leaves the callee's type parameters unbound, and its arguments are
-// still checked against the declared parameter types. The declared signature
-// when `type_args` is that mismatch, else None.
+// A call whose type-argument count doesn't match leaves the callee's type
+// parameters unbound, and its arguments are still checked against the declared
+// parameter types. The declared signature when `type_args` is that mismatch,
+// else None.
 fn sema_call_direct_type_arg_mismatch_signature(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Type? {
     if type_args.len() == 0 -> return None
     nearest :: sema_scope_resolve_index(scopes, name) ?? return None
@@ -573,8 +573,8 @@ fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type
     trait_rows := [SemaRegistrationRowRef]{}
     // A type parameter's bounds dispatch in the order they are written: the
     // first bound that declares the method answers it, so `...[Inspect, Edit]`
-    // calls `Inspect.touch` (Rust `tests/ownership.rs`
-    // `multi_trait_receiver_access_follows_first_match_dispatch_order`).
+    // calls `Inspect.touch`
+    // (`multi_trait_receiver_access_follows_first_match_dispatch_order`).
     first_match := false
     if resolved_receiver == {
         .TraitObject(bounds) -> {

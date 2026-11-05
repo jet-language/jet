@@ -1,7 +1,7 @@
-// Source/CmdProve.rs `run_prove` (its front) and `resolve_target`: the closed
-// `jet prove TARGET` grammar (D-PROVE-REPLAY1=A, D-RECORD-SPELL1=D,
-// D-PROVE-LENS1=A) and the one target it selects. Every refusal here comes
-// before any build, producer, artifact or program effect.
+// `run_prove` (its front) and `resolve_target`: the closed `jet prove TARGET`
+// grammar (D-PROVE-REPLAY1=A, D-RECORD-SPELL1=D, D-PROVE-LENS1=A) and the one
+// target it selects. Every refusal here comes before any build, producer,
+// artifact or program effect.
 use {
     cli_files :: core.files
     cli_sys :: core.sys
@@ -109,7 +109,7 @@ fn jet_cli_prove_lens_names(lenses: [String]) -> [String] Never! {
 }
 
 // A refusal as the human report on stderr, or with `--json` as the one failed
-// `prove` status line on stdout (main.rs `emit_cli_report_for_action`).
+// `prove` status line on stdout.
 fn jet_cli_prove_fail(refusal: JetCLIProveRefusal, color: Bool, json: Bool) -> JetCLIPlan Never! {
     JetCLIPlan.Done{output: jet_cli_prove_refused(refusal, color, json)}
 }
@@ -203,7 +203,7 @@ fn jet_cli_prove_one_of(first: String, second: String) -> JetCLIProveRefusal Nev
     jet_cli_prove_refusal("E2104", "`jet prove` accepts at most one of `{first}` / `{second}`", "keep `{first}` or `{second}`, not both", JET_DRIVER_EXIT_USAGE)
 }
 
-// ProveReplay.rs `parse_capture_flag`: a capture path uses the `=` form only.
+// `parse_capture_flag`: a capture path uses the `=` form only.
 fn jet_cli_prove_capture_flag(word: String) -> JetCLIProveCapture? Never! {
     if word == "--capture" -> return Val(JetCLIProveCapture{path: None, sensitive: false})
     if word.starts_with("--capture=") -> return Val(JetCLIProveCapture{path: Val(word.removeprefix("--capture=")), sensitive: false})

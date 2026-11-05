@@ -1,14 +1,12 @@
-// core.log host cells and sinks. Rust providers: CoreLib/Top/Log.rs (state
-// cells :40-78, flush :80, spans :153-207, JSON/text records :592-768),
-// Core/LogState.rs (trace id), CoreLib/Top/CoreSlice7LogRaw.rs (record emit,
-// span allocate) and the AOT jet_log_write_line/jet_log_process_exit leaves
-// (Codegen/mod.rs:3955-3956). Every cell is thread_local! in Rust, so each OS
-// thread owns one LogState88 block (allocated on first use, freed by the TLS
-// destructor): level0 disabled8 format16 sink24 (owned E4 or 0 for "")
-// sample_every32 sample_count40 next_span48 trace56 (owned E4 or 0)
-// spans: data64 len72 cap80, each span a 16-byte {id, owned name E4}.
-// The devtools publication of Log.rs (:316-590) reaches only installed event
-// sinks; the native runtime installs none, so it has no native counterpart.
+// core.log host cells and sinks. Rust providers: (state cells, flush, spans,
+// JSON/text records), (trace id), (record emit, span allocate) and the AOT
+// jet_log_write_line/jet_log_process_exit leaves. Every cell is thread_local!
+// in Rust, so each OS thread owns one LogState88 block (allocated on first use,
+// freed by the TLS destructor): level0 disabled8 format16 sink24 (owned E4 or 0
+// for "") sample_every32 sample_count40 next_span48 trace56 (owned E4 or 0)
+// spans: data64 len72 cap80, each span a 16-byte {id, owned name E4}. The
+// devtools publication (:316-590) reaches only installed event sinks; the
+// native runtime installs none, so it has no native counterpart.
 LOG_STATE_BYTES :: I64{88}
 LOG_STATE_LEVEL :: I64{0}
 LOG_STATE_DISABLED :: I64{8}
@@ -21,7 +19,7 @@ LOG_STATE_TRACE :: I64{56}
 LOG_STATE_SPANS :: I64{64}
 LOG_STATE_SPANS_LEN :: I64{72}
 LOG_STATE_SPANS_CAP :: I64{80}
-// LogField32 (CommonTypes.rs:2693): key0 value8 kind16 owned E4s, redacted24.
+// LogField32: key0 value8 kind16 owned E4s, redacted24.
 LOG_FIELD_BYTES :: I64{32}
 log_state_key := I64{0}
 
@@ -59,7 +57,7 @@ fn log_text_drop(text: I64) {
     if (text != I64{0}) -> jet_rt_string_drop(text)
 }
 
-// The calling thread's cells, created with Log.rs's initial values.
+// The calling thread's cells, created initial values.
 fn log_state() -> I64 {
     state :: jet_rt_tls_get(log_state_key)
     if (state != I64{0}) -> return state
@@ -87,7 +85,7 @@ fn log_text_cell_store(cell: I64, value: I64) {
 #Export(c) fn jet_log_disabled_store(value: Bool) {
     rt_text_store(wrapping(log_state() + LOG_STATE_DISABLED), if value -> I64{1} else -> I64{0})
 }
-// Log.rs:67: the cell is a u8 (`value as u8`).
+// The cell is a u8 (`value as u8`).
 #Export(c) fn jet_log_format_store(value: I64) {
     native :: jet_int_owned_to_i64(value)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
@@ -104,7 +102,6 @@ fn log_text_cell_store(cell: I64, value: I64) {
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     rt_text_store(wrapping(log_state() + LOG_STATE_SAMPLE_COUNT), native)
 }
-// LogState.rs:11.
 #Export(c) fn jet_ring_log_set_trace_id(id: I64) { log_text_cell_store(wrapping(log_state() + LOG_STATE_TRACE), id) }
 
 // std::process::exit(code as i32): rt::cleanup flushes stdout, then exit.
@@ -115,9 +112,9 @@ fn log_text_cell_store(cell: I64, value: I64) {
     _ := host_call(I64{231}, native, I64{0}, I64{0})
 }
 
-// Log.rs:316: the metric's slot and Metric events exist only for installed
-// devtools event sinks, which the native runtime never installs; the leaf
-// keeps the adapter's exact-Int narrowing of the value.
+// The metric's slot and Metric events exist only for installed devtools event
+// sinks, which the native runtime never installs; the leaf keeps the adapter's
+// exact-Int narrowing of the value.
 #Export(c) fn jet_log_publish_metric(_name: I64, value: I64) {
     _ := jet_int_owned_to_i64(value)
 }
@@ -140,7 +137,7 @@ fn log_sink_open(path: I64) -> I64 {
     fd
 }
 
-// Log.rs:80: flush stderr, then open (creating) and flush the file sink.
+// Flush stderr, then open (creating) and flush the file sink.
 #Export(c) fn jet_ring_log_flush() {
     _ := host_stdio_flush_failure(true)
     path :: rt_text_word(wrapping(log_state() + LOG_STATE_SINK))
@@ -149,7 +146,7 @@ fn log_sink_open(path: I64) -> I64 {
     if (fd >= I64{0}) -> _ := host_call(I64{3}, fd, I64{0}, I64{0})
 }
 
-// CoreSlice7LogRaw.rs:5 / Log.rs:153: the thread's next span id, then +1.
+// The thread's next span id, then +1.
 #Export(c) fn jet_log_span_allocate_raw(name: I64, item0: I64, item1: I64) {
     state :: log_state()
     id :: rt_text_word(wrapping(state + LOG_STATE_NEXT_SPAN))
@@ -158,7 +155,7 @@ fn log_sink_open(path: I64) -> I64 {
     rt_text_store(item1, jet_rt_string_clone(name))
 }
 
-// Log.rs:165: push a clone of the span on the thread's active stack.
+// Push a clone of the span on the thread's active stack.
 #Export(c) fn jet_ring_log_enter(span: I64) {
     state :: log_state()
     length :: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
@@ -178,7 +175,7 @@ fn log_sink_open(path: I64) -> I64 {
     rt_text_store(wrapping(state + LOG_STATE_SPANS_LEN), length + I64{1})
 }
 
-// Log.rs:190: remove the last active span with this id (rposition), if any.
+// Remove the last active span with this id (rposition), if any.
 #Export(c) fn jet_ring_log_close(span: I64) {
     state :: log_state()
     id :: data_tree_word(wrapping(span + LOG_SPAN_ID))
@@ -197,7 +194,7 @@ fn log_sink_open(path: I64) -> I64 {
     }
 }
 
-// Log.rs:606 jet_log_json_escape: only " \ LF CR TAB are escaped.
+// jet_log_json_escape: only " \ LF CR TAB are escaped.
 fn log_json_escape_push(target: I64, value: I64) {
     data :: rt_text_data(value)
     length :: rt_text_len(value)
@@ -225,7 +222,7 @@ fn log_json_escape_push(target: I64, value: I64) {
 
 fn log_text_is(value: I64, literal: I64) -> Bool { jet_rt_string_eq(value, literal) }
 
-// Log.rs:621: int/float/bool/counter values are written raw, others quoted.
+// int/float/bool/counter values are written raw, others quoted.
 fn log_fields_json_push(target: I64, data: I64, count: I64) {
     at := I64{0}
     loop at < count {
@@ -246,7 +243,7 @@ fn log_fields_json_push(target: I64, data: I64, count: I64) {
     }
 }
 
-// Log.rs:642: `,"spans":["name",...]` for a nonempty active stack.
+// `,"spans":["name",...]` for a nonempty active stack.
 fn log_spans_json_push(target: I64, state: I64) {
     length :: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
     if (length == I64{0}) -> return
@@ -263,7 +260,7 @@ fn log_spans_json_push(target: I64, state: I64) {
     jet_rt_string_builder_push(target, rt_static_text("]"))
 }
 
-// Log.rs:657: append `line` + LF to the file sink, else eprintln to stderr.
+// Append `line` + LF to the file sink, else eprintln to stderr.
 fn log_write(state: I64, line: I64) {
     path :: rt_text_word(wrapping(state + LOG_STATE_SINK))
     if (path == I64{0}) {
@@ -298,7 +295,6 @@ fn log_drop_space_before_brace(line: I64) -> I64 {
     result
 }
 
-// Log.rs:671.
 fn log_emit_json(state: I64, level: I64, message: I64, ts: I64, fields: I64, count: I64) {
     line :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(line, rt_static_text("{{\"level\":\""))
@@ -337,7 +333,7 @@ fn log_push_padded(target: I64, value: I64, width: I64) {
     rt_text_push_number(target, value)
 }
 
-// Log.rs:804 unix_to_ymdhms for the non-negative wall seconds.
+// unix_to_ymdhms for the non-negative wall seconds.
 fn log_push_timestamp(target: I64, secs: I64) {
     days := secs /% I64{86400}
     time_of_day :: secs % I64{86400}
@@ -373,7 +369,6 @@ fn log_push_timestamp(target: I64, secs: I64) {
     rt_text_push_scalar(target, I64{90})
 }
 
-// Log.rs:698.
 fn log_emit_text(state: I64, level: I64, message: I64, ts: I64, fields: I64, count: I64) {
     line :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(line, rt_static_text("["))
@@ -410,15 +405,14 @@ fn log_emit_text(state: I64, level: I64, message: I64, ts: I64, fields: I64, cou
     jet_rt_string_drop(line)
 }
 
-// Log.rs:592: an explicit format code, else text on a terminal stderr.
+// An explicit format code, else text on a terminal stderr.
 fn log_format_active(state: I64) -> I64 {
     explicit :: rt_text_word(wrapping(state + LOG_STATE_FORMAT))
     if (explicit != I64{0}) -> return explicit
     if host_is_tty(I64{2}) -> I64{2} else -> I64{1}
 }
 
-// CoreSlice7LogRaw.rs:2 -> Log.rs:737 jet_log_emit. `fields` borrows a buffer
-// of `count` LogField32 handles.
+// `fields` borrows a buffer of `count` LogField32 handles.
 #Export(c) fn jet_log_record_emit_raw(level: I64, message: I64, fields: I64, count: I64) {
     state :: log_state()
     if (rt_text_word(wrapping(state + LOG_STATE_DISABLED)) != I64{0}) -> return
@@ -435,7 +429,7 @@ fn log_format_active(state: I64) -> I64 {
     }
 }
 
-// LogField record carrier (CAbiRoutes.rs:15455): text members are copied.
+// LogField record carrier: text members are copied.
 #Export(c) fn jet_rt_record_new_log_field(key: I64, value: I64, kind: I64, redacted: Bool) -> I64 {
     result :: jet_rt_alloc(LOG_FIELD_BYTES, I64{8})
     rt_text_store(result, jet_rt_string_clone(key))

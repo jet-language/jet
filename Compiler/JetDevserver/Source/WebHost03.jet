@@ -18,13 +18,11 @@ use {
     jet_driver.Package.[ReleaseDevtoolsPolicy]
     jet_foundation.Dyn.[Dyn]
     jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
-    // Rust: crates/jet-devserver/src/WebHost.rs:3789
     // Canonical WebPending implementation, not the Rust include bridge.
     web_stream_bridge :: jet_codegen.Prelude.Core.WebPending
     jet_foundation.[foundation_json_escape]
     core.encoding.[Dyn]
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3589
 fn canvas_api_path(path: String, target: String) -> Bool {
     return path == "/__jet_canvas".bit_or("/__jet_canvas/").bit_or("/__jet_canvas/app.js").bit_or("/__jet_canvas/session").bit_or("/__jet_canvas/live").bit_or("/__jet_canvas/graph").bit_or("/__jet_canvas/project").bit_or("/__jet_canvas/source-control").bit_or("/__jet_canvas/core-catalog").bit_or("/__jet_canvas/proof").bit_or("/__jet_canvas/source").bit_or("/__jet_canvas/command").bit_or("/__jet_canvas/transaction").bit_or("/__jet_canvas/project/transaction").bit_or("/__jet_canvas/query").bit_or("/__jet_canvas/debug").bit_or("/canvas").bit_or("/canvas/").bit_or("/canvas/app.js").bit_or("/canvas/session").bit_or("/canvas/graph").bit_or("/canvas/project").bit_or("/canvas/source-control").bit_or("/canvas/core-catalog").bit_or("/canvas/proof").bit_or("/canvas/source").bit_or("/canvas/command").bit_or("/canvas/transaction").bit_or("/canvas/project/transaction").bit_or("/canvas/query").bit_or("/canvas/debug").bit_or("/panel").bit_or("/panel/").bit_or("/panel/app.js").bit_or("/panel/session").bit_or("/panel/graph").bit_or("/panel/project").bit_or("/panel/source-control").bit_or("/panel/core-catalog").bit_or("/panel/proof").bit_or("/panel/source").bit_or("/panel/command").bit_or("/panel/transaction").bit_or("/panel/project/transaction").bit_or("/panel/query").bit_or("/panel/debug").bit_or("/__jet_dev_version").bit_or("/__jet_dev_status").bit_or("/__jet_dev_disconnect").bit_or("/__jet_perf_browser").bit_or("/__jet_web/stream")
         || devtools_path(path)
@@ -32,7 +30,6 @@ fn canvas_api_path(path: String, target: String) -> Bool {
             || query_param(target, "jet_panel_app") == "1"
             || query_param(target, "jet_panel_graph") == "1"))
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3650
 fn canvas_request_authorized(request: Request, target: String, bind_host: String, port: U16, session_secret: String) -> Bool {
     if session_secret.is_empty() || !(request.method == "GET".bit_or("POST"))
         || request.body.len() > MAX_REQUEST_BODY_BYTES
@@ -61,7 +58,6 @@ fn canvas_request_authorized(request: Request, target: String, bind_host: String
     }
     return session_valid && (origin.is_some() || canvas_bootstrap_path(path, target) || same_origin)
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3709
 fn unique_session_param(target: String) -> String? Unit! {
     (_, query) :: target.split_once('?') ?? return .None
     found := false
@@ -74,19 +70,15 @@ fn unique_session_param(target: String) -> String? Unit! {
     }
     return .Ok(query_param(target, "session"))
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3726
 fn canvas_bootstrap_path(path: String, target: String) -> Bool {
     return path == "/__jet_canvas".bit_or("/__jet_canvas/").bit_or("/__jet_canvas/app.js").bit_or("/canvas").bit_or("/canvas/").bit_or("/canvas/app.js").bit_or("/panel").bit_or("/panel/").bit_or("/panel/app.js").bit_or("/__jet_devtools").bit_or("/__jet_devtools/workbench")
         || target == "/?jet_panel=1".bit_or("/?jet_panel_app=1")
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3743
 fn requires_canvas_authorization(listener_kind: ListenerKind) -> Bool { listener_kind == .Canvas }
-// Rust: crates/jet-devserver/src/WebHost.rs:3747
 fn requires_session_authorization(listener_kind: ListenerKind, path: String) -> Bool {
     (path != "/__jet_dev_status" && requires_canvas_authorization(listener_kind))
         || (listener_kind == .Application && (devtools_path(path) || web_stream_path(path) || source_tool_path(path)))
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3753
 fn host_header_allowed(value: String, bind_host: String, port: U16) -> Bool {
     trimmed := value.trim() // #4303
     value :: trimmed.to_ascii_lowercase()
@@ -94,7 +86,6 @@ fn host_header_allowed(value: String, bind_host: String, port: U16) -> Bool {
     if !is_loopback_host(bind_host) -> return false
     return ["localhost", "127.0.0.1", "[::1]"].iter().any((alias) -> value == "{alias}:{port}")
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3766
 fn origin_allowed(value: String, bind_host: String, port: U16) -> Bool {
     trimmed := value.trim() // #4303
     value :: trimmed.to_ascii_lowercase()
@@ -102,7 +93,6 @@ fn origin_allowed(value: String, bind_host: String, port: U16) -> Bool {
     if value == expected -> return true
     return is_loopback_host(bind_host) && ["localhost", "127.0.0.1", "[::1]"].iter().any((alias) -> value == "http://{alias}:{port}")
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3778
 fn constant_time_equal(left: String, right: String) -> Bool {
     left :: left.as_bytes()
     right :: right.as_bytes()
@@ -112,13 +102,9 @@ fn constant_time_equal(left: String, right: String) -> Bool {
     }
     return difference == 0
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3794
 fn web_stream_json_string(value: String) -> String { "\"{foundation_json_escape(value)}\"" }
-// Rust: crates/jet-devserver/src/WebHost.rs:3798
 fn web_stream_error(error: web_stream_bridge.JetWebPendingError) -> (String, String) { (_0: error.code().to_string(), _1: error.message()) }
-// Rust: crates/jet-devserver/src/WebHost.rs:3802
 fn web_stream_request_error(message: String) -> (String, String) { (_0: "invalid_request", _1: ^message) }
-// Rust: crates/jet-devserver/src/WebHost.rs:3806
 fn web_stream_required_string(object: [String:Dyn], key: String) -> Result<String, (String, String)> {
     return if object.get(key) == {
         .Val(.Text(value)) if !value.is_empty() -> .Ok(value.clone())
@@ -127,7 +113,6 @@ fn web_stream_required_string(object: [String:Dyn], key: String) -> Result<Strin
         .None -> .Err(web_stream_request_error("web stream request has no `{key}`"))
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3823
 fn web_stream_required_text(object: [String:Dyn], key: String) -> Result<String, (String, String)> {
     return if object.get(key) == {
         .Val(.Text(value)) -> .Ok(value.clone())
@@ -135,7 +120,6 @@ fn web_stream_required_text(object: [String:Dyn], key: String) -> Result<String,
         .None -> .Err(web_stream_request_error("web stream request has no `{key}`"))
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3838
 fn web_stream_required_u64(object: [String:Dyn], key: String) -> Result<U64, (String, String)> {
     return if object.get(key) == {
         .Val(.Int(value)) if value >= 0 -> .Ok(U64{value})
@@ -144,7 +128,6 @@ fn web_stream_required_u64(object: [String:Dyn], key: String) -> Result<U64, (St
         .None -> .Err(web_stream_request_error("web stream request has no `{key}`"))
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3856
 fn web_stream_required_bool(object: [String:Dyn], key: String) -> Result<Bool, (String, String)> {
     return if object.get(key) == {
         .Val(.Bool(value)) -> .Ok(value)
@@ -152,17 +135,14 @@ fn web_stream_required_bool(object: [String:Dyn], key: String) -> Result<Bool, (
         .None -> .Err(web_stream_request_error("web stream request has no `{key}`"))
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3870
 fn web_stream_required_usize(object: [String:Dyn], key: String) -> Result<USize, (String, String)> {
     value :: web_stream_required_u64(object, key)
     return USize.try_from(value).map_err((_) -> web_stream_request_error("web stream `{key}` is too large")) // GATE #4483: selected pointer width.
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3879
 fn web_stream_object(object: [String:Dyn], key: String) -> Result<[String:Dyn], (String, String)> {
     value :: object.get(key).ok_or_else(() -> web_stream_request_error("web stream request has no `{key}`"))
     return object_map(value).ok_or_else(() -> web_stream_request_error("web stream `{key}` must be an object"))
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3890
 fn web_stream_identity(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebIslandIdentity, (String, String)> {
     identity :: web_stream_object(object, key)
     island_id :: web_stream_required_string(&identity, "island_id")
@@ -171,11 +151,9 @@ fn web_stream_identity(object: [String:Dyn], key: String) -> Result<web_stream_b
     revision :: web_stream_required_string(&identity, "revision")
     return web_stream_bridge.JetWebIslandIdentity.new(^island_id, ^source_id, ^build_id, ^revision).map_err(web_stream_error)
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3903
 fn web_stream_boundary_id(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebBoundaryId, (String, String)> {
     return web_stream_bridge.JetWebBoundaryId.new(web_stream_required_string(object, key)?).map_err(web_stream_error)
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3911
 fn web_stream_id(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebStreamId, (String, String)> {
     stream :: web_stream_object(object, key)
     boundary_id :: web_stream_bridge.JetWebBoundaryId.new(web_stream_required_string(&stream, "boundary_id")?).map_err(web_stream_error)
@@ -183,12 +161,10 @@ fn web_stream_id(object: [String:Dyn], key: String) -> Result<web_stream_bridge.
     identity :: web_stream_identity(&stream, "identity")
     return web_stream_bridge.JetWebStreamId.from_parts(^boundary_id, generation, ^identity).map_err(web_stream_error)
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3927
 fn web_stream_trigger(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebHydrationTrigger, (String, String)> {
     value :: web_stream_required_string(object, key)
     return web_stream_bridge.JetWebHydrationTrigger.parse(value).ok_or_else(() -> web_stream_request_error("web stream `{key}` has an unknown hydration trigger"))
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3939
 fn web_stream_target(object: [String:Dyn], key: String) -> Result<web_stream_bridge.JetWebPendingProjectionTarget, (String, String)> {
     return if web_stream_required_string(object, key)? == {
         "server" -> .Ok(.Server)
@@ -196,7 +172,6 @@ fn web_stream_target(object: [String:Dyn], key: String) -> Result<web_stream_bri
         else -> .Err(web_stream_request_error("web stream `{key}` must be `server` or `client`"))
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3952
 fn web_stream_failure(object: [String:Dyn]) -> Result<web_stream_bridge.JetWebPendingError, (String, String)> {
     error :: web_stream_object(object, "error")
     return if web_stream_required_string(&error, "code")? == {
@@ -206,13 +181,10 @@ fn web_stream_failure(object: [String:Dyn]) -> Result<web_stream_bridge.JetWebPe
         code -> .Err(web_stream_request_error("web stream failure code `{code}` is not supported by the host bridge"))
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3972
 fn web_stream_success(action: String, payload: String) -> String { "{{\"ok\":true,\"action\":{web_stream_json_string(action)},{payload} }}" }
-// Rust: crates/jet-devserver/src/WebHost.rs:3980
 fn web_stream_failure_json(code: String, message: String) -> String {
     "{{\"ok\":false,\"error\":{{\"code\":{web_stream_json_string(code)},\"message\":{web_stream_json_string(message)}}}}}"
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:3988
 fn handle_web_stream_request(stream: &impl Write, request: &Request) Err! {
     if request.method != "POST" -> return method_not_allowed(stream)
     text :: match std.str.from_utf8(&request.body) { // GATE #4494: borrowed UTF-8 byte view.
@@ -306,11 +278,9 @@ fn handle_web_stream_request(stream: &impl Write, request: &Request) Err! {
         .Err((code, message)) -> write_response(stream, "400 Bad Request", "application/json; charset=utf-8", web_stream_failure_json(code, message).as_bytes())
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:4182
 fn unauthorized(stream: &impl Write) Err! {
     write_response(stream, "401 Unauthorized", "text/plain; charset=utf-8", "devserver session, host, or origin rejected".bytes())
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:4190
 fn handle_release_devtools_request(stream: &impl Write, request: &Request, path: String, bind_host: String, port: U16, peer_addr: SocketAddr, session: &ResidentDevSession, policy: &ReleaseDevtoolsPolicy) Err! {
     if path != "/__jet_devtools" || !policy.endpoint_enabled() -> return write_response(stream, "404 Not Found", "text/plain; charset=utf-8", "inspect endpoint absent".bytes())
     if request.method != "GET" -> return method_not_allowed(stream)
@@ -331,26 +301,20 @@ fn handle_release_devtools_request(stream: &impl Write, request: &Request, path:
     body :: browser_web_adapter.release_json(&projection, &panels)
     return write_response(stream, "200 OK", "application/json; charset=utf-8", body.as_bytes())
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:4308
 enum ListenerKind { Canvas; Application }
-// Rust: crates/jet-devserver/src/WebHost.rs:4314
 struct DeadlineStream {
     stream: TcpStream
     deadline: Instant
 }
 impl DeadlineStream {
-    // Rust: crates/jet-devserver/src/WebHost.rs:4320
     fn new(stream: TcpStream, deadline: Instant) -> Self { Self(stream: ^stream, deadline: deadline) }
-    // Rust: crates/jet-devserver/src/WebHost.rs:4324
     fn try_clone(self: Self) -> Self Err! { .Ok(Self.new(self.stream.try_clone(), self.deadline)) }
-    // Rust: crates/jet-devserver/src/WebHost.rs:4328
     fn remaining(self: Self) -> Duration Err! {
         remaining :: self.deadline.saturating_duration_since(Instant.now()) // GATE #4494: monotonic clock.
         if remaining.is_zero() { .Err(Error.new(ErrorKind.TimedOut, "devserver request deadline exceeded")) } else { .Ok(remaining) }
     }
 }
 impl DeadlineStream.Read {
-    // Rust: crates/jet-devserver/src/WebHost.rs:4342
     fn read(self: Self, buffer: [U8]) -> USize Err! {
         remaining :: self.remaining()
         self.stream.set_read_timeout(.Val(remaining))? // GATE #4494: retained native socket timeout.
@@ -358,20 +322,17 @@ impl DeadlineStream.Read {
     }
 }
 impl DeadlineStream.Write {
-    // Rust: crates/jet-devserver/src/WebHost.rs:4350
     fn write(self: Self, buffer: [U8]) -> USize Err! {
         remaining :: self.remaining()
         self.stream.set_write_timeout(.Val(remaining))? // GATE #4494
         return self.stream.write(buffer)
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:4356
     fn flush(self: &Self) Err! {
         remaining :: self.remaining()
         self.stream.set_write_timeout(.Val(remaining))
         return self.stream.flush()
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:4365
 // One thread per accepted connection, bounded by MAX_CONNECTION_THREADS.
 fn serve_forever(listener: TcpListener, status: Arc<DevStatus>, debug_sessions: Arc<Canvas.DebugSessions>, session: Arc<ResidentDevSession>, canvas_file: String, listener_kind: ListenerKind, bind_host: String, session_secret: String, shutdown: Arc<AtomicBool>, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, browser_state: Arc<Mutex<browser_web_adapter.BrowserWebState?>>, paused_evaluate: Arc<Mutex<PausedEvaluateHost>>, terminal_style: Arc<TerminalStyleHostAdapter>) -> Unit {
     if listener.set_nonblocking(true).is_err() -> return
@@ -404,7 +365,6 @@ fn serve_forever(listener: TcpListener, status: Arc<DevStatus>, debug_sessions: 
         }
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:4432
 fn try_acquire_connection(active: AtomicUsize) -> Bool {
     current := active.load(Ordering.Acquire) // GATE #4494
     loop {
@@ -415,7 +375,6 @@ fn try_acquire_connection(active: AtomicUsize) -> Bool {
         }
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:4504
 fn handle_connection_with_root_and_policy(stream: TcpStream, status: &DevStatus, debug_sessions: &Canvas.DebugSessions, session: &ResidentDevSession, canvas_file: String, listener_kind: ListenerKind, bind_host: String, session_secret: String, static_root: &OSPath, browser_state: &Arc<Mutex<browser_web_adapter.BrowserWebState?>>, paused_evaluate: &Arc<Mutex<PausedEvaluateHost>>, terminal_style: &Arc<TerminalStyleHostAdapter>, release_policy: &ReleaseDevtoolsPolicy, peer_addr: SocketAddr) Err! {
     deadline :: Instant.now() + REQUEST_DEADLINE
     stream := DeadlineStream.new(^stream, deadline)

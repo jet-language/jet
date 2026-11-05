@@ -2,13 +2,13 @@ use {
     unicode :: core.text
     math :: core.math
 }
-// core.text.fmt — deterministic number, quantity, and display formatting.
-// Calls run this source; interpolation selectors and compile-time calls run the
-// shared Prelude kernel crates/jet-codegen/src/Prelude/Core/Fmt.rs, which takes
-// the same steps, so both give one meaning (owner rows, card #4588). Radix
-// helpers use lowercase digits; text padding counts UTF-8 scalars.
-// Fixed-precision formats preserve the exact binary Float's ties-to-even
-// rounding and signed zero; non-finite Floats keep their ordinary display.
+// core.text.fmt — deterministic number, quantity, and display formatting. Calls
+// run this source; interpolation selectors and compile-time calls run the
+// shared Prelude kernel, which takes the same steps, so both give one meaning
+// (owner rows, card #4588). Radix helpers use lowercase digits; text padding
+// counts UTF-8 scalars. Fixed-precision formats preserve the exact binary
+// Float's ties-to-even rounding and signed zero; non-finite Floats keep their
+// ordinary display.
 fn number(n: Int) -> String Never! { grouped_int(n) }
 fn bin(n: Int) -> String Never! { radix_signed_width(n, 2, 0) }
 fn oct(n: Int) -> String Never! { radix_signed_width(n, 8, 0) }
@@ -149,9 +149,9 @@ fn round_ratio_half_away(numerator: Int, denominator: Int) -> Int Never! {
     rounded
 }
 
-// Core/Fmt.rs:166-310: expand only one complete outer fragment, with quoted
-// delimiters ignored and commas split only at the current structural depth;
-// each item but the last keeps its comma.
+// Expand only one complete outer fragment, with quoted delimiters ignored and
+// commas split only at the current structural depth; each item but the last
+// keeps its comma.
 fn pretty(value: String) -> String Never! { pretty_fragment(value, 0) }
 
 fn pretty_fragment(value: String, indent: Int) -> String Never! {
@@ -397,8 +397,7 @@ fn grouped_digits(text: String) -> String Never! {
 }
 
 
-// Core/Fmt.rs:389-419: empty fill means space, and each centered side
-// begins its own fill cycle.
+// Empty fill means space, and each centered side begins its own fill cycle.
 fn pad_mode(text: String, width: Int, fill: String, mode: Int) -> String Never! {
     need :: width - unicode.scalar_count(text)
     if need <= 0 -> return text.copy()

@@ -1,6 +1,5 @@
-// The marker registry is read from Prelude Jet source
-// (crates/jet-foundation/src/Policy/MarkerSource.rs). `Prelude/Markers.jet`
-// declares each rule as a marker type: `struct Name { fields  impl Marker {
+// The marker registry is read from Prelude Jet source. `Prelude/Markers.jet`
+// declares each rule as a marker type: `struct Name { fields impl Marker {
 // settings } }`. This reader accepts that one shape and nothing else; a
 // malformed row is a bug in a file that ships with the compiler, so it panics
 // with the offending declaration.
@@ -362,8 +361,8 @@ fn marker_source_declaration(name: String, body: String) -> TAppliedRule? Never!
     })
 }
 
-// Every marker type in `source`, the text of Prelude/Markers.jet
-// (MarkerSource.rs `read`), in source order.
+// Every marker type in `source`, the text of Prelude/Markers.jet, in source
+// order.
 fn marker_source_read(source: String) -> [TAppliedRule] Never! {
     rows := [TAppliedRule]{}
     loop member in marker_source_members(marker_source_strip_comments(source)) {
@@ -375,7 +374,7 @@ fn marker_source_read(source: String) -> [TAppliedRule] Never! {
     rows
 }
 
-// Policy.rs `RuleSignature::render`: `(name: Type{default}, …, Variadic...)`.
+// `RuleSignature::render`: `(name: Type{default}, …, Variadic...)`.
 fn applied_rule_signature_render(signature: TAppliedRuleSignature) -> String Never! {
     parts := [String]{}
     loop param in signature.params {
@@ -416,8 +415,8 @@ fn marker_decl_signature_source(source: String, span: Span) -> String Never! {
     text
 }
 
-// The registered signature `marker_argument_shape_error` (Policy.rs) names:
-// the rule row's rendered signature, `()` when no row has that name.
+// The registered signature `marker_argument_shape_error` names: the rule row's
+// rendered signature, `()` when no row has that name.
 fn marker_registered_signature(name: String) -> String Never! {
     loop rule in marker_source_read(MARKER_SOURCE) {
         if rule.name == name -> return applied_rule_signature_render(rule.signature)
@@ -443,9 +442,9 @@ fn marker_registered_site_bound(name: String) -> Bool Never! {
     false
 }
 
-// Policy.rs `RuleSignature::accepts_arguments` (D-MARK-FORM1=A): whether the
-// registered rule `name` may be written with parentheses at all. A row with
-// no parameter and no variadic list never takes arguments.
+// `RuleSignature::accepts_arguments` (D-MARK-FORM1=A): whether the registered
+// rule `name` may be written with parentheses at all. A row with no parameter
+// and no variadic list never takes arguments.
 fn marker_registered_accepts_arguments(name: String) -> Bool Never! {
     loop rule in marker_source_read(MARKER_SOURCE) {
         if rule.name == name -> return rule.signature.params.len() > 0 || rule.signature.variadic != None

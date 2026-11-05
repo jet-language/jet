@@ -1,8 +1,8 @@
-// Native exact-Int's ONE hazard domain, port of Numeric.rs:2902-3082.
-// Root16: hazards0, retired8; Hazard16: protectedNode0, next8.
-// Hazard records are append-only PROCESS-LIFETIME; TCB192 lends this thread's
-// record. Numeric nodes use Int.jet's established immutable Node48/limbs ABI.
-// Native arithmetic and carrier sites retire nodes through this Jet domain.
+// Native exact-Int's ONE hazard domain, port. Root16: hazards0, retired8;
+// Hazard16: protectedNode0, next8. Hazard records are append-only
+// PROCESS-LIFETIME; TCB192 lends this thread's record. Numeric nodes use
+// Int.jet's established immutable Node48/limbs ABI. Native arithmetic and
+// carrier sites retire nodes through this Jet domain.
 int_hazard_root := I64{0}
 
 // Allocator init0 precedes this root. Any code that reads the root keeps this
@@ -66,7 +66,7 @@ fn int_hazard_push_retired(node: I64) {
 
 #Export(c) fn jet_rt_int_hazard_clear(record: I64) {
     sync_store(record, I64{0})
-    // Seed threshold is ANY pending node (Numeric.rs:2974), not a new batch.
+    // Seed threshold is ANY pending node, not a new batch.
     if (sync_load(wrapping(int_hazard_root + I64{8})) != I64{0}) -> jet_rt_int_hazard_reclaim()
 }
 

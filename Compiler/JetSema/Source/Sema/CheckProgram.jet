@@ -1363,11 +1363,10 @@ fn sema_function_publish_return_views(scopes: &SemaScopeTable, rows: &[String:In
     false
 }
 
-// Rust `contains_view` (`Bundle/Validation.rs` `check_module_bodies`): a
-// declared return type carries view provenance across its signature when it
-// structurally holds a `View`, `ViewMut` or `Pin` directly or
-// through struct fields. `seen` names every nominal already entered, so
-// recursive structs terminate.
+// Rust `contains_view` (`check_module_bodies`): a declared return type carries
+// view provenance across its signature when it structurally holds a `View`,
+// `ViewMut` or `Pin` directly or through struct fields. `seen` names every
+// nominal already entered, so recursive structs terminate.
 fn sema_check_type_contains_view(graph: SemaRegistrationGraph, module_identity: String, ty: Type, seen: &[String:Bool]) -> Bool {
     if ty == {
         .Apply(name, args) -> {
@@ -2134,10 +2133,10 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         }
         param_index += 1
     }
-    // Rust `check_fn` (Registration.rs:803 @ 6083377777): the function's
-    // builtin markers bind their signatures with its parameters in scope. The
-    // markers are written before the parameters, so names resolve position
-    // free, as the contract conditions do (sema_contract_check_expr).
+    // Rust `check_fn`: the function's builtin markers bind their signatures
+    // with its parameters in scope. The markers are written before the
+    // parameters, so names resolve position free, as the contract conditions do
+    // (sema_contract_check_expr).
     marker_position_free :: scopes.position_free
     scopes.position_free = true
     _ := sema_marker_rules_check_rule_signatures(func.markers, updated, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -2147,9 +2146,9 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         resolved_return = sema_function_resolve_declared(updated, program, declared_return, module_identity, generic_params)
         if !sema_type_check_declared_map_keys(updated, program, resolved_return, func.return_type_span ?? func.name_span, &diagnostics) -> complete = false
     }
-    // Rust CheckerKernel.rs `check_kernel_marker`: the declaration and
-    // worker-boundary obligations of `#Kernel(.parallel)` (E1102); its
-    // effect and body obligations wait for the effect rows (Kernel.jet).
+    // `check_kernel_marker`: the declaration and worker-boundary obligations of
+    // `#Kernel(.parallel)` (E1102); its effect and body obligations wait for
+    // the effect rows (Kernel.jet).
     if func.kernel == .Val(kernel) {
         if !sema_kernel_check_declaration(func, kernel, is_method, params, effective_return, updated, program, scopes, context, &diagnostics) -> complete = false
     }
@@ -2188,8 +2187,8 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     if !statements.complete -> complete = false
     if !sema_check_never_fallthrough(func, updated, program, scopes, &diagnostics) -> complete = false
     sema_function_header_external_target(func, &diagnostics, diagnostics_start)
-    // Rust `check_value_block` over the body (Registration.rs:937-938): a
-    // value body reports E0114 when it can reach its end without a value.
+    // Rust `check_value_block` over the body: a value body reports E0114 when
+    // it can reach its end without a value.
     if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, context.function_name, &diagnostics) -> complete = false
     // Validation borrows the original checked rows. Once that loan ends the
     // same vector moves into the function; no owning TStmt-vector copy.
@@ -3278,10 +3277,10 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
             module_result.complete = false
             &module_result.incomplete_reasons.push("invalid job names")
         }
-        // Rust ScopeMembers.rs `check`: structural `.member { … }` checks in every mode.
+        // `check`: structural `.member { … }` checks in every mode.
         loop diagnostic in sema_scope_members_check(graph.modules[module_index].program.items) -> &module_result.diagnostics.push(diagnostic)
-        // Rust Footprint.rs `infer_module_footprints`: a stated receiver
-        // footprint names stored fields and covers its body (E0231).
+        // `infer_module_footprints`: a stated receiver footprint names stored
+        // fields and covers its body (E0231).
         loop diagnostic in sema_footprint_check(graph.modules[module_index].program.items) -> &module_result.diagnostics.push(diagnostic)
         // Typestate declarations are bundle-wide; collect that view only for
         // a module that declares a state section or a typestate marker.
@@ -3303,9 +3302,9 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
                 // methods before registration (sema_protocols_expand); the
                 // declaration itself has no checked body.
                 .ProtocolDecl(_) -> {}
-                // Rust `CheckInner.rs` `Item::Module(_) => {}`: a role module
-                // (`env.*`, `perf.*`, `dev`, `workspace`) carries no checked
-                // body; its contributions are validated by their own passes.
+                // `Item::Module(_) => {}`: a role module (`env.*`, `perf.*`,
+                // `dev`, `workspace`) carries no checked body; its
+                // contributions are validated by their own passes.
                 .Module(_) -> {}
                 // A `migration` block has no checked body of its own: the
                 // derived decode of its published-schema struct replays it
@@ -3331,8 +3330,7 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
                 }
                 // A `fact` declaration has no checked body: its rows are
                 // compile-time-only and lowering erases them. One fact identity
-                // names one declaration in the loaded bundle (Rust
-                // Pipeline.rs `register_fact_declaration`).
+                // names one declaration in the loaded bundle.
                 .FactDecl(definition) -> {
                     identity :: sema_fact_identity(definition)
                     if sema_fact_first_declaration(graph, module_index, item_index, identity) == .Val(first) {
@@ -3354,8 +3352,8 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
     panic("an owning registered-module pass lost its registration graph")
 }
 
-// Rust Pipeline.rs `fact_identity`: `$name` when it is a plain string,
-// otherwise the declaration's source name.
+// `fact_identity`: `$name` when it is a plain string, otherwise the
+// declaration's source name.
 fn sema_fact_identity(definition: FactDecl) -> String {
     loop parameter in definition.params {
         if parameter.name != "$name" -> next
@@ -3485,10 +3483,10 @@ fn sema_check_registered_keep_going(environment: SemaScopeEnvironment, program: 
 
 fn sema_check_registered_item_is_jet_function(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int) -> Bool {
     if program.registration_graph == .Val(graph) {
-        // Rust Registration.rs `check_fn`: an `#FFI` tier body is foreign
-        // source and a per-callable `#Import(c)` has no Jet body (its C
-        // signature is checked by sema_guest_check_surfaces); neither is checked
-        // as an empty value body. Both stay registered.
+        // `check_fn`: an `#FFI` tier body is foreign source and a per-callable
+        // `#Import(c)` has no Jet body (its C signature is checked by
+        // sema_guest_check_surfaces); neither is checked as an empty value body.
+        // Both stay registered.
         if graph.modules[module_index].program.items[item_index] == .Func(func) -> return func.inline_foreign == None && !sema_function_is_guest_import(func)
         return false
     }
@@ -8753,14 +8751,13 @@ fn sema_failure_recheck_modules(modules: [SemaGraphModuleResult], unions: SemaFa
     selected
 }
 
-// #3708 / #3740: the Rust reference checks every body once and reconciles the
-// `T Never!` projection afterwards (Completion.rs `solve_inferred_failure`,
-// the Rust reference's `is_result_carrier`, `plain_named_fn_value`). A module checked
-// before the solve projected `projected` takes it here: each projected
-// function's checked signature names the `T Never!` carrier, and a dropped
-// call to one is a discarded result (E0433). Its call sites
-// keep the carrier they were checked against; lowering hands a plain-return
-// callee's value to any `Result` carrier a call site names.
+// #3708 / #3740: the Rust reference checks every body once and reconciles the `T
+// Never!` projection afterwards (`solve_inferred_failure`, the Rust reference's
+// `is_result_carrier`, `plain_named_fn_value`). A module checked before the solve
+// projected `projected` takes it here: each projected function's checked signature
+// names the `T Never!` carrier, and a dropped call to one is a discarded result
+// (E0433). Its call sites keep the carrier they were checked against; lowering hands
+// a plain-return callee's value to any `Result` carrier a call site names.
 fn sema_failure_reconcile_infallible(modules: &[SemaGraphModuleResult], projected: [String]) {
     if projected.len() == 0 -> return
     keys := [String:Bool]{}

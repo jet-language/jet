@@ -28,7 +28,7 @@ struct StdinHandle {
     fd: Int
 
     // The declaration's fd is informational; every token reads shared stdin.
-    // StdinReader.rs:9-43 owns no independent unread buffer or close operation.
+    // The Rust original owns no independent unread buffer or close operation.
     // The raw leaf already drops the line's trailing LF and CR bytes.
     fn read_line(&self) -[IO, Time.Wait]> String? IOError! {
         stdio_checkpoint(.Read, "stdin", "IO.Read")
@@ -113,8 +113,8 @@ fn eprint(text: String) Never! -[IO, Time.Wait]> {
     _ :: core.term.__stdio_write("{text}\n", false, true, true)
 }
 
-// IoLineStream.rs jet_std_io_input: the prompt is written and flushed, then
-// one line is read without its line ending; a closed stream reads as "".
+// jet_std_io_input: the prompt is written and flushed, then one line is read
+// without its line ending; a closed stream reads as "".
 fn input(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
     terminal_prompt(prompt, false)
     readline()
@@ -595,8 +595,8 @@ fn stdio_terminal(stderr: Bool) -> Bool Never! {
     core.term.__stdout_terminal()
 }
 
-// Term.rs:152-160,168-176 holds one lock across write_all and flush.
-// The raw operation receives this source decision; it never re-decides it.
+// The Rust original holds one lock across write_all and flush. The raw
+// operation receives this source decision; it never re-decides it.
 fn stdio_write(text: String, newline: Bool, stderr: Bool) IOError! -[IO]> {
     resource :: if stderr -> "stderr" else -> "stdout"
     stdio_checkpoint(.Write, resource, "IO.Write")

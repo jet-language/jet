@@ -462,7 +462,7 @@ fn coll_bits_render(bits: I64) -> I64 {
 #Export(c) fn jet_rt_handle_debug_jet_bit_set(bits: I64) -> I64 { coll_bits_render(bits) }
 
 // These legacy collection routes use native signed-I64 words, not tagged Int
-// input slots (CAbiRoutes.rs list_in(... |w| w as i64)). Their scalar index
+// input slots (list_in(... |w| w as i64)). Their scalar index
 // results are exact Int carriers; returned slot buffers transfer ownership.
 fn coll_i64_output(length: I64, out_data: I64) -> I64 {
     data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
@@ -512,9 +512,8 @@ fn coll_i64_swap(data: I64, left: I64, right: I64) {
     trap_store(wrapping(data + right * I64{8}), value)
 }
 
-// Same strict child/tie choice as MathLibPure.rs:1287-1306; minimum=false
-// is the max-heap dual used to select the n smallest values without a copy
-// of the unselected input.
+// minimum=false is the max-heap dual used to select the n smallest values
+// without a copy of the unselected input.
 fn coll_i64_sift(data: I64, length: I64, root: I64, minimum: Bool) {
     index := root
     loop index < length / (I64{2}) {
@@ -782,8 +781,8 @@ fn coll_render_word(text: I64, scratch: I64, word: I64, length: I64) {
     rt_text_append(text, scratch, length)
 }
 
-// Values.rs:278-281,369-372: String's list Show is raw text (no quoting),
-// with comma-space separators. All three OrderedMap modes share this form.
+// String's list Show is raw text (no quoting), with comma-space separators. All
+// three OrderedMap modes share this form.
 fn coll_render_text_items(text: I64, scratch: I64, header: I64) {
     length :: trap_word(header)
     data :: trap_word(wrapping(header + I64{16}))
@@ -862,8 +861,8 @@ fn coll_counter_remove(counter: I64, index: I64) {
     trap_store(wrapping(counter + I64{24}), length - I64{1})
 }
 
-// Core/Collections.rs:3331-3357; apply to our fresh owner in place so a
-// merge/from-list copies each input only once, not once per delta.
+// Apply to our fresh owner in place so a merge/from-list copies each input only
+// once, not once per delta.
 fn coll_counter_delta(counter: I64, key: I64, amount: I64) {
     keys :: trap_word(wrapping(counter + I64{16}))
     counts :: trap_word(wrapping(counter + I64{40}))
@@ -1073,9 +1072,9 @@ fn coll_counter_render(counter: I64) -> I64 {
 
 #Export(c) fn jet_rt_handle_debug_jet_counter(counter: I64) -> I64 { coll_counter_render(counter) }
 
-// Native Chain owns a list of inline 48-byte Layer pairs. Each Layer keeps
-// both input lengths, matching Core/Collections.rs:3524-3555 (not layer_from's
-// Core source normalization). Only matching an unpaired key raises bounds.
+// Native Chain owns a list of inline 48-byte Layer pairs. Each Layer keeps both
+// input lengths, matching (not layer_from's Core source normalization). Only
+// matching an unpaired key raises bounds.
 fn coll_layer_init(layer: I64, keys: I64, key_count: I64, values: I64, value_count: I64) {
     coll_zero(layer, I64{48})
     trap_store(layer, key_count)
@@ -1246,8 +1245,8 @@ fn coll_chain_render(chain: I64) -> I64 {
 
 #Export(c) fn jet_rt_handle_debug_jet_chain(chain: I64) -> I64 { coll_chain_render(chain) }
 
-// Legacy numeric LoopRange uses the CAbi.rs:735-780 exact-Int boundary.
-// The private native cursor keeps [current, end, step, exclusive, done].
+// Legacy numeric LoopRange uses the exact-Int boundary. The private native
+// cursor keeps [current, end, step, exclusive, done].
 fn coll_loop_range_stop(exhausted: Bool) {
     trap_header(I64{0})
     trap_write_word(I64{8028827855593824626}, I64{8})

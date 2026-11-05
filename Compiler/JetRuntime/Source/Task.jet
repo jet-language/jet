@@ -6,7 +6,7 @@
 // at TASK_CONTEXT. Result initializes only after Propagate == 0.
 TASK_CONTEXT :: I64{200}
 fn task_state_bytes() -> I64 { TASK_CONTEXT + CONTEXT_RECORD_BYTES }
-// JetTaskFailure: Outcome.rs:2185-2188 / TaskGroup.rs:77-82 ordinals 0/1/2.
+// JetTaskFailure: ordinals 0/1/2.
 fn task_failure_new(kind: I64, owned_reason: I64) -> I64 {
     failure :: jet_rt_alloc(TASK_FAILURE_BYTES, I64{8})
     sync_store(wrapping(failure + TASK_FAILURE_TAG), kind)
@@ -40,9 +40,9 @@ fn task_failure_new(kind: I64, owned_reason: I64) -> I64 {
     if kind != TASK_FAILURE_PANICKED -> return true
     jet_rt_string_eq(sync_load(wrapping(left + TASK_FAILURE_REASON)), sync_load(wrapping(right + TASK_FAILURE_REASON)))
 }
-// Values.rs:454-460/TextValues.rs:212-227: Panicked is raw in show/display
-// but Rust str Debug quoted in debug. Extend the existing carrier in place.
-// Normalize service outcome ordinals to TaskFailure's terminal variants.
+// Panicked is raw in show/display but Rust str Debug quoted in debug. Extend
+// the existing carrier in place. Normalize service outcome ordinals to
+// TaskFailure's terminal variants.
 fn task_terminal_render(result: I64, kind: I64, reason: I64, debug: Bool) {
     if kind == TASK_FAILURE_CANCELLED {
         rt_text_push_word(result, I64{7308335478031147331}, I64{8})
@@ -69,7 +69,7 @@ fn task_failure_render(failure: I64, debug: Bool) -> I64 {
 #Export(c) fn jet_rt_handle_debug_jet_task_failure(failure: I64) -> I64 { task_failure_render(failure, true) }
 
 // Service TaskOutcome is a distinct registry-owned carrier, not TaskFailure.
-// Services.rs:102-106 / CAbiRoutes.rs:11381-11409 fix these four ordinals.
+// The Rust originals fix these four ordinals.
 fn task_outcome_new(kind: I64, owned_reason: I64) -> I64 {
     outcome :: jet_rt_alloc(TASK_OUTCOME_BYTES, I64{8})
     sync_store(wrapping(outcome + TASK_OUTCOME_TAG), kind)
@@ -285,9 +285,9 @@ fn task_drain(child: I64) {
     scheduler_blocking_wait_leave()
 }
 
-// Core Task is move-only (Sema/Ownership/Copy.jet:132-143); Rust's
-// MathTaskMem.rs:606 has no Clone and join(self):717 consumes the sole handle.
-// Lexical group cleanup is a separate retained drain, using done@24 wake-all.
+// Core Task is move-only (Sema/Ownership/Copy.jet:132-143); Rust's has no Clone
+// and join(self):717 consumes the sole handle. Lexical group cleanup is a
+// separate retained drain, using done@24 wake-all.
 fn task_join_wait(child: I64) -> I64 {
     kind :: scheduler_msg_join()
     if (sync_load(wrapping(child + I64{184})) == I64{0}) -> _ := scheduler_deadline_check(kind)
@@ -315,7 +315,7 @@ fn task_panic_reason(child: I64) -> I64 {
     result
 }
 
-// Literal mirror of Scheduler.rs:263-288, including its transported-header
+// A literal mirror of the Rust original, including its transported-header
 // fallback and the compiler-shaped location suffix. Never strips arbitrary
 // parenthesized text: the suffix must end ')' and contain a location colon.
 fn task_panic_prefix(data: I64, length: I64, at: I64) -> Bool {

@@ -207,12 +207,12 @@ fn ir_core_reach_lambda_keys(tree: BodyTree, value: BodyLambda, functions: [FnBo
     }
 }
 
-// The Core function `loop line in handle.lines()` reads each line with (Rust
-// CollectionIoSources.rs jet_std_file_reader_read_line /
-// jet_std_io_stdin_read_line / the process stream line readers): the Core
-// `read_line` whose owner is the handle's type, FileReader or StdinHandle,
-// or core.process `__stdout_next_line` / `__stderr_next_line` for a child's
-// ProcessStdoutStream / ProcessStderrStream; "" when the program holds none.
+// The Core function `loop line in handle.lines()` reads each line with
+// (jet_std_file_reader_read_line / jet_std_io_stdin_read_line / the process
+// stream line readers): the Core `read_line` whose owner is the handle's type,
+// FileReader or StdinHandle, or core.process `__stdout_next_line` /
+// `__stderr_next_line` for a child's ProcessStdoutStream / ProcessStderrStream;
+// "" when the program holds none.
 fn ir_line_reader_key(functions: [FnBody], handle: Type) -> String Never! {
     owner :: ir_line_reader_owner(handle)
     if owner == "" -> return ""

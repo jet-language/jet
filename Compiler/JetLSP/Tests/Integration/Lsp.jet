@@ -1,4 +1,3 @@
-// Rust: tests/lsp.rs:1
 // M13 LSP integration suite: scripted JSON transcripts and latency bench.
 use {
     jet_foundation.Dyn.[Dyn]
@@ -11,25 +10,19 @@ use {
 }
 // GATE #4494: actual native child-process pipes, mutexes, threads and filesystem.
 
-// Rust: tests/lsp.rs:22
 fn jet_bin() -> OSPath { OSPath.from(env.binary_path("jet")) }
-// Rust: tests/lsp.rs:26
 fn lsp_process_lock() -> Mutex<()> {
     LOCK :: OnceLock<Mutex<()>>.new()
     LOCK.get_or_init(() -> Mutex.new(_))
 }
-// Rust: tests/lsp.rs:31
 fn lock_unpoisoned<T>(mutex: Mutex<T>) -> MutexGuard<T> {
     mutex.lock().unwrap_or_else(poisoned -> poisoned.into_inner())
 }
-// Rust: tests/lsp.rs:37
 fn lock_lsp_process() -> MutexGuard<()> { lock_unpoisoned(lsp_process_lock()) }
-// Rust: tests/lsp.rs:53
 fn send_msg(stdin: &Write, json: &String) {
     stdin.write_all("Content-Length: {json.len()}{Char{13}}\n{Char{13}}\n{json}".as_bytes()).unwrap()
     stdin.flush().unwrap()
 }
-// Rust: tests/lsp.rs:58
 fn read_msg(stdout: Read) -> String {
     header := String.new()
     buf := [0u8]
@@ -44,7 +37,6 @@ fn read_msg(stdout: Read) -> String {
     stdout.read_exact(&body).unwrap()
     String.from_utf8(^body).unwrap()
 }
-// Rust: tests/lsp.rs:79
 fn request_lsp(stdin: Write, stdout: Read, id: I64, method: String, params: String) -> String {
     send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{params}}}")
     loop {
@@ -53,7 +45,6 @@ fn request_lsp(stdin: Write, stdout: Read, id: I64, method: String, params: Stri
         if json_get(parsed, "id") == Dyn.Int(id) -> return ^body
     }
 }
-// Rust: tests/lsp.rs:101
 // Keep every message preceding the matching response, preserving arrival order.
 fn request_lsp_collect(stdin: Write, stdout: Read, id: I64, method: String, params: String) -> (Dyn, [Dyn]) {
     send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{params}}}")
@@ -64,17 +55,14 @@ fn request_lsp_collect(stdin: Write, stdout: Read, id: I64, method: String, para
         before.push(^parsed)
     }
 }
-// Rust: tests/lsp.rs:123
 fn published_diagnostics_for(messages: [Dyn], uri: String) -> [&Dyn] {
     messages.iter().filter(message -> json_get(message, "method").and_then(json_str) == "textDocument/publishDiagnostics")
         .filter_map(message -> json_get(message, "params"))
         .filter(params -> json_get(params, "uri").and_then(json_str) == uri).collect()
 }
-// Rust: tests/lsp.rs:134
 fn error_count(published: Dyn) -> USize {
     json_array_field(published, "diagnostics").iter().filter(diagnostic -> json_get(diagnostic, "severity") == Dyn.Int(1)).count()
 }
-// Rust: tests/lsp.rs:141
 fn json_string(s: String) -> String {
     out := String.from("\"")
     loop c in s.chars() {
@@ -90,20 +78,16 @@ fn json_string(s: String) -> String {
     out.push('"')
     ^out
 }
-// Rust: tests/lsp.rs:157
 fn json_object_field(value: Dyn, key: String) -> Dyn {
     json_get(value, key).unwrap_or_else(() -> panic("missing JSON field `{key}`"))
 }
-// Rust: tests/lsp.rs:161
 fn json_array(value: Dyn, context: String) -> [Dyn] {
     if value == {
         .Array(values) -> values
         else -> { panic("{context} is not an array: {value}") }
     }
 }
-// Rust: tests/lsp.rs:168
 fn json_array_field(value: Dyn, key: String) -> [Dyn] { json_array(json_object_field(value, key), "JSON field `{key}`") }
-// Rust: tests/lsp.rs:175
 fn json_values_equal(left: Dyn, right: Dyn) -> Bool {
     if {
         left == Dyn.Null && right == Dyn.Null -> true
@@ -118,13 +102,10 @@ fn json_values_equal(left: Dyn, right: Dyn) -> Bool {
         else -> false
     }
 }
-// Rust: tests/lsp.rs:206
 fn assert_json_values_equal(label: &String, actual: &Dyn, expected: &Dyn) {
     assert(json_values_equal(actual, expected), "{label}: actual={actual}, expected={expected}")
 }
-// Rust: tests/lsp.rs:214
 struct DecodedSemanticToken { text: String, token_type: U32, modifiers: U32 }
-// Rust: tests/lsp.rs:220
 fn semantic_data_from_response(resp: String) -> [U32] {
     data_key :: "\"data\""
     start :: resp.find(data_key).expect("semantic token data")
@@ -134,7 +115,6 @@ fn semantic_data_from_response(resp: String) -> [U32] {
     array_end :: after_array.find(']').expect("data array end")
     after_array[0..<array_end].split(',').filter_map(n -> n.trim().parse<U32>().ok()).collect()
 }
-// Rust: tests/lsp.rs:233
 fn decode_semantic_tokens(src: String, resp: String) -> [DecodedSemanticToken] {
     data :: semantic_data_from_response(resp)
     lines :: src.lines().collect()
@@ -154,11 +134,9 @@ fn decode_semantic_tokens(src: String, resp: String) -> [DecodedSemanticToken] {
     }
     ^out
 }
-// Rust: tests/lsp.rs:266
 fn assert_semantic_token(tokens: &[DecodedSemanticToken], text: &String, token_type: U32, modifier: U32) {
     assert(tokens.iter().any(t -> t.text == text && t.token_type == token_type && (t.modifiers.bit_and(modifier)) != 0), "missing semantic token `{text}` type {token_type} modifier {modifier}; got {tokens}")
 }
-// Rust: tests/lsp.rs:284
 LSP_CAPABILITY_COVERAGE :: [
     (_0: "textDocumentSync", _1: "lsp_incremental_sync_range_edit_updates_document"),
     (_0: "documentFormattingProvider", _1: "lsp_formatting_and_range_formatting_return_edits"),
@@ -190,7 +168,6 @@ LSP_CAPABILITY_COVERAGE :: [
     (_0: "executeCommandProvider", _1: "lsp_execute_command_impact_returns_report"),
     (_0: "resources", _1: "lsp_mcp_environment_resources_are_read_only")
 ]
-// Rust: tests/lsp.rs:355
 fn advertised_capabilities(init: String) -> [String] {
     cap_start :: init.find("\"capabilities\"")
     if cap_start == none -> return []
@@ -235,14 +212,10 @@ fn advertised_capabilities(init: String) -> [String] {
     ^out
 }
 
-// Rust: tests/lsp.rs:432
 // Minimal transcript JSON extractor; all byte offsets and original malformed-input behavior retained.
 module transcript_parser {
-    // Rust: tests/lsp.rs:434
     struct Step { send_raw: String?, open_uri: String?, expect_contains: [String], expect_notification: Bool }
-    // Rust: tests/lsp.rs:445
     struct Transcript { description: String, source: String, steps: [Step] }
-    // Rust: tests/lsp.rs:453
     fn unescape(s: String) -> String {
         out := String.with_capacity(s.len())
         chars := s.chars()
@@ -272,7 +245,6 @@ module transcript_parser {
         }
         ^out
     }
-    // Rust: tests/lsp.rs:489
     fn extract_string_field(json: String, key: String) -> String? {
         needle :: "\"{key}\""
         pos :: json.find(needle)
@@ -289,9 +261,7 @@ module transcript_parser {
         }
         unescape(after[0..<end])
     }
-    // Rust: tests/lsp.rs:515
     fn skip_ws(s: String) -> String { s.trim_start_matches(c -> c.is_ascii_whitespace()) }
-    // Rust: tests/lsp.rs:520
     fn find_matching_close(s: String, open: Char, close: Char) -> USize? {
         depth := 0usize
         in_str := false
@@ -312,12 +282,10 @@ module transcript_parser {
         }
         none
     }
-    // Rust: tests/lsp.rs:553
     fn c_len(bytes: [U8], i: USize) -> USize {
         b :: bytes[i]
         if b < 0x80 -> 1 else if b < 0xE0 -> 2 else if b < 0xF0 -> 3 else -> 4
     }
-    // Rust: tests/lsp.rs:567
     fn extract_string_array(s: String) -> [String] {
         s := skip_ws(s) // #4303
         if !s.starts_with('[') -> return []
@@ -346,14 +314,12 @@ module transcript_parser {
         }
         ^result
     }
-    // Rust: tests/lsp.rs:612
     fn extract_object(s: String) -> (String, String)? {
         s := skip_ws(s) // #4303
         if !s.starts_with('{') -> return none
         close :: find_matching_close(s, '{', '}')
         (_0: s[0..<close + 1].to_string(), _1: s[close + 1..<s.len()])
     }
-    // Rust: tests/lsp.rs:621
     fn parse(content: String) -> Transcript {
         description :: extract_string_field(content, "description").unwrap_or_default()
         source :: extract_string_field(content, "source").expect("transcript must have 'source'")
@@ -376,7 +342,6 @@ module transcript_parser {
         }
         Transcript{description: ^description, source: ^source, steps: ^steps}
     }
-    // Rust: tests/lsp.rs:664
     fn parse_step(obj: String) -> Step {
         send_needle :: "\"send\""
         open_needle :: "\"open\""
@@ -411,7 +376,6 @@ module transcript_parser {
         Step{send_raw: ^send_raw, open_uri: ^open_uri, expect_contains: ^expect_contains, expect_notification: expect_notification}
     }
 }
-// Rust: tests/lsp.rs:722
 fn run_json_transcript_file(jet: &OSPath, path: &OSPath) {
     _guard :: lock_lsp_process()
     content :: fs.read_to_string(path).unwrap_or_else(e -> panic("read {path}: {e}"))

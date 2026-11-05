@@ -1,10 +1,10 @@
 // `jet audit copies [--json] [<entry.jet>]` and `jet audit <file.jet>`
-// (CmdSupply.rs `run_copy_audit`, #3738): every implicit read-view copy in the
-// checked package of the entry, one row per site. The sites are sema's one
-// copy-site rule, the same one `jet fmt --explicit-copies` writes: with
-// `#Policy(copies: .Explicit)` laid over each module of the entry's source
-// root, each implicit copy is a diagnostic with a Safe `.copy()` edit, and the
-// diagnostic's span is the copied expression. Nothing is written.
+// (`run_copy_audit`, #3738): every implicit read-view copy in the checked
+// package of the entry, one row per site. The sites are sema's one copy-site
+// rule, the same one `jet fmt --explicit-copies` writes: with `#Policy(copies:
+// .Explicit)` laid over each module of the entry's source root, each implicit
+// copy is a diagnostic with a Safe `.copy()` edit, and the diagnostic's span is
+// the copied expression. Nothing is written.
 use {
     cli_files :: core.files
     jet_driver.[
@@ -35,11 +35,11 @@ enum JetCLIAuditSubject {
     Foreign
 }
 
-// main.rs `"audit"`: `copies [file]` and a `.jet` argument audit copies;
-// `foreign [file]` audits foreign code. `words` is the argv after the subject
-// (flags included); the target is its first non-flag word, else the project
-// around the working directory, and a directory resolves to its stock entry
-// as `jet lint` resolves one.
+// `"audit"`: `copies [file]` and a `.jet` argument audit copies; `foreign
+// [file]` audits foreign code. `words` is the argv after the subject (flags
+// included); the target is its first non-flag word, else the project around the
+// working directory, and a directory resolves to its stock entry as `jet lint`
+// resolves one.
 fn jet_cli_audit_entry_plan(subject: JetCLIAuditSubject, words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     target := ""
     loop word in words {
@@ -139,8 +139,8 @@ fn jet_cli_audit_copy_sites(file: String, modules: [JetDriverAuthorizedSourceFil
     sites
 }
 
-// Diagnostics.rs `span_line_col`: the 1-based line of byte `offset`, and its
-// column counting every character that starts before it on that line.
+// `span_line_col`: the 1-based line of byte `offset`, and its column counting
+// every character that starts before it on that line.
 fn jet_cli_audit_line_column(source: String, offset: Int) -> [Int] Never! {
     bytes :: source.bytes()
     line := 1

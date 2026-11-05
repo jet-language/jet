@@ -84,7 +84,7 @@ static void unit_cases(const char *const *goldens,int64_t variants,int64_t *(*cl
     drop(NULL);
 }
 static void ws_error_cases(void) {
-    // Custom WsClient.rs:22-52, not derive Debug: raw operation, signed limit.
+    // Custom, not derive Debug: raw operation, signed limit.
     const char *goldens[]={"websocket URL is invalid","websocket handshake failed","websocket protocol error","websocket message exceeds -9223372036854775808 bytes","websocket I/O failed during read\"\n","websocket timed out","websocket is closed","websocket cancelled","this build target lacks websocket client connect"};
     for(int64_t kind=0;kind<9;++kind) {
         WsError *a=jet_rt_alloc(24,8);a->kind=kind;a->limit=kind==3?INT64_MIN:0;a->operation=kind==4?text("read\"\n"):NULL;
@@ -148,7 +148,7 @@ static Lane *lane(const uint64_t bits[4]) { Lane *result=jet_rt_alloc(32,8);memc
 static void lane_cases(void) {
     const uint64_t words[]={0,UINT64_C(0x8000000000000000),UINT64_C(0x7ff8000000000001),UINT64_C(0x7ff0000000000000)};
     Lane *a=lane(words),*b=jet_rt_handle_clone_f64x4(a);assert(a!=b && memcmp(a,b,32)==0 && !jet_rt_handle_eq_f64x4(a,a) && !jet_rt_handle_eq_f64x4(a,b));
-    // Exact pinned rustc debug_tuple/array oracle, MathTaskMem.rs:397-407.
+    // Exact pinned rustc debug_tuple/array oracle.
     expect(jet_rt_handle_debug_f64x4(a),"F64x4([0.0, -0.0, NaN, inf])");
     watch(a,32,8);watch(b,32,8);unsigned before=intercepted;jet_rt_handle_drop_f64x4(a);jet_rt_handle_drop_f64x4(b);freed(before);
     a=jet_rt_alloc(32,8);a->lanes[0]=1.25;a->lanes[1]=1e-5;a->lanes[2]=1e20;a->lanes[3]=-1e-10;b=jet_rt_handle_clone_f64x4(a);

@@ -210,7 +210,7 @@ function jet_web_call_arg_value(value) {
 
 // JavaScript carries every Float as Number, whose default string form erases
 // the decimal point from whole values. Jet Float display preserves that type
-// fact, matching Prelude/Core/Values.rs on native and Wasm tiers.
+// fact, matching on native and Wasm tiers.
 function jet_float_display(value) {
   const number = Number(value);
   if (Number.isNaN(number)) return "NaN";
@@ -287,11 +287,11 @@ function jet_show(value) {
   return String(value);
 }
 
-// D-FMT-PLAIN1=A / I9: decimal formatting is one Prelude rail on the JS
-// adapter too. BigInt stays exact; Number carries the Float path. Rulings
-// #4588, the same steps as Prelude/Core/Fmt.rs `fixed_half_away`: round
-// `value * 10^places` half away from zero, never print a negative zero, and
-// past the exact Int range round the value's exact expansion instead.
+// D-FMT-PLAIN1=A / I9: decimal formatting is one Prelude rail on the JS adapter
+// too. BigInt stays exact; Number carries the Float path. Rulings #4588, the
+// same steps as `fixed_half_away`: round `value * 10^places` half away from
+// zero, never print a negative zero, and past the exact Int range round the
+// value's exact expansion instead.
 function jet_fmt_decimal(value, precision) {
   const number = Number(value);
   if (Number.isNaN(number)) return "NaN";
@@ -317,7 +317,7 @@ function jet_fmt_quantity(value) {
 
 // Rebuild a finite, non-negative Number as an integer over a power of two,
 // scale by 10^places, and round the exact rational quotient half away from
-// zero (Fmt.rs `exact_fixed_half_away`).
+// zero.
 function jet_fmt_fixed_exact(number, places) {
   const bits = new ArrayBuffer(8);
   const view = new DataView(bits);

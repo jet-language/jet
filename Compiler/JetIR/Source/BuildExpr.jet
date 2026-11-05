@@ -5054,8 +5054,8 @@ fn ir_try_converts(conversion: TTryConvert) -> Bool Never! {
 }
 
 // The `Err(...)` values a returned valued `if` or block hands back from its
-// tails (an arm's last line), filed in `b.origins`: Rust lowers each such
-// arm as its own `return` (tir_to_mir_expr.rs `TExprKind::Err`).
+// tails (an arm's last line), filed in `b.origins`: Rust lowers each such arm
+// as its own `return`.
 fn ir_tail_errs(p: IRProgram, b: &IRBuilder, expression: Int) Never! {
     if ir_body_node(p, b, expression).kind == {
         .Err(_) -> &b.origins.push(expression)
@@ -5870,10 +5870,10 @@ fn ir_iterable_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, v
 // `loop item in reader` over an encoding reader (TForInMethod.EncodingReader):
 // each step calls the reader's Core `next(&self)`, an `Item? Error!`. Ok with
 // an item runs the body with it, Ok(None) ends the walk, and an error panics
-// with its display at <core.prelude>:0, as CollectionSources.rs's encoding
-// reader source does. A fresh reader belongs to the loop, which drops it; a
-// kept one is read in place and stays its owner's. A step runs the body on
-// every n-th item from the first; the others are taken and dropped.
+// with its display at <core.prelude>:0, encoding reader source does. A fresh
+// reader belongs to the loop, which drops it; a kept one is read in place and
+// stays its owner's. A step runs the body on every n-th item from the first;
+// the others are taken and dropped.
 fn ir_encoding_reader_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, collection: Int, step: Int?, body: [Int], span: Span) Never! {
     reader_ty :: ir_ty(p, b, collection)
     next_symbol :: ir_encoding_reader_next_key(p.functions, reader_ty)

@@ -1,14 +1,14 @@
-// The JS/WASM web partition (D-WASM1=A, Rust WebPartition.rs). Every checked
-// function gets a web bucket by one precedence: its `#Target(JS|Wasm)` or
-// `#WasmExport` marker, the `Browser` effect, the inline-module or file
-// `#Target` ceiling, a `Stream` result, then the Wasm default. Unpinned
-// functions follow their call edges until the graph is closed: a Wasm caller
-// of a JS function becomes JS, and so does an unpinned Wasm callee of a JS
-// caller. Once a program opts in (a web marker or a `#Target` ceiling), a
-// `#WasmExport` signature must be ABI-safe (E-WEB-ABI-TYPE), a Wasm function
-// must not use `Browser` (E-WEB-TARGET-BROWSER), and a call must stay in its
-// bucket unless it is the JS-to-`#WasmExport` bridge (E-WEB-CROSS-PARTITION).
-// The bucket is stamped onto each FnBody (`web_bucket`).
+// The JS/WASM web partition (D-WASM1=A). Every checked function gets a web
+// bucket by one precedence: its `#Target(JS|Wasm)` or `#WasmExport` marker, the
+// `Browser` effect, the inline-module or file `#Target` ceiling, a `Stream`
+// result, then the Wasm default. Unpinned functions follow their call edges
+// until the graph is closed: a Wasm caller of a JS function becomes JS, and so
+// does an unpinned Wasm callee of a JS caller. Once a program opts in (a web
+// marker or a `#Target` ceiling), a `#WasmExport` signature must be ABI-safe
+// (E-WEB-ABI-TYPE), a Wasm function must not use `Browser`
+// (E-WEB-TARGET-BROWSER), and a call must stay in its bucket unless it is the
+// JS-to-`#WasmExport` bridge (E-WEB-CROSS-PARTITION). The bucket is stamped
+// onto each FnBody (`web_bucket`).
 use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, Func, Item, NamedSpan, Span, StructDef, Type, VariantPayload, WebBucket, WebPartitionMarker, owned_trait_codec_names, owned_trait_family, type_name]
 
 // One function's partition inputs, read from its declaration and its checked

@@ -1,8 +1,7 @@
-// `jet find` (Source/CmdSemIndex.rs `run_find`): search the checked
-// semantic symbols by type shape, effect, input/output example, or text.
-// The query is parsed here; the host checks the entry (when there is one)
-// and searches its symbols (SemIndexSymbols.jet), else the language
-// catalog alone.
+// `jet find`: search the checked semantic symbols by type shape, effect,
+// input/output example, or text. The query is parsed here; the host checks the
+// entry (when there is one) and searches its symbols (SemIndexSymbols.jet),
+// else the language catalog alone.
 use {
     cli_files :: core.files
     jet_driver.[
@@ -21,13 +20,11 @@ use {
     ]
 }
 
-// CmdSemIndex.rs `TypeShape`.
 struct JetCLIFindShape {
     inputs: [String]
     output: String
 }
 
-// CmdSemIndex.rs `FindMode`.
 enum JetCLIFindMode {
     Signature(shape: JetCLIFindShape)
     Effect(name: String, text: String)
@@ -35,7 +32,6 @@ enum JetCLIFindMode {
     Text(query: String)
 }
 
-// CmdSemIndex.rs `FindMatch`.
 struct JetCLIFindMatch {
     name: String
     signature: String
@@ -78,7 +74,7 @@ fn jet_cli_find_words(text: String) -> [String] Never! {
     collapsed.split(" ").to_list()
 }
 
-// CmdSemIndex.rs `compact_type`: every whitespace byte dropped.
+// `compact_type`: every whitespace byte dropped.
 fn jet_cli_find_compact(ty: String) -> String Never! {
     kept := [U8]{}
     loop byte in ty.bytes() {
@@ -87,7 +83,7 @@ fn jet_cli_find_compact(ty: String) -> String Never! {
     String.from_bytes(kept) ?? ty
 }
 
-// CmdSemIndex.rs `split_top_level`: split on `separator` outside (), [], <>.
+// `split_top_level`: split on `separator` outside, [], <>.
 fn jet_cli_find_split_top(input: String, separator: Int) -> [String] Never! {
     bytes :: input.bytes()
     parts := [String]{}
@@ -115,7 +111,6 @@ fn jet_cli_find_split_top(input: String, separator: Int) -> [String] Never! {
     parts
 }
 
-// CmdSemIndex.rs `parse_type_shape`.
 fn jet_cli_find_parse_shape(query: String) -> JetCLIFindShape? Never! {
     halves :: jet_cli_find_split_once(query, "->") ?? return None
     inputs := [String]{}
@@ -130,7 +125,6 @@ fn jet_cli_find_parse_shape(query: String) -> JetCLIFindShape? Never! {
     Val(JetCLIFindShape{inputs: inputs, output: output})
 }
 
-// CmdSemIndex.rs `parameter_type`.
 fn jet_cli_find_parameter_type(part: String) -> String? Never! {
     text := part.trim()
     if text.starts_with("...") -> text = jet_cli_find_text(text, 3, text.bytes().len())
@@ -145,10 +139,10 @@ fn jet_cli_find_parameter_type(part: String) -> String? Never! {
     Val(jet_cli_find_compact(ty))
 }
 
-// CmdSemIndex.rs `signature_shape`: the call shape of a rendered symbol
-// signature, read between the first `(` and the last `)` of its declaration
-// line. Source signatures carry a `failure:` line after it, whose own
-// parentheses are not part of the call shape.
+// `signature_shape`: the call shape of a rendered symbol signature, read
+// between the first `(` and the last `)` of its declaration line. Source
+// signatures carry a `failure:` line after it, whose own parentheses are not
+// part of the call shape.
 fn jet_cli_find_signature_shape(rendered: String) -> JetCLIFindShape? Never! {
     signature := rendered
     if jet_cli_find_split_once(rendered, "\n") == .Val(lines) -> signature = lines[0]
@@ -186,7 +180,6 @@ fn jet_cli_find_parses_float(value: String) -> Bool Never! {
     true
 }
 
-// CmdSemIndex.rs `literal_type`.
 fn jet_cli_find_literal_type(raw: String) -> String? Never! {
     value :: raw.trim()
     quoted :: (value.starts_with("\"") && value.ends_with("\"")) || (value.starts_with("'") && value.ends_with("'"))
@@ -216,7 +209,6 @@ fn jet_cli_find_literal_type(raw: String) -> String? Never! {
     Val("T")
 }
 
-// CmdSemIndex.rs `example_shape`.
 fn jet_cli_find_example_shape(example: String) -> JetCLIFindShape? Never! {
     halves :: jet_cli_find_split_once(example, "->") ?? return None
     inputs := [String]{}
@@ -230,7 +222,7 @@ fn jet_cli_find_example_shape(example: String) -> JetCLIFindShape? Never! {
     Val(JetCLIFindShape{inputs: inputs, output: output})
 }
 
-// CmdSemIndex.rs `generic_parts`: `Head<A, B>` as its head and arguments.
+// `generic_parts`: `Head<A, B>` as its head and arguments.
 fn jet_cli_find_generic_parts(ty: String) -> [String]? Never! {
     open :: jet_cli_find_byte(ty, 60, false)
     if open < 0 || !ty.ends_with(">") -> return None
@@ -239,7 +231,7 @@ fn jet_cli_find_generic_parts(ty: String) -> [String]? Never! {
     Val(parts)
 }
 
-// CmdSemIndex.rs `is_type_variable`: one ASCII capital letter.
+// `is_type_variable`: one ASCII capital letter.
 fn jet_cli_find_is_type_variable(ty: String) -> Bool Never! {
     bytes :: ty.bytes()
     bytes.len() == 1 && Int.from_u8(bytes[0]) >= 65 && Int.from_u8(bytes[0]) <= 90
@@ -256,7 +248,6 @@ fn jet_cli_find_type_leaf(ty: String) -> String Never! {
     jet_cli_doc_text(bytes, start, bytes.len())
 }
 
-// CmdSemIndex.rs `type_names_equal`.
 fn jet_cli_find_names_equal(left: String, right: String) -> Bool Never! {
     left == right || jet_cli_find_type_leaf(left) == jet_cli_find_type_leaf(right)
 }
@@ -269,7 +260,7 @@ fn jet_cli_find_inner(ty: String) -> String Never! {
     jet_cli_find_text(ty, 1, ty.bytes().len() - 1)
 }
 
-// CmdSemIndex.rs `type_matches`: single capital letters bind consistently.
+// `type_matches`: single capital letters bind consistently.
 fn jet_cli_find_type_matches(wanted_raw: String, candidate_raw: String, bindings: &[String: String]) -> Bool Never! {
     wanted :: jet_cli_find_compact(wanted_raw)
     candidate :: jet_cli_find_compact(candidate_raw)
@@ -302,7 +293,6 @@ fn jet_cli_find_type_matches(wanted_raw: String, candidate_raw: String, bindings
     jet_cli_find_names_equal(wanted, candidate)
 }
 
-// CmdSemIndex.rs `shape_matches`.
 fn jet_cli_find_shape_matches(wanted: JetCLIFindShape, candidate: JetCLIFindShape) -> Bool Never! {
     if wanted.inputs.len() != candidate.inputs.len() -> return false
     bindings := [String: String]{}
@@ -312,7 +302,7 @@ fn jet_cli_find_shape_matches(wanted: JetCLIFindShape, candidate: JetCLIFindShap
     jet_cli_find_type_matches(wanted.output, candidate.output, &bindings)
 }
 
-// CmdSemIndex.rs `effect_fact`: the effect summary of a source symbol.
+// `effect_fact`: the effect summary of a source symbol.
 fn jet_cli_find_effect_fact(symbol: JetCLISymbol, effects: [JetCLISemEffect]) -> JetCLISemEffect? Never! {
     if symbol.provenance == .Builtin(_) -> return None
     key :: if symbol.owner == .Val(owner) -> "{owner}::{symbol.name}" else -> symbol.name
@@ -341,7 +331,6 @@ fn jet_cli_find_effect_covers(wanted: String, actual: String) -> Bool Never! {
     actual == wanted || actual.starts_with("{wanted}.") || wanted.starts_with("{actual}.") || jet_cli_find_root(actual) == jet_cli_find_root(wanted)
 }
 
-// CmdSemIndex.rs `effect_matches`.
 fn jet_cli_find_effect_matches(wanted: String, fact: JetCLISemEffect) -> Bool Never! {
     if fact.maximal -> return true
     loop actual in fact.inferred {
@@ -350,7 +339,6 @@ fn jet_cli_find_effect_matches(wanted: String, fact: JetCLISemEffect) -> Bool Ne
     false
 }
 
-// CmdSemIndex.rs `effect_reason`.
 fn jet_cli_find_effect_reason(wanted: String, fact: JetCLISemEffect) -> String Never! {
     if fact.maximal -> return "holds {wanted} through an open effect set"
     actual :: fact.inferred.join(", ")
@@ -360,14 +348,13 @@ fn jet_cli_find_effect_reason(wanted: String, fact: JetCLISemEffect) -> String N
     "holds {wanted} (inferred: {actual})"
 }
 
-// CmdSemIndex.rs `is_pure_candidate`.
 fn jet_cli_find_is_pure(symbol: JetCLISymbol, effects: [JetCLISemEffect]) -> Bool Never! {
     fact :: jet_cli_find_effect_fact(symbol, effects) ?? return true
     !fact.maximal && fact.inferred.len() == 0
 }
 
-// CmdSemIndex.rs `text_matches`: every query term longer than one byte
-// appears in the symbol's names, summary, or examples (ASCII-insensitive).
+// `text_matches`: every query term longer than one byte appears in the symbol's
+// names, summary, or examples (ASCII-insensitive).
 fn jet_cli_find_text_matches(symbol: JetCLISymbol, query: String) -> Bool Never! {
     haystack :: jet_cli_ascii_lower("{symbol.name} {symbol.qualified_name} {symbol.summary} {symbol.examples.join(" ")}")
     loop term in jet_cli_find_words(query) {
@@ -377,8 +364,7 @@ fn jet_cli_find_text_matches(symbol: JetCLISymbol, query: String) -> Bool Never!
     true
 }
 
-// CmdSemIndex.rs `find_matches`: function and member symbols, sorted by
-// name, then signature.
+// `find_matches`: function and member symbols, sorted by name, then signature.
 fn jet_cli_find_matches(symbols: [JetCLISymbol], effects: [JetCLISemEffect], mode: JetCLIFindMode) -> [JetCLIFindMatch] Never! {
     matches := [JetCLIFindMatch]{}
     loop symbol in symbols {
@@ -421,7 +407,6 @@ fn jet_cli_find_matches(symbols: [JetCLISymbol], effects: [JetCLISemEffect], mod
     matches
 }
 
-// CmdSemIndex.rs `render_find`.
 fn jet_cli_find_render(mode: JetCLIFindMode, query: String, matches: [JetCLIFindMatch], json: Bool) -> String Never! {
     if json {
         values :: loop item in matches -> jet_cli_status_object([JetCLIStatusField]{
@@ -443,8 +428,8 @@ fn jet_cli_find_render(mode: JetCLIFindMode, query: String, matches: [JetCLIFind
     out
 }
 
-// `jet find …` (CmdSemIndex.rs `run_find` up to the check): the query mode
-// and the entry to search, resolved as the Rust host resolves it.
+// `jet find …` (`run_find` up to the check): the query mode and the entry to
+// search, resolved as the Rust host resolves it.
 fn jet_cli_find(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     effect_name := String?{None}
     example_raw := String?{None}
@@ -528,8 +513,8 @@ fn jet_cli_find(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan 
 }
 
 // The host half: check the entry (Doc mode, as `jet inspect semindex`) and
-// search its symbols, or search the language catalog when there is none.
-// Check errors are CmdInspect.rs `render_check_failure`'s.
+// search its symbols, or search the language catalog when there is none. Check
+// errors are `render_check_failure`'s.
 fn jet_cli_compile_find(file: String?, query: String, mode: JetCLIFindMode, json: Bool) -> JetDriverVerbOutput {
     path :: file ?? return JetDriverVerbOutput{stdout: jet_cli_find_render(mode, query, jet_cli_find_matches(jet_cli_symbol_index(jet_cli_language_symbols()), [JetCLISemEffect]{}, mode), json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}

@@ -1,18 +1,17 @@
-// (Rust `Registration/Serde.rs`
-// `expand_builtin_serde_items` and `Registration/Serde/Ast.rs`): the built-in
-// codecs are ordinary Jet impl items. A struct or enum gets a compiler-built
-// `impl T.Encode { fn encode(self) -> Dyn }` and/or
-// `impl T.Decode { fn decode(tree: Dyn) -> T [FieldError]! }` when it derives
-// the codec explicitly (`#Codable`, `#Encode`, `#Decode`) or when the
-// structural auto-derive selects it: every declaration is Codable by default
-// unless a `#!Codable`/`#!Encode`/`#!Decode` marker refuses it, a stored field
-// has no wire form, or a hand-written `impl T.Encode`/`impl T.Decode` already
-// supplies that codec. The meaning is selected eagerly, the work on demand:
-// registration adds each selected codec as an impl whose method has its
-// header only (so the type IS Encode/Decode for every bound and lookup), and
-// the body is generated and checked only once an Encode/Decode requirement
-// reaches the type (sema_codec_waves): a codec bound or call a check records
-// (sema_codec_demand_type), or a wire field of a demanded generated codec.
+// (`expand_builtin_serde_items`): the built-in codecs are ordinary Jet impl
+// items. A struct or enum gets a compiler-built `impl T.Encode { fn
+// encode(self) -> Dyn }` and/or `impl T.Decode { fn decode(tree: Dyn) -> T
+// [FieldError]! }` when it derives the codec explicitly (`#Codable`, `#Encode`,
+// `#Decode`) or when the structural auto-derive selects it: every declaration
+// is Codable by default unless a `#!Codable`/`#!Encode`/`#!Decode` marker
+// refuses it, a stored field has no wire form, or a hand-written `impl
+// T.Encode`/`impl T.Decode` already supplies that codec. The meaning is
+// selected eagerly, the work on demand: registration adds each selected codec
+// as an impl whose method has its header only (so the type IS Encode/Decode for
+// every bound and lookup), and the body is generated and checked only once an
+// Encode/Decode requirement reaches the type (sema_codec_waves): a codec bound
+// or call a check records (sema_codec_demand_type), or a wire field of a
+// demanded generated codec.
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -1154,7 +1153,7 @@ fn sema_serde_items_enum_from_binding(variant: Variant, binding: String, type_na
 }
 
 // ---------------------------------------------------------------------------
-// AST builders (Rust `Registration/Serde/Ast.rs`).
+// AST builders.
 
 fn sema_serde_items_ident(name: String, span: Span) -> Expr Never! {
     Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}

@@ -1,5 +1,4 @@
 // Stable semantic-index opening API. Canonical facts remain at their owners.
-// Rust: crates/jet-semindex/src/lib.rs:6
 // Build/Structure/Signatures own builder and binder queries; Docs owns doc graphs;
 // Receipts owns semantic operations; Symbols owns symbol facts; Facts and
 // CallableFacts own schema records; Foundation owns derivations; Codec owns JSON.
@@ -10,25 +9,17 @@ use {
     jet_foundation.[Diagnostic]
 }
 
-// Rust: crates/jet-semindex/src/lib.rs:57
 // SemIndexError::Load and its Display/Error contracts are canonical in Open.jet.
-// Rust: crates/jet-semindex/src/lib.rs:74
-// from_checked is canonical as semindex_from_checked in Open.jet, using the
-// checked graph/source/effect inputs rather than copying a retained bundle.
-// Rust: crates/jet-semindex/src/lib.rs:82
-// package_facts_for_entry is canonical as semindex_package_facts_for_entry.
-// Its diagnostic join is semindex_package_facts_error_text, both in Open.jet.
-// Rust: crates/jet-semindex/src/lib.rs:99
+// from_checked is canonical as semindex_from_checked in Open.jet, using the checked
+// graph/source/effect inputs rather than copying a retained bundle.
+// package_facts_for_entry is canonical as semindex_package_facts_for_entry. Its
+// diagnostic join is semindex_package_facts_error_text, both in Open.jet.
 // package_facts_diagnostic is semindex_package_facts_diagnostic in Open.jet.
-// Rust: crates/jet-semindex/src/lib.rs:113
 // workspace_overlay_policy_for_entry is semindex_workspace_overlay_policy_for_entry.
-// Rust: crates/jet-semindex/src/lib.rs:148
 // workspace_lock_at is semindex_workspace_lock_at in Open.jet: missing versus
 // stale/invalid lock and nearest workspace boundaries retain their own branches.
-// Rust: crates/jet-semindex/src/lib.rs:170
 // attach_package_facts is semindex_attach_package_facts in Open.jet.
 
-// Rust: crates/jet-semindex/src/lib.rs:185
 fn semindex_open(entry: OSPath) -[FS, Env]> SemIndex SemIndexError! {
     entry_str :: entry.to_string_lossy()
     (diags, bundle, facts) :: check_file_with_effect_facts(entry_str, None, false)
@@ -43,7 +34,6 @@ fn semindex_open(entry: OSPath) -[FS, Env]> SemIndex SemIndexError! {
     Err(SemIndexError.Load{diagnostics: ^diags})
 }
 
-// Rust: crates/jet-semindex/src/lib.rs:203
 fn semindex_open_symbols(entry: OSPath) -[FS, Env]> SemanticSymbolIndex SemIndexError! {
     entry_str :: entry.to_string_lossy()
     (diags, bundle, facts) :: check_file_with_effect_facts(entry_str, None, false)
@@ -55,7 +45,6 @@ fn semindex_open_symbols(entry: OSPath) -[FS, Env]> SemanticSymbolIndex SemIndex
     Err(SemIndexError.Load{diagnostics: ^diags})
 }
 
-// Rust: crates/jet-semindex/src/lib.rs:219
 fn semindex_open_with_overlays(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> SemIndex SemIndexError! {
     entry_str :: entry.to_string_lossy()
     (diags, bundle, facts) :: check_file_with_overlays(entry_str, overlays, false)
@@ -70,7 +59,6 @@ fn semindex_open_with_overlays(entry: OSPath, overlays: [(OSPath, String)]) -[FS
     Err(SemIndexError.Load{diagnostics: ^diags})
 }
 
-// Rust: crates/jet-semindex/src/lib.rs:241
 fn semindex_open_structural_with_overlays(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> SemIndex SemIndexError! {
     entry_str :: entry.to_string_lossy()
     (diags, bundle, facts) :: check_file_with_overlays_and_import_root(entry_str, overlays)
@@ -85,13 +73,11 @@ fn semindex_open_structural_with_overlays(entry: OSPath, overlays: [(OSPath, Str
     Err(SemIndexError.Load{diagnostics: ^diags})
 }
 
-// Rust: crates/jet-semindex/src/lib.rs:264
 fn semindex_open_with_overlays_and_diagnostics(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic]) SemIndexError! {
     (index, diagnostics, _) :: semindex_open_with_overlays_diagnostics_and_inputs(entry, overlays)
     Ok((^index, ^diagnostics))
 }
 
-// Rust: crates/jet-semindex/src/lib.rs:275
 fn semindex_open_with_overlays_diagnostics_and_inputs(entry: OSPath, overlays: [(OSPath, String)]) -[FS, Env]> (SemIndex, [Diagnostic], [OSPath]) SemIndexError! {
     entry_str :: entry.to_string_lossy()
     (diags, bundle, facts) :: check_file_with_overlays(entry_str, overlays, false)

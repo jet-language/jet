@@ -1,10 +1,10 @@
-// Native request budgets: Core.rs:1014-1057 and Core/CAbi.rs:244-305.
-// One host request at a time; the host joins its native work before end.
-// Process-lifetime root48: mutex0 active8 fuel16 maxDepth24 firstStop32 mode40.
-// The root owns firstStop; each current Scheduler control owns a fresh copy.
-// Unsigned order is World's existing world_unsigned_before over raw I64 bits;
-// subtraction is wrapping only AFTER that unsigned bounds check. No exact Int.
-// TCB frame/scope ownership is documented in Thread.jet (65ba90e97).
+// Native request budgets. One host request at a time; the host joins its native
+// work before end. Process-lifetime root48: mutex0 active8 fuel16 maxDepth24
+// firstStop32 mode40. The root owns firstStop; each current Scheduler control
+// owns a fresh copy. Unsigned order is World's existing world_unsigned_before
+// over raw I64 bits; subtraction is wrapping only AFTER that unsigned bounds
+// check. No exact Int. TCB frame/scope ownership is documented in Thread.jet
+// (65ba90e97).
 COMPTIME_ROOT_BYTES :: I64{48}
 comptime_root := I64{0}
 
@@ -366,8 +366,9 @@ fn comptime_stop_frame_write(status: I64, owner: I64, start: I64, end: I64) -> U
     header :: wrapping(scratch + I64{160})
     digits :: world_decimal(header, at)
     trap_put(wrapping(header + digits), I64{10})
-    // Core.rs:988-994 flushes program stdout before the private channel frame.
-    // This is the same active stdout flush used by every native process stop.
+    // The Rust original flushes program stdout before the private channel
+    // frame. This is the same active stdout flush used by every native process
+    // stop.
     jet_rt_stdout_flush()
     // fcntl F_DUPFD_CLOEXEC borrows the compiler worker's lifetime descriptor3;
     // failed duplicate is ignored just like protocol_channel's Option in Rust.

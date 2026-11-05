@@ -1286,8 +1286,8 @@ fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, ex
     fork :: sema_ownership_fork(&state)
     fallback_mark :: sema_scope_mark(&scopes)
     // A `?? panic` on a checked core.compute Tensor operation is that
-    // operation's failure route, which autodiff admits (Rust fallible.rs
-    // `compute_failure_fallback`); the route reads and clears the flag.
+    // operation's failure route, which autodiff admits; the route reads and
+    // clears the flag.
     saved_safe_panic_context :: context.autodiff_safe_panic_context
     context.autodiff_safe_panic_context = is_compute_tensor_family(payload) && sema_control_is_core_compute_call(value, environment, program)
     route :: sema_expression_or_fallback_route(fallback, span, subject.ty, payload, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -1423,9 +1423,9 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
             fallback_reaches_merge = checked.ty != Type.Named{name: "Never"}
         }
         .Block(body, tail, block_span) -> {
-            // Rust `parse_or_fallback_block` (binary_unary.rs:229-259): a
-            // block with no value line must end in a real exit, which then
-            // needs no value of the success payload's type.
+            // Rust `parse_or_fallback_block`: a block with no value line must
+            // end in a real exit, which then needs no value of the success
+            // payload's type.
             if tail == None {
                 last_exits := false
                 last_span := Span{start: block_span.end - 1, end: block_span.end}

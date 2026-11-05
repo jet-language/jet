@@ -10,37 +10,25 @@ use {
     jet_devserver.Canvas.ValidationJson.[json_str, span_json]
     core.files.[OSPath]
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:24
 struct InlineExpr { id: String; span: SourceSpan }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:30
 struct GraphEditAnchor { graph_id: String; insert_offset: USize; fallible: Bool }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:37
 struct NodeQueryRef { graph_id: String; node_id: String; kind: String; title: String; span: SourceSpan }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:51
 struct CanvasCallableExport { module_path: String; span: SourceSpan; callee: String }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:58
 struct Projection { json: String; inline_exprs: [InlineExpr]; graph_anchors: [GraphEditAnchor]; node_refs: [NodeQueryRef]; callable_exports: [CanvasCallableExport]; game_facts: [CanvasGameFact] }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:71
 struct CanvasGameFact { source_id: String; kind: String; operation: String; field: String; value_source: String; source_span: SourceSpan; field_span: SourceSpan?; authored_instance_id: String }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:84
 struct GraphBuilder {
     graph_id :: String{""}; nodes :: [NodeRec]{}; pins :: [PinRec]{}; wires :: [WireRec]{}
     regions :: [String]{}; inline_exprs :: [InlineRec]{}
     local_pins :: [String:String]{}; local_types :: [String:String]{}; getter_pins :: [String:String]{}; next_wire :: USize{0}
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:97
 struct NodeRec { id: String; kind: String; archetype: String; title: String; span: SourceSpan; x: I32; y: I32; badges: [String]; affordances: [String]; meta_json: String? }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:110
 struct PinRec {
     id: String; node_id: String; name: String; direction: String; ty: String; role: String?
     pattern_source: String?; ability: String; fallible: Bool; effect_grant_need: String?
     span: SourceSpan; pattern_source_span: SourceSpan?; append_op: String?; element_index: USize?
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:127
 struct WireRec { id: String; from_pin: String; to_pin: String; kind: String; span: SourceSpan?; from_span: SourceSpan?; to_span: SourceSpan? }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:137
 struct InlineRec { id: String; node_id: String; role: String; source: String; span: SourceSpan }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:145
 fn canvas_reasoning_family(record: jet_foundation.Facts.DerivationRecord) -> String {
     text := "{record.subject} {record.claim} {record.rule} {record.producer}".to_ascii_lowercase()
     families := [(String, [String])]{[
@@ -51,7 +39,6 @@ fn canvas_reasoning_family(record: jet_foundation.Facts.DerivationRecord) -> Str
     ]}
     families.iter().find_map((family) -> if family._1.iter().any((needle) -> text.contains(needle)) -> .Val(family._0) else -> .None).unwrap_or("relationships")
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:172
 fn canvas_reasoning_json(path: OSPath, index: SemIndex) -> String {
     source_path := path.to_string_lossy().replace('\\', "/")
     records := [String]{}; lens_rows := [String:[String]]{}
@@ -66,7 +53,6 @@ fn canvas_reasoning_json(path: OSPath, index: SemIndex) -> String {
     }).collect().join(",")
     "{{\"kind\":\"jet.reasoning/v1\",\"source\":{json_str(source_path)},\"selection\":\"all\",\"records\":[{records.join(",")}],\"lenses\":[{lenses}],\"limits\":{{\"records\":{index.derivations().len()},\"records_truncated\":false,\"expanded\":true}}}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:224
 fn project_checked(path: OSPath, source_id: String, src: String, bundle: AST.ProgramBundle, facts: SemIndexEffectFacts, package_facts: jet_driver.Package.PackageFacts?, workspace_overlay_policy: jet_env_model.Overlay.OverlayPolicy?, runtime_events: String?) -> Projection {
     index := jet_semindex.from_checked(bundle, facts)
     if package_facts == .Val(package) -> index.attach_package_facts(package)
@@ -84,7 +70,6 @@ fn project_checked(path: OSPath, source_id: String, src: String, bundle: AST.Pro
     json := "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{GRAPH_SCHEMA_VERSION},\"source_id\":{json_str(source_id)},\"revision\":{json_str(source_revision(src))},\"fmt_fingerprint\":{json_str(source_revision(fmt))},\"source_text\":{json_str(src)},\"node_descriptors\":{node_catalog.catalog_json()},\"graphs\":[{graph_json.join(",")}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{index.schema_version()},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\",\"state_graphs\",\"assets\",\"components\"],\"effect_projection\":{effect_projection},\"enum_variants\":{enum_catalog},\"pattern_variants\":{pattern_catalog},\"blueprint\":{blueprint},\"reasoning\":{reasoning}}}}}"
     Projection { json: json, inline_exprs: inline_spans, graph_anchors: anchors, node_refs: node_refs, callable_exports: callable_exports, game_facts: game_facts }
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:306
 fn canvas_callable_exports(bundle: AST.ProgramBundle, facts: SemIndexEffectFacts) -> [CanvasCallableExport] {
     facts.name_ledger.declarations().filter((declaration) -> declaration.kind == "function")
         .filter((declaration) -> bundle.modules.get(declaration.module_ref).is_some_and((module_ref) -> !is_foreign_module(module_ref.display)))
@@ -92,11 +77,9 @@ fn canvas_callable_exports(bundle: AST.ProgramBundle, facts: SemIndexEffectFacts
         .filter_map((declaration) -> bundle.modules.get(declaration.module_ref).map((module_ref) ->
             CanvasCallableExport { module_path: module_ref.display.clone(), span: declaration.span.into(), callee: canvas_callable_callee(bundle, declaration) })).collect()
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:338
 fn is_foreign_module(display: String) -> Bool {
     display.split_once('.').and_then((parts) -> AST.ForeignLanguage.from_root(parts._0)).is_some()
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:345
 fn canvas_callable_callee(bundle: AST.ProgramBundle, declaration: jet_foundation.Names.NameDeclaration) -> String {
     module_alias := bundle.modules.get(declaration.module_ref).map((module_ref) -> module_ref.alias.as_str()).unwrap_or("")
     source_path := source_item_path(bundle.name_ledger, declaration.module_ref, module_alias, declaration.name, declaration.span, [])
@@ -110,7 +93,6 @@ fn canvas_callable_callee(bundle: AST.ProgramBundle, declaration: jet_foundation
         .map((alias) -> alias.name.as_str()).unwrap_or(module_alias)
     "{prefix}.{source_path}"
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:399
 fn enum_catalog_json(bundle: AST.ProgramBundle) -> String {
     catalog := [String:[String]]{}
     loop module_ref in bundle.modules -> collect_enum_variants(module_ref.items, &catalog)
@@ -121,7 +103,6 @@ fn enum_catalog_json(bundle: AST.ProgramBundle) -> String {
     }).collect().join(",")
     "{{{entries}}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:425
 fn collect_enum_variants(items: &[Item], catalog: &[String:[String]]) {
     loop item in items {
         if item == {
@@ -136,7 +117,6 @@ fn collect_enum_variants(items: &[Item], catalog: &[String:[String]]) {
         }
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:447
 fn pattern_catalog_json(bundle: AST.ProgramBundle) -> String {
     catalog := [String:[(String, USize)]]{}
     loop module_ref in bundle.modules -> collect_pattern_variants(module_ref.items, &catalog)
@@ -147,7 +127,6 @@ fn pattern_catalog_json(bundle: AST.ProgramBundle) -> String {
     }).collect().join(",")
     "{{{entries}}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:469
 fn collect_pattern_variants(items: &[Item], catalog: &[String:[(String, USize)]]) {
     loop item in items {
         if item == {
@@ -166,7 +145,6 @@ fn collect_pattern_variants(items: &[Item], catalog: &[String:[(String, USize)]]
         }
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:497
 fn collect_item_graphs(entry_path: &OSPath, entry_src: String, index: &SemIndex, ledger: &jet_foundation.Names.NameLedger, module_idx: USize, entry_module_idx: USize, module_display: String, module_src: String, items: &[Item], owner: String?, out: &[String], inline_spans: &[InlineExpr], anchors: &[GraphEditAnchor], node_refs: &[NodeQueryRef]) {
     loop item in items {
         if item == {
@@ -201,12 +179,10 @@ fn collect_item_graphs(entry_path: &OSPath, entry_src: String, index: &SemIndex,
     }
     _ :: entry_path
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:608
 fn function_is_fallible(f: AST.Func) -> Bool { if f.return_type.as_ref() == {
     .Val(.Result { .. }) -> true
     else -> false
 } }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:612
 fn canvas_blueprint_facts_json(path: OSPath, src: String, bundle: AST.ProgramBundle, index: SemIndex, runtime_events: String?, game_facts: [CanvasGameFact]) -> String {
     interfaces := [String]{}
     loop (module_idx, module_ref) in bundle.modules.iter().enumerate() {
@@ -223,20 +199,17 @@ fn canvas_blueprint_facts_json(path: OSPath, src: String, bundle: AST.ProgramBun
     components := game_facts.iter().filter((fact) -> fact.kind == "component").map(canvas_game_fact_json).collect().join(",")
     "{{\"runtime_events\":{runtime_events.unwrap_or("null")},\"event_dispatchers\":[{event_dispatchers}],\"interfaces\":[{interfaces.join(",")}],\"task_flows\":[{task_flows}],\"outputs\":[{outputs}],\"state_graphs\":[{state_graphs}],\"assets\":[{assets}],\"components\":[{components}],\"package_facts\":{package_facts},\"workspace_overlays\":{workspace_overlays},\"source_truth\":\"ordinary_jet_source\"}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:682
 fn canvas_game_fact_json(fact: CanvasGameFact) -> String {
     field_span := fact.field_span.map(span_json).unwrap_or_else(() -> "null".to_string())
     fields := "{{{json_str(fact.field)}:{{\"source_span\":{field_span},\"source\":{json_str(fact.value_source)}}}}}"
     "{{\"kind\":{json_str(fact.kind)},\"operation\":{json_str(fact.operation)},\"source_id\":{json_str(fact.source_id)},\"source_span\":{span_json(fact.source_span)},\"authored_instance_id\":{json_str(fact.authored_instance_id)},\"field\":{json_str(fact.field)},\"value\":{json_str(fact.value_source)},\"fields\":{fields},\"source_truth\":\"ordinary_jet_source\",\"fact_source\":\"checked_game_call\"}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:705
 fn canvas_game_facts(source_id: String, src: String, bundle: &AST.ProgramBundle) -> [CanvasGameFact] {
     facts := [CanvasGameFact]{}
     module_ref := bundle.modules.get(bundle.entry) ?? return facts
     collect_game_items(module_ref.items, source_id, src, &facts)
     facts.sort_by_key((fact) -> (_0: fact.source_span.start, _1: fact.source_span.end)); facts
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:719
 fn collect_game_items(items: &[Item], source_id: String, src: String, out: &[CanvasGameFact]) {
     loop item in items {
         if item == {
@@ -247,7 +220,6 @@ fn collect_game_items(items: &[Item], source_id: String, src: String, out: &[Can
         }
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:748
 fn collect_game_statements(statements: &[Stmt], source_id: String, src: String, out: &[CanvasGameFact]) {
     loop statement in statements {
         statement.for_each_expr((expr) -> {
@@ -286,7 +258,6 @@ fn collect_game_statements(statements: &[Stmt], source_id: String, src: String, 
     }
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:825
 fn game_assets_receiver(expr: Expr) -> Bool {
     if expr == {
         .Field(_, name, _, _) -> name == "assets"
@@ -294,14 +265,12 @@ fn game_assets_receiver(expr: Expr) -> Bool {
         else -> false
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:832
 fn game_receiver_start(expr: Expr) -> USize {
     if expr == {
         .Field(base, ..) | .Paren(base, .., _) -> game_receiver_start(base)
         else -> expr.span().start
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:839
 fn game_method_call_span(src: String, receiver: &Expr, method_span: Span) -> SourceSpan {
     fallback := SourceSpan{method_span.into()}
     start := game_receiver_start(receiver)
@@ -310,7 +279,6 @@ fn game_method_call_span(src: String, receiver: &Expr, method_span: Span) -> Sou
     close := matching_call_close(src, open) ?? return fallback
     SourceSpan { start: start, end: close }
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:862
 fn matching_call_close(src: String, open: USize) -> USize? {
     bytes := src.as_bytes(); depth := USize{1}; in_string := false; escaped := false
     loop index in open + 1..bytes.len() {
@@ -326,7 +294,6 @@ fn matching_call_close(src: String, open: USize) -> USize? {
     }
     .None
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:895
 fn game_type_name_span(src: String, enclosing: SourceSpan, method_span: Span, type_name: String) -> SourceSpan? {
     start := method_span.end.min(enclosing.end); end := enclosing.end.min(src.len())
     if start >= end -> return .None
@@ -334,12 +301,10 @@ fn game_type_name_span(src: String, enclosing: SourceSpan, method_span: Span, ty
     token_start := start + relative
     .Val(SourceSpan { start: token_start, end: token_start + type_name.len() })
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:914
 fn source_span_text(src: String, span: SourceSpan) -> String {
     text := src.get(span.start..span.end).unwrap_or("").trim() // #4303
     text.to_string()
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:922
 fn state_graph_json(graph: StateGraphFact) -> String {
     states := graph.states.iter().map((state) -> {
         reachable := state.reachable.map_or_else(() -> "null".to_string(), (value) -> value.to_string())
@@ -351,14 +316,12 @@ fn state_graph_json(graph: StateGraphFact) -> String {
     }).collect().join(",")
     "{{\"owner\":{json_str(graph.owner)},\"module\":{json_str(graph.module_path)},\"states\":[{states}],\"transitions\":[{transitions}]}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:966
 fn output_fact_json(output: jet_semindex.OutputFact) -> String {
     effects := output.entry.effects.iter().map(json_str).collect().join(",")
     params := output.entry.params.iter().map(json_str).collect().join(",")
     ret := output.entry.return_type.as_deref().map(json_str).unwrap_or_else(() -> "null".to_string())
     "{{\"binding\":{json_str(output.binding)},\"kind\":{json_str(output.kind)},\"name\":{json_str(output.name)},\"entry\":{{\"identity\":{json_str(output.entry.identity)},\"name\":{json_str(output.entry.name)},\"module_path\":{json_str(output.entry.module_path)},\"definition_span\":{span_json(output.entry.definition_span)},\"reference_span\":{span_json(output.entry.reference_span)},\"params\":[{params}],\"return_type\":{ret},\"failure_contract\":{json_str(output.entry.failure_contract)},\"failure_source\":{json_str(output.entry.failure_source)},\"authority\":{json_str(output.entry.authority)},\"effects\":[{effects}]}},\"fact_source\":\"semindex_resolved_output\"}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:993
 fn collect_interface_facts(items: &[&Item], out: &[String], scope: &[String], src: String, module_idx: USize, module_alias: String, name_ledger: &jet_foundation.Names.NameLedger) {
     loop item in items {
         if item == {
@@ -396,7 +359,6 @@ fn collect_interface_facts(items: &[&Item], out: &[String], scope: &[String], sr
         }
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1106
 fn source_item_path(name_ledger: jet_foundation.Names.NameLedger, module_idx: USize, module_alias: String, internal_name: String, span: Span, fallback_scope: [String]) -> String {
     loop candidate in ["{module_alias}.{internal_name}", if fallback_scope.is_empty() -> "{module_alias}.{internal_name}" else -> "{module_alias}.{fallback_scope.join(".")}.{internal_name}"] {
         if name_ledger.display_path(module_idx, candidate, .Val(module_idx)) == .Val(path) -> return strip_module_alias(path, module_alias)
@@ -405,11 +367,9 @@ fn source_item_path(name_ledger: jet_foundation.Names.NameLedger, module_idx: US
     fallback := if fallback_scope.is_empty() || internal_name.contains('.') -> internal_name.to_string() else -> "{fallback_scope.join(".")}.{internal_name}"
     strip_module_alias(fallback, module_alias)
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1143
 fn strip_module_alias(path: String, module_alias: String) -> String {
     path.strip_prefix(module_alias).and_then((rest) -> rest.strip_prefix('.')).unwrap_or(path).to_string()
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1150
 fn trait_fact_json(src: String, t: &AST.TraitDef, display_path: String) -> String {
     (scope, trait_name) := display_path.rsplit_once('.').map_or((_0: "", _1: display_path), (parts) -> parts)
     associated_types := t.assoc_types.iter().map((entry) -> json_str(entry._0)).collect().join(",")
@@ -419,7 +379,6 @@ fn trait_fact_json(src: String, t: &AST.TraitDef, display_path: String) -> Strin
     }).collect().join(",")
     "{{\"kind\":\"trait_interface\",\"trait\":{json_str(trait_name)},\"scope\":{json_str(scope)},\"associated_types\":[{associated_types}],\"methods\":[{methods}],\"source_span\":{span_json(t.name_span.into())},\"authoring\":[\"create_trait_impl\",\"jump_trait_to_impls\",\"palette_trait_methods\"]}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1198
 fn impl_fact_json(i: AST.ImplDef, type_path: String, trait_path: String) -> String {
     methods := i.methods.iter().map((m) -> json_str(m.name)).collect().join(",")
     associated_types := i.assoc_type_impls.iter().map((entry) -> json_str(entry._0)).collect().join(",")
@@ -428,7 +387,6 @@ fn impl_fact_json(i: AST.ImplDef, type_path: String, trait_path: String) -> Stri
     scope := trait_path.rsplit_once('.').map_or("", (parts) -> parts._0)
     "{{\"kind\":\"trait_impl\",\"type\":{json_str(type_path)},\"trait\":{json_str(trait_name)},\"scope\":{json_str(scope)},\"methods\":[{methods}],\"associated_types\":[{associated_types}],\"delegation_field\":{delegation},\"source_span\":{span_json(i.type_span.into())},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1226
 fn inline_trait_impl_fact_json(type_path: String, trait_path: String, block: &AST.TraitImplBlock) -> String {
     methods := block.methods.iter().map((m) -> json_str(m.name)).collect().join(",")
     associated_types := block.assoc_type_impls.iter().map((entry) -> json_str(entry._0)).collect().join(",")
@@ -437,7 +395,6 @@ fn inline_trait_impl_fact_json(type_path: String, trait_path: String, block: &AS
     scope := trait_path.rsplit_once('.').map_or("", (parts) -> parts._0)
     "{{\"kind\":\"trait_impl\",\"type\":{json_str(type_path)},\"trait\":{json_str(trait_name)},\"scope\":{json_str(scope)},\"methods\":[{methods}],\"associated_types\":[{associated_types}],\"delegation_field\":{delegation},\"source_span\":{span_json(block.trait_span.into())},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1254
 fn trait_method_signature(src: String, m: &AST.TraitMethodSig) -> String {
     params := m.params.iter().enumerate().flat_map((entry) -> {
         (i, p) := entry; parts := [String]{}
@@ -458,7 +415,6 @@ fn trait_method_signature(src: String, m: &AST.TraitMethodSig) -> String {
     "fn {m.name}({params}){arrow}{ret}{provenance}"
 }
 
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1302
 fn event_dispatcher_facts(path: OSPath, source: String, bundle: AST.ProgramBundle, index: SemIndex) -> [String] {
     path_text := path.to_string_lossy()
     module_ref := bundle.modules.iter().find((module_ref) -> module_ref.display == path_text.as_ref()).or_else(() -> bundle.modules.iter().find((module_ref) -> module_ref.source == source)) ?? return []
@@ -483,7 +439,6 @@ fn event_dispatcher_facts(path: OSPath, source: String, bundle: AST.ProgramBundl
         .Val("{{\"kind\":{json_str(kind)},\"source\":{json_str(call_source)},\"source_span\":{span_json(call_source_span)},\"receiver\":{receiver_name},\"receiver_source_span\":{receiver_span},\"receiver_type\":{receiver_json},\"scope\":{scope_name},\"scope_source_span\":{scope_span},\"fact_source\":\"semindex_checked_call\",\"lifetime\":\"EventScope-owned\",\"observables\":[\"listener_count\",\"blocked_count\",\"queued_count\",\"running_count\",\"DispatchReport.trace\"],\"semantics\":\"core.event_source_truth\"}}")
     }).collect()
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1365
 fn event_module_aliases(src: String) -> [String] {
     aliases := [String]{}
     loop raw_line in src.lines() {
@@ -498,7 +453,6 @@ fn event_module_aliases(src: String) -> [String] {
     }
     aliases.sort(); aliases.dedup(); aliases
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1389
 fn event_constructor_kind(src: String, call_span: SourceSpan, callee: String, _source: String, aliases: &[String]) -> String? {
     before := src.get(..call_span.start.min(src.len()))?.trim_end() // #4303
     if !aliases.iter().any((alias) -> before.ends_with("{alias}.")) -> return .None
@@ -509,7 +463,6 @@ fn event_constructor_kind(src: String, call_span: SourceSpan, callee: String, _s
         "policy_sync" -> .Val("event_policy_sync"), _ -> .None
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1415
 fn constructor_type(callee: String, source: String) -> String? {
     type_args := source.find('<').and_then((start) -> source[start + 1..<source.len()].find('>').map((end) -> source[start + 1..start + 1 + end])).map((s) -> s.trim()).filter((args) -> !args.is_empty())
     if callee == {
@@ -520,7 +473,6 @@ fn constructor_type(callee: String, source: String) -> String? {
         "scope" -> .Val("EventScope"), "policy_sync" -> .Val("EventPolicy"), _ -> .None
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1436
 fn event_call_span(src: String, callee_span: SourceSpan) -> SourceSpan? {
     tail := src.get(callee_span.end..)?
     open_offset := tail.find('(')?; open := callee_span.end + open_offset
@@ -539,7 +491,6 @@ fn event_call_span(src: String, callee_span: SourceSpan) -> SourceSpan? {
     }
     .None
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1475
 fn event_receiver(src: String, index: &SemIndex, call_span: SourceSpan, module_path: String) -> (String, String, SourceSpan)? {
     reference := index.references().iter().filter((reference) -> reference.module_path == module_path)
         .filter((reference) -> reference.span.end <= call_span.start)
@@ -553,7 +504,6 @@ fn event_receiver(src: String, index: &SemIndex, call_span: SourceSpan, module_p
     }
     .Val((_0: reference.name.clone(), _1: ty, _2: reference.span))
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1502
 fn event_scope_argument(index: SemIndex, call_span: SourceSpan, module_path: String) -> (String, SourceSpan)? {
     index.references().iter().filter((reference) -> reference.module_path == module_path)
         .filter((reference) -> reference.span.start >= call_span.start && reference.span.end <= call_span.end)
@@ -566,7 +516,6 @@ fn event_scope_argument(index: SemIndex, call_span: SourceSpan, module_path: Str
             if is_scope -> .Val((_0: reference.name.clone(), _1: reference.span)) else -> .None
         }).min_by_key((entry) -> entry.1.start)
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1526
 fn event_method_kind(receiver_type: String, method: String) -> String? {
     kind := if {
         receiver_type == ty && method == "on") if is_event_handler_type(ty -> "event_subscribe",
@@ -594,11 +543,9 @@ fn event_method_kind(receiver_type: String, method: String) -> String? {
     }
     .Val(kind)
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1556
 fn is_event_handler_type(ty: String) -> Bool {
     ty.starts_with("Event<") || ty.starts_with("AsyncEvent<") || ty.starts_with("Hook<") || ty.starts_with("DecisionHook<")
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1563
 fn trait_param_signature(src: String, p: &AST.Param) -> String {
     is_self := p.name == "self" && p.ty.name().is_empty(); out := String.new()
     if p.root -> out.push_str("#Root ")
@@ -611,7 +558,6 @@ fn trait_param_signature(src: String, p: &AST.Param) -> String {
     if p.default == .Val(default) { out.push('{'); out.push_str(snippet(src, default.span())); out.push('}') }
     out
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1605
 fn trait_return_view_from(m: AST.TraitMethodSig, params: [AST.Param]) -> String {
     map := m.declared_return_view_provenance.as_ref() ?? return String.new()
     if map.is_empty() -> return String.new()
@@ -640,7 +586,6 @@ fn trait_return_view_from(m: AST.TraitMethodSig, params: [AST.Param]) -> String 
     }
     if map.len() == 1 && keys.first().is_some_and((path) -> path.is_empty()) -> " from {body}" else -> " from ({body})"
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1664
 fn task_flow_facts(src: String) -> [String] {
     facts := [String]{}
     // Task.group / task / task.all|race|any.
@@ -652,7 +597,6 @@ fn task_flow_facts(src: String) -> [String] {
     }
     facts
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1695
 fn project_func(index: SemIndex, module_display: String, module_src: String, f: AST.Func) -> GraphBuilder {
     id := graph_id(module_display, f)
     g := GraphBuilder { graph_id: id.clone() }
@@ -680,7 +624,6 @@ fn project_func(index: SemIndex, module_display: String, module_src: String, f: 
     add_source_comment_regions(&g, module_src, f); add_execution_overlay(&g, module_src, f.body)
     g
 }
-// Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1771
 fn collect_node_refs(graph: &GraphBuilder, out: &[NodeQueryRef]) {
     loop node in graph.nodes ->
         out.push(NodeQueryRef { graph_id: graph.graph_id.clone(), node_id: node.id.clone(), kind: node.kind.clone(), title: node.title.clone(), span: node.span })

@@ -1,8 +1,8 @@
-// Ports of the deleted tests/receipt_store.rs store tests (#6096 c17). The Rust
-// ReceiptStore claim, write, lookup, record and list calls map to
-// jet_cli_receipt_claim, jet_cli_receipt_prepare plus jet_cli_receipt_publish,
-// jet_cli_receipt_lookup and jet_cli_receipt_list. A Rust store directory is a
-// Jet project root: its objects live under .jet/receipts/objects.
+// Ports of the deleted store tests (#6096 c17). The Rust ReceiptStore claim,
+// write, lookup, record and list calls map to jet_cli_receipt_claim,
+// jet_cli_receipt_prepare plus jet_cli_receipt_publish, jet_cli_receipt_lookup
+// and jet_cli_receipt_list. A Rust store directory is a Jet project root: its
+// objects live under.jet/receipts/objects.
 use {
     jet_cli.[
         JetCLIReceipt, JetCLIReceiptClaim, JetCLIReceiptSection, JetCLIRecordLink, jet_cli_comparison_input_paths,
@@ -72,7 +72,6 @@ fn rsp_list_current(store: String) -[FS, Time.Wait]> Int {
     current
 }
 
-// tests/receipt_store.rs:58-96.
 #Test("content_keys_reuse_without_timestamps_and_invalidate_only_dependents") {
     root :: rsp_root("identity")
     owner :: RspFixtureRoot{path: root}
@@ -101,9 +100,8 @@ fn rsp_list_current(store: String) -[FS, Time.Wait]> Int {
     assert(rsp_current(store, unrelated_claim))
 }
 
-// tests/receipt_store.rs:180-256. The Rust ReceiptStore::input_paths_for read
-// the explicit target's authority inputs; jet_cli_comparison_input_paths is the
-// Jet producer of that closure.
+// The Rust ReceiptStore::input_paths_for read the explicit target's authority
+// inputs; jet_cli_comparison_input_paths is the Jet producer of that closure.
 #Test("explicit_check_receipt_tracks_package_workspace_and_generated_authorities") {
     root :: rsp_root("project-authorities")
     owner :: RspFixtureRoot{path: root}
@@ -151,7 +149,6 @@ fn rsp_list_current(store: String) -[FS, Time.Wait]> Int {
     }
 }
 
-// tests/receipt_store.rs:258-287.
 #Test("result_payloads_share_one_receipt_codec_and_store") {
     root :: rsp_root("kinds")
     owner :: RspFixtureRoot{path: root}

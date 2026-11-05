@@ -1,6 +1,6 @@
 // D-GAME / D-FOUND-COREAPI1=A: Web projection of the shared headless game
-// facts. The Foundation frame plan is emitted by Web.rs; this adapter only
-// stores typed scene facts and executes that plan.
+// facts. The Foundation frame plan is; this adapter only stores typed scene
+// facts and executes that plan.
 
 function jet_game_option(value) {
   if (value != null && value.tag === "Ok") {

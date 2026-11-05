@@ -1,7 +1,7 @@
-// Native realization of the user-Rust helper plan (FFI.rs). Cargo never
-// compiles a Jet program here: its sole input is the planner's helper crate.
-// Sources and the two digest/provenance sidecars belong to one full key;
-// dependency output belongs to the toolchain/target/artifact-mode shared key.
+// Native realization of the user-Rust helper plan. Cargo never compiles a Jet
+// program here: its sole input is the planner's helper crate. Sources and the
+// two digest/provenance sidecars belong to one full key; dependency output
+// belongs to the toolchain/target/artifact-mode shared key.
 use {
     cli_files :: core.files
     cli_process :: core.process
@@ -80,7 +80,7 @@ fn jet_cli_rust_foreign_publish(directory: cli_files.Directory, name: String, by
 
 fn jet_cli_rust_foreign_home() -[Env]> String Never! { cli_sys.get("HOME") ?? (cli_sys.get("USERPROFILE") ?? "/tmp") }
 fn jet_cli_rust_foreign_cache() -[Env]> String Never! {
-    // Even the empty override is used verbatim, as in FFI.rs cache_dir.
+    // Even the empty override is used verbatim, as cache_dir.
     cli_sys.get("JET_FFI_CACHE_DIR") ?? "{jet_cli_rust_foreign_home()}/.cache/jet/ffi"
 }
 
@@ -420,8 +420,8 @@ fn jet_cli_rust_foreign_provenance(plan: JetDriverRustForeignPlan, source: Strin
     Ok(text)
 }
 
-// A complete, valid digest manifest with changed artifact bytes is E2604,
-// exactly as FFI.rs. Missing/obsolete sidecars fall through to regeneration.
+// A complete, valid digest manifest with changed artifact bytes is E2604.
+// Missing/obsolete sidecars fall through to regeneration.
 fn jet_cli_rust_foreign_verified(plan: JetDriverRustForeignPlan, source: String, release: String, toolchain: String, link_closure: String) -[FS]> Bool JetDriverRustForeignError! {
     directory :: cli_files.open_directory(release) ?? return Ok(false)
     manifest :: jet_cli_rust_foreign_text(directory, "{plan.crate_name}.sha256") ?? return Ok(false)

@@ -1,7 +1,7 @@
 // Core/Mem AllocError {requested_bytes: Int, allocator: String}: the record
 // Lower's fallible-capacity helpers build (Builtins.jet, Lists.jet, Atomic.jet)
-// and read back field by field. CAbiRoutes.rs AllocError carrier; Box16 is
-// requested_bytes (i64 word) at 0 and the owned allocator text at 8.
+// and read back field by field. Box16 is requested_bytes (i64 word) at 0 and
+// the owned allocator text at 8.
 ALLOC_ERROR_BYTES :: I64{16}
 ALLOC_ERROR_REQUESTED :: I64{0}
 ALLOC_ERROR_ALLOCATOR :: I64{8}
@@ -31,8 +31,8 @@ ALLOC_ERROR_ALLOCATOR :: I64{8}
     if data_tree_word(wrapping(left + ALLOC_ERROR_REQUESTED)) != data_tree_word(wrapping(right + ALLOC_ERROR_REQUESTED)) -> return false
     jet_rt_string_eq(data_tree_word(wrapping(left + ALLOC_ERROR_ALLOCATOR)), data_tree_word(wrapping(right + ALLOC_ERROR_ALLOCATOR)))
 }
-// Values.rs AllocError JetShow, which its Display and Debug repeat:
-// `AllocError { requested_bytes: <i64>, allocator: <String {:?}> }`.
+// AllocError JetShow, which its Display and Debug repeat: `AllocError {
+// requested_bytes: <i64>, allocator: <String {:?}> }`.
 #Export(c) fn jet_rt_handle_show_alloc_error(value: I64) -> I64 {
     target :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(target, rt_static_text("AllocError {{ requested_bytes: "))

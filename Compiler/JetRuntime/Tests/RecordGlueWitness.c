@@ -99,7 +99,7 @@ static void event_cases(void) {
         assert(p!=a->path && p->data!=a->path->data && t!=a->detail && t->data!=a->detail->data);
         expect(p,"a\"\n");expect(t,"detail\\raw");
         char golden[160];snprintf(golden,sizeof(golden),"WatchEvent { domain: %s, kind: %s, path: a\"\n, detail: detail\\raw }",domains[d],kinds[k]);
-        // CommonTypes.rs:6772-6777: unquoted raw text, no pid/port.
+        // Unquoted raw text, no pid/port.
         expect(jet_rt_handle_show_watch_event(a),golden);assert(jet_rt_handle_eq_watch_event(a,a) && jet_rt_handle_eq_watch_event(a,b));
         b->domain=(d+1)%3;assert(!jet_rt_handle_eq_watch_event(a,b));b->domain=d;
         b->kind=(k+1)%6;assert(!jet_rt_handle_eq_watch_event(a,b));b->kind=k;

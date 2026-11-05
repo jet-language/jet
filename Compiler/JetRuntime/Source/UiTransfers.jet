@@ -1,5 +1,5 @@
-// Ui.rs:302-317; C route inputs borrow owners and return a fresh cloned node.
-// Replacement drops only the clone's former metadata, never the input owner.
+// C route inputs borrow owners and return a fresh cloned node. Replacement
+// drops only the clone's former metadata, never the input owner.
 #Export(c) fn jet_ui_raw_accessibility_transfer(node: I64, accessibility: I64, present: U8) -> I64 {
     result :: jet_rt_handle_clone_jet_ui_node(node)
     previous :: ui_carrier_word(wrapping(result + UI_NODE_ACCESSIBILITY))
@@ -15,12 +15,12 @@
     result
 }
 
-// Ui.rs jet_ui_raw_node_transfer (CAbiRoutes.rs route): Jet packs the tags and
-// absent slots; this only unpacks them into a fresh Node160. Text and the
-// children List are borrowed (each child is cloned); exact Int carriers are
-// borrowed words. The wire carries no present optional slot: absent must be 63
-// (accessibility, IME, key, click, drop, shortcut). An off-contract carrier
-// is the reference's unreachable!/assert, a host defect.
+// jet_ui_raw_node_transfer (route): Jet packs the tags and absent slots; this
+// only unpacks them into a fresh Node160. Text and the children List are
+// borrowed (each child is cloned); exact Int carriers are borrowed words. The
+// wire carries no present optional slot: absent must be 63 (accessibility, IME,
+// key, click, drop, shortcut). An off-contract carrier is the reference's
+// unreachable!/assert, a host defect.
 fn ui_transfer_defect() {
     reason :: rt_static_text("invalid audited UI node carrier")
     jet_rt_unreachable(rt_text_data(reason), rt_text_len(reason))

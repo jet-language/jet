@@ -34,8 +34,8 @@ static void *adds(void *pointer) {
     return NULL;
 }
 int main(void) {
-    // Frozen low-byte indices from Sketch.rs's two unsigned wrapping FNV hashes.
-    // No alternative CMS implementation is linked into this client.
+    // Frozen low-byte indices two unsigned wrapping FNV hashes. No alternative
+    // CMS implementation is linked into this client.
     static const unsigned indices[][4] = {{57,77,97,117},{115,187,3,75},{173,179,185,191},{205,226,247,12}};
     static const char snow[] = "snow\0\xe9\x9b\xaa";
     static const Text keys[] = {{"",0,0},{"alpha",5,5},{"beta",4,4},{snow,sizeof(snow)-1,sizeof(snow)-1}};

@@ -1,5 +1,5 @@
-// Rust Prelude/Core/UnicodeString.rs:1-155, the always-on String kernel.
-// Full locale-free mappings and pinned whitespace, not a text-import fallback.
+// The always-on String kernel. Full locale-free mappings and pinned whitespace,
+// not a text-import fallback.
 use {
     text_asset :: core.text.runtime.unicode_assets
     text_unicode_fold_index :: core.text.runtime.assets.unicode_fold_index
@@ -115,7 +115,7 @@ fn upper(text: String) -> String Never! {
     map_stream(text, upper_index, upper_pool)
 }
 
-// UnicodeTables.rs:17-21 default C+F fold; no locale or Final_Sigma condition.
+// Default C+F fold; no locale or Final_Sigma condition.
 fn casefold(text: String) -> String Never! {
     fold_index :: text_unicode_fold_index.UNICODE_FOLD_INDEX
     fold_pool :: text_unicode_fold_pool.UNICODE_FOLD_POOL
@@ -136,8 +136,8 @@ fn map_stream(text: String, index_asset: [U8], pool_asset: [U8]) -> String Never
     String.from_bytes(out) ?? panic("Unicode mapping produced invalid UTF-8")
 }
 
-// Rust Text.rs:303-335. Word membership is Alphabetic OR Numeric; interior
-// lowercase is scalar-local (NOT whole-word FinalSigma), including expansions.
+// Word membership is Alphabetic OR Numeric; interior lowercase is scalar-local
+// (NOT whole-word FinalSigma), including expansions.
 fn title(text: String) -> String Never! {
     title_index_asset :: text_unicode_title_index.UNICODE_TITLE_INDEX
     title_pool_asset :: text_unicode_title_pool.UNICODE_TITLE_POOL
@@ -170,7 +170,7 @@ fn title(text: String) -> String Never! {
     String.from_bytes(out) ?? panic("Unicode title mapping produced invalid UTF-8")
 }
 
-// Rust Text.rs:982-992. Only the suffix participates in FinalSigma context.
+// Only the suffix participates in FinalSigma context.
 fn capitalize(text: String) -> String Never! {
     raw :: utf8_bytes(text)
     if raw.len() == 0 -> return ""
@@ -186,8 +186,8 @@ fn capitalize(text: String) -> String Never! {
     String.from_bytes(out) ?? panic("Unicode capitalization produced invalid UTF-8")
 }
 
-// Rust Text.rs:993-1014: uppercase wins when both mappings change (titlecase
-// digraphs). Sigma is scalar-local here, unlike lowercase's FinalSigma.
+// Uppercase wins when both mappings change (titlecase digraphs). Sigma is
+// scalar-local here, unlike lowercase's FinalSigma.
 fn swapcase(text: String) -> String Never! {
     cased :: text_unicode_cased.UNICODE_CASED
     upper_index_asset :: text_unicode_upper_index.UNICODE_UPPER_INDEX
@@ -215,9 +215,9 @@ fn swapcase(text: String) -> String Never! {
     String.from_bytes(out) ?? panic("Unicode swapcase produced invalid UTF-8")
 }
 
-// Rust Text.rs:944-981: cased + changed opposite full mapping, not the
-// Lowercase/Uppercase properties used by istitle. Public cutover is owner-gated:
-// titlecase digraph U+01C5 has BOTH predicates true in this source contract.
+// Cased + changed opposite full mapping, not the Lowercase/Uppercase properties
+// used by istitle. Public cutover is owner-gated: titlecase digraph U+01C5 has
+// BOTH predicates true in this source contract.
 fn is_lower(text: String) -> Bool Never! {
     index :: text_unicode_upper_index.UNICODE_UPPER_INDEX
     pool :: text_unicode_upper_pool.UNICODE_UPPER_POOL
@@ -247,9 +247,9 @@ fn all_cased_change(text: String, index_asset: [U8], pool_asset: [U8]) -> Bool N
     saw
 }
 
-// Rust Core/Ascii.rs:5-21: the sole deliberately byte-preserving ASCII kernel.
-// Existing String.to_ascii_lower/to_ascii_upper routing is a native/tier gate;
-// these private-module policies do not add a public core.text spelling.
+// The sole deliberately byte-preserving ASCII kernel. Existing
+// String.to_ascii_lower/to_ascii_upper routing is a native/tier gate; these
+// private-module policies do not add a public core.text spelling.
 fn ascii_lower(text: String) -> String Never! { ascii_case(text, false) }
 fn ascii_upper(text: String) -> String Never! { ascii_case(text, true) }
 fn ascii_case(text: String, upper: Bool) -> String Never! {
@@ -265,8 +265,8 @@ fn ascii_case(text: String, upper: Bool) -> String Never! {
     String.from_bytes(out) ?? panic("ASCII mapping produced invalid UTF-8")
 }
 
-// Rust Text.rs:1649-1668 literal source, NOT equality with title(text).
-// Owner gate: repeated uppercase is accepted; uncased alphabetic is rejected.
+// Literal source, NOT equality with title(text). Owner gate: repeated uppercase
+// is accepted; uncased alphabetic is rejected.
 fn is_title(text: String) -> Bool Never! {
     uppercase :: text_unicode_uppercase.UNICODE_UPPERCASE
     lowercase :: text_unicode_lowercase.UNICODE_LOWERCASE
@@ -294,7 +294,7 @@ fn is_title(text: String) -> Bool Never! {
     has_cased
 }
 
-// Rust Text.rs:939-941,1640-1645; pinned scalar properties, no scalar list.
+// Pinned scalar properties, no scalar list.
 fn is_alphabetic(text: String) -> Bool Never! {
     asset :: text_unicode_alphabetic.UNICODE_ALPHABETIC
     all_property(text, asset)
@@ -331,8 +331,8 @@ fn is_alnum(text: String) -> Bool Never! {
     true
 }
 
-// Rust Text.rs:1626-1636: nonempty; the first scalar is `_` or Alphabetic and
-// every later scalar is `_`, Alphabetic, or Numeric (char::is_alphanumeric).
+// The first scalar is `_` or Alphabetic and every later scalar is `_`,
+// Alphabetic, or Numeric (char::is_alphanumeric).
 fn is_identifier(text: String) -> Bool Never! {
     alphabetic :: text_unicode_alphabetic.UNICODE_ALPHABETIC
     numeric :: text_unicode_numeric.UNICODE_NUMERIC
@@ -349,8 +349,8 @@ fn is_identifier(text: String) -> Bool Never! {
     true
 }
 
-// Rust Text.rs:1669-1671: empty is printable; only General_Category Cc fails.
-// Format, separators, unassigned scalars and non-ASCII letters remain printable.
+// Empty is printable; only General_Category Cc fails. Format, separators,
+// unassigned scalars and non-ASCII letters remain printable.
 fn isprintable(text: String) -> Bool Never! {
     category :: text_unicode_category.UNICODE_GENERAL_CATEGORY
     raw :: utf8_bytes(text)

@@ -1,7 +1,8 @@
 // Native providers for Core.net's private TCP leaves. Stream56/Listener8 own
 // FD72, Socket56 is borrowed, and error results own the canonical NetError
-// carrier. NetHTTP.rs is the semantic source; no Rust Box/std socket layout is
-// read here. Nonblocking syscalls use HostSockets and the shared native poller.
+// carrier. The Rust original is the semantic source; no Rust Box/std socket
+// layout is read here. Nonblocking syscalls use HostSockets and the shared
+// native poller.
 #Import(c) fn net_route_inet_pton(family: I64, text: I64, output: I64) -> I64 = "inet_pton"
 
 fn net_route_detail_take(operation: I64, address: I64, message: I64, code: I64) -> I64 {
@@ -286,7 +287,7 @@ fn net_route_listen_one(address: I64, scratch: I64) -> I64 {
     I64{1}
 }
 // TCP and Unix listeners share the reference accept loop; only the operation
-// name differs (NetHTTP.rs jet_net_tcp_accept / jet_net_unix_accept).
+// name differs (jet_net_tcp_accept / jet_net_unix_accept).
 fn net_route_accept(listener: I64, operation: I64, output: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}

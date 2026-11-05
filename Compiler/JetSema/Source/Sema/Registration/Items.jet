@@ -3071,15 +3071,15 @@ enum SemaRegistrationCLIFieldKind {
     RequiredOption
 }
 
-// Rust `validate_cli_items` (CheckerCli.rs): every `#CLI` program struct of the
-// module, in item order. A struct that is not `#CLI` may carry neither a
-// callable member (E1345) nor `#Short`/`#Env` (E1319). A `#CLI` struct's
-// fields each map to one flag (E1305), keep `#Flag` meaningful (E1309), derive
-// distinct flags beside the reserved `--help`/`--allow`/`--deny` (E1306), use
-// one-letter distinct short names (E1318), and keep `#Env` off presence flags
-// (E1319). Its methods and bound members are commands with one namespace
-// (E1344), read-only receivers (E1347), and callable shapes (E1345), and are
-// not allowed on a Codable struct (E1346).
+// Rust `validate_cli_items`: every `#CLI` program struct of the module, in item
+// order. A struct that is not `#CLI` may carry neither a callable member
+// (E1345) nor `#Short`/`#Env` (E1319). A `#CLI` struct's fields each map to one
+// flag (E1305), keep `#Flag` meaningful (E1309), derive distinct flags beside
+// the reserved `--help`/`--allow`/`--deny` (E1306), use one-letter distinct
+// short names (E1318), and keep `#Env` off presence flags (E1319). Its methods
+// and bound members are commands with one namespace (E1344), read-only
+// receivers (E1347), and callable shapes (E1345), and are not allowed on a
+// Codable struct (E1346).
 fn sema_registration_cli_items(items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == .Struct(definition) {
@@ -3622,7 +3622,7 @@ fn sema_registration_import_is_unqualified(declaration: ImportDecl) -> Bool Neve
     if declaration.kind == {.Unqualified(_, _, _, _, _) -> true else -> false}
 }
 
-// Rust `Bundle/ItemReuse.rs` `by_identity`: module identity -> row.
+// `by_identity`: module identity -> row.
 fn sema_registration_module_index(graph: SemaRegistrationGraph, identity: String) -> Int? {
     if graph.counting {
         counters := graph.lookup_counters
@@ -4177,7 +4177,7 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
         sema_marker_module_bind_program(&prepared_inputs[index].program, bindings)
     }
     // Module identity -> row; duplicates are rejected below, so the first row
-    // is the only row (Rust `Bundle/ItemReuse.rs` `by_identity`).
+    // is the only row (`by_identity`).
     module_rows := name_rows()
     generic_module_index :: sema_generic_modules_index(prepared_inputs, edges)
     // User policies are package-scoped, so every module

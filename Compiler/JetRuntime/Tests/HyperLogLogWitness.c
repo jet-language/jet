@@ -39,7 +39,7 @@ static void *adds(void *pointer) {
     return NULL;
 }
 int main(void) {
-    // Frozen ACTUAL Sketch.rs offline oracle; sparse C initializers describe full 256-byte vectors.
+    // Frozen ACTUAL offline oracle; sparse C initializers describe full 256-byte vectors.
     static const uint8_t four[256] = {[37]=9,[43]=9,[167]=10,[184]=9};
     static const uint8_t shared[256] = {[37]=9,[43]=9,[167]=10,[184]=9,[244]=13};
     static const int64_t linear[256] = {

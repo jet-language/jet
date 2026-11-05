@@ -188,7 +188,7 @@ fn jet_std_process_cmd_owned(cmd: I64) -> I64 {
     result
 }
 #Export(c) fn jet_std_process_cmd(data: I64, length: I64) -> I64 {
-    // CAbiRoutes.rs:26-29 list_in treats null data or nonpositive length as empty.
+    // list_in treats null data or nonpositive length as empty.
     count :: if (length <= I64{0} || data == I64{0}) -> I64{0} else -> length
     cmd :: data_sequence_new(count, DATA_TREE_ELEMENT_BYTES)
     at := I64{0}
@@ -309,7 +309,6 @@ fn process_spec_mode(value: I64, mode: I64, field: I64) -> I64 {
 #Export(c) fn jet_process_spec_terminal(value: I64) -> I64 {
     result :: jet_rt_handle_clone_process_spec(value)
     jet_rt_handle_drop_terminal_policy(encoding_word(wrapping(result + PROCESS_SPEC_TERMINAL)))
-    // TerminalDefault.rs:7-8 + CommonTypes.rs:62-67, Cooked=1.
     encoding_store(wrapping(result + PROCESS_SPEC_TERMINAL), ui_carrier_terminal_policy_new(I64{80}, I64{24}, I64{1}))
     result
 }
@@ -323,7 +322,7 @@ fn process_spec_mode(value: I64, mode: I64, field: I64) -> I64 {
 // ns (Routes.jet lower_route_word_getter, CAbiRoutes `Duration { ns:
 // native(word) }`); a Duration always fits i64.
 fn process_duration_millis(nanos: I64) -> I64 {
-    // CommonTypes.rs:2847-2848 truncates towards zero before Process.rs max(0).
+    // The Rust original truncates towards zero before max(0).
     millis :: host_native_int(nanos) /% I64{1000000}
     if (millis < I64{0}) -> I64{0} else -> millis
 }

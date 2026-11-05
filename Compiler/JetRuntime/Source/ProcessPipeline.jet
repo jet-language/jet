@@ -1,11 +1,11 @@
-// Process.rs:2051-2455 jet_process_spec_pipeline on the HostSpawn Child72 seam.
-// Rust's drain and relay threads become one nonblocking pump on the waiting
-// task: every stage's stderr, the final stdout and each bounded relay advance
-// whenever the wait loop runs, and the task parks only when nothing moved.
-// Stage128 rows: native0 finished8 started16 errfd24 errtext32 used40 limit48
-// (-1 = no limit) relaysrc56 relaydst64 relaybuf72 start80 end88 stop96
-// relayerr104 relayactive112 errerror120. Top64: outfd0 outtext8 outerror16
-// limithit24 cancel32 exceeded40 count48 scratch56.
+// jet_process_spec_pipeline on the HostSpawn Child72 seam. Rust's drain and
+// relay threads become one nonblocking pump on the waiting task: every stage's
+// stderr, the final stdout and each bounded relay advance whenever the wait
+// loop runs, and the task parks only when nothing moved. Stage128 rows: native0
+// finished8 started16 errfd24 errtext32 used40 limit48 (-1 = no limit)
+// relaysrc56 relaydst64 relaybuf72 start80 end88 stop96 relayerr104
+// relayactive112 errerror120. Top64: outfd0 outtext8 outerror16 limithit24
+// cancel32 exceeded40 count48 scratch56.
 PIPELINE_STAGE_BYTES :: I64{128}
 PIPELINE_TOP_BYTES :: I64{64}
 PIPELINE_CHUNK_BYTES :: I64{16384}
@@ -29,7 +29,7 @@ fn pipeline_close(slot: I64) {
     spawn_close(fd_word(slot, I64{0}))
     fd_put(slot, I64{0}, I64{-1})
 }
-// Process.rs:1942-1956: SIGKILL every spawned stage's process group.
+// SIGKILL every spawned stage's process group.
 fn pipeline_stop_groups(rows: I64, count: I64) {
     at := I64{0}
     loop at < count {
@@ -38,7 +38,7 @@ fn pipeline_stop_groups(rows: I64, count: I64) {
         at += I64{1}
     }
 }
-// Process.rs:1913-1940: kill each group and child, then reap every stage.
+// Kill each group and child, then reap every stage.
 fn pipeline_cleanup(rows: I64, count: I64, scratch: I64) {
     at := I64{0}
     loop at < count {
@@ -61,11 +61,11 @@ fn pipeline_cleanup(rows: I64, count: I64, scratch: I64) {
         at += I64{1}
     }
 }
-// Process.rs:1922-1931 after a stage's own wait: its group may still hold pipes.
+// After a stage's own wait: its group may still hold pipes.
 fn pipeline_stop_after_wait(row: I64) {
     _ := host_call(I64{62}, I64{0} - pipeline_pid(row), I64{9}, I64{0})
 }
-// Process.rs jet_process_output_reserve against the stage's shared budget.
+// jet_process_output_reserve against the stage's shared budget.
 fn pipeline_reserve(row: I64, count: I64) -> I64 {
     limit :: fd_word(row, I64{48})
     if (limit < I64{0}) -> return count
@@ -81,9 +81,9 @@ fn pipeline_read(number: I64, buffer: I64) -> I64 {
         if (count != I64{-4}) -> return count
     }
 }
-// Process.rs:1301-1374 jet_process_drain_reader for one pipe: reads until it
-// would block; EOF closes; a read error cancels the pipeline; a budget
-// overrun keeps the bounded prefix, records the limit and stops every group.
+// jet_process_drain_reader for one pipe: reads until it would block; EOF
+// closes; a read error cancels the pipeline; a budget overrun keeps the bounded
+// prefix, records the limit and stops every group.
 fn pipeline_drain(top: I64, rows: I64, slot: I64, text: I64, error: I64, budget: I64, label: I64) -> Bool {
     moved := false
     scratch :: fd_word(top, I64{56})
@@ -125,8 +125,8 @@ fn pipeline_relay_end(row: I64) {
     pipeline_close(wrapping(row + I64{64}))
     fd_put(row, I64{112}, I64{0})
 }
-// Process.rs:1975-2016 jet_process_forward_pipeline_output into stage `row`
-// from the previous stage, whose row owns the limit and the shared budget.
+// jet_process_forward_pipeline_output into stage `row` from the previous stage,
+// whose row owns the limit and the shared budget.
 fn pipeline_relay(top: I64, rows: I64, row: I64, previous: I64) -> Bool {
     if (fd_word(row, I64{112}) == I64{0}) -> return false
     moved := false
@@ -193,15 +193,15 @@ fn pipeline_open(top: I64, rows: I64) -> Bool {
     }
     false
 }
-// Drain to EOF: the joins in Process.rs:2408-2410. `idle` is a zero word the
-// pump sleeps on for 1ms when no pipe moved.
+// Drain to EOF: the joins. `idle` is a zero word the pump sleeps on for 1ms
+// when no pipe moved.
 fn pipeline_finish_io(top: I64, rows: I64, idle: I64) {
     fd_put(idle, I64{0}, I64{0})
     loop pipeline_open(top, rows) {
         if !pipeline_pump(top, rows) -> _ := sync_wait(idle, I64{0}, sync_deadline(I64{1000000}))
     }
 }
-// Process.rs:2581-2594: SIGXCPU under a declared CPU limit.
+// SIGXCPU under a declared CPU limit.
 fn pipeline_status_limit(status: I64, spec: I64) -> I64 {
     if (fd_word(spec, PROCESS_SPEC_CPU_TIME_LIMIT) != I64{0} && status.bit_and(I64{127}) == I64{24}) -> return PROCESS_RESOURCE_CPU_TIME
     I64{-1}
@@ -236,7 +236,7 @@ fn pipeline_fail(top: I64, rows: I64, error: I64, err: I64) -> I64 {
 // stage's stdin, or (limited previous stage) a relay this task forwards.
 fn pipeline_spawn(spec: I64, input: I64, relayed: Bool, last: Bool, err: I64) -> I64 {
     prepared :: jet_rt_handle_clone_process_spec(spec)
-    // Pipeline stages always join their own process group (Process.rs:2151).
+    // Pipeline stages always join their own process group.
     fd_put(prepared, PROCESS_SPEC_DETACHED, I64{0})
     if !last -> fd_put(prepared, PROCESS_SPEC_STDOUT, PROCESS_STREAM_STREAM)
     if (input >= I64{0} || relayed) {
@@ -276,7 +276,7 @@ fn pipeline_secrets(specs: I64, count: I64) -> I64 {
         process_text_list_drop(own, false)
         at += I64{1}
     }
-    // Stable descending length, then adjacent dedup (Process.rs:2440-2441).
+    // Stable descending length, then adjacent dedup.
     data :: fd_word(secrets, I64{16})
     at = I64{1}
     loop at < fd_word(secrets, I64{0}) {
@@ -493,7 +493,7 @@ fn pipeline_text(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_t
         pipeline_free(top, rows)
         return I64{0}
     }
-    // Forwarders join last stage first (Process.rs:2018-2049).
+    // Forwarders join last stage first.
     at = count - I64{1}
     loop at > (I64{0}) {
         row :: pipeline_row(rows, at)
@@ -505,7 +505,7 @@ fn pipeline_text(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_t
         }
         at -= I64{1}
     }
-    // Drains: stdout first, then stderr in stage order (Process.rs:1399-1432).
+    // Drains: stdout first, then stderr in stage order.
     drained :: wrapping(scratch + I64{16384})
     fd_put(drained, I64{0}, I64{0})
     if (fd_word(top, I64{16}) != I64{0}) {

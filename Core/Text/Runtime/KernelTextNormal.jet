@@ -1,7 +1,7 @@
-// Rust BudgetStore.rs:1259-1367 `nfc` / `canonical_decompose` / `ccc` /
-// `compose`, Text.rs jet_text_nfc/nfd/nfkc/nfkd: Unicode 17.0.0 UAX #15
-// normalization over the pinned decomposition, CCC and composition-pair JUCD
-// assets. One owner for core.text.nfc/nfd/nfkc/nfkd and String.normalize().
+// `nfc` / `canonical_decompose` / `ccc` / `compose`,
+// jet_text_nfc/nfd/nfkc/nfkd: Unicode 17.0.0 UAX #15 normalization over the
+// pinned decomposition, CCC and composition-pair JUCD assets. One owner for
+// core.text.nfc/nfd/nfkc/nfkd and String.normalize().
 use {
     normal_assets :: core.text.runtime.unicode_assets
     normal_string :: core.text.runtime.kernel_unicode_string
@@ -41,9 +41,9 @@ fn encode_cps_prefix(cps: [Int], length: Int) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-// Rust `nfc` / `canonical_decompose` (BudgetStore.rs:1259-1325);
-// compatibility uses the same jet_unicode decomposition index, including tagged rows.
-// `compat` selects NFK*, `recompose` selects *C.
+// Rust `nfc` / `canonical_decompose`; compatibility uses the same jet_unicode
+// decomposition index, including tagged rows. `compat` selects NFK*, `recompose`
+// selects *C.
 fn normalize(text: String, compat: Bool, recompose: Bool) -> String Never! {
     bytes :: text.bytes()
     non_ascii := false
@@ -126,14 +126,14 @@ fn decompose_cp(out: &[Int], cp: Int, compat: Bool, index: View<U8>, pool: View<
     &out.push(cp)
 }
 
-// Rust `ccc` (BudgetStore.rs:1326-1342): binary search the generated nonzero ranges.
+// Rust `ccc`: binary search the generated nonzero ranges.
 fn normal_ccc(table: View<U8>, cp: Int) -> Int Never! {
     normal_assets.range_tag(table, cp, 0)
 }
 
-// Rust `nfc` canonical ordering (BudgetStore.rs:1264-1276).
-// Stable counting sort of each nonstarter run gives linear time even for hostile
-// descending CCC sequences. Sorted runs (the usual case) need no scratch allocation.
+// Rust `nfc` canonical ordering. Stable counting sort of each nonstarter run gives
+// linear time even for hostile descending CCC sequences. Sorted runs (the usual
+// case) need no scratch allocation.
 fn canon_order(cps: &[Int], ccc: View<U8>) Never! {
     positions := [Int]{}
     scratch := [Int]{}
@@ -176,8 +176,8 @@ fn canon_order(cps: &[Int], ccc: View<U8>) Never! {
     }
 }
 
-// Rust `nfc` composition/blocking (BudgetStore.rs:1277-1293).
-// Compact in place: a successful composition does not change last_class.
+// Rust `nfc` composition/blocking. Compact in place: a successful composition
+// does not change last_class.
 fn compose(cps: &[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
     length := 0
     starter := 0
@@ -199,8 +199,8 @@ fn compose(cps: &[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
     encode_cps_prefix(cps, length)
 }
 
-// Rust `compose` (BudgetStore.rs:1343-1367); excluded compositions are absent
-// from the generated pairs, including singleton and nonstarter exclusions.
+// Rust `compose`; excluded compositions are absent from the generated pairs,
+// including singleton and nonstarter exclusions.
 fn compose_pair(pairs: View<U8>, a: Int, b: Int) -> Int? {
     if hangul_compose(a, b) == .Val(cp) -> return Val(cp)
     low := 0
