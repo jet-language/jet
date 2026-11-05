@@ -180,6 +180,29 @@ source snapshot hash has moved, so evidence recorded under the old hash no
 longer counts. `--repro-check` and `--repro-replay` validate and replay
 `jet.hardening.repro.v1` bundles.
 
+## Compiler release candidates
+
+`jet run Tools/release/Main.jet -- candidate DIR` turns a compiler build into a
+release candidate. It writes `DIR/CANDIDATE.json` (schema
+`jet.release.candidate.v1`), one record that names the source commit and
+tree, the toolchain and its chain fixed point, every shipped and uploaded
+file's sha256, the signer, the test receipts, the support matrix
+(`Tools/release/support-matrix.tsv`) and the provenance. The record carries
+its own content digest, and `CANDIDATE.json.sig` is an Ed25519 signature of
+that digest by the `jet-release` key.
+
+`jet run Tools/release/Main.jet -- publish DIR` is the one route to a GitHub
+release. It derives the record again from disk and refuses any difference, a
+bad signature or an untrusted signer. These also block release: a target or
+shard with no receipt, a check that passed in one run and failed in another, a
+skipped or partly run check, a stale artifact, a signing failure, a chain
+without a fixed point, an archive that packs differently twice, and a release
+GitHub holds only in part. Every run appends a JSON entry under `DIR/audit/`,
+and a rerun moves the earlier stage and record there instead of deleting them.
+Evidence comes first: `publish` refuses a record with no `candidate` entry,
+and it writes its own entry before `gh release create` runs.
+`Tools/release/Tests.jet` covers each case with a fake `gh`.
+
 ## Exit codes
 
 `jet` returns stable documented exit codes so shells and CI can branch without

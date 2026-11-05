@@ -28,7 +28,8 @@
 // IDENTITY, SOURCE, SHA256SUMS, current.env, RELEASE.json, RELEASE.md, MERGE_MSG, TAG_MSG and
 // evidence/, then prints the commands for Main: make it current (jet-use), merge it to master
 // as `Merge dev: a0_NNN <summary>`, tag it, push, and publish it as the tag's GitHub release
-// with `publish-release.mjs publish SEEDS/a0_NNN`. Fail: SEEDS is unchanged; the evidence stays
+// with `jet run Tools/release/Main.jet -- candidate SEEDS/a0_NNN`, then `-- publish SEEDS/a0_NNN`.
+// Fail: SEEDS is unchanged; the evidence stays
 // in the work directory. The tool never repoints `current`, merges, tags, pushes or
 // publishes. One release run at a time (a lock in the work root); the run takes one
 // build-slot.sh slot, and every suite process runs inside that slot's memory cap. Each
@@ -366,7 +367,9 @@ async function chainStage(ctx, gate) {
     const stages = [...rows.values()].filter(row => row.stage !== 'verdict').map(row => `${row.stage} ${row.status}`).join(', ');
     if (problems.length) return gate.row('chain', 'FAIL', `${problems.join('; ')} (${stages})`);
     const sha = sha256File(s2);
-    ctx.candidate = { jet: s2, runtime: join(out, 's2/jet-runtime'), sha, identity: `${release.version}#${sha}`, jetpack: '' };
+    // RELEASE.json records both chain stages so Tools/release can check the fixed point from the seed alone.
+    const chain = { s2: `${release.version}#${sha}`, s3: `${release.version}#${sha256File(s3)}` };
+    ctx.candidate = { jet: s2, runtime: join(out, 's2/jet-runtime'), sha, identity: `${release.version}#${sha}`, jetpack: '', chain };
     gate.row('chain', 'PASS', `fixed point s2 == s3 (jet ${sha.slice(0, 16)}) from ${release.name}, no Rust (${stages}; ${verdict.note})`);
 }
 
@@ -639,7 +642,7 @@ function assemble(ctx, gate, plan) {
     for (const name of ['RESULT', 'REPORT.md']) if (existsSync(join(ctx.work, 'chain', name))) copyFileSync(join(ctx.work, 'chain', name), join(temp, 'evidence', `chain-${name}`));
     writeFileSync(join(temp, 'RELEASE.json'), `${JSON.stringify({
         schema: 'jet-release/v1', name: next, commit: sha, verdict: 'PASS', scope, created: new Date().toISOString(),
-        identity: candidate.identity, seed: { name: release.name, identity: release.identity }, summary, gains,
+        identity: candidate.identity, target: `${process.platform}-${process.arch}`, chain: candidate.chain, seed: { name: release.name, identity: release.identity }, summary, gains,
         checks: gate.rows, lost: lost.map(({ suite, case: id, tier, was, now, disposition }) => ({ suite, case: id, tier, was, now, card: disposition.card, reason: disposition.reason })),
         merge: plan,
     }, null, 2)}\n`);
@@ -666,7 +669,8 @@ function printCommands(ctx, released, plan) {
     lines.push(`  git tag -a ${ctx.next} -F ${dest}/TAG_MSG ${ctx.sha}`);
     if (plan.fastForward) {
         lines.push(`  git push origin master ${ctx.next}`);
-        lines.push(`  node Tools/agent/publish-release.mjs publish ${dest}`);
+        lines.push(`  jet run Tools/release/Main.jet -- candidate ${dest}`);
+        lines.push(`  jet run Tools/release/Main.jet -- publish ${dest}`);
     } else lines.push(`  # do not push: origin/master ${plan.origin.slice(0, 10)} is not an ancestor of ${ctx.sha.slice(0, 10)}, so the push would not fast-forward. Release a newer dev commit instead; never force-push master.`);
     process.stdout.write(`${lines.join('\n')}\n`);
 }

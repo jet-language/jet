@@ -102,9 +102,12 @@ it with the previous tag's `s2` as its seed.
    ```
 
    Then check out the `a0_NNN` tag and run the chain with `SEED=seed`.
-   Releases are built and published by `Tools/agent/publish-release.mjs`
-   (`build COMMIT --seed SEED --out OUT`, then `Tools/agent/verify-full.sh`
-   with `JET=OUT/jet`, then `publish OUT --evidence EV`); the latest is fetched
+   Releases are built by `Tools/agent/publish-release.mjs`
+   (`build COMMIT --seed SEED --out OUT`), gated by `Tools/agent/verify-full.sh`
+   with `JET=OUT/jet` on each runner, recorded and signed by
+   `jet run Tools/release/Main.jet -- candidate OUT --evidence EV`, and published
+   by `jet run Tools/release/Main.jet -- publish OUT`. Each release also carries
+   `CANDIDATE.json` and its signature `CANDIDATE.json.sig`. The latest is fetched
    with `gh release download -R jet-language/jet -p 'jet-a0_*-linux-x64.tar.gz*'`.
 3. **The `rust` branch.** The last commit that still contains the Rust
    implementation (`6083377777`) is kept as the frozen `rust` branch (see

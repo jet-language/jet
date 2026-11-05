@@ -2,6 +2,7 @@
 // Full native test gate. Independent failures accumulate; no Cargo inventory,
 // bootstrap build, reference oracle, skip or blessing can close a suite.
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,12 +24,17 @@ if (inside(realpathSync(repo), evidence)) throw Error('verify-full evidence must
 mkdirSync(evidence, { recursive: true });
 const env = { ...process.env, JET: binary, TMPDIR: scratch, TMP: scratch, TEMP: scratch, JET_TEST_SCRATCH_DIR: scratch, JET_CI_EVIDENCE_DIR: evidence, NO_COLOR: '1', TERM: 'dumb' };
 let sourcePin = null;
+// Tools/release ties each receipt to one compiler binary, runner target and shard.
+const jetSha256 = createHash('sha256').update(readFileSync(binary)).digest('hex');
+const target = `${process.platform}-${process.arch}`;
+const shardIndex = process.env.JET_TEST_SHARD ?? '0';
+const shardCount = process.env.JET_TEST_SHARD_COUNT ?? '1';
 const rows = [];
 let unsafe = '';
 const summary = join(evidence, 'verify-full-summary.tsv');
 function publish() {
     writeFileSync(summary, 'status\tscope\trc\tprerequisite\tlog\ttarget\n' + rows.map(row => [row.status, row.scope, row.code ?? '-', row.reason ?? '-', row.log, row.scope].join('\t')).join('\n') + '\n');
-    writeFileSync(join(evidence, 'verify-full.json'), JSON.stringify({ head: sourcePin, source: repo, jet: binary, scratch, status: rows.length && rows.every(row => row.status === 'PASS') ? 'PASS' : 'FAIL', rows }, null, 2) + '\n');
+    writeFileSync(join(evidence, 'verify-full.json'), JSON.stringify({ head: sourcePin, source: repo, jet: binary, jet_sha256: jetSha256, target, shard: { index: Number(shardIndex), count: Number(shardCount) }, scratch, status: rows.length && rows.every(row => row.status === 'PASS') ? 'PASS' : 'FAIL', rows }, null, 2) + '\n');
 }
 function run(scope, command, args, capture = null) {
     const log = join(evidence, `${scope}.log`);
@@ -75,8 +81,6 @@ if (process.env.JET_NATIVE_TRACE_LOG) {
     env.JET_NATIVE_TRACE_CACHE_ROOT = join(evidence, 'native-ffi-cache');
     mkdirSync(env.JET_NATIVE_TRACE_CACHE_ROOT, { recursive: true });
 }
-const shardIndex = process.env.JET_TEST_SHARD ?? '0';
-const shardCount = process.env.JET_TEST_SHARD_COUNT ?? '1';
 const selection = spawnSync(binary, ['run', 'Tools/ci/TestShards.jet', '--', shardIndex, shardCount], { cwd: repo, env, encoding: 'utf8' });
 if (selection.error || selection.status !== 0) throw Error(`native suite inventory failed: ${selection.error ?? selection.stderr}`);
 const suites = selection.stdout.trim().split('\n').filter(Boolean);
