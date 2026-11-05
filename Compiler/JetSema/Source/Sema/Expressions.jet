@@ -542,17 +542,16 @@ struct SemaExprOperatorResolution {
     derived: Bool
 }
 
-// The `equal` or `compare` hook `==`/`!=` (and `assert_eq`) dispatch to. With
-// one of each, `compare` (tested against `Ordering.Equal`), unless only the
-// `equal` is authored: a derived order beside an authored equality compares
-// the fields the author's `equal` leaves out.
+// The `equal` or `compare` hook `==`/`!=` (and `assert_eq`) dispatch to.
+// `==` is Equatable's operator, so an authored `equal` wins (S55: a
+// hand-written implementation wins). `compare`, tested against
+// `Ordering.Equal`, answers beside a derived `equal`, or alone when authored:
+// a derived order never gives `==` to a type that refused `Equatable`.
 fn sema_expr_equality_resolution(graph: SemaRegistrationGraph, op: BinOp, lhs: Type, rhs: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaExprOperatorResolution? {
     comparable :: sema_expr_registration_operator_candidates(graph, lhs, rhs, "Comparable", "compare", false, span, environment, program, &scopes, &diagnostics)
     equatable :: sema_expr_registration_operator_candidates(graph, lhs, rhs, "Equatable", "equal", false, span, environment, program, &scopes, &diagnostics)
-    if comparable.len() == 1 && equatable.len() == 1 {
-        if comparable[0].derived && !equatable[0].derived -> return Val(equatable[0])
-        return Val(comparable[0])
-    }
+    if equatable.len() == 1 && !equatable[0].derived -> return Val(equatable[0])
+    if comparable.len() == 1 && (equatable.len() == 1 || (equatable.len() == 0 && !comparable[0].derived)) -> return Val(comparable[0])
     sema_expr_operator_resolution(op, lhs, rhs, span, environment, program, &scopes, &diagnostics)
 }
 // `signature` is `function`'s signature specialized to the receiver; the

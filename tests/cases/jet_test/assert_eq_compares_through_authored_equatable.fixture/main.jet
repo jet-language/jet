@@ -10,7 +10,8 @@ impl Version.Equatable {
     }
 }
 
-// Ordered by size alone; `==` (and so assert_eq) goes through `compare`.
+// Equal by size, ordered by label: the two authored hooks disagree, and `==`
+// (and so assert_eq) is Equatable's operator, so `equal` answers.
 struct Box {
     size: Int
     label: String
@@ -25,8 +26,24 @@ impl Box.Equatable {
 impl Box.Comparable {
     fn compare(self, rhs: Box) -> Ordering {
         if {
-            self.size < rhs.size -> Ordering.Less
-            self.size > rhs.size -> Ordering.Greater
+            self.label < rhs.label -> Ordering.Less
+            self.label > rhs.label -> Ordering.Greater
+            else -> Ordering.Equal
+        }
+    }
+}
+
+// Ordered by rank alone with a derived `equal`: the authored `compare` answers.
+struct Ranked {
+    rank: Int
+    note: String
+}
+
+impl Ranked.Comparable {
+    fn compare(self, rhs: Ranked) -> Ordering {
+        if {
+            self.rank < rhs.rank -> Ordering.Less
+            self.rank > rhs.rank -> Ordering.Greater
             else -> Ordering.Equal
         }
     }
@@ -36,9 +53,13 @@ fn version(number: Int, build: String) -> Version {
     Version{number: number, build: build}
 }
 
-// A call, not a literal: `x == Box{…}` is a struct pattern test.
+// Calls, not literals: `x == Box{…}` is a struct pattern test.
 fn sized(size: Int, label: String) -> Box {
     Box{size: size, label: label}
+}
+
+fn ranked(rank: Int, note: String) -> Ranked {
+    Ranked{rank: rank, note: note}
 }
 
 #Test("assert_eq agrees with an authored equal") {
@@ -46,9 +67,15 @@ fn sized(size: Int, label: String) -> Box {
     assert_eq(version(1, "a"), version(1, "b"))
 }
 
-#Test("assert_eq agrees with an authored compare") {
+#Test("assert_eq agrees with an authored equal over an authored compare") {
     assert(sized(2, "x") == sized(2, "y"))
+    assert(sized(2, "x") < sized(1, "y"))
     assert_eq(sized(2, "x"), sized(2, "y"))
+}
+
+#Test("assert_eq agrees with an authored compare over a derived equal") {
+    assert(ranked(3, "x") == ranked(3, "y"))
+    assert_eq(ranked(3, "x"), ranked(3, "y"))
 }
 
 #Test("assert_eq reports values the authored equal rejects") {
