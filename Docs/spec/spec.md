@@ -3795,6 +3795,30 @@ use `--browser=<engines>`, `--browser-retries=<n>`,
 `--browser-reporter=<text|json|html>`, `--browser-ui`, `--browser-visual`, and
 `--browser-trace`.
 
+A package names test profiles in `package.jet`, and `--profile=<name>` or
+`defaults: { test: <name> }` selects one. Test and build profiles share one
+namespace, so a test profile can't take the name of a stock or declared build
+profile. `tests` is the built-in suite, every `#Test` of the package; other
+suites are declared in `suites:`, and an unknown suite is a manifest error, as
+is a `defaults.test` that names neither a test profile nor a Check output.
+
+```text
+test: {
+    quick: TestProfile{ suites: [tests], time_limit: 60s },
+    full: TestProfile{ suites: [tests, golden], optimize: [none, full] },
+}
+suites: { golden: TestSuite{ golden_corpus: "tests/golden" } }
+defaults: { test: quick }
+```
+
+`time_limit:` (`ms`, `s` or `m`) stops and fails each test that runs longer.
+`optimize:` runs the `tests` suite once per listed level. Each run's rows are
+its baseline in `.jet/test/<profile>/`. A later run fails when a test that
+passed in the baseline fails or is gone; a failure the baseline already holds
+does not fail it, and `-u` records the run as the new baseline. The golden
+corpus runner is not ported yet, so a profile naming a corpus suite is refused
+with E2104 (`reference/cli.md`).
+
 ### Test scope members
 
 A dot-prefixed scope member is a statement directly inside a marker that

@@ -1,0 +1,324 @@
+// `jet test --profile <name>`, and a bare `jet test` under `defaults: { test:
+// <name> }`: a test profile package.jet declares (PackageModel
+// TestProfiles.jet). Each run of the profile is a child `jet test` of this
+// jet: the `tests` suite once, or once per level its `optimize:` lists. Each
+// run's rows are compared with its baseline under `.jet/test/<profile>/`; a
+// test the baseline has passing that now fails or is gone fails the profile,
+// while a failure the baseline already holds does not. A run with no
+// baseline records one and keeps its own exit status, as `-u` does.
+use {
+    cli_files :: core.files
+    cli_sys :: core.sys
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[
+        EVIDENCE_REPORT_ENV,
+        EvidenceExpectation,
+        EvidenceKind,
+        EvidenceRecord,
+        build_option_flags,
+        evidence_outcome_name,
+        evidence_report_read,
+    ]
+    jet_pkg_model.[ComposeError, PackageFacts, TEST_SUITE_TESTS]
+}
+
+// Set in each child of a profile run to the profile's name: a child never
+// plans a profile of its own.
+JET_CLI_TEST_PROFILE_ENV :: "JET_TEST_PROFILE"
+// The profile's `time_limit` in milliseconds, for the child's harness.
+JET_CLI_TEST_TIME_LIMIT_ENV :: "JET_TEST_TIME_LIMIT_MS"
+// A row's state when its test passed.
+JET_CLI_TEST_ROW_PASSED :: "passed"
+
+// One child `jet test` of a profile run.
+struct JetCLITestProfileRun {
+    // `tests`, or `tests at optimize full`.
+    label: String
+    // Its baseline file in `.jet/test/<profile>/`.
+    rows_file: String
+    // The child's words after the executable.
+    args: [String]
+}
+
+// How a run's rows moved against its baseline, one line per test.
+struct JetCLITestRowsDiff {
+    lost: [String]
+    changed: [String]
+    added: [String]
+}
+
+// The profile plan of a `jet test`, None when this run is no profile run: a
+// child of one, `--show-default`, a `--profile` that names no test profile
+// (the build profile path reports it), or a package whose manifest doesn't
+// parse (the compile reports it). A bare run takes `defaults.test` only for
+// a package target, never for a file; a default naming neither a test
+// profile nor an output is refused.
+fn jet_cli_test_profile_plan(jet_argv: [String], positionals: [String], show_default: Bool, update: Bool, color: Bool, quiet: Bool) -[FS, Env]> JetCLIPlan? Never! {
+    if cli_sys.get(JET_CLI_TEST_PROFILE_ENV) != None || show_default -> return None
+    named :: jet_cli_profile_name(jet_argv)
+    package_target :: positionals.len() == 0 || cli_files.is_dir(positionals[0])
+    if named == "" && !package_target -> return None
+    start := if positionals.len() == 0 -> cli_files.cwd() ?? "." else -> positionals[0].copy()
+    if !package_target -> start = jet_cli_parent(start) ?? "."
+    root :: jet_cli_manifest_root(start) ?? return None
+    manifest :: jet_cli_rooted_join(root, JET_CLI_PACKAGE_FILE)
+    source :: cli_files.read(manifest) ?? return None
+    facts :: PackageFacts.parse_uncomposed(source, manifest) ?? return None
+    chosen := named.copy()
+    from_default :: chosen == ""
+    if from_default -> chosen = facts.defaults.get("test") ?? return None
+    profile :: facts.test_profile(chosen) ?? {
+        // A default that names no test profile names a Check output, which
+        // a `configs:` file may add; without one, the name is a typo.
+        if from_default && !facts.outputs.has_key(chosen) && facts.configs.len() == 0 && facts.inline_configs.len() == 0 {
+            unknown :: ComposeError.UnknownTestDefault{name: chosen.copy(), profiles: (loop declared in facts.test_profiles -> declared.name)}
+            return Val(jet_cli_fail("E1215", "`package.jet` has a shape error", unknown.message(), "name a test profile of the `test:` block, or a Check output, in `defaults: {{ test: … }}`", color, JET_DRIVER_EXIT_USER_ERROR))
+        }
+        return None
+    }
+    loop suite in profile.suites {
+        if suite == TEST_SUITE_TESTS -> next
+        stock :: facts.test_suite(suite) ?? return Val(jet_cli_not_ported("test --profile {chosen}", color))
+        corpus :: jet_cli_rooted_join(root, stock.golden_corpus)
+        if !cli_files.is_dir(corpus) {
+            return Val(jet_cli_fail("E2105", "test suite `{suite}` names the corpus `{stock.golden_corpus}`, which isn't a directory", jet_cli_why("E2105"), "create the corpus directory or correct `golden_corpus:` in package.jet", color, JET_DRIVER_EXIT_USER_ERROR))
+        }
+        // A corpus suite needs the golden runner, which this `jet` has not got yet.
+        return Val(jet_cli_not_ported("test --profile {chosen} (suite `{suite}`)", color))
+    }
+    if profile.optimize.len() > 0 {
+        if build_option_flags(jet_argv) == {
+            .Resolved(given, _) -> {
+                if given.written.any(choice -> choice.name == "optimize") {
+                    return Val(jet_cli_fail("E2104", "`--optimize` and test profile `{chosen}` both choose the optimize level", jet_cli_why("E2104"), "drop `--optimize`: the profile runs its tests at each level its `optimize:` lists", color, JET_DRIVER_EXIT_USAGE))
+                }
+            }
+            .Refused(_, _, _) -> {}
+        }
+    }
+    words := [String]{"test"}
+    index := 1
+    loop index < jet_argv.len() {
+        argument :: jet_argv[index]
+        if argument == "--" {
+            loop rest in index..<jet_argv.len() -> &words.push(jet_argv[rest].copy())
+            break
+        }
+        if argument == "--profile" {
+            index += 2
+            next
+        }
+        if !argument.starts_with("--profile=") -> &words.push(argument.copy())
+        index += 1
+    }
+    // A child's streams are captured, so a colored run asks for color.
+    if color && !words.any(argument -> argument == "--color" || argument.starts_with("--color=")) -> &words.push("--color=always")
+    runs := [JetCLITestProfileRun]{}
+    if profile.optimize.len() == 0 {
+        &runs.push(JetCLITestProfileRun{label: TEST_SUITE_TESTS, rows_file: "{TEST_SUITE_TESTS}.rows", args: words.copy()})
+    }
+    loop level in profile.optimize {
+        args := words.copy()
+        &args.push("--optimize={level.as_str()}")
+        &runs.push(JetCLITestProfileRun{label: "{TEST_SUITE_TESTS} at optimize {level.as_str()}", rows_file: "{TEST_SUITE_TESTS}-{level.as_str()}.rows", args: ^args})
+    }
+    Val(JetCLIPlan.TestProfile{profile: chosen.copy(), root: root.copy(), time_limit_ms: profile.time_limit_ms, runs: runs, update: update, quiet: quiet})
+}
+
+// A profile child's per-test time limit, None outside a profile run.
+fn jet_cli_test_profile_time_limit() -[Env]> Int? Never! {
+    if cli_sys.get(JET_CLI_TEST_PROFILE_ENV) == None -> return None
+    text :: cli_sys.get(JET_CLI_TEST_TIME_LIMIT_ENV) ?? return None
+    limit :: Int.parse(text) ?? return None
+    if limit <= 0 -> return None
+    Val(limit)
+}
+
+// Runs a profile's children together (jet_cli_test_members_run), each handing
+// its evidence report to a scratch file, then compares or records each run's
+// rows. The summary goes to stderr after every run's own output.
+fn jet_cli_test_profile(profile: String, root: String, time_limit_ms: Int?, runs: [JetCLITestProfileRun], update: Bool, quiet: Bool) -> JetDriverVerbOutput {
+    scratch :: cli_files.temp_dir("jet-test-profile") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: profile `{profile}`: couldn't create a scratch directory: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    executable :: cli_sys.executable()
+    labels := [String]{}
+    argvs := [[String]]{}
+    envs := [[String]]{}
+    loop (index, run) in runs {
+        &labels.push(run.label.copy())
+        argv := [String]{executable.copy()}
+        loop argument in run.args -> &argv.push(argument.copy())
+        &argvs.push(^argv)
+        env := [String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), EVIDENCE_REPORT_ENV, jet_cli_rooted_join(scratch.path, "{index}.bin")}
+        if time_limit_ms == .Val(limit) {
+            &env.push(JET_CLI_TEST_TIME_LIMIT_ENV)
+            &env.push("{limit}")
+        }
+        &envs.push(^env)
+    }
+    finished :: jet_cli_test_members_run("profile `{profile}`, run", labels, argvs, envs, jet_cli_native_test_width(cli_sys.cpu_count(), jet_cli_memory_available()), quiet)
+    exit_code := JET_DRIVER_EXIT_OK
+    summary := ""
+    baselines :: jet_cli_rooted_join(root, ".jet/test/{profile}")
+    loop (index, run) in runs {
+        child :: finished[index]
+        site :: "jet test: profile `{profile}`, `{run.label}`"
+        // An exit that isn't a test verdict (an internal error) stands.
+        if child.code != JET_DRIVER_EXIT_OK && child.code != JET_DRIVER_EXIT_USER_ERROR && child.code > exit_code -> exit_code = child.code
+        report_path :: jet_cli_rooted_join(scratch.path, "{index}.bin")
+        if !cli_files.exists(report_path) {
+            // The child stopped before its tests ran; its own stderr says why.
+            if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+            summary = "{summary}{site}: no test ran\n"
+            next
+        }
+        report :: evidence_report_read(report_path) ?? {
+            if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+            summary = "{summary}{site}: couldn't read its test evidence: {err.message}\n"
+            next
+        }
+        rows :: jet_cli_test_profile_rows(report.records)
+        shown :: ".jet/test/{profile}/{run.rows_file}"
+        stored :: jet_cli_rooted_join(baselines, run.rows_file)
+        if update || !cli_files.exists(stored) {
+            if child.code > exit_code -> exit_code = child.code
+            cli_files.create_dir_all(baselines) ?? {
+                if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+                summary = "{summary}{site}: couldn't create `.jet/test/{profile}`: {err}\n"
+                next
+            }
+            cli_files.write(stored, jet_cli_test_rows_text(rows)) ?? {
+                if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+                summary = "{summary}{site}: couldn't write `{shown}`: {err}\n"
+                next
+            }
+            if !quiet -> summary = "{summary}{site}: {rows.len()} rows recorded as the baseline `{shown}`\n"
+            next
+        }
+        text :: cli_files.read(stored) ?? {
+            if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+            summary = "{summary}{site}: couldn't read `{shown}`: {err}\n"
+            next
+        }
+        diff :: jet_cli_test_rows_compare(jet_cli_test_rows_parse(text), rows)
+        if diff.lost.len() > 0 && JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+        summary = "{summary}{jet_cli_test_rows_report(site, shown, rows.len(), diff, quiet)}"
+    }
+    JetDriverVerbOutput{stdout: "", stderr: summary, exit_code: exit_code}
+}
+
+// A run's rows: one `<test>\t<state>` line per test, sorted. The state is the
+// outcome's name, with `,expected` for an expected failure. A repeated test
+// name gets ` (2)`, ` (3)`, … in report order.
+fn jet_cli_test_profile_rows(records: [EvidenceRecord]) -> [String] Never! {
+    rows := [String]{}
+    names := [String]{}
+    loop record in records {
+        if record.kind != EvidenceKind.Unit -> next
+        base :: record.identity.claim_id.replace("\t", " ").replace("\n", " ")
+        name := base.copy()
+        repeat := 1
+        loop names.contains(name) {
+            repeat += 1
+            name = "{base} ({repeat})"
+        }
+        &names.push(name.copy())
+        expected :: if record.expectation == EvidenceExpectation.ExpectedFailure -> ",expected" else -> ""
+        &rows.push("{name}\t{evidence_outcome_name(record.outcome)}{expected}")
+    }
+    &rows.sort()
+    rows
+}
+
+fn jet_cli_test_rows_text(rows: [String]) -> String Never! {
+    text := ""
+    loop row in rows -> text = "{text}{row}\n"
+    text
+}
+
+fn jet_cli_test_rows_parse(text: String) -> [String] Never! {
+    rows := [String]{}
+    loop line in text.split("\n").to_list() {
+        if line != "" -> &rows.push(line)
+    }
+    rows
+}
+
+fn jet_cli_test_row_name(row: String) -> String Never! {
+    row.split("\t").to_list()[0]
+}
+
+fn jet_cli_test_row_state(row: String) -> String Never! {
+    parts :: row.split("\t").to_list()
+    if parts.len() < 2 -> return ""
+    parts[1]
+}
+
+// Lost: passed in the baseline, failing or gone now. Changed: any other
+// state that moved, or a non-passing test that is gone. Added: a test the
+// baseline lacks.
+fn jet_cli_test_rows_compare(baseline: [String], rows: [String]) -> JetCLITestRowsDiff Never! {
+    diff := JetCLITestRowsDiff{lost: [String]{}, changed: [String]{}, added: [String]{}}
+    loop before in baseline {
+        name :: jet_cli_test_row_name(before)
+        was :: jet_cli_test_row_state(before)
+        now := "missing"
+        loop row in rows {
+            if jet_cli_test_row_name(row) == name {
+                now = jet_cli_test_row_state(row)
+                break
+            }
+        }
+        if now == was -> next
+        line :: "{name}: was {was}, now {now}"
+        if was == JET_CLI_TEST_ROW_PASSED {
+            &diff.lost.push(line)
+        } else {
+            &diff.changed.push(line)
+        }
+    }
+    loop row in rows {
+        name :: jet_cli_test_row_name(row)
+        wanted :: name.copy()
+        if !baseline.any(before -> jet_cli_test_row_name(before) == wanted) -> &diff.added.push("{name}: {jet_cli_test_row_state(row)}")
+    }
+    diff
+}
+
+// The stderr lines of one compared run: the counts and each changed row
+// (unless quiet), and always every lost row.
+fn jet_cli_test_rows_report(site: String, shown: String, count: Int, diff: JetCLITestRowsDiff, quiet: Bool) -> String Never! {
+    text := ""
+    if !quiet || diff.lost.len() > 0 {
+        text = "{site}: {count} rows against `{shown}`: {diff.lost.len()} lost, {diff.changed.len()} changed, {diff.added.len()} new\n"
+    }
+    loop line in diff.lost -> text = "{text}  lost: {line}\n"
+    if !quiet {
+        loop line in diff.changed -> text = "{text}  changed: {line}\n"
+        loop line in diff.added -> text = "{text}  new: {line}\n"
+    }
+    if diff.lost.len() > 0 -> text = "{text}  run again with `-u` to make these rows the baseline\n"
+    text
+}
+
+#Test("profile rows compare lost, changed and new against the baseline") {
+    baseline :: [String]{"a\tpassed", "b\tpassed", "c\tfailed", "d\tpassed", "e\tfailed"}
+    rows :: [String]{"a\tpassed", "b\tfailed", "c\tpassed", "f\tpassed"}
+    diff :: jet_cli_test_rows_compare(baseline, rows)
+    assert_eq(diff.lost, [String]{"b: was passed, now failed", "d: was passed, now missing"})
+    assert_eq(diff.changed, [String]{"c: was failed, now passed", "e: was failed, now missing"})
+    assert_eq(diff.added, [String]{"f: passed"})
+}
+
+#Test("an unchanged run has no lost, changed or new rows") {
+    rows :: [String]{"a\tpassed", "b\tfailed,expected"}
+    diff :: jet_cli_test_rows_compare(rows, rows)
+    assert_eq(diff.lost.len() + diff.changed.len() + diff.added.len(), 0)
+    assert_eq(jet_cli_test_rows_report("s", "f", 2, diff, true), "")
+}
+
+#Test("profile rows round-trip through their baseline text") {
+    rows :: [String]{"a\tpassed", "b c\tfailed"}
+    assert_eq(jet_cli_test_rows_text(rows), "a\tpassed\nb c\tfailed\n")
+    assert_eq(jet_cli_test_rows_parse(jet_cli_test_rows_text(rows)), rows)
+    assert_eq(jet_cli_test_rows_parse(""), [String]{})
+}

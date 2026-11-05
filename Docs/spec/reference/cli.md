@@ -734,7 +734,25 @@ that can run `jet test` runs as its own child `jet test <member>` with the
 same flags, one child per core, fewer while free memory can't hold 1 GiB for
 each; each member's output is written whole, in member order, after a
 `jet test: member <name>` line on stderr (muted by `--quiet`), and the exit is
-the worst member's. A bare `--shuffle` and the other test flags are refused
+the worst member's. `--profile <name>` naming a test profile of the package's
+`package.jet` (`test: { quick: TestProfile{ suites: [tests], time_limit: 60s } }`),
+or a bare package `jet test` when `defaults: { test: <name> }` names one, runs
+that profile instead (`--show-default` runs the stock default): each run is a
+child `jet test` with the other flags, the `tests` suite once, or once per
+level `optimize: [none, full]` lists (an `--optimize` flag beside it is refused
+with E2104). `time_limit:` stops each test that runs longer and fails it; each
+test then runs alone, and with output checks the batch runs bounded by the
+limit for each test and check. Each run's output follows a
+`jet test: profile <name>, run <run>` line on stderr (muted by `--quiet`). Its
+rows (each test and its outcome) are compared with the baseline
+`.jet/test/<profile>/tests.rows` (`tests-<level>.rows` per level): a test the
+baseline has passing that now fails or is gone is lost and fails the profile
+with exit 1, while a failure the baseline already holds does not. A run with no
+baseline, or under `-u`, records its rows as the baseline and keeps its own
+exit. A profile naming a corpus suite (`suites: { golden: TestSuite{
+golden_corpus: "tests/golden" } }`) fails with E2105 when the corpus directory
+is missing and is otherwise refused with E2104 until the golden runner is
+ported. A bare `--shuffle` and the other test flags are refused
 with E2104 until they are ported. The test-result cache, the evidence
 report, and the package claims
 floor are not ported yet: every run compiles fresh, and the outcome is the

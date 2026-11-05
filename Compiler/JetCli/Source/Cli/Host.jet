@@ -246,18 +246,21 @@ fn jet_cli_test_workspace(names: [String], member_args: [[String]], quiet: Bool)
         loop argument in args -> &argv.push(argument.copy())
         &argvs.push(^argv)
     }
+    no_env := [[String]]{}
+    loop _ in argvs -> &no_env.push([String]{})
     exit_code := JET_DRIVER_EXIT_OK
-    loop run in jet_cli_test_members_run(names, argvs, jet_cli_native_test_width(cli_sys.cpu_count(), jet_cli_memory_available()), quiet) {
+    loop run in jet_cli_test_members_run("member", names, argvs, no_env, jet_cli_native_test_width(cli_sys.cpu_count(), jet_cli_memory_available()), quiet) {
         if run.code > exit_code -> exit_code = run.code
     }
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
 }
 
-// Runs each argv as a child, at most `width` at once, and writes each one's
-// output whole (after a `jet test: member` header on stderr unless quiet)
-// once it and every argv before it have finished, so the streams keep argv
-// order whatever order the children end in. The runs come back in argv order.
-fn jet_cli_test_members_run(names: [String], argvs: [[String]], width: Int, quiet: Bool) -> [JetCLITestMemberRun] {
+// Runs each argv as a child with its `envs` row of name, value pairs set, at
+// most `width` at once, and writes each one's output whole (after a
+// `jet test: <heading> <name>` header on stderr unless quiet) once it and
+// every argv before it have finished, so the streams keep argv order whatever
+// order the children end in. The runs come back in argv order.
+fn jet_cli_test_members_run(heading: String, names: [String], argvs: [[String]], envs: [[String]], width: Int, quiet: Bool) -> [JetCLITestMemberRun] {
     runs := [JetCLITestMemberRun]{}
     loop index in 0..<argvs.len() -> &runs.push(JetCLITestMemberRun{index: index, done: false, code: 0, output: "", errors: ""})
     started := 0
@@ -267,7 +270,7 @@ fn jet_cli_test_members_run(names: [String], argvs: [[String]], width: Int, quie
     task.group members(limit: width) {
         loop written < runs.len() {
             if started < argvs.len() && running < width {
-                task jet_cli_test_member_report(started, argvs[started], done.copy())
+                task jet_cli_test_member_report(started, argvs[started], envs[started], done.copy())
                 started += 1
                 running += 1
                 next
@@ -276,7 +279,7 @@ fn jet_cli_test_members_run(names: [String], argvs: [[String]], width: Int, quie
             running -= 1
             runs[run.index] = run
             loop written < runs.len() && runs[written].done {
-                if !quiet -> jet_cli_write_notice("jet test: member `{names[written]}`\n")
+                if !quiet -> jet_cli_write_notice("jet test: {heading} `{names[written]}`\n")
                 jet_cli_write_output(JetDriverVerbOutput{stdout: runs[written].output, stderr: runs[written].errors, exit_code: runs[written].code})
                 written += 1
             }
@@ -287,14 +290,16 @@ fn jet_cli_test_members_run(names: [String], argvs: [[String]], width: Int, quie
 
 // Runs one member's child in its own task, so a task that stops still
 // reports its member, as a failure.
-fn jet_cli_test_member_report(index: Int, argv: [String], done: Sender<JetCLITestMemberRun>) {
-    member :: task jet_cli_test_member(index, argv.copy())
+fn jet_cli_test_member_report(index: Int, argv: [String], env: [String], done: Sender<JetCLITestMemberRun>) {
+    member :: task jet_cli_test_member(index, argv.copy(), env.copy())
     run := ^member.join() ?? JetCLITestMemberRun{index: index, done: true, code: JET_DRIVER_EXIT_USER_ERROR, output: "", errors: "jet test: the run of `{argv.join(" ")}` stopped before it reported\n"}
     done.send(^run)
 }
 
-fn jet_cli_test_member(index: Int, argv: [String]) -> JetCLITestMemberRun {
-    receipt :: cli_process.cmd(argv).run() ?? return JetCLITestMemberRun{index: index, done: true, code: JET_DRIVER_EXIT_USER_ERROR, output: "", errors: "jet test: couldn't run `{argv.join(" ")}`: {err}\n"}
+fn jet_cli_test_member(index: Int, argv: [String], env: [String]) -> JetCLITestMemberRun {
+    spec := cli_process.cmd(argv)
+    loop pair in 0..<(env.len() /% 2) -> spec = spec.env(env[2 * pair], env[2 * pair + 1])
+    receipt :: spec.run() ?? return JetCLITestMemberRun{index: index, done: true, code: JET_DRIVER_EXIT_USER_ERROR, output: "", errors: "jet test: couldn't run `{argv.join(" ")}`: {err}\n"}
     code := receipt.code
     if !receipt.success && code <= 0 -> code = JET_DRIVER_EXIT_USER_ERROR
     JetCLITestMemberRun{index: index, done: true, code: code, output: receipt.output, errors: receipt.errors}
@@ -1681,7 +1686,9 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     if options.trace_tiers -> spec = spec.env("JET_TEST_TRACE_TIERS", "1")
     spec = spec.env("JET_TEST_CAPTURE", options.capture)
     if measure != None -> spec = spec.env("JET_TEST_MEASURE", "1")
-    run :: jet_cli_native_test_run(spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, "{binary}.records") ?? {
+    time_limit := Duration?{None}
+    if options.time_limit_ms == .Val(limit_ms) -> time_limit = Val(Duration.milliseconds(limit_ms) ?? return jet_cli_ice("the test time limit of {limit_ms} ms is out of range"))
+    run :: jet_cli_native_test_run(spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, "{binary}.records", time_limit) ?? {
         cli_files.remove(binary).drop("the native run already failed")
         return jet_cli_ice(err.message)
     }
@@ -2824,6 +2831,7 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         }
         .Test(file, source, color, verbose, threads, options) -> output = jet_cli_compile_test(file, source, color, verbose, threads, options, trace_sink)
         .TestWorkspace(names, member_args, quiet) -> output = jet_cli_test_workspace(names, member_args, quiet)
+        .TestProfile(profile, root, time_limit_ms, runs, update, quiet) -> output = jet_cli_test_profile(profile, root, time_limit_ms, runs, update, quiet)
         .New(name, template, annotated, quiet, json, color) -> output = jet_cli_new_project(name, template, annotated, quiet, json, color)
 
         .Doc(file, source, color, json, check) -> output = jet_cli_compile_doc(file, source, color, json, check)

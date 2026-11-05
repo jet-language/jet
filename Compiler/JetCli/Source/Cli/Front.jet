@@ -98,6 +98,10 @@ enum JetCLIPlan {
     // `member_args` holds each member's `jet test <member>` words, in
     // member order (Host.jet `jet_cli_test_workspace`).
     TestWorkspace(names: [String], member_args: [[String]], quiet: Bool)
+    // `jet test` under the test profile `profile` of the package at `root`:
+    // each of `runs` is a child `jet test`, compared with its baseline
+    // (TestProfile.jet `jet_cli_test_profile`); `update` rewrites them.
+    TestProfile(profile: String, root: String, time_limit_ms: Int?, runs: [JetCLITestProfileRun], update: Bool, quiet: Bool)
     // `jet new <name>`: write the project folder (Source/CmdCompile.rs
     // `run_new`); `template` is "" for the print-only starter. `json` prints
     // the created files as one `new` status line instead of the human recap.
@@ -260,6 +264,8 @@ struct JetCLITestOptions {
     profile: String
     project_root: String?
     status: String
+    // A test profile's `time_limit`: each test's wall-time bound.
+    time_limit_ms: Int?{None}
 }
 
 // Commands that validate their own flags (CLI.rs `owns_flag_vocabulary`).
@@ -1264,6 +1270,9 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
             options.filter = Val(filter)
         }
     }
+    // `--profile <test profile>`, or a bare package run under `defaults: { test: … }`.
+    if jet_cli_test_profile_plan(jet_argv, positionals, show_default, options.update_snapshots, color, quiet) == .Val(plan) -> return plan
+    options.time_limit_ms = jet_cli_test_profile_time_limit()
     if show_default && !quiet -> options.status = "jet test: using stock default\n"
     // A bare `jet test` or `jet test <dir>` tests the package: the directory's own
     // `fn test(t: Test)` file when it declares one (also for a workspace root), otherwise

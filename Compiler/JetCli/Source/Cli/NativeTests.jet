@@ -167,7 +167,9 @@ fn jet_native_test_merge(records: [JetNativeTestRecord], selected: [U64:Int], ou
 
 fn jet_native_test_failure(test: JetNativeTestCase, receipt: ProcessReceipt) -> String Never! {
     message := receipt.errors
-    if message.len() == 0 {
+    if receipt.timed_out {
+        message = "test exceeded its time limit and was stopped\n{receipt.errors}"
+    } else if message.len() == 0 {
         if receipt.signal == .Val(signal) {
             message = "native test executable terminated by signal {signal}"
         } else {
@@ -228,29 +230,51 @@ fn jet_native_test_settle(outcomes: &[U64:String], streamed: [U64:String], id: U
 // `spec` is the caller's already-configured test ProcessSpec, preserving every
 // JET_TEST_* / project / snapshot / tier option without mutating the parent env.
 // Raw child stdout/stderr never enter the separate framed outcome channel.
-fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String) -> JetNativeTestOutcomes Err! {
+// Under a `time_limit` every test runs alone in a child stopped at the limit;
+// output checks need the batch's state, so with checks the batch still runs,
+// bounded by the limit for each test and check, and only the tests it left
+// unreported rerun alone at the limit.
+fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?) -> JetNativeTestOutcomes Err! {
     clean :: spec.env_remove("JET_NATIVE_TEST_ID").env_remove("JET_NATIVE_TEST_REPORT_PATH").env_remove("JET_NATIVE_TEST_RECORDS_PATH")
-    batch_path :: "{records_path}.batch"
-    native_test_files.write(batch_path, "") ?? return Err("couldn't create native test records: {err}")
-    batch :: clean.env("JET_NATIVE_TEST_RECORDS_PATH", batch_path).run() ?? {
-        native_test_files.remove(batch_path).drop("native test spawn already failed")
-        return Err("couldn't run native tests: {err}")
-    }
-    outputs := [String]{batch.output}
-    errors := [String]{batch.errors}
+    // The spec each test that runs alone starts from.
+    alone := clean.env_remove("JET_NATIVE_TEST_ID")
+    if time_limit == .Val(limit) -> alone = alone.timeout(limit)
+    outputs := [String]{}
+    errors := [String]{}
     outcomes := [U64:String]{}
     selected := [U64:Int]{}
     loop (index, test) in tests -> &selected.add(test.id, index).drop("selected test functions are unique")
-    completed :: jet_native_test_read_records(batch_path, batch)
-    jet_native_test_merge(completed, selected, &outcomes)
     missing := [JetNativeTestCase]{}
-    loop test in tests {
-        if outcomes.get(test.id) == None -> &missing.push(test)
+    batch_success := true
+    batch_errors := ""
+    if time_limit != None && check_names.len() == 0 {
+        loop test in tests -> &missing.push(test)
+    } else {
+        batch_path :: "{records_path}.batch"
+        native_test_files.write(batch_path, "") ?? return Err("couldn't create native test records: {err}")
+        batch_spec := clean.env("JET_NATIVE_TEST_RECORDS_PATH", batch_path)
+        if time_limit == .Val(limit) {
+            bound :: limit.in(.Milliseconds) ?? return Err("the test time limit is out of range")
+            batch_spec = batch_spec.timeout(Duration.milliseconds(bound * (tests.len() + check_names.len())) ?? return Err("the test batch time limit is out of range"))
+        }
+        batch :: batch_spec.run() ?? {
+            native_test_files.remove(batch_path).drop("native test spawn already failed")
+            return Err("couldn't run native tests: {err}")
+        }
+        &outputs.push(batch.output)
+        &errors.push(batch.errors)
+        batch_success = batch.success
+        batch_errors = batch.errors
+        completed :: jet_native_test_read_records(batch_path, batch)
+        jet_native_test_merge(completed, selected, &outcomes)
+        loop test in tests {
+            if outcomes.get(test.id) == None -> &missing.push(test)
+        }
+        if missing.len() > 0 && batch.success -> return Err("native test executable completed without every selected outcome")
     }
-    if missing.len() > 0 && batch.success -> return Err("native test executable completed without every selected outcome")
     // Every outcome streamed, then the batch died: no record names the
     // culprit, so each selected test reruns alone (jet_native_test_settle).
-    exit_fatal :: missing.len() == 0 && !batch.success
+    exit_fatal :: missing.len() == 0 && !batch_success
     streamed := [U64:String]{}
     if exit_fatal {
         loop test in tests {
@@ -259,12 +283,12 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
         }
         outcomes = [U64:String]{}
     }
-    fatal_attributed := batch.success
+    fatal_attributed := batch_success
     if serial {
         loop test in missing {
             path :: "{records_path}.{test.id}"
             native_test_files.write(path, "") ?? return Err("couldn't create selected native test records: {err}")
-            receipt :: clean.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path).run() ?? {
+            receipt :: alone.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path).run() ?? {
                 native_test_files.remove(path).drop("selected native test spawn already failed")
                 return Err("couldn't run native test {test.name}: {err}")
             }
@@ -295,7 +319,7 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
                     spawn_error = Val("couldn't create selected native test records: {err}")
                     break
                 }
-                child :: clean.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path).spawn() ?? {
+                child :: alone.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path).spawn() ?? {
                     native_test_files.remove(path).drop("selected native test spawn already failed")
                     spawn_error = Val("couldn't run native test {test.name}: {err}")
                     break
@@ -334,9 +358,9 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
     loop test in tests -> &wires.push(outcomes.get(test.id) ?? return Err("native test aggregation lost an outcome"))
     if exit_fatal && !fatal_attributed {
         name :: "native test process exit"
-        &wires.push("0 {name.bytes().len()} 0 {batch.errors.bytes().len()} -\n{name}{batch.errors}")
+        &wires.push("0 {name.bytes().len()} 0 {batch_errors.bytes().len()} -\n{name}{batch_errors}")
     }
-    if !batch.success && check_names.len() > 0 {
+    if !batch_success && check_names.len() > 0 {
         report :: unrun_check_report()
         // The batch's state died with its process. Never rerun a check in the
         // fresh reporter and pretend that it observed the test-body state.

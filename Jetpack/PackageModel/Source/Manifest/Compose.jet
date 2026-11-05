@@ -14,11 +14,20 @@ impl PackageFacts {
         self = candidate
     }
 
+    // `defaults: { test: … }` may name a test profile instead of a Check
+    // output, but not a name that is both.
     fn validate_defaults(self) ComposeError! {
         loop intent in pkg_manifest_sorted(self.defaults.keys().to_list()) {
             output_name :: self.defaults[intent]
             pkg_validate_intent(intent)
-            fact :: self.outputs.get(output_name) ?? return Err(ComposeError.UnknownDefault{intent: intent, output: output_name})
+            if intent == "test" && self.test_profile(output_name) != None {
+                if self.outputs.has_key(output_name) -> return Err(ComposeError.Conflict{field: "defaults.test", left_origin: self.origin, right_origin: self.origin, left: output_name, right: "names both a test profile and an output; rename one"})
+                next
+            }
+            fact :: self.outputs.get(output_name) ?? {
+                if intent == "test" -> return Err(ComposeError.UnknownTestDefault{name: output_name, profiles: (loop profile in self.test_profiles -> profile.name)})
+                return Err(ComposeError.UnknownDefault{intent: intent, output: output_name})
+            }
             if !pkg_intent_accepts_kind(intent, fact.kind) {
                 return Err(ComposeError.Conflict{field: "defaults.{intent}", left_origin: self.origin, right_origin: self.origin, left: output_name, right: "default must select a {pkg_intent_kind_description(intent)} output"})
             }

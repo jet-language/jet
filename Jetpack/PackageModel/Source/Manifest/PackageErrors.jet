@@ -72,6 +72,8 @@ enum ComposeError {
     Conflict(field: String, left_origin: String, right_origin: String, left: String, right: String)
     UnknownDefault(intent: String, output: String)
     UnknownIntent(intent: String)
+    // `defaults.test` names neither a test profile nor an output.
+    UnknownTestDefault(name: String, profiles: [String])
 
     fn message(self) -> String Never! {
         if self == {
@@ -79,6 +81,7 @@ enum ComposeError {
             .Conflict(field, left_origin, right_origin, left, right) -> "conflicting `{field}` from `{left_origin}` ({left}) and `{right_origin}` ({right})"
             .UnknownDefault(intent, output) -> "default `{intent}` names unknown output `{output}`"
             .UnknownIntent(intent) -> "unknown Output intent `{intent}`"
+            .UnknownTestDefault(name, profiles) -> "default `test` names `{name}`, which is neither a test profile nor an output (test profiles: {if profiles.len() == 0 -> "none" else -> profiles.join(", ")})"
         }
     }
 }

@@ -1,0 +1,17 @@
+// Test profiles: `quick` bounds each test at 60 s and `tight` at 300 ms,
+// `levels` runs the tests at two optimize levels, and `full` adds the
+// `golden` corpus suite. A bare `jet test` runs `quick`.
+name: "profiled"
+version: "0.1.0"
+edition: "2026"
+authority: { allow: [IO, Time.Wait] }
+test: {
+    quick: TestProfile{ suites: [tests], time_limit: 60s },
+    tight: TestProfile{ suites: [tests], time_limit: 300ms },
+    levels: TestProfile{ suites: [tests], optimize: [none, full] },
+    full: TestProfile{ suites: [tests, golden], optimize: [none, full] },
+}
+suites: {
+    golden: TestSuite{ golden_corpus: "tests/golden" },
+}
+defaults: { test: quick }
