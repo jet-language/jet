@@ -2,7 +2,8 @@
 # Claim: every tests/ui/*.fixed.jet (50 files) compiles (tests/ui_fixes.rs:17-69)
 # Fixture migrated: each companion copied into its own dir cN/ to keep packages separate
 # Not ported: rustc --edition 2021 leg of check_fixed_companion (Rust codegen, no Jet equivalent)
-# Not ported: ffi_* skip when no cargo: all companions are checked here
+# The ffi_* companions (c12-c14) need cargo; the original skipped them without it
+# (tests/ui_fixes.rs:77-79), so they run in ownership_ui_fixes_compile_ffi_companions.case.
 fixture: ownership_ui_fixes_compile.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -31,12 +32,6 @@ step: jet check c10/fallible_ignored.fixed.jet
 exit: 0 # tests/ui_fixes.rs:34-69 companion fallible_ignored.fixed.jet must compile (jet::compile_with_path)
 step: jet check c11/fallible_unchecked.fixed.jet
 exit: 0 # tests/ui_fixes.rs:34-69 companion fallible_unchecked.fixed.jet must compile (jet::compile_with_path)
-step: jet check c12/ffi_bad_path.fixed.jet
-exit: 0 # tests/ui_fixes.rs:34-69 companion ffi_bad_path.fixed.jet must compile (jet::compile_with_path)
-step: jet check c13/ffi_bad_type.fixed.jet
-exit: 0 # tests/ui_fixes.rs:34-69 companion ffi_bad_type.fixed.jet must compile (jet::compile_with_path)
-step: jet check c14/ffi_missing_version.fixed.jet
-exit: 0 # tests/ui_fixes.rs:34-69 companion ffi_missing_version.fixed.jet must compile (jet::compile_with_path)
 step: jet check c15/impl_unknown_type.fixed.jet
 exit: 0 # tests/ui_fixes.rs:34-69 companion impl_unknown_type.fixed.jet must compile (jet::compile_with_path)
 step: jet check c16/incomparable_eq.fixed.jet
