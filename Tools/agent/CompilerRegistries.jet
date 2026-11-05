@@ -1,0 +1,1847 @@
+#!/usr/bin/env jet
+// The compiler-owned registry census and runner. No oracle, selection filter,
+// skip or Rust emission.
+// Usage (from the repository root):
+//   jet Tools/agent/CompilerRegistries.jet manifest SHA [--out DIR]
+//       write DIR/manifest.json (and print it): every registry under
+//       Compiler/*/Tests, the testkit cases entry and the retired rows, all
+//       bound to the pinned source of SHA
+//   jet Tools/agent/CompilerRegistries.jet run --jet JET --manifest JSON [--runtime DIR] [--receipt JSON] [--shard I/N]
+//       execute every listed entry (or the one-based shard I of N) and write
+//       the receipt (default JSON.receipt.json); exit 0 only when all PASS
+// Both run on an immutable export: from a checkout without a sibling
+// ../source.manifest.json, SHA is exported through Tools/agent/ProofSource.jet
+// and the export's copy of this script runs instead. BLOCKED entries stay in
+// the manifest and fail the receipt. Support files and non-registry test
+// inputs stay visible in the inventory, never counted as executed registries.
+// A package registry runs in place inside its Tests package; a JetRuntime Test
+// registry runs as an assembled standalone file; the native runtime and
+// backend registries run through their transports, which drive the existing
+// fixture runners under Compiler/*/Tests and check their real native verdicts.
+use {
+    crypto :: core.crypto
+    files :: core.files
+    json :: core.encoding.json
+    process :: core.process
+    regex :: core.regex
+    sys :: core.sys
+    term :: core.term
+    time :: core.time
+}
+
+USAGE :: "usage: jet Tools/agent/CompilerRegistries.jet manifest SHA [--out DIR] | run --jet JET --manifest JSON [--runtime DIR] [--receipt JSON] [--shard I/N]"
+TOOL :: "/Tools/agent/CompilerRegistries.jet"
+FLAGS :: [String]{"--jet", "--manifest", "--receipt", "--out", "--runtime", "--shard"}
+SOURCE_LIST :: "Compiler/JetRuntime/sources.list"
+RETIRED :: "Tools/testkit/retired-with-rust.tsv"
+RT :: "Compiler/JetRuntime/Tests/"
+BE :: "Compiler/JetBackend/Tests/"
+TEST_SCHEMA :: "jet.test.v1"
+REGISTRY_TIMEOUT_MS :: 3500000
+TRANSPORT_TIMEOUT_MS :: 600000
+REGISTRY_PACKAGE :: "name: \"compiler_registry\"\nversion: \"0.0.1\"\nedition: \"2028\"\n"
+TRANSPORT_PACKAGE :: "name: \"compiler_registry_transport\"\nversion: \"0.0.1\"\nedition: \"2028\"\nauthority: {{ allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time.Wait, FFI] }}\n"
+// The ICU root primary order of the ASCII names a repository holds: the order
+// the inventory walk lists directory entries in.
+ROOT_PRIMARY_ORDER :: " _-,;:!?.'\"()[]{{}}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz"
+CRYPTO :: [String]{"AgeCodec", "AgeV1", "CryptoAead", "CryptoArgon", "CryptoBlake3", "CryptoChaCha", "CryptoEd25519", "CryptoEd25519Signature", "CryptoEntropy", "CryptoHash", "CryptoHkdf", "CryptoOsEntropy", "CryptoPbkdf2", "CryptoSha3", "CryptoWipe", "CryptoX25519", "Sha256"}
+C_FIXTURES :: [String]{"EnvironmentLeaves", "FaultSchedule", "IterCharge", "ProgressState", "HostFault", "FloatBits", "TerminalColor", "TrapReport", "VaultHooks", "VaultProvider", "Thread", "HostSpawn", "CompilerEnv", "CompilerRoutes", "CompilerNeededJSON", "CompilerNeededURL", "CompilerNeededMathText", "DynNative"}
+FOUR_MODES :: [String]{"assemble", "lower", "link", "run"}
+
+#Error
+struct Problem {
+    message: String
+    impl Display {
+        fn display(self) -> String { self.message.copy() }
+    }
+    impl Debug {
+        fn debug(^self) -> String Never! { self.message.copy() }
+    }
+}
+
+fn problem(message: String) -> Problem Never! { Problem{message: message} }
+
+struct Options {
+    command: String
+    head: String
+    jet: String
+    manifest: String
+    receipt: String
+    out: String
+    runtime: String
+    shard: String
+}
+
+struct Setting {
+    name: String
+    value: String
+}
+
+// One inventory row: a file under Compiler/<package>/Tests.
+struct Census {
+    package: String
+    source: String
+    sha256: String
+    names: [String]
+    entry: Bool
+    role: String
+}
+
+// One registry to account for: a census row and its id and mode.
+struct Registry {
+    row: Census
+    id: String
+    mode: String
+}
+
+struct Retirement {
+    path: String
+    reason: String
+    sha256: String?
+}
+
+struct Kit {
+    sources: [String]
+    tree: Dyn
+    cases: [String]
+    retired_cases: [Dyn]
+    pending: Int
+    rust_tools: Int
+}
+
+// How a native registry is driven: the runner under Compiler/*/Tests and the
+// verdict that admits it. `blocked` names a registry without a transport.
+struct Spec {
+    kind: String
+    name: String
+    runner: String
+    modes: [String]
+    crypto: Bool
+    call: String?
+    expected: String
+    witness: String
+    expected_file: String
+    blocked: String
+}
+
+struct Runtime {
+    dir: String
+    pack: String
+    object: String
+    pack_sha256: String
+    object_sha256: String
+}
+
+// One transport run: its staged toolchain and the evidence of every command.
+struct Lane {
+    id: String
+    out: String
+    repo: String
+    log_dir: String
+    jet: String
+    runtime_dir: String
+    pack: String
+    object: String
+    node: String
+    evidence: [Dyn]
+}
+
+struct Ran {
+    code: Int
+    signal: Int?
+    timed_out: Bool
+    stdout: String
+    stderr: String
+}
+
+fn run() {
+    args :: process.args()
+    repo :: repo_root()
+    options :: parse_options(args)
+    head :: if options.command == "manifest" -> options.head.copy() else -> manifest_head(options.manifest)
+    use_pinned_source(repo, head, args)
+    if options.command == "manifest" -> return generate(repo, options)
+    if options.command == "run" -> return run_registries(repo, options)
+    fail(USAGE)
+}
+
+fn fail(message: String) -[Exec, IO]> Never {
+    term.eprint("compiler registries: {message}")
+    process.exit(1)
+}
+
+fn env_or(name: String, fallback: String) -[Env]> String Never! {
+    value :: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> return fallback.copy()
+    value
+}
+
+fn jet_cli() -[Env]> String Never! { env_or("JET", "jet") }
+
+// The shared scratch root of Tools/agent/roots.sh.
+fn scratch_root() -[Env]> String Never! {
+    cache :: env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")
+    env_or("JET_SCRATCH_ROOT", env_or("JET_STATE_ROOT", "{cache}/jet-dev"))
+}
+
+// The checkout holding this script, or else the one around the working directory.
+fn repo_root() -[Env, Exec, FS, IO]> String Never! {
+    script :: sys.executable()
+    if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
+    dir := files.cwd() ?? "/"
+    loop {
+        if files.exists("{dir}/Tools/agent/ProofSource.jet") -> return dir
+        if dir == "/" || dir == "" -> return fail("run from inside the Jet checkout")
+        dir = files.dirname(dir)
+    }
+}
+
+fn absolute(path: String) -[Env, Exec, FS, IO]> String Never! {
+    files.absolute(path) ?? fail("`{path}` cannot be resolved: {err}")
+}
+
+fn parse_options(args: [String]) -[Env, Exec, FS, IO]> Options Never! {
+    options := Options{command: "", head: "", jet: "", manifest: "", receipt: "", out: "", runtime: "", shard: ""}
+    if args.len() == 0 -> return fail(USAGE)
+    options.command = args[0].copy()
+    at := 1
+    if options.command == "manifest" && args.len() > 1 {
+        options.head = args[1].copy()
+        at = 2
+    }
+    loop at < args.len() {
+        name :: args[at]
+        value :: if at + 1 < args.len() -> args[at + 1].copy() else -> ""
+        if !FLAGS.contains(name) || value == "" -> return fail(USAGE)
+        if name == "--shard" && options.command != "run" -> return fail(USAGE)
+        if name == "--shard" {
+            options.shard = value
+        } else {
+            resolved :: absolute(value)
+            if name == "--jet" -> options.jet = resolved
+            if name == "--manifest" -> options.manifest = resolved
+            if name == "--receipt" -> options.receipt = resolved
+            if name == "--out" -> options.out = resolved
+            if name == "--runtime" -> options.runtime = resolved
+        }
+        at += 2
+    }
+    if options.command == "run" && options.jet == "" {
+        jet :: env_or("JET", "")
+        if jet != "" -> options.jet = absolute(jet)
+    }
+    options
+}
+
+fn manifest_head(path: String) -[Env, Exec, FS, IO]> String Never! {
+    if path == "" -> return ""
+    text :: files.read(path) ?? return fail("`{path}` cannot be read: {err}")
+    tree :: json.parse(text) ?? return fail("`{path}` is not JSON: {err}")
+    text_field(tree, "head")
+}
+
+fn is_full_sha(text: String) -> Bool Never! {
+    text.len() == 40 && text.bytes().all(byte -> (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{97} && byte <= U8{102}))
+}
+
+fn proof_path(repo: String) -> String Never! { "{files.dirname(repo)}/source.manifest.json" }
+
+// SOURCE's pinned commit, once Tools/agent/ProofSource.jet confirms it still
+// holds the bytes its sibling source.manifest.json records.
+fn pinned(source: String, head: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem! {
+    ran :: process.cmd([String]{jet_cli(), "{source}/Tools/agent/ProofSource.jet", "check", source, head}).cwd(source).run() ?? return Err(problem("the proof source check cannot start: {err}"))
+    if ran.code != 0 || ran.signal != None {
+        reason :: ran.errors.trim()
+        return Err(problem(if reason != "" -> reason.copy() else -> "proof source check failed for {source}"))
+    }
+    ran.output.trim().copy()
+}
+
+fn current_head(repo: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem! {
+    path :: proof_path(repo)
+    text :: files.read(path) ?? return Err(problem("`{path}` cannot be read: {err}"))
+    tree :: json.parse(text) ?? return Err(problem("`{path}` is not JSON: {err}"))
+    pinned(repo, text_field(tree, "commit")) ?? return Err(err)
+}
+
+fn use_pinned_source(repo: String, head: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> () {
+    if !is_full_sha(head) -> return fail("registry source requires a full committed SHA")
+    if files.exists(proof_path(repo)) {
+        pinned(repo, head) ?? return fail(err.message)
+        return
+    }
+    exported :: process.cmd([String]{jet_cli(), "{repo}/Tools/agent/ProofSource.jet", head, repo}).cwd(repo).output_limit(8388608).run() ?? return fail("the source export cannot start: {err}")
+    if exported.code != 0 || exported.signal != None -> return fail("the source export of {head} failed: {exported.errors.trim()}")
+    source :: exported.output.trim().copy()
+    pinned(source, head) ?? return fail(err.message)
+    argv := [String]{jet_cli(), "{source}{TOOL}"}
+    loop arg in args -> &argv.push(arg.copy())
+    child :: process.cmd(argv).cwd(source).stdout(.Inherit).stderr(.Inherit).run() ?? return fail("the pinned copy cannot start: {err}")
+    process.exit(if child.signal != None -> 1 else -> child.code)
+}
+
+// --- inventory ---------------------------------------------------------------
+
+fn primary_rank(scalar: String) -> Int Never! {
+    folded :: scalar.lower()
+    at :: ROOT_PRIMARY_ORDER.find(folded)
+    if at >= 0 && folded.count_bytes() == 1 -> return at
+    rank := 0
+    loop byte in folded.bytes() -> rank = rank * 256 + Int.from_u8(byte)
+    ROOT_PRIMARY_ORDER.count_bytes() + rank
+}
+
+fn primary_ranks(name: String) -> [Int] Never! {
+    ranks := [Int]{}
+    loop scalar in name.chars() -> &ranks.push(primary_rank("{scalar}"))
+    ranks
+}
+
+// Primary rank first; on a tie lowercase sorts before uppercase.
+fn collate(left: String, right: String) -> Ordering Never! {
+    primary :: primary_ranks(left) <=> primary_ranks(right)
+    if primary != .Equal -> return primary
+    right <=> left
+}
+
+// The files ending in `extension` under `directory` (repository-relative),
+// in collation order; package.jet is a manifest, never a member.
+fn files_under(repo: String, directory: String, extension: String) -[Env, Exec, FS, IO]> [String] Never! {
+    listed := files.list_dir("{repo}/{directory}") ?? return fail("`{directory}` cannot be listed: {err}")
+    &listed.sort_by((left: DirEntry, right: DirEntry) -> collate(left.name, right.name))
+    out := [String]{}
+    loop entry in listed {
+        path :: "{directory}/{entry.name}"
+        meta :: files.stat("{repo}/{path}") ?? return fail("`{path}` cannot be read: {err}")
+        if meta.is_symlink -> return fail("registry inventory must not follow symlinks: {repo}/{path}")
+        if meta.is_dir {
+            loop nested in files_under(repo, path, extension) -> &out.push(nested)
+        } else if entry.name.ends_with(extension) && entry.name != "package.jet" {
+            &out.push(path)
+        }
+    }
+    out
+}
+
+fn blank_bytes(out: &[U8], raw: [U8], start: Int, end: Int) Never! {
+    stop :: if end < raw.len() -> end else -> raw.len()
+    loop at in start..<stop -> &out.push(if raw[at] == (U8{10}) -> U8{10} else -> U8{32})
+}
+
+fn starts_at(raw: [U8], at: Int, word: String) -> Bool Never! {
+    needle :: word.bytes()
+    if at + needle.len() > raw.len() -> return false
+    loop k in 0..<needle.len() {
+        if raw[at + k] != needle[k] -> return false
+    }
+    true
+}
+
+fn index_of(raw: [U8], word: String, from: Int) -> Int Never! {
+    at := from
+    loop at < raw.len() {
+        if starts_at(raw, at, word) -> return at
+        at += 1
+    }
+    -1
+}
+
+// Comments and literals blanked without moving offsets: a Test inside a
+// parser input string is not a registry member. Jet nests block comments and
+// has backtick literals and triple-quoted bodies.
+fn code_mask(raw: [U8]) -> [U8] Never! {
+    out := [U8]{}
+    i := 0
+    n :: raw.len()
+    loop i < n {
+        start :: i
+        b :: raw[i]
+        if starts_at(raw, i, "//") {
+            loop i < n && raw[i] != (U8{10}) -> i += 1
+            blank_bytes(&out, raw, start, i)
+        } else if starts_at(raw, i, "/*") {
+            i += 2
+            depth := 1
+            loop i < n && depth > 0 {
+                if starts_at(raw, i, "/*") {
+                    depth += 1
+                    i += 2
+                } else if starts_at(raw, i, "*/") {
+                    depth -= 1
+                    i += 2
+                } else {
+                    i += 1
+                }
+            }
+            blank_bytes(&out, raw, start, i)
+        } else if starts_at(raw, i, "\"\"\"") {
+            end :: index_of(raw, "\"\"\"", i + 3)
+            i = if end < 0 -> n else -> end + 3
+            blank_bytes(&out, raw, start, i)
+        } else if b == (U8{34}) || b == (U8{96}) || b == (U8{39}) {
+            i += 1
+            loop i < n {
+                if raw[i] == (U8{92}) && b != (U8{96}) {
+                    i += 2
+                    next
+                }
+                closing :: raw[i] == b
+                i += 1
+                if closing -> break
+            }
+            blank_bytes(&out, raw, start, i)
+        } else {
+            &out.push(b)
+            i += 1
+        }
+    }
+    out
+}
+
+fn is_space(b: U8) -> Bool Never! { b == (U8{32}) || b == (U8{9}) || b == (U8{10}) || b == (U8{13}) || b == (U8{11}) || b == (U8{12}) }
+
+fn skip_space(raw: [U8], from: Int) -> Int Never! {
+    at := from
+    loop at < raw.len() && is_space(raw[at]) -> at += 1
+    at
+}
+
+// The exact literal names of the `#Test(...)` declarations of `text`.
+fn tests_in(text: String) -> [String] Problem! {
+    raw :: text.bytes()
+    masked :: code_mask(raw)
+    names := [String]{}
+    at := 0
+    loop {
+        found :: index_of(masked, "#Test", at)
+        if found < 0 -> break
+        at = found + 5
+        open :: skip_space(masked, at)
+        if open >= masked.len() || masked[open] != (U8{40}) -> next
+        quote :: skip_space(raw, open + 1)
+        if quote >= raw.len() || raw[quote] != (U8{34}) -> return Err(problem("registry Test must have an exact literal name"))
+        end := quote + 1
+        closed := false
+        loop end < raw.len() {
+            if raw[end] == (U8{92}) {
+                end += 2
+                next
+            }
+            if raw[end] == (U8{34}) {
+                closed = true
+                break
+            }
+            end += 1
+        }
+        if !closed -> return Err(problem("registry Test must have an exact literal name"))
+        literal :: String.from_bytes(raw.slice(quote, end + 1)) ?? return Err(problem("registry Test must have an exact literal name"))
+        parsed :: json.parse(literal) ?? return Err(problem("registry Test name {literal} is not a JSON string literal: {err}"))
+        if parsed == .Text(name) -> &names.push(name.copy()) else -> return Err(problem("registry Test must have an exact literal name"))
+    }
+    names
+}
+
+struct Patterns {
+    entry: Regex
+    abi: Regex
+    nested: Regex
+}
+
+fn patterns() -[Exec, IO]> Patterns Never! {
+    Patterns{
+        entry: regex.compile_with("^fn run\\s*\\(", regex.flags(false, true, false)) ?? fail("entry pattern: {err}"),
+        abi: regex.compile("\\bfn\\s+[A-Za-z_][A-Za-z0-9_]*\\s*\\(") ?? fail("ABI pattern: {err}"),
+        nested: regex.compile("/Tests/(?:[A-Za-z0-9]+\\.fixture/)?(?:fixtures|Fixtures)/") ?? fail("fixture pattern: {err}"),
+    }
+}
+
+fn sha256_file(repo: String, path: String) -[Env, Exec, FS, IO]> String Never! {
+    crypto.sha256(files.read_bytes("{repo}/{path}") ?? return fail("`{path}` cannot be read: {err}")).hex()
+}
+
+fn inventory(repo: String) -[Env, Exec, FS, IO]> [Census] Never! {
+    found := [Census]{}
+    shapes :: patterns()
+    packages := files.list_dir("{repo}/Compiler") ?? return fail("Compiler cannot be listed: {err}")
+    &packages.sort_by((left: DirEntry, right: DirEntry) -> collate(left.name, right.name))
+    loop item in packages {
+        if !item.is_dir || !files.is_dir("{repo}/Compiler/{item.name}/Tests") -> next
+        loop source in files_under(repo, "Compiler/{item.name}/Tests", ".jet") {
+            text :: files.read("{repo}/{source}") ?? return fail("`{source}` cannot be read: {err}")
+            masked :: String.from_bytes(code_mask(text.bytes())) ?? return fail("`{source}` masks to invalid UTF-8")
+            names :: tests_in(text) ?? return fail(err.message)
+            entry :: shapes.entry.is_match(masked)
+            abi_registry :: source.ends_with("Tests.jet") && shapes.abi.is_match(masked)
+            nested_input :: shapes.nested.is_match(source)
+            role :: if !nested_input && (names.len() > 0 || entry || abi_registry) -> "registry" else -> "support-or-fixture"
+            &found.push(Census{package: item.name.copy(), source: source, sha256: crypto.sha256(text.bytes()).hex(), names: names, entry: entry, role: role})
+        }
+    }
+    found
+}
+
+fn census_dyn(rows: [Census]) -> Dyn Never! {
+    Dyn.Array(rows.map(row -> Dyn.Object([String: Dyn]{
+        "package": Dyn.Text(row.package.copy()),
+        "source": Dyn.Text(row.source.copy()),
+        "sha256": Dyn.Text(row.sha256.copy()),
+        "names": texts(row.names),
+        "entry": Dyn.Bool(row.entry),
+        "role": Dyn.Text(row.role.copy()),
+    })))
+}
+
+fn texts(items: [String]) -> Dyn Never! { Dyn.Array(items.map(item -> Dyn.Text(item.copy()))) }
+
+fn retirements(repo: String) -[Env, Exec, FS, IO]> [Retirement] Never! {
+    text :: files.read("{repo}/{RETIRED}") ?? return fail("`{RETIRED}` cannot be read: {err}")
+    rows := [Retirement]{}
+    loop line in text.split("\n") {
+        if line.trim() == "" || line.starts_with("#") -> next
+        cells :: line.split("\t").to_list()
+        if cells.len() != 2 || cells[0] == "" || cells[1] == "" -> return fail("retired rows need an exact source ID and reason")
+        path :: cells[0].copy()
+        sha :: if files.exists("{repo}/{path}") -> Val(sha256_file(repo, path)) else -> None
+        &rows.push(Retirement{path: path, reason: cells[1].copy(), sha256: sha})
+    }
+    rows
+}
+
+fn retirement_dyn(row: Retirement, status: String) -> Dyn Never! {
+    entries := [String: Dyn]{"path": Dyn.Text(row.path.copy()), "reason": Dyn.Text(row.reason.copy())}
+    if row.sha256 == .Val(sha) -> entries["sha256"] = Dyn.Text(sha.copy())
+    if status != "" -> entries["status"] = Dyn.Text(status.copy())
+    Dyn.Object(entries.copy())
+}
+
+fn registry_rows(repo: String, census: [Census]) -[Env, Exec, FS, IO]> [Registry] Never! {
+    retired :: retirements(repo).map(row -> row.path.copy())
+    rows := [Registry]{}
+    loop row in census {
+        if row.role != "registry" || retired.contains(row.source) -> next
+        id :: row.source.removeprefix("Compiler/").removesuffix(".jet")
+        &rows.push(Registry{row: row.copy(), id: id.copy(), mode: if row.names.len() > 0 -> "test" else -> "run"})
+        if row.names.len() > 0 && row.entry -> &rows.push(Registry{row: row.copy(), id: "{id}.run", mode: "run"})
+    }
+    rows
+}
+
+// The testkit binary's sources: Tools/testkit (run.jet and its manifest) and
+// the Compiler/JetTestKit engine package it depends on, assembled under their
+// repository-relative paths so the path dependency still resolves.
+fn testkit_inventory(repo: String) -[Env, Exec, FS, IO]> Kit Never! {
+    sources := [String]{"Tools/testkit/run.jet", "Tools/testkit/package.jet", "Compiler/JetTestKit/package.jet"}
+    engine := files_under(repo, "Compiler/JetTestKit", ".jet")
+    &engine.sort()
+    loop path in engine -> &sources.push(path)
+    &sources.push(RETIRED)
+    table :: retirements(repo)
+    retired := [Dyn]{}
+    pending := [Dyn]{}
+    retired_ids := [String]{}
+    loop row in table {
+        if !row.path.starts_with("tests/cases/") -> next
+        if row.reason.starts_with("Retired with Rust:") {
+            &retired.push(retirement_dyn(row, ""))
+            &retired_ids.push(row.path.copy())
+        }
+        if row.reason.starts_with("PRODUCT INTEROP RED:") -> &pending.push(retirement_dyn(row, "RED"))
+    }
+    cases :: files_under(repo, "tests/cases", ".case").filter(path -> !retired_ids.contains(path))
+    requirement :: regex.compile("^(?:requires: tool:|when tool |step(?: [^:]+)?: )") ?? return fail("requirement pattern: {err}")
+    rust :: regex.compile("\\b(?:cargo|rustc|rustup)\\b") ?? return fail("Rust tool pattern: {err}")
+    requirements := [Dyn]{}
+    case_rows := [Dyn]{}
+    loop path in cases {
+        bytes :: files.read_bytes("{repo}/{path}") ?? return fail("`{path}` cannot be read: {err}")
+        &case_rows.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path.copy()), "sha256": Dyn.Text(crypto.sha256(bytes).hex())}))
+        text :: String.from_bytes(bytes) ?? return fail("`{path}` is not UTF-8")
+        number := 0
+        loop line in text.split("\n") {
+            number += 1
+            if requirement.is_match(line) && rust.is_match(line) {
+                &requirements.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path.copy()), "line": Dyn.Int(number), "source": Dyn.Text(line.copy())}))
+            }
+        }
+    }
+    source_rows :: sources.map(path -> Dyn.Object([String: Dyn]{"path": Dyn.Text(path.copy()), "sha256": Dyn.Text(sha256_file(repo, path))}))
+    tree :: Dyn.Object([String: Dyn]{
+        "sources": Dyn.Array(source_rows),
+        "cases": Dyn.Array(case_rows.copy()),
+        "retiredCases": Dyn.Array(retired.copy()),
+        "pendingProductInterop": Dyn.Array(pending.copy()),
+        "rustToolRequirements": Dyn.Array(requirements.copy()),
+    })
+    Kit{sources: sources.copy(), tree: tree, cases: cases, retired_cases: retired.copy(), pending: pending.len(), rust_tools: requirements.len()}
+}
+
+// --- imports of an assembled standalone registry ----------------------------
+
+// A `use { … }` block rewritten as one `use` line per row, keeping every line
+// and byte offset: `use {` and its `}` turn to spaces and each row's last four
+// columns of indentation become `use `. `pub use { … }` stays as written.
+fn unblock_uses(text: String) -> String Never! {
+    lines := text.split("\n").to_list()
+    indent := ""
+    open := false
+    depth := 0
+    loop at in 0..<lines.len() {
+        line :: lines[at].copy()
+        if !open {
+            trimmed :: line.trim_start()
+            lead :: line.removesuffix(trimmed)
+            if lead.bytes().all(b -> is_space(b)) && trimmed.starts_with("use {{") && trimmed.removeprefix("use {{").trim() == "" {
+                indent = lead.copy()
+                open = true
+                lines[at] = " ".repeat(line.len())
+            }
+            next
+        }
+        closer :: "{indent}}}"
+        if depth == 0 && line.trim_end() == closer {
+            open = false
+            lines[at] = " ".repeat(line.len())
+            next
+        }
+        row :: "{indent}    "
+        if depth == 0 && line.starts_with(row) {
+            rest :: line.removeprefix(row)
+            first :: if rest.count_bytes() > 0 -> rest.bytes()[0] else -> U8{0}
+            if (first >= (U8{65}) && first <= (U8{90})) || (first >= (U8{97}) && first <= (U8{122})) || first == (U8{95}) || first == (U8{34}) -> lines[at] = "{indent}use {rest}"
+        }
+        code :: line.partition("//").head
+        loop b in code.bytes() {
+            if b == (U8{91}) -> depth += 1
+            if b == (U8{93}) -> depth -= 1
+        }
+    }
+    lines.join("\n")
+}
+
+fn blank_match(found: Match) -> String Never! {
+    out := [U8]{}
+    blank_bytes(&out, found.text.bytes(), 0, found.text.bytes().len())
+    String.from_bytes(out) ?? ""
+}
+
+// Package imports blanked; a repeated single-line Core import blanked.
+fn strip_imports(text: String) -[Exec, IO]> String Never! {
+    // `(?:\n|\z)`, not a multiline `$`: Core regex's `$` matches only at the end of the text.
+    package_import :: regex.compile_with("^use (?:jet_\\w+|compiler_bootstrap)\\.(?:\\[[^\\]]*\\]|[A-Za-z_][A-Za-z0-9_]*[ \\t]*(?:\\n|\\z))", regex.flags(false, true, false)) ?? return fail("import pattern: {err}")
+    core_import :: regex.compile("use (?:[A-Za-z_][A-Za-z0-9_]* :: )?core\\.[^\\[\\n]*") ?? return fail("Core import pattern: {err}")
+    blanked :: package_import.replace_all_with(unblock_uses(text), blank_match)
+    seen := [String]{}
+    lines := [String]{}
+    loop line in blanked.split("\n") {
+        if core_import.full_match(line) {
+            key :: line.trim_end()
+            if seen.contains(key) {
+                &lines.push(" ".repeat(line.len()))
+                next
+            }
+            &seen.push(key.copy())
+        }
+        &lines.push(line.copy())
+    }
+    lines.join("\n")
+}
+
+// --- transports ---------------------------------------------------------------
+
+fn spec(kind: String, name: String, runner: String) -> Spec Never! {
+    Spec{kind: kind, name: name, runner: runner, modes: [String]{}, crypto: false, call: None, expected: "", witness: "", expected_file: "", blocked: ""}
+}
+
+fn specification(id: String) -> Spec? Never! {
+    if id.starts_with("JetRuntime/Tests/") {
+        name :: id.removeprefix("JetRuntime/Tests/").removesuffix("Tests")
+        if CRYPTO.contains(name) {
+            found := spec("suite", "", "{RT}run-crypto-fixtures.mjs")
+            found.modes = FOUR_MODES.copy()
+            found.crypto = true
+            return Val(found)
+        }
+        plain :: if name == {
+            "Alloc" -> Val((call: Val("alloc_tests"), expected: "alloc tests: ok\n"))
+            "Collections" -> Val((call: Val("collections_tests"), expected: ""))
+            "Scan" -> Val((call: Val("scan_tests"), expected: ""))
+            "Text" -> Val((call: Val("text_tests"), expected: ""))
+            "Unicode" -> Val((call: Val("unicode_tests"), expected: ""))
+            "Secret" -> Val((call: None, expected: "secret tests: ok\n"))
+            else -> None
+        }
+        if plain == .Val(table) {
+            found := spec("plain", name, "{RT}check-runtime.mjs")
+            found.call = table.call.copy()
+            found.expected = table.expected.copy()
+            return Val(found)
+        }
+        if ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves"}).contains(name) -> return Val(spec("codec-fixture", name, "{RT}run-native-codec-file-leaves.mjs"))
+        if name == "ProcessExecution" || name == "TerminalProcess" {
+            found := spec("process-fixture", name, "{RT}run-process-witnesses.mjs")
+            found.witness = "{RT}{name}Witness.c"
+            found.expected_file = "{RT}{name}Witness.stdout"
+            return Val(found)
+        }
+        if name == "FilesWalk" || name == "HostParallelism" {
+            found := spec("native-suite", name, if name == "FilesWalk" -> "{RT}run-files-walk-fixtures.mjs" else -> "{RT}run-host-parallelism-fixtures.mjs")
+            found.witness = "{RT}{name}Witness.c"
+            found.modes = [String]{"assemble", "lower", "audit", "link", "run"}
+            return Val(found)
+        }
+        suite :: if name == {
+            "AllocationPolicy" | "World" | "Sentry" | "SentryInline" | "TestScope" -> Val((runner: "run-world-sentry-fixtures.mjs", modes: FOUR_MODES.copy()))
+            "Channel" -> Val((runner: "run-channel-fixtures.mjs", modes: FOUR_MODES.copy()))
+            "Stm" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-stm", "lower", "link-stm", "run-stm"}))
+            "Sync" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-sync", "lower", "link-sync", "run-sync"}))
+            "Observe" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-observe", "lower", "link-observe", "run-observe"}))
+            "SharedPublication" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-publication", "lower", "link-publication", "run-publication"}))
+            "SharedSource" -> Val((runner: "run-shared-source-fixtures.mjs", modes: FOUR_MODES.copy()))
+            "SharedThread" -> Val((runner: "run-thread-fixtures.mjs", modes: [String]{"assemble", "lower", "shared-link", "shared-run"}))
+            "Parallel" -> Val((runner: "run-parallel-fixtures.mjs", modes: FOUR_MODES.copy()))
+            "Scheduler" -> Val((runner: "run-scheduler-fixtures.mjs", modes: FOUR_MODES.copy()))
+            "TestSuite" -> Val((runner: "run-testsuite-fixtures.mjs", modes: FOUR_MODES.copy()))
+            "CollectionsStop" -> Val((runner: "run-collections-stop.mjs", modes: [String]{"--assemble", "--lower", "--run"}))
+            else -> None
+        }
+        if suite == .Val(table) {
+            found := spec("suite", name, "{RT}{table.runner}")
+            found.modes = table.modes.copy()
+            return Val(found)
+        }
+        if C_FIXTURES.contains(name) -> return Val(spec("c", name, "{BE}run-runtime.mjs"))
+        found := spec("blocked", name, "")
+        found.blocked = "No registered transport for {id}; the source must not be counted without an exact native verdict"
+        return Val(found)
+    }
+    if !id.starts_with("JetBackend/Tests/") -> return None
+    name :: id.removeprefix("JetBackend/Tests/")
+    if name == "LinkIndexes" -> return Val(spec("indices", "", "{BE}run-link.mjs"))
+    if name == "LinkPackRoots" -> return Val(spec("roots", "", "{BE}run-runtime-pack-roots.mjs"))
+    if name == "LinkRuntime" -> return Val(spec("link", "", "{BE}run-link.mjs"))
+    None
+}
+
+// The manifest's view of a transport: exactly the fields its kind uses.
+fn spec_dyn(found: Spec, runner_sha256: String) -> Dyn Never! {
+    entries := [String: Dyn]{"type": Dyn.Text(found.kind.copy())}
+    if found.kind == "suite" {
+        entries["runner"] = Dyn.Text(found.runner.copy())
+        entries["modes"] = texts(found.modes)
+        if found.crypto -> entries["crypto"] = Dyn.Bool(true) else -> entries["name"] = Dyn.Text(found.name.copy())
+    } else if found.kind == "indices" || found.kind == "roots" || found.kind == "link" {
+        entries["runner"] = Dyn.Text(found.runner.copy())
+    } else {
+        entries["name"] = Dyn.Text(found.name.copy())
+        if found.kind == "plain" {
+            entries["call"] = if found.call == .Val(call) -> Dyn.Text(call.copy()) else -> Dyn.Null
+            entries["expected"] = Dyn.Text(found.expected.copy())
+        }
+        entries["runner"] = Dyn.Text(found.runner.copy())
+        if found.witness != "" -> entries["witness"] = Dyn.Text(found.witness.copy())
+        if found.expected_file != "" -> entries["expectedFile"] = Dyn.Text(found.expected_file.copy())
+        if found.kind == "native-suite" -> entries["modes"] = texts(found.modes)
+    }
+    entries["runnerSha256"] = Dyn.Text(runner_sha256.copy())
+    Dyn.Object(entries.copy())
+}
+
+// A registry fragment lives in its Tests package's fixture directory; its
+// identity and C witness are named from the Tests package itself.
+fn transport_home(source: String) -[Exec, IO]> String Never! {
+    fragment :: regex.compile("/[A-Za-z0-9]+\\.fixture/") ?? return fail("fixture pattern: {err}")
+    fragment.replace_first(source, "/")
+}
+
+fn prepare_transport(repo: String, row: Census, out: String, adapter: String) -[Env, Exec, FS, IO]> Dyn? Never! {
+    home :: transport_home(row.source)
+    id :: home.removeprefix("Compiler/").removesuffix(".jet")
+    found :: specification(id) ?? return None
+    sources := [String]{row.source.copy()}
+    if found.witness != "" -> &sources.push(found.witness.copy())
+    if found.expected_file != "" -> &sources.push(found.expected_file.copy())
+    witness :: "{home.removesuffix(".jet")}.c"
+    if found.kind == "c" && files.exists("{repo}/{witness}") -> &sources.push(witness)
+    entry := [String: Dyn]{
+        "id": Dyn.Text(id.copy()),
+        "package": Dyn.Text(row.package.copy()),
+        "mode": Dyn.Text("run"),
+        "kind": Dyn.Text("transport"),
+        "path": Dyn.Text(adapter.copy()),
+        "cwd": Dyn.Text("{out}/{id}"),
+        "sha256": Dyn.Text(crypto.sha256(files.read_bytes(adapter) ?? return fail("`{adapter}` cannot be read: {err}")).hex()),
+        "testCount": Dyn.Int(1),
+        "stdout": Dyn.Text("JET_COMPILER_REGISTRY PASS {id} tests=1\n"),
+        "sources": texts(sources),
+        "sourceManifests": texts([String]{SOURCE_LIST}),
+    }
+    if found.blocked != "" {
+        entry["status"] = Dyn.Text("BLOCKED")
+        entry["reason"] = Dyn.Text(found.blocked.copy())
+    } else {
+        entry["transport"] = spec_dyn(found, sha256_file(repo, found.runner))
+    }
+    Val(Dyn.Object(entry.copy()))
+}
+
+// The library a suite's lower mode builds: its file, object prefix,
+// lifecycle list and, for crypto, the exports list.
+fn suite_library(found: Spec, out: String) -> (file: String, prefix: String, lifecycle: String, exports: String) Never! {
+    if found.name == "SharedThread" -> return (file: "{out}/shared/Source/Fixture.jet", prefix: "{out}/shared/fixture", lifecycle: "{out}/shared/lifecycle.list", exports: "")
+    folder :: if found.name == "CollectionsStop" -> out.copy() else -> "{out}/{if found.runner.ends_with("run-channel-fixtures.mjs") || found.name == "SharedSource" -> "fixture" else -> "unit"}"
+    (file: "{folder}/Source/Fixture.jet", prefix: "{folder}/fixture", lifecycle: "{folder}/lifecycle.list", exports: if found.crypto -> "{folder}/exports.list" else -> "")
+}
+
+// The argument vectors the C driver of a `c` transport runs with.
+fn driver_runs(found: Spec, out: String) -> [[String]] Never! {
+    if found.name == "CompilerEnv" -> return [[String]]{[String]{}, [String]{"empty"}}
+    if found.name == "CompilerRoutes" -> return [[String]]{[String]{out.copy()}}
+    [[String]]{[String]{}}
+}
+
+// The arguments of a codec or process fixture runner.
+fn fixture_args(repo: String, found: Spec, out: String, jet: String, runtime_dir: String) -> [String] Never! {
+    folder :: if found.kind == "codec-fixture" -> "codec" else -> "process"
+    [String]{"{repo}/{found.runner}", "{out}/{folder}", jet.copy(), runtime_dir.copy(), "--test", found.name.copy()}
+}
+
+fn c_driver(name: String, repo: String) -> String? Never! {
+    head :: "#define _GNU_SOURCE\n#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n"
+    exported :: if name == {
+        "FaultSchedule" -> Val("jet_rt_fault_schedule_fixture")
+        "IterCharge" -> Val("jet_rt_iter_charge_fixture")
+        "ProgressState" -> Val("jet_rt_progress_state_fixture")
+        "CompilerNeededJSON" -> Val("jet_rt_compiler_needed_json_fixture")
+        "CompilerNeededURL" -> Val("jet_rt_compiler_needed_url_fixture")
+        "CompilerNeededMathText" -> Val("jet_rt_compiler_math_text_fixture")
+        "DynNative" -> Val("jet_rt_dyn_native_fixture")
+        else -> None
+    }
+    if exported == .Val(symbol) -> return Val("{head}extern char **environ;\nextern void jet_rt_host_arguments(int64_t,char **,char **);\nextern int64_t {symbol}(void);\nint main(int argc,char **argv) {{ jet_rt_host_arguments(argc,argv,environ); return (int){symbol}(); }}\n")
+    if name == "EnvironmentLeaves" -> return Val("{head}extern char **environ;\nextern int64_t jet_rt_environment_leaves_fixture(int64_t,int64_t,int64_t);\nint main(int argc,char **argv) {{ char invalid[]=\"JET_LEAF_INVALID=\\xff\"; if (putenv(invalid)||setenv(\"JET_LEAF_EMPTY\",\"\",1)||unsetenv(\"JET_LEAF_MISSING\")) return 100; return (int)jet_rt_environment_leaves_fixture(argc,(intptr_t)argv,(intptr_t)environ); }}\n")
+    if name == "HostFault" -> return Val("{head}extern int64_t jet_rt_host_fault_fixture(int64_t,_Bool);\nint main(int argc,char **argv) {{ (void)argv; return (int)jet_rt_host_fault_fixture((intptr_t)\"A\",argc>1); }}\n")
+    if name == "FloatBits" -> return Val("{head}extern int64_t jet_rt_test_f64_bits(double);\nextern double jet_rt_test_f64_from_bits(int64_t);\nint main(void) {{ const uint64_t words[]={{0,UINT64_C(0x8000000000000000),1,UINT64_C(0x7ff0000000000000),UINT64_C(0xfff0000000000000),UINT64_C(0x7ff8000000000001),UINT64_C(0x3ff0000000000000),UINT64_C(0xffffffffffffffff)}}; for(unsigned i=0;i<sizeof(words)/sizeof(*words);i++) {{ double value; memcpy(&value,&words[i],8); if((uint64_t)jet_rt_test_f64_bits(value)!=words[i]) return 1; value=jet_rt_test_f64_from_bits((int64_t)words[i]); uint64_t back; memcpy(&back,&value,8); if(back!=words[i]) return 2; }} return 0; }}\n")
+    if name == "TerminalColor" -> return Val("{head}#include <pthread.h>\nextern void jet_rt_thread_attach(void),jet_rt_thread_detach(void);\nextern int64_t jet_rt_terminal_color_fixture(void);\nstatic void *worker(void *unused) {{ (void)unused; jet_rt_thread_attach(); int64_t code=jet_rt_terminal_color_fixture(); jet_rt_thread_detach(); return (void *)(intptr_t)code; }}\nint main(void) {{ if(jet_rt_terminal_color_fixture()) return 1; pthread_t thread; void *result; if(pthread_create(&thread,NULL,worker,NULL)||pthread_join(thread,&result)) return 2; return result!=NULL; }}\n")
+    if name == "TrapReport" -> return Val("#define main registry_cabi_main\n#include \"{repo}/{RT}CAbiDriver.c\"\n#undef main\nextern int64_t jet_rt_trap_report_fixture(int64_t,int64_t,_Bool);\nextern void jet_rt_panic_message(const void *,int64_t);\nstatic int64_t callback(int64_t kind) {{ if(kind==0) jet_rt_panic_message(\"registry boom\",13); else if(kind==1) numeric_stop(); else if(kind==2) require(); else if(kind==3) require_eq(); else panic_case(); return 0; }}\nint main(int argc,char **argv) {{ if(argc!=3) return 2; return (int)jet_rt_trap_report_fixture((intptr_t)callback,strtol(argv[1],NULL,10),!strcmp(argv[2],\"captured\")); }}\n")
+    None
+}
+
+// The committed trap literal `name` of TrapMessages.jet, decoded from its
+// little-endian words: no runtime manufactures the expected report.
+fn trap_literal(repo: String, name: String) -[FS]> String Problem! {
+    text :: files.read("{repo}/Compiler/JetRuntime/Source/TrapMessages.jet") ?? return Err(problem("TrapMessages.jet cannot be read: {err}"))
+    raw :: "\n{text}".bytes()
+    open :: index_of(raw, "\nfn {name}() {{\n", 0)
+    if open < 0 -> return Err(problem("missing frozen trap literal {name}"))
+    start :: open + "\nfn {name}() {{\n".count_bytes()
+    close :: index_of(raw, "\n}}", start - 1)
+    if close < 0 -> return Err(problem("missing frozen trap literal {name}"))
+    body :: String.from_bytes(raw.slice(start, close + 1)) ?? return Err(problem("trap literal {name} is not UTF-8"))
+    row :: regex.compile("trap_write_word\\(I64\\{{(-?\\d+)\\}}, I64\\{{(\\d+)\\}}\\)") ?? return Err(problem("trap pattern: {err}"))
+    bytes := [U8]{}
+    loop found in row.matches(body) {
+        word :: Int.parse(found.group(1) ?? "") ?? return Err(problem("trap literal {name} has an invalid word"))
+        count :: Int.parse(found.group(2) ?? "") ?? return Err(problem("trap literal {name} has an invalid width"))
+        loop i in 0..<count {
+            v :: (word >> (i * 8)).bit_and(255)
+            &bytes.push(U8{v})
+        }
+    }
+    literal :: String.from_bytes(bytes) ?? return Err(problem("trap literal {name} is not UTF-8"))
+    literal
+}
+
+fn strips_transport(name: String) -> Bool Never! {
+    name.starts_with("JET_BOOTSTRAP_") || name.starts_with("JET_FRONT_")
+        || ([String]{"JET_TEST_FILTER", "JET_NATIVE_TEST_ID", "FX_ONLY", "FX_HEAD", "FX_EXCLUDE", "SELFHOST_SKIP", "SELFHOST_ROOTS"}).contains(name)
+}
+
+fn strips_registry(name: String) -> Bool Never! {
+    name == "JET_RUNTIME_PACK" || name.starts_with("JET_FRONT_") || name.starts_with("JET_BOOTSTRAP_") || name.starts_with("FX_")
+        || ([String]{"JET_TEST_FILTER", "JET_TEST_SHUFFLE_SEED", "JET_TEST_SERIAL", "JET_TEST_TRACE_TIERS", "JET_NATIVE_TEST_ID", "JET_NATIVE_TEST_REPORT_PATH", "JET_NATIVE_TEST_RECORDS_PATH", "JET_UPDATE_SNAPSHOTS", "JET_SCHEMA_CACHE_DIR"}).contains(name)
+}
+
+// A registry child's environment: the caller's, without selection, tracing or
+// front-end hooks, and with this checkout as the toolchain root.
+fn registry_spec(argv: [String], cwd: String, repo: String, extra: [Setting], timeout_ms: Int) -[Env, Exec]> ProcessSpec Never! {
+    spec := process.cmd(argv).cwd(cwd).timeout(time.duration_ms(timeout_ms)).output_limit(134217728)
+    keys :: process.env_keys() ?? [String]{}
+    loop name in keys {
+        if strips_registry(name) {
+            spec = spec.env_remove(name)
+        }
+    }
+    spec = spec.env("JET_TOOLCHAIN_ROOT", repo).env("JET_TEST_JSON", "1").env("NO_COLOR", "1").env("TERM", "dumb")
+    loop setting in extra {
+        spec = spec.env(setting.name, setting.value)
+    }
+    spec
+}
+
+fn front_timeout_ms() -[Env]> Int Never! { Int.parse(env_or("JET_FRONT_TIMEOUT_MS", "")) ?? TRANSPORT_TIMEOUT_MS }
+
+fn registry_timeout_ms() -[Env]> Int Never! { Int.parse(env_or("JET_REGISTRY_TIMEOUT_MS", "")) ?? REGISTRY_TIMEOUT_MS }
+
+fn signal_dyn(value: Int?) -> Dyn Never! {
+    if value == .Val(number) -> return Dyn.Int(number)
+    Dyn.Null
+}
+
+// Run one transport command with its evidence logged; any exit other than
+// `expected` (or a signal or timeout) fails the transport.
+fn execute(lane: &Lane, command: String, args: [String], cwd: String, extra: [Setting], expected: Int, timeout_ms: Int) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Problem! {
+    argv := [String]{command.copy()}
+    loop arg in args -> &argv.push(arg.copy())
+    spec := process.cmd(argv).cwd(cwd).timeout(time.duration_ms(timeout_ms)).output_limit(134217728)
+    keys :: process.env_keys() ?? [String]{}
+    loop name in keys {
+        if strips_transport(name) {
+            spec = spec.env_remove(name)
+        }
+    }
+    spec = spec.env("JET_TOOLCHAIN_ROOT", lane.repo).env("JET_KEEP_GOING", "1").env("JET", lane.jet).env("JET_RUN", lane.jet)
+        .env("JET_RUNTIME_PACK", lane.pack).env("JET_RUNTIME_JET_OBJECT", lane.object).env("JET_RUNTIME_OBJECT", lane.object)
+        .env("JET_RUNTIME_C_LIB", lane.object).env("NO_COLOR", "1").env("TERM", "dumb")
+    loop setting in extra {
+        spec = spec.env(setting.name, setting.value)
+    }
+    prefix :: "{lane.log_dir}/{lane.id.replace("/", "_")}-{lane.evidence.len()}"
+    receipt :: spec.run() ?? {
+        files.write("{prefix}.stdout", "") ?? return Err(problem("`{prefix}.stdout` cannot be written: {err}"))
+        files.write("{prefix}.stderr", "") ?? return Err(problem("`{prefix}.stderr` cannot be written: {err}"))
+        &lane.evidence.push(evidence_row(command, args, cwd, Dyn.Null, Dyn.Null, Dyn.Text("{err}"), prefix))
+        return Err(problem("{command}: {err}; see {prefix}"))
+    }
+    files.write("{prefix}.stdout", receipt.output) ?? return Err(problem("`{prefix}.stdout` cannot be written: {err}"))
+    files.write("{prefix}.stderr", receipt.errors) ?? return Err(problem("`{prefix}.stderr` cannot be written: {err}"))
+    code :: if receipt.signal != None || receipt.timed_out -> Dyn.Null else -> Dyn.Int(receipt.code)
+    failure :: if receipt.timed_out -> Dyn.Text("timed out after {timeout_ms} ms") else -> Dyn.Null
+    &lane.evidence.push(evidence_row(command, args, cwd, code, signal_dyn(receipt.signal), failure, prefix))
+    if receipt.timed_out -> return Err(problem("{command}: timed out after {timeout_ms} ms; see {prefix}"))
+    if receipt.signal == .Val(number) -> return Err(problem("{command}: signal {number}; see {prefix}"))
+    if receipt.code != expected -> return Err(problem("{command}: {receipt.code}; see {prefix}"))
+    Ran{code: receipt.code, signal: None, timed_out: false, stdout: receipt.output.copy(), stderr: receipt.errors.copy()}
+}
+
+fn evidence_row(command: String, args: [String], cwd: String, code: Dyn, signal: Dyn, failure: Dyn, prefix: String) -> Dyn Never! {
+    Dyn.Object([String: Dyn]{
+        "command": Dyn.Text(command.copy()),
+        "args": texts(args),
+        "cwd": Dyn.Text(cwd.copy()),
+        "code": code,
+        "signal": signal,
+        "error": failure,
+        "stdoutPath": Dyn.Text("{prefix}.stdout"),
+        "stderrPath": Dyn.Text("{prefix}.stderr"),
+    })
+}
+
+fn node(lane: &Lane, runner: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Problem! {
+    argv := [String]{"{lane.repo}/{runner}"}
+    loop arg in args -> &argv.push(arg.copy())
+    binary :: lane.node.copy()
+    cwd :: lane.out.copy()
+    execute(&lane, binary, argv, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+}
+
+fn exact(ran: Ran, stdout: String, stderr: String) Problem! {
+    if ran.stdout == stdout && ran.stderr == stderr -> return Ok(())
+    shown :: json.dumps(Dyn.Object([String: Dyn]{"stdout": Dyn.Text(ran.stdout.copy()), "stderr": Dyn.Text(ran.stderr.copy()), "expectedStdout": Dyn.Text(stdout.copy()), "expectedStderr": Dyn.Text(stderr.copy())})) ?? ""
+    Err(problem("exact native verdict differs: {shown}"))
+}
+
+// One front-end command of the production CLI, with its log and record.
+fn front(lane: &Lane, args: [String], prefix: String, cwd: String, extra: [Setting]) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    files.create_dir_all(files.dirname(prefix)) ?? return Err(problem("`{prefix}` cannot be prepared: {err}"))
+    binary :: lane.jet.copy()
+    ran :: execute(&lane, binary, args, cwd, extra, 0, front_timeout_ms()) ?? return Err(err)
+    files.write("{prefix}.front.log", "{ran.stdout}{ran.stderr}") ?? return Err(problem("`{prefix}.front.log` cannot be written: {err}"))
+    record :: Dyn.Object([String: Dyn]{"command": Dyn.Text(lane.jet.copy()), "args": texts(args), "cwd": Dyn.Text(cwd.copy()), "status": Dyn.Int(ran.code), "signal": Dyn.Null, "error": Dyn.Null, "stdout": Dyn.Text(ran.stdout.copy()), "stderr": Dyn.Text(ran.stderr.copy())})
+    text :: json.to_string_pretty(record) ?? return Err(problem("the front record cannot be encoded: {err}"))
+    files.write("{prefix}.front.run.json", "{text}\n") ?? return Err(problem("`{prefix}.front.run.json` cannot be written: {err}"))
+    Ok(())
+}
+
+// Build `file` as a native program in `root` and return a fresh copy of it.
+fn compile(lane: &Lane, file: String, root: String, prefix: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem! {
+    if !files.exists("{root}/package.jet") -> files.write("{root}/package.jet", TRANSPORT_PACKAGE) ?? return Err(problem("`{root}/package.jet` cannot be written: {err}"))
+    built :: "{root}/.jet/build/{files.basename(file).removesuffix(".jet")}"
+    loop path in ([String]{built, "{prefix}.exe", "{prefix}.issues", "{prefix}.pack-issues"}) {
+        if files.exists(path) -> files.remove(path) ?? return Err(problem("`{path}` cannot be removed: {err}"))
+    }
+    front(&lane, [String]{"build", file}, prefix, root, [Setting]{}) ?? return Err(err)
+    if !files.exists(built) -> return Err(problem("native build did not emit a fresh executable"))
+    files.copy(built, "{prefix}.exe") ?? return Err(problem("`{prefix}.exe` cannot be written: {err}"))
+    files.set_mode("{prefix}.exe", 0o755) ?? return Err(problem("`{prefix}.exe` cannot be made executable: {err}"))
+    "{prefix}.exe"
+}
+
+// Lower `file` as a native library: the front-end hook writes its object,
+// exports, ABI, thread and issue files beside `prefix`.
+fn library(lane: &Lane, file: String, prefix: String, lifecycle: String, exports: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    if !files.exists(lifecycle) -> return Err(problem("native library lifecycle list `{lifecycle}` is missing"))
+    loop suffix in ([String]{".o", ".exports", ".abi.json", ".threads", ".issues"}) {
+        if files.exists("{prefix}{suffix}") -> files.remove("{prefix}{suffix}") ?? return Err(problem("`{prefix}{suffix}` cannot be removed: {err}"))
+    }
+    hooks := [Setting]{Setting{name: "JET_FRONT_LIBRARY_OBJECT_OUTPUT", value: prefix.copy()}, Setting{name: "JET_FRONT_LIBRARY_LIFECYCLE", value: lifecycle.copy()}}
+    if exports != "" -> &hooks.push(Setting{name: "JET_FRONT_LIBRARY_EXPORTS", value: exports.copy()})
+    front(&lane, [String]{"check", file}, prefix, files.dirname(file), hooks) ?? return Err(err)
+    if files.exists("{prefix}.issues") -> return Err(problem(files.read("{prefix}.issues") ?? ""))
+    loop suffix in ([String]{".o", ".exports", ".abi.json", ".threads"}) {
+        if !files.exists("{prefix}{suffix}") -> return Err(problem("native library hook omitted {suffix}"))
+    }
+    Ok(())
+}
+
+fn program(lane: &Lane, file: String, expected: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    root :: files.dirname(file)
+    binary :: compile(&lane, file, root, "{root}/registry-native") ?? return Err(err)
+    cwd :: lane.out.copy()
+    ran :: execute(&lane, binary, [String]{}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    exact(ran, expected, "") ?? return Err(err)
+}
+
+fn link(lane: &Lane, source: String, object: String, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    args :: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", source, object, "-lpthread", "-ldl", "-lm", "-o", binary}
+    cwd :: lane.out.copy()
+    execute(&lane, env_or("CC", "cc"), args, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    Ok(())
+}
+
+fn read_json(path: String) -[FS]> Dyn Problem! {
+    text :: files.read(path) ?? return Err(problem("`{path}` cannot be read: {err}"))
+    parsed :: json.parse(text) ?? return Err(problem("`{path}` is not JSON: {err}"))
+    parsed
+}
+
+fn truthy(value: Dyn) -> Bool Never! {
+    if value == {
+        .Null -> false
+        .Bool(flag) -> flag
+        .Text(text) -> text != ""
+        .Int(number) -> number != 0
+        .Number(lexeme) -> lexeme != "0"
+        else -> true
+    }
+}
+
+fn copy_tree(from: String, to: String) Problem! -[FS]> {
+    files.create_dir_all(to) ?? return Err(problem("`{to}` cannot be created: {err}"))
+    listed :: files.list_dir(from) ?? return Err(problem("`{from}` cannot be listed: {err}"))
+    loop entry in listed {
+        source :: "{from}/{entry.name}"
+        meta :: files.stat(source, .Follow) ?? return Err(problem("`{source}` cannot be read: {err}"))
+        if meta.is_dir {
+            copy_tree(source, "{to}/{entry.name}") ?? return Err(err)
+            next
+        }
+        files.copy(source, "{to}/{entry.name}") ?? return Err(problem("`{source}` cannot be copied: {err}"))
+        files.set_mode("{to}/{entry.name}", meta.mode % 4096) ?? return Err(problem("`{to}/{entry.name}` mode: {err}"))
+    }
+    Ok(())
+}
+
+fn sha256_path(path: String) -[FS]> String Problem! {
+    crypto.sha256(files.read_bytes(path) ?? return Err(problem("`{path}` cannot be read: {err}"))).hex()
+}
+
+// The production CLI resolves its runtime beside its executable: stage the
+// supplied jet and runtime exactly, never a previously installed runtime.
+fn stage_toolchain(jet: String, runtime: Runtime, out: String) -[FS]> String Problem! {
+    staged :: "{out}/jet"
+    staged_pack :: "{out}/jet-runtime/{files.basename(files.dirname(runtime.pack))}/jet_runtime.pack.o"
+    if !files.exists(out) {
+        files.create_dir_all(out) ?? return Err(problem("`{out}` cannot be created: {err}"))
+        files.copy(jet, staged) ?? return Err(problem("`{jet}` cannot be staged: {err}"))
+        files.set_mode(staged, 0o755) ?? return Err(problem("`{staged}` cannot be made executable: {err}"))
+        copy_tree(runtime.dir, "{out}/jet-runtime") ?? return Err(err)
+    } else if !files.exists(staged) || !files.exists(staged_pack) || (sha256_path(staged) ?? "") != (sha256_path(jet) ?? "-") || (sha256_path(staged_pack) ?? "") != runtime.pack_sha256 {
+        return Err(problem("staged transport toolchain changed"))
+    }
+    staged
+}
+
+fn run_transport(entry: Dyn, repo: String, jet: String, log_dir: String, runtime: Runtime, adapter: String) -[Env, Exec, FS, IO, Time, Time.Wait]> (ran: Ran, evidence: [Dyn]) Problem! {
+    id :: text_field(entry, "id")
+    found :: specification(id) ?? return Err(problem("unknown transport {id}"))
+    if found.blocked != "" -> return Err(problem(found.blocked))
+    runner_sha :: text_field(field(entry, "transport"), "runnerSha256")
+    if int_field(entry, "testCount") != Val(1) || text_field(entry, "sha256") != (sha256_path(adapter) ?? "") || runner_sha != (sha256_path("{repo}/{found.runner}") ?? "") {
+        return Err(problem("transport source/count changed: {id}"))
+    }
+    out :: text_field(entry, "cwd")
+    files.create_dir_all(out) ?? return Err(problem("`{out}` cannot be created: {err}"))
+    files.create_dir_all(log_dir) ?? return Err(problem("`{log_dir}` cannot be created: {err}"))
+    staged :: stage_toolchain(jet, runtime, "{log_dir}/toolchain") ?? return Err(err)
+    lane := Lane{id: id.copy(), out: out.copy(), repo: repo.copy(), log_dir: log_dir.copy(), jet: staged, runtime_dir: runtime.dir.copy(), pack: runtime.pack.copy(), object: runtime.object.copy(), node: process.which("node") ?? "node", evidence: [Dyn]{}}
+    if drive(&lane, found) == {
+        .Ok(_) -> {}
+        .Err(failure) -> return (ran: Ran{code: 1, signal: None, timed_out: false, stdout: "", stderr: "{failure.message}\n"}, evidence: lane.evidence.copy())
+    }
+    (ran: Ran{code: 0, signal: None, timed_out: false, stdout: text_field(entry, "stdout"), stderr: ""}, evidence: lane.evidence.copy())
+}
+
+// The transport body: the fixture runner's modes, the native build or
+// library, the C driver, and the exact verdict its kind admits.
+fn drive(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    out :: lane.out.copy()
+    repo :: lane.repo.copy()
+    node_bin :: lane.node.copy()
+    staged :: lane.jet.copy()
+    if found.kind == "codec-fixture" || found.kind == "process-fixture" {
+        args :: fixture_args(repo, found, out, lane.jet, lane.runtime_dir)
+        execute(&lane, node_bin, args, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        result :: read_json("{args[1]}/fixture-result.json") ?? return Err(err)
+        ok :: int_field(result, "status") == Val(0) && text_field(result, "test") == found.name
+        if found.kind == "codec-fixture" && !(ok && field(result, "stdout") == .Text("") && field(result, "stderr") == .Text("")) -> return Err(problem("named native codec/file fixture receipt differs"))
+        if found.kind == "process-fixture" && !(ok && text_field(result, "witness") == "{found.name}Witness") -> return Err(problem("named native process fixture receipt differs"))
+        return Ok(())
+    }
+    if found.kind == "native-suite" {
+        loop mode in found.modes {
+            execute(&lane, node_bin, [String]{"{repo}/{found.runner}", out, mode}, out, [Setting]{Setting{name: "JET_FRONT_JETC0", value: staged.copy()}}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        }
+        result :: read_json("{out}/run.receipt.json") ?? return Err(err)
+        if int_field(result, "status") != Val(0) || truthy(field(result, "signal")) || truthy(field(result, "error")) || field(result, "stdout") != .Text("") || field(result, "stderr") != .Text("") {
+            return Err(problem("native files/host fixture receipt differs"))
+        }
+        return Ok(())
+    }
+    if found.kind == "suite" {
+        node(&lane, found.runner, [String]{out, found.modes[0]}) ?? return Err(err)
+        selected :: suite_library(found, out)
+        library(&lane, selected.file, selected.prefix, selected.lifecycle, selected.exports) ?? return Err(err)
+        loop mode in found.modes[2..<found.modes.len()] -> node(&lane, found.runner, [String]{out, mode}) ?? return Err(err)
+        // The final run modes execute the actual C driver and check literal
+        // output, stops and ledgers; never admit assembly-only or reference.
+        if found.crypto -> crypto_verdict(&lane) ?? return Err(err)
+        return Ok(())
+    }
+    if found.kind == "plain" {
+        raw :: "{out}/raw"
+        native :: "{out}/native"
+        files.create_dir_all(native) ?? return Err(problem("`{native}` cannot be created: {err}"))
+        node(&lane, found.runner, [String]{raw, "--assemble-only", "--test", found.name}) ?? return Err(err)
+        unit :: files.read("{raw}/unit.jet") ?? return Err(problem("`{raw}/unit.jet` cannot be read: {err}"))
+        entry :: if found.call == .Val(call) -> "\nfn run() {{ {call}() }}\n" else -> ""
+        files.write("{native}/unit.jet", "{unit}{entry}") ?? return Err(problem("`{native}/unit.jet` cannot be written: {err}"))
+        return program(&lane, "{native}/unit.jet", found.expected)
+    }
+    if found.kind == "c" -> return c_verdict(&lane, found)
+    if found.kind == "indices" {
+        node(&lane, found.runner, [String]{out, "--indices"}) ?? return Err(err)
+        return program(&lane, "{out}/unit.jet", "link section indexes: pass\n")
+    }
+    if found.kind == "roots" || found.kind == "link" {
+        node(&lane, "{BE}run-runtime-pack-roots.mjs", [String]{out, "--prepare-only"}) ?? return Err(err)
+        if found.kind == "roots" {
+            program(&lane, "{out}/unit.jet", "runtime pack object roots: pass\n") ?? return Err(err)
+        } else {
+            node(&lane, found.runner, [String]{out}) ?? return Err(err)
+            binary :: compile(&lane, "{out}/unit.jet", out, "{out}/link-native") ?? return Err(err)
+            linked :: execute(&lane, binary, [String]{"{out}/consumer", "{out}/consumer.o", "{out}/runtime.o", "{out}/runtime.a"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+            receipt :: regex.compile("linked .+: [0-9]+ bytes; read [0-9]+ ms, link [0-9]+ ms, write [0-9]+ ms\\n") ?? return Err(problem("linker pattern: {err}"))
+            if !receipt.full_match(linked.stdout) || linked.stderr != "" -> return Err(problem("linker artifact receipt differs"))
+        }
+        consumer :: execute(&lane, "{out}/consumer", [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        return exact(consumer, "", "")
+    }
+    Err(problem("unimplemented transport {found.kind}"))
+}
+
+fn crypto_verdict(lane: &Lane) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    name :: (lane.id.split("/").to_list().last() ?? "").removesuffix("Tests")
+    receipts := [String]{}
+    if name == "AgeV1" {
+        frozen :: read_json("{lane.repo}/{RT}AgeV1Fixtures.json") ?? return Err(err)
+        loop group in ([String]{"cases", "seals"}) {
+            loop test in array_field(frozen, group) -> &receipts.push("{lane.out}/run-{text_field(test, "name")}.receipt.json")
+        }
+    } else {
+        &receipts.push("{lane.out}/run-{name}.receipt.json")
+    }
+    loop path in receipts {
+        receipt :: read_json(path) ?? return Err(err)
+        if int_field(receipt, "status") != Val(0) || truthy(field(receipt, "signal")) || truthy(field(receipt, "error")) || field(receipt, "stderr") != .Text("") {
+            return Err(problem("selected crypto witness execution differs"))
+        }
+        if name == "AgeV1" {
+            if field(receipt, "stdout") != .Text("") -> return Err(problem("AgeV1 vector output differs"))
+            next
+        }
+        expected :: witness_stdout(lane.repo, name) ?? return Err(err)
+        if expected == "" || field(receipt, "stdout") != .Text(expected) -> return Err(problem("selected crypto stdout differs from committed C witness literal"))
+    }
+    Ok(())
+}
+
+// A witness's committed stdout: its .stdout file, or else the lines its C
+// source `puts`.
+fn witness_stdout(repo: String, name: String) -[FS]> String Problem! {
+    stdout_file :: "{repo}/{RT}{name}Witness.stdout"
+    if files.exists(stdout_file) -> return files.read(stdout_file) ?? return Err(problem("`{stdout_file}` cannot be read: {err}"))
+    source :: files.read("{repo}/{RT}{name}Witness.c") ?? return Err(problem("`{RT}{name}Witness.c` cannot be read: {err}"))
+    puts :: regex.compile("puts\\((\"(?:\\\\.|[^\"\\\\])*\")\\);") ?? return Err(problem("puts pattern: {err}"))
+    out := ""
+    loop found in puts.matches(source) {
+        parsed :: json.parse(found.group(1) ?? "") ?? return Err(problem("witness literal is not a JSON string: {err}"))
+        if parsed == .Text(line) -> out = "{out}{line}\n"
+    }
+    out
+}
+
+fn c_verdict(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    out :: lane.out.copy()
+    repo :: lane.repo.copy()
+    node(&lane, found.runner, [String]{out, "--until", "assemble", "--test", found.name}) ?? return Err(err)
+    library(&lane, "{out}/library/Source/Runtime.jet", "{out}/jet_runtime_jet", "{repo}/Compiler/JetRuntime/lifecycle.list", "") ?? return Err(err)
+    source :: if found.name == {
+        "VaultHooks" | "VaultProvider" -> "{repo}/{RT}{found.name}Witness.c"
+        "Thread" -> "{repo}/{RT}thread-fixture.c"
+        "HostSpawn" | "CompilerEnv" | "CompilerRoutes" -> "{repo}/{RT}{found.name}Tests.c"
+        else -> "{out}/driver.c"
+    }
+    driver :: "{out}/driver.c"
+    if source == driver {
+        text :: c_driver(found.name, repo) ?? return Err(problem("no C source {found.name}"))
+        files.write(source, text) ?? return Err(problem("`{source}` cannot be written: {err}"))
+    }
+    binary :: "{out}/driver"
+    link(&lane, source, "{out}/jet_runtime_jet.o", binary) ?? return Err(err)
+    if found.name == "HostFault" {
+        plain :: execute(&lane, binary, [String]{}, out, [Setting]{}, 101, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        exact(plain, "", "A\n") ?? return Err(err)
+        unreachable :: trap_literal(repo, "trap_msg_unreachable") ?? return Err(err)
+        trapped :: execute(&lane, binary, [String]{"unreachable"}, out, [Setting]{}, 101, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        return exact(trapped, "", "{unreachable}A\n")
+    }
+    if found.name == "TrapReport" {
+        header :: trap_literal(repo, "trap_msg_header_panic") ?? return Err(err)
+        prelude :: trap_literal(repo, "trap_msg_prelude_end") ?? return Err(err)
+        footer :: trap_literal(repo, "trap_footer_e3001") ?? return Err(err)
+        simple :: "{header}registry boom{prelude}{footer}"
+        loop kind in 0..<5 {
+            direct :: execute(&lane, binary, [String]{"{kind}", "direct"}, out, [Setting]{}, 70, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+            captured :: execute(&lane, binary, [String]{"{kind}", "captured"}, out, [Setting]{}, 70, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+            stop :: if kind == 1 -> "Stop [E3010]:" else -> "Stop [E3001]:"
+            if direct.stdout != "" || !direct.stderr.starts_with(stop) -> return Err(problem("trap report process-edge verdict differs"))
+            exact(captured, "", direct.stderr) ?? return Err(err)
+            if kind == 0 -> exact(direct, "", simple) ?? return Err(err)
+        }
+        return Ok(())
+    }
+    expected :: if found.name == {
+        "VaultHooks" -> "vault hooks witness OK (TLS ownership, exact stops, 8 root-filtered two-phase barriers)\n"
+        "VaultProvider" -> "vault witness OK (13 errors, legacy+JVLT2 codec, imported origin/default entropy, native Secret redaction/wipe, long-origin hash, duplicate priority)\n"
+        "Thread" -> "tls ok\n"
+        "HostSpawn" -> "process raw: ok\n"
+        "CompilerEnv" -> "compiler environment routes: Jet-only (Rust frozen)\n"
+        "CompilerRoutes" -> "compiler routes: Jet-only (Rust frozen)\n"
+        else -> ""
+    }
+    loop args in driver_runs(found, out) {
+        ran :: execute(&lane, binary, args, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        exact(ran, expected, "") ?? return Err(err)
+    }
+    Ok(())
+}
+
+// --- manifest -------------------------------------------------------------------
+
+fn registry_environment(repo: String, cwd: String, sources: [String]) -[Env, Exec, FS, IO]> Dyn Never! {
+    scratch :: "{cwd}/scratch"
+    entries := [String: Dyn]{"TMPDIR": Dyn.Text(scratch.copy())}
+    loop source in sources {
+        text :: files.read("{repo}/{source}") ?? return fail("`{source}` cannot be read: {err}")
+        if text.contains("\"JET_CLI_FMT_TEST_ROOT\"") {
+            entries["JET_CLI_FMT_TEST_ROOT"] = Dyn.Text(scratch.copy())
+            break
+        }
+    }
+    Dyn.Object(entries.copy())
+}
+
+fn write_json(path: String, value: Dyn) -[Env, Exec, FS, IO]> String Never! {
+    text :: json.to_string_pretty(value) ?? return fail("`{path}` cannot be encoded: {err}")
+    files.write(path, "{text}\n") ?? return fail("`{path}` cannot be written: {err}")
+    text
+}
+
+fn generate(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wait]> () {
+    head :: current_head(repo) ?? return fail(err.message)
+    if options.head != head -> return fail("manifest requires its pinned committed source SHA")
+    out :: if options.out != "" -> options.out.copy() else -> "{scratch_root()}/RegistryRunnerLead/{options.head}"
+    if out == repo || out.starts_with("{repo}/") -> return fail("registry outputs belong outside the repository")
+    if files.exists("{out}/manifest.json") -> return fail("manifest output already sealed: {out}; choose a fresh --out")
+    files.create_dir_all(out) ?? return fail("`{out}` cannot be created: {err}")
+    adapter :: sys.executable()
+    census :: inventory(repo)
+    manifests :: Dyn.Array([Dyn]{Dyn.Object([String: Dyn]{"path": Dyn.Text(SOURCE_LIST), "sha256": Dyn.Text(sha256_file(repo, SOURCE_LIST))})})
+    entries := [Dyn]{}
+    loop registry in registry_rows(repo, census) {
+        row :: registry.row
+        mode :: registry.mode
+        standalone :: row.package == "JetRuntime" && mode == "test"
+        if !standalone {
+            if prepare_transport(repo, row, out, adapter) == .Val(transport) {
+                &entries.push(transport)
+                next
+            }
+        }
+        reason := ""
+        if !row.entry && row.names.len() == 0 -> reason = "hand-ABI fixture has no run or Test entry; its exact native/C witness must be registered"
+        if row.package == "JetRuntime" && !standalone -> reason = "runtime hand-ABI registries require their native C fixture driver/runtime source assembly; not a compiler Test harness"
+        if row.package == "JetBackend" && row.entry -> reason = "backend artifact/FFI registry needs its existing run-*.mjs source assembly plus native artifact execution/checker; a returned fn run is not its success verdict"
+        id :: registry.id.copy()
+        cwd :: "{out}/{id}"
+        sources :: [String]{row.source.copy()}
+        if !standalone {
+            // Package form: the registry is its own file inside its Tests
+            // package, which declares and imports the compiler packages it
+            // uses; it runs in place.
+            path :: "{repo}/{row.source}"
+            entry := [String: Dyn]{
+                "id": Dyn.Text(id.copy()),
+                "package": Dyn.Text(row.package.copy()),
+                "mode": Dyn.Text(mode.copy()),
+                "kind": Dyn.Text("package"),
+                "path": Dyn.Text(path.copy()),
+                "cwd": Dyn.Text(cwd.copy()),
+                "sha256": Dyn.Text(sha256_file(repo, row.source)),
+                "stdout": if mode == "test" -> Dyn.Text(TEST_SCHEMA) else -> Dyn.Null,
+                "testCount": Dyn.Int(if mode == "test" -> row.names.len() else -> 1),
+                "testNames": if mode == "test" -> texts(row.names) else -> Dyn.Array([Dyn]{}),
+                "sources": texts(sources),
+                "sourceManifests": texts([String]{SOURCE_LIST}),
+            }
+            entry["environment"] = registry_environment(repo, cwd, sources)
+            if reason != "" {
+                entry["status"] = Dyn.Text("BLOCKED")
+                entry["reason"] = Dyn.Text(reason.copy())
+            }
+            &entries.push(Dyn.Object(entry.copy()))
+            next
+        }
+        entry := [String: Dyn]{
+            "id": Dyn.Text(id.copy()),
+            "package": Dyn.Text(row.package.copy()),
+            "mode": Dyn.Text(mode.copy()),
+            "path": Dyn.Text("{cwd}/registry.jet"),
+            "cwd": Dyn.Text(cwd.copy()),
+            "sha256": Dyn.Text(row.sha256.copy()),
+            "stdout": Dyn.Text(TEST_SCHEMA),
+            "testCount": Dyn.Int(row.names.len()),
+            "sources": texts(sources),
+            "sourceManifests": texts([String]{SOURCE_LIST}),
+        }
+        entry["environment"] = registry_environment(repo, cwd, sources)
+        if reason != "" {
+            entry["status"] = Dyn.Text("BLOCKED")
+            entry["reason"] = Dyn.Text(reason.copy())
+            &entries.push(Dyn.Object(entry.copy()))
+            next
+        }
+        text :: files.read("{repo}/{row.source}") ?? return fail("`{row.source}` cannot be read: {err}")
+        body :: "\n// [compiler registry source: {row.source}]\n{strip_imports(text)}\n"
+        names :: tests_in(body) ?? return fail(err.message)
+        entry["sha256"] = Dyn.Text(crypto.sha256(body.bytes()).hex())
+        entry["testNames"] = texts(names)
+        entry["testCount"] = Dyn.Int(names.len())
+        files.create_dir_all(cwd) ?? return fail("`{cwd}` cannot be created: {err}")
+        files.write("{cwd}/registry.jet", body) ?? return fail("`{cwd}/registry.jet` cannot be written: {err}")
+        files.write("{cwd}/package.jet", REGISTRY_PACKAGE) ?? return fail("`{cwd}/package.jet` cannot be written: {err}")
+        &entries.push(Dyn.Object(entry.copy()))
+    }
+    kit :: testkit_inventory(repo)
+    kit_dir :: "{out}/testkit"
+    loop source in kit.sources {
+        target :: "{kit_dir}/{source}"
+        files.create_dir_all(files.dirname(target)) ?? return fail("`{target}` cannot be prepared: {err}")
+        files.write_bytes(target, files.read_bytes("{repo}/{source}") ?? return fail("`{source}` cannot be read: {err}")) ?? return fail("`{target}` cannot be written: {err}")
+    }
+    kit_entry :: "{kit_dir}/Tools/testkit/run.jet"
+    summary :: "{{\"PASS\":{kit.cases.len()},\"FAIL\":0,\"KNOWN-FAILING\":0,\"UNEXPECTED-PASS\":0,\"UNSUPPORTED\":0,\"SKIP-HOST\":0,\"OPT-IN\":0,\"REFUSED\":0,\"ERROR\":0,\"TIMEOUT\":0,\"suites\":[\"cases\"]}}\n"
+    testkit := [String: Dyn]{
+        "id": Dyn.Text("testkit/cases"),
+        "package": Dyn.Text("testkit"),
+        "mode": Dyn.Text("run"),
+        "kind": Dyn.Text("testkit"),
+        "path": Dyn.Text(kit_entry.copy()),
+        "cwd": Dyn.Text(repo.copy()),
+        "sha256": Dyn.Text(sha256_path(kit_entry) ?? return fail(err.message)),
+        "stdout": Dyn.Text(summary),
+        "testCount": Dyn.Int(kit.cases.len()),
+        "sources": texts(kit.sources),
+        "caseNames": texts(kit.cases),
+    }
+    if kit.pending > 0 || kit.rust_tools > 0 {
+        testkit["status"] = Dyn.Text("BLOCKED")
+        testkit["reason"] = Dyn.Text(if kit.pending > 0 -> "{kit.pending} mandatory user Rust product cases remain RED; see testkit.pendingProductInterop (not retired or excluded)" else -> "full testkit cases have {kit.rust_tools} active Rust tool requirements/guards; removing Rust would skip required case branches. See testkit.rustToolRequirements for exact paths/lines")
+    }
+    &entries.push(Dyn.Object(testkit.copy()))
+    after :: current_head(repo) ?? return fail(err.message)
+    if options.head != after -> return fail("pinned source changed during assembly")
+    proof :: proof_path(repo)
+    proof_tree :: read_json(proof) ?? return fail(err.message)
+    compiler_retired :: retirements(repo).filter(row -> row.path.starts_with("Compiler/")).map(row -> retirement_dyn(row, ""))
+    manifest :: Dyn.Object([String: Dyn]{
+        "head": Dyn.Text(options.head.copy()),
+        "completeCompilerRegistries": Dyn.Bool(true),
+        "repo": Dyn.Text(repo.copy()),
+        "sourceProof": Dyn.Object([String: Dyn]{"path": Dyn.Text(proof.copy()), "sha256": Dyn.Text(sha256_path(proof) ?? return fail(err.message)), "tree": Dyn.Text(text_field(proof_tree, "tree"))}),
+        "sourceManifests": manifests,
+        "inventory": census_dyn(census),
+        "testkit": kit.tree,
+        "entries": Dyn.Array(entries.copy()),
+        "retiredWithRust": Dyn.Object([String: Dyn]{"testkitCases": Dyn.Array(kit.retired_cases.copy()), "compilerRegistries": Dyn.Array(compiler_retired)}),
+    })
+    print(write_json("{out}/manifest.json", manifest))
+}
+
+// --- run ------------------------------------------------------------------------
+
+// Testkit's one-based I/N convention over the id-sorted manifest; validate the
+// full manifest before calling.
+fn partition(entries: [Dyn], shard: String) -> [Dyn] Problem! {
+    if shard == "" -> return entries.copy()
+    shape :: regex.compile("([1-9][0-9]*)/([1-9][0-9]*)") ?? return Err(problem("shard pattern: {err}"))
+    if !shape.full_match(shard) -> return Err(problem("invalid registry shard; expected I/N"))
+    parts :: shard.partition("/")
+    index :: Int.parse(parts.head) ?? -1
+    count :: Int.parse(parts.tail) ?? -1
+    if index < 1 || count < 1 || index > 9007199254740991 || count > 9007199254740991 || index > count -> return Err(problem("invalid registry shard I/N"))
+    sorted := entries.copy()
+    &sorted.sort_by((left: Dyn, right: Dyn) -> text_field(left, "id") <=> text_field(right, "id"))
+    picked := [Dyn]{}
+    loop offset in 0..<sorted.len() {
+        if offset % count == index - 1 -> &picked.push(sorted[offset].copy())
+    }
+    picked
+}
+
+fn native_runtime(jet: String, runtime: String) -[FS]> Runtime Problem! {
+    requested :: if runtime != "" -> runtime.copy() else -> "{files.dirname(jet)}/jet-runtime"
+    dir :: files.canonicalize(requested) ?? return Err(problem("`{requested}` cannot be resolved: {err}"))
+    key_text :: files.read("{dir}/native.key") ?? return Err(problem("`{dir}/native.key` cannot be read: {err}"))
+    key :: key_text.trim()
+    if key == "" || key == "." || key == ".." || key.bytes().any(b -> b == (U8{47}) || b == (U8{92}) || is_space(b)) -> return Err(problem("native.key must name one runtime directory"))
+    pack :: "{dir}/{key}/jet_runtime.pack.o"
+    object :: "{dir}/{key}/jet_runtime_jet.o"
+    provenance :: read_json("{dir}/provenance.json") ?? return Err(err)
+    pack_sha :: sha256_path(pack) ?? return Err(err)
+    object_sha :: sha256_path(object) ?? return Err(err)
+    if text_field(provenance, "backend") != "jet-native" || int_field(provenance, "rustObjects") != Val(0) || int_field(provenance, "llvmObjects") != Val(0)
+        || text_field(provenance, "packSha256") != pack_sha || text_field(provenance, "objectSha256") != object_sha {
+        return Err(problem("registry transports require matching Jet-native, zero-Rust/LLVM runtime pack/object provenance"))
+    }
+    Runtime{dir: dir.copy(), pack: pack, object: object, pack_sha256: pack_sha, object_sha256: object_sha}
+}
+
+fn canonical(value: Dyn) -> String Never! { json.canonical(value) ?? "" }
+
+fn sorted_texts(items: [String]) -> [String] Never! {
+    out := items.copy()
+    &out.sort()
+    out
+}
+
+struct RunTally {
+    total: Int
+    passed: Int
+    blocked: Int
+    failed: Int
+    entries: [Dyn]
+    runtime: Dyn?
+    reason: String?
+}
+
+fn receipt_dyn(status: String, header: [String: Dyn], tally: RunTally, shard: String, full_total: Int) -> Dyn Never! {
+    entries := header.copy()
+    entries["status"] = Dyn.Text(status.copy())
+    out := [String: Dyn]{"status": Dyn.Text(status.copy())}
+    loop pair in header -> out[pair.key] = pair.value.copy()
+    out["total"] = Dyn.Int(tally.total)
+    out["passed"] = Dyn.Int(tally.passed)
+    out["blocked"] = Dyn.Int(tally.blocked)
+    out["failed"] = Dyn.Int(tally.failed)
+    out["entries"] = Dyn.Array(tally.entries.copy())
+    if shard != "" {
+        out["shard"] = Dyn.Text(shard.copy())
+        out["fullTotal"] = Dyn.Int(full_total)
+    }
+    if tally.runtime == .Val(runtime) -> out["runtime"] = runtime.copy()
+    if tally.reason == .Val(reason) -> out["reason"] = Dyn.Text(reason.copy())
+    Dyn.Object(out.copy())
+}
+
+fn run_registries(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wait]> () {
+    if options.jet == "" || options.manifest == "" -> return fail(USAGE)
+    jet :: files.canonicalize(options.jet) ?? return fail("`{options.jet}` cannot be resolved: {err}")
+    bytes :: files.read_bytes(options.manifest) ?? return fail("`{options.manifest}` cannot be read: {err}")
+    manifest :: read_json(options.manifest) ?? return fail(err.message)
+    head :: current_head(repo) ?? return fail(err.message)
+    entries :: array_field(manifest, "entries")
+    proof_sha :: sha256_path(proof_path(repo)) ?? return fail(err.message)
+    if text_field(manifest, "head") != head || text_field(manifest, "repo") != repo || text_field(field(manifest, "sourceProof"), "sha256") != proof_sha
+        || field(manifest, "completeCompilerRegistries") != .Bool(true) || entries.len() == 0 {
+        return fail("complete pinned-source manifest required")
+    }
+    // Re-census: a forged or truncated entries array cannot turn omissions into PASS.
+    current :: inventory(repo)
+    required := registry_rows(repo, current).map(row -> row.id.copy())
+    &required.push("testkit/cases")
+    ids :: entries.map(entry -> text_field(entry, "id"))
+    distinct := [String]{}
+    loop id in ids {
+        if !distinct.contains(id) -> &distinct.push(id.copy())
+    }
+    if distinct.len() != ids.len() || sorted_texts(ids) != sorted_texts(required) -> return fail("manifest does not account for every current registry")
+    if canonical(census_dyn(current)) != canonical(field(manifest, "inventory")) -> return fail("registry source inventory changed since manifest")
+    loop source in array_field(manifest, "sourceManifests") {
+        path :: text_field(source, "path")
+        if sha256_file(repo, path) != text_field(source, "sha256") -> return fail("source manifest changed: {path}")
+    }
+    if canonical(testkit_inventory(repo).tree) != canonical(field(manifest, "testkit")) -> return fail("testkit sources/cases changed since manifest")
+    // Partition only after every full-manifest integrity and completeness check.
+    selected :: partition(entries, options.shard) ?? return fail(err.message)
+    receipt_path :: if options.receipt != "" -> options.receipt.copy() else -> "{options.manifest}.receipt.json"
+    files.create_dir_all(files.dirname(receipt_path)) ?? return fail("`{receipt_path}` cannot be prepared: {err}")
+    log_dir :: "{receipt_path}.logs"
+    files.create_dir_all(log_dir) ?? return fail("`{log_dir}` cannot be created: {err}")
+    header :: [String: Dyn]{
+        "head": Dyn.Text(text_field(manifest, "head")),
+        "jet": Dyn.Text(jet.copy()),
+        "jetSha256": Dyn.Text(sha256_path(jet) ?? return fail(err.message)),
+        "manifestSha256": Dyn.Text(crypto.sha256(bytes).hex()),
+        "sourceProof": field(manifest, "sourceProof"),
+    }
+    tally := RunTally{total: selected.len(), passed: 0, blocked: 0, failed: 0, entries: [Dyn]{}, runtime: None, reason: None}
+    loaded := Loaded{runtime: None, error: ""}
+    if selected.any(entry -> text_field(entry, "kind") == "transport" && text_field(entry, "status") != "BLOCKED") -> loaded = load_runtime(jet, options.runtime)
+    if loaded.runtime == .Val(found) {
+        tally.runtime = Val(Dyn.Object([String: Dyn]{"runtimeDir": Dyn.Text(found.dir.copy()), "runtimePack": Dyn.Text(found.pack.copy()), "runtimeObject": Dyn.Text(found.object.copy()), "packSha256": Dyn.Text(found.pack_sha256.copy()), "objectSha256": Dyn.Text(found.object_sha256.copy())}))
+    }
+    adapter :: sys.executable()
+    loop entry in selected {
+        result := [String: Dyn]{"id": field(entry, "id"), "mode": field(entry, "mode"), "testCount": field(entry, "testCount")}
+        if text_field(entry, "status") == "BLOCKED" {
+            result["status"] = Dyn.Text("BLOCKED")
+            result["reason"] = field(entry, "reason")
+            tally.blocked += 1
+        } else if text_field(entry, "kind") == "transport" && loaded.error != "" {
+            result["status"] = Dyn.Text("BLOCKED")
+            result["reason"] = Dyn.Text("runtime prerequisite: {loaded.error}")
+            tally.blocked += 1
+        } else {
+            if run_entry(&result, entry, manifest, repo, jet, log_dir, loaded.runtime, adapter) == {
+                .Ok(_) -> {
+                    result["status"] = Dyn.Text("PASS")
+                    tally.passed += 1
+                }
+                .Err(failure) -> {
+                    result["status"] = Dyn.Text("FAIL")
+                    result["reason"] = Dyn.Text(failure.message.copy())
+                    tally.failed += 1
+                }
+            }
+        }
+        &tally.entries.push(Dyn.Object(result.copy()))
+        write_json(receipt_path, receipt_dyn("FAIL", header, tally, options.shard, entries.len()))
+    }
+    if current_head(repo) == {
+        .Ok(final) -> {
+            if final != text_field(manifest, "head") {
+                tally.failed += 1
+                tally.reason = Val("pinned source changed during registry run: source SHA changed")
+            }
+        }
+        .Err(failure) -> {
+            tally.failed += 1
+            tally.reason = Val("pinned source changed during registry run: {failure.message}")
+        }
+    }
+    status :: if tally.passed == tally.total && tally.blocked == 0 && tally.failed == 0 -> "PASS" else -> "FAIL"
+    write_json(receipt_path, receipt_dyn(status, header, tally, options.shard, entries.len()))
+    print("{status} compiler registries {tally.passed}/{tally.total}; blocked={tally.blocked} failed={tally.failed}; {receipt_path}")
+    process.exit(if status == "PASS" -> 0 else -> 1)
+}
+
+struct Loaded {
+    runtime: Runtime?
+    error: String
+}
+
+fn load_runtime(jet: String, dir: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Loaded Never! {
+    if native_runtime(jet, dir) == {
+        .Ok(found) -> Loaded{runtime: Val(found.copy()), error: ""}
+        .Err(failure) -> Loaded{runtime: None, error: failure.message.copy()}
+    }
+}
+
+fn exit_problem(what: String, ran: ProcessReceipt, timeout_ms: Int) -> String Never! {
+    if ran.timed_out -> return "{what} timed out after {timeout_ms} ms"
+    if ran.signal == .Val(number) -> return "{what} exit null, signal {number}"
+    "{what} exit {ran.code}, signal null"
+}
+
+// Execute one manifest entry; `result` gathers the command, logs and report.
+fn run_entry(result: &[String: Dyn], entry: Dyn, manifest: Dyn, repo: String, jet: String, log_dir: String, runtime: Runtime?, adapter: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    mode :: text_field(entry, "mode")
+    count :: int_field(entry, "testCount") ?? 0
+    path :: text_field(entry, "path")
+    kind :: text_field(entry, "kind")
+    id :: text_field(entry, "id")
+    if (mode != "run" && mode != "test") || count < 1 || (sha256_path(path) ?? "") != text_field(entry, "sha256") -> return Err(problem("invalid or changed assembled registry"))
+    stem :: "{log_dir}/{id.replace("/", "_")}"
+    timeout_ms :: registry_timeout_ms()
+    started :: time.unix_ns()
+    command := [String]{}
+    cwd := text_field(entry, "cwd")
+    code := Dyn.Null
+    signal := Dyn.Null
+    stdout := ""
+    stderr := ""
+    failure := ""
+    if kind == "testkit" {
+        kit_dir :: files.dirname(files.dirname(files.dirname(path)))
+        loop source in array_field(field(manifest, "testkit"), "sources") {
+            name :: text_field(source, "path")
+            if (sha256_path("{kit_dir}/{name}") ?? "") != text_field(source, "sha256") -> return Err(problem("assembled testkit source changed: {name}"))
+        }
+        project :: files.dirname(path)
+        build :: registry_spec([String]{jet, "build", path}, project, repo, [Setting]{}, timeout_ms).run() ?? return Err(problem("testkit native build cannot start: {err}"))
+        files.write("{stem}.build.stdout", build.output) ?? return Err(problem("`{stem}.build.stdout` cannot be written: {err}"))
+        files.write("{stem}.build.stderr", build.errors) ?? return Err(problem("`{stem}.build.stderr` cannot be written: {err}"))
+        if build.timed_out || build.signal != None || build.code != 0 -> return Err(problem(exit_problem("testkit native build", build, timeout_ms)))
+        report_path :: "{stem}.results.json"
+        scratch :: "{project}/case-scratch"
+        files.create_dir_all(scratch) ?? return Err(problem("`{scratch}` cannot be created: {err}"))
+        command = [String]{"{project}/.jet/build/run", "cases", "--jet", jet, "--opt-in", "--scratch", scratch, "--results", report_path}
+        cwd = repo.copy()
+        child :: registry_spec(command, repo, repo, [Setting]{}, timeout_ms).run() ?? return Err(problem("the testkit cannot start: {err}"))
+        stdout = child.output.copy()
+        stderr = child.errors.copy()
+        if !child.timed_out && child.signal == None {
+            code = Dyn.Int(child.code)
+        }
+        signal = signal_dyn(child.signal)
+        failure = if child.timed_out || child.signal != None || child.code != 0 -> exit_problem("registry", child, timeout_ms) else -> ""
+        if failure == "" {
+            report :: read_json(report_path) ?? return Err(err)
+            rows :: array_field(report, "results")
+            names :: rows.map(row -> text_field(row, "case"))
+            expected :: array_field(entry, "caseNames").map(name -> if name == .Text(text) -> text.copy() else -> "")
+            if text_field(report, "jet") != jet || rows.len() != count || rows.any(row -> text_field(row, "status") != "PASS") || sorted_texts(names) != sorted_texts(expected) {
+                return Err(problem("testkit cases contain missing, non-PASS, skipped, or unexpected outcomes"))
+            }
+            result["report"] = report
+        }
+    } else if kind == "transport" {
+        found :: runtime ?? return Err(problem("runtime prerequisite: no native runtime"))
+        ran :: run_transport(entry, repo, jet, log_dir, found, adapter) ?? return Err(err)
+        command = [String]{"native-registry-transport", path, id}
+        code = Dyn.Int(ran.ran.code)
+        stdout = ran.ran.stdout.copy()
+        stderr = ran.ran.stderr.copy()
+        result["transportEvidence"] = Dyn.Array(ran.evidence.copy())
+        failure = if ran.ran.code != 0 -> "registry exit {ran.ran.code}, signal null" else -> ""
+    } else {
+        command = [String]{jet, mode}
+        if mode == "test" {
+            &command.push("--capture=all")
+            &command.push("--color=never")
+        }
+        &command.push(path)
+        sources :: array_field(entry, "sources").map(source -> if source == .Text(text) -> text.copy() else -> "")
+        environment :: field(entry, "environment")
+        if canonical(environment) != canonical(registry_environment(repo, cwd, sources)) -> return Err(problem("registry environment changed since manifest"))
+        scratch :: text_field(environment, "TMPDIR")
+        files.create_dir_all(scratch) ?? return Err(problem("`{scratch}` cannot be created: {err}"))
+        result["environment"] = environment.copy()
+        extra := [Setting]{}
+        if environment == .Object(pairs) {
+            loop pair in pairs {
+                if pair.value == .Text(value) -> &extra.push(Setting{name: pair.key.copy(), value: value.copy()})
+            }
+        }
+        child :: registry_spec(command, cwd, repo, extra, timeout_ms).run() ?? return Err(problem("the registry cannot start: {err}"))
+        stdout = child.output.copy()
+        stderr = child.errors.copy()
+        if !child.timed_out && child.signal == None -> code = Dyn.Int(child.code)
+        signal = signal_dyn(child.signal)
+        failure = if child.timed_out || child.signal != None || child.code != 0 -> exit_problem("registry", child, timeout_ms) else -> ""
+    }
+    files.write("{stem}.stdout", stdout) ?? return Err(problem("`{stem}.stdout` cannot be written: {err}"))
+    files.write("{stem}.stderr", stderr) ?? return Err(problem("`{stem}.stderr` cannot be written: {err}"))
+    result["command"] = texts(command)
+    result["cwd"] = Dyn.Text(cwd.copy())
+    result["code"] = code
+    result["signal"] = signal
+    result["milliseconds"] = Dyn.Int((time.unix_ns() - started) /% 1000000)
+    result["stdoutLog"] = Dyn.Text("{stem}.stdout")
+    result["stderrLog"] = Dyn.Text("{stem}.stderr")
+    if failure != "" -> return Err(problem(failure))
+    if mode == "test" {
+        reports := [Dyn]{}
+        loop line in stdout.split("\n") {
+            parsed :: json.parse(line) ?? next
+            if text_field(parsed, "schema") == text_field(entry, "stdout") -> &reports.push(parsed)
+        }
+        if reports.len() != 1 -> return Err(problem("exact canonical jet.test.v1 success report required"))
+        report :: reports[0].copy()
+        tests :: field(report, "tests")
+        listed :: if tests == .Array(items) -> Val(items.copy()) else -> None
+        if field(report, "ok") != .Bool(true) || int_field(report, "failed") != Val(0) || int_field(report, "skipped") != Val(0) || int_field(report, "unexpectedPasses") != Val(0) || listed == None {
+            return Err(problem("test report contains failure, skip, or invalid success fields"))
+        }
+        items :: listed ?? [Dyn]{}
+        passed :: int_field(report, "passed") ?? -1
+        expected_failures :: int_field(report, "expectedFailures") ?? -1
+        if items.len() != count || passed < 0 || expected_failures < 0 || passed + expected_failures != count -> return Err(problem("executed test count does not match registry"))
+        ran_names :: items.map(test -> text_field(test, "name"))
+        names :: array_field(entry, "testNames").map(name -> if name == .Text(text) -> text.copy() else -> "")
+        if sorted_texts(ran_names) != sorted_texts(names) -> return Err(problem("executed test names do not match complete registry"))
+        result["report"] = report
+    }
+    Ok(())
+}
+
+// --- JSON fields -----------------------------------------------------------------
+
+fn field(tree: Dyn, name: String) -> Dyn Never! {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+fn text_field(tree: Dyn, name: String) -> String Never! {
+    if field(tree, name) == .Text(value) -> return value.copy()
+    ""
+}
+
+fn int_field(tree: Dyn, name: String) -> Int? Never! {
+    if field(tree, name) == {
+        .Int(value) -> Val(value)
+        .Number(lexeme) -> Val(Int.parse(lexeme) ?? return None)
+        else -> None
+    }
+}
+
+fn array_field(tree: Dyn, name: String) -> [Dyn] Never! {
+    if field(tree, name) == .Array(items) -> return items.copy()
+    [Dyn]{}
+}
+
+// --- tests -------------------------------------------------------------------------
+
+fn test_repo() -[Env, Exec, FS, IO]> String Never! {
+    dir := files.cwd() ?? "/"
+    loop {
+        if files.exists("{dir}/Tools/agent/ProofSource.jet") -> return dir
+        if dir == "/" || dir == "" -> panic("run the test from inside the Jet checkout")
+        dir = files.dirname(dir)
+    }
+}
+
+fn shard_ids(entries: [Dyn], shard: String) -> [String] Never! {
+    (partition(entries, shard) ?? panic("shard {shard}: {err}")).map(entry -> text_field(entry, "id"))
+}
+
+#Test("registry shards are deterministic, disjoint and cover the complete manifest") {
+    ids :: [String]{"Z", "A", "T", "B", "Q", "C", "P"}
+    manifest :: ids.map(id -> Dyn.Object([String: Dyn]{"id": Dyn.Text(id.copy())}))
+    assert_eq(shard_ids(manifest, ""), ids)
+    reversed := manifest.copy()
+    &reversed.reverse()
+    loop count in ([Int]{1, 2, 3, 10}) {
+        all := [String]{}
+        loop index in 1..<(count + 1) {
+            picked :: shard_ids(manifest, "{index}/{count}")
+            assert_eq(shard_ids(reversed, "{index}/{count}"), picked)
+            loop id in picked -> &all.push(id.copy())
+        }
+        assert_eq(all.len(), ids.len())
+        assert_eq(sorted_texts(all), sorted_texts(ids))
+    }
+}
+
+#Test("invalid registry shards cannot run a partial manifest") {
+    manifest :: [Dyn]{Dyn.Object([String: Dyn]{"id": Dyn.Text("A")})}
+    loop shard in ([String]{"0/2", "3/2", "1/0", "-1/2", "1", "1/2/3", "1.5/2", "1/9007199254740992"}) {
+        if partition(manifest, shard) == {
+            .Ok(_) -> panic("shard {shard} was accepted")
+            .Err(found) -> assert(found.message.starts_with("invalid registry shard"))
+        }
+    }
+}
+
+#Test("the census reads Test names outside comments and literals only") {
+    text :: "// #Test(\"commented\")\n/* outer /* #Test(\"nested\") */ */\nx :: \"#Test(\\\"quoted\\\")\"\n#Test(\"real \\\"one\\\"\") {{ }}\n#Test (\n  \"spaced\") {{ }}\n"
+    assert_eq(tests_in(text) ?? panic("names: {err}"), [String]{"real \"one\"", "spaced"})
+    if tests_in("#Test(name) {{ }}\n") == {
+        .Ok(_) -> panic("an unnamed Test was accepted")
+        .Err(_) -> {}
+    }
+}
+
+#Test("a standalone registry keeps offsets and drops package and repeated Core imports") {
+    text :: "use {{\n    files :: core.files\n    jet_lex.Token\n}}\nuse files :: core.files\nuse compiler_bootstrap.[a,\nb]\nfn run() {{ }}\n"
+    stripped :: strip_imports(text)
+    assert_eq(stripped.count_bytes(), text.count_bytes())
+    lines :: stripped.split("\n").to_list()
+    assert_eq(lines[1], "use files :: core.files")
+    assert_eq(lines[2].trim(), "")
+    assert_eq(lines[4].trim(), "")
+    assert_eq(lines[5].trim(), "")
+    assert_eq(lines[6].trim(), "")
+    assert_eq(lines[7], "fn run() {{ }}")
+}
+
+#Test("runtime C transports run their complete witness variants") {
+    repo :: test_repo()
+    loop name in ([String]{"CompilerEnv", "CompilerRoutes", "CompilerNeededJSON", "CompilerNeededURL", "CompilerNeededMathText", "DynNative"}) {
+        source :: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet"
+        row :: Census{package: "JetRuntime", source: source, sha256: "", names: [String]{}, entry: false, role: "registry"}
+        entry :: prepare_transport(repo, row, "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
+        transport :: field(entry, "transport")
+        assert_eq(text_field(transport, "type"), "c")
+        assert_eq(text_field(transport, "name"), name)
+        assert_eq(int_field(entry, "testCount"), Val(1))
+        found :: specification(text_field(entry, "id")) ?? panic("{name}: no specification")
+        out :: text_field(entry, "cwd")
+        expected :: if name == "CompilerEnv" -> [[String]]{[String]{}, [String]{"empty"}} else if name == "CompilerRoutes" -> [[String]]{[String]{out}} else -> [[String]]{[String]{}}
+        assert_eq(driver_runs(found, out), expected)
+        sources :: array_field(entry, "sources")
+        if name == "CompilerEnv" || name == "CompilerRoutes" -> assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Tests.c")))
+    }
+}
+
+#Test("codec, process and native-suite transports drive the selected real fixture") {
+    repo :: test_repo()
+    loop name in ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves", "ProcessExecution", "TerminalProcess"}) {
+        row :: Census{package: "JetRuntime", source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet", sha256: "", names: [String]{}, entry: false, role: "registry"}
+        entry :: prepare_transport(repo, row, "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
+        found :: specification(text_field(entry, "id")) ?? panic("{name}: no specification")
+        out :: text_field(entry, "cwd")
+        codec :: name.starts_with("Codec") || name.starts_with("Dyn") || name == "CompilerFileLeaves"
+        runner :: if codec -> "run-native-codec-file-leaves.mjs" else -> "run-process-witnesses.mjs"
+        folder :: if codec -> "codec" else -> "process"
+        assert_eq(fixture_args(repo, found, out, "/native/jet", "/native/jet-runtime"), [String]{"{repo}/Compiler/JetRuntime/Tests/{runner}", "{out}/{folder}", "/native/jet", "/native/jet-runtime", "--test", name})
+        if !codec {
+            sources :: array_field(entry, "sources")
+            assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.c")))
+            assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.stdout")))
+        }
+    }
+    loop name in ([String]{"FilesWalk", "HostParallelism"}) {
+        row :: Census{package: "JetRuntime", source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet", sha256: "", names: [String]{}, entry: false, role: "registry"}
+        entry :: prepare_transport(repo, row, "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
+        assert_eq(text_field(field(entry, "transport"), "type"), "native-suite")
+        assert(array_field(entry, "sources").contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.c")))
+        found :: specification(text_field(entry, "id")) ?? panic("{name}: no specification")
+        assert_eq(found.modes, [String]{"assemble", "lower", "audit", "link", "run"})
+    }
+}

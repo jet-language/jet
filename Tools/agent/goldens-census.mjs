@@ -6,7 +6,6 @@ import { appendFileSync, closeSync, cpSync, createWriteStream, existsSync, mkdir
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { partitionRegistries } from './registry-shard.mjs';
 
 const here = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const args = process.argv.slice(2), options = { jobs: 2, timeout: 90, registryTimeout: 600, tiers: 'o0,o1,o2' };
@@ -177,18 +176,20 @@ async function main() {
     cpSync(root, work, { recursive: true });
     // Only this mutable copy is the cwd for tests or examples.
     const registryDir = join(scratch, 'registries'), registryManifest = join(registryDir, 'manifest.json');
-    const generated = await invoke([process.execPath, join(root, 'Tools/agent/compiler-registries.mjs'), 'manifest', manifest.commit, '--out', registryDir], root, options.registryTimeout);
+    const generated = await invoke([jet, join(root, 'Tools/agent/CompilerRegistries.jet'), 'manifest', manifest.commit, '--out', registryDir], root, options.registryTimeout);
     const registries = readJSON(registryManifest);
     if (!registries) record({ test: 'compiler/registry-manifest', kind: 'compiler-registry', rawStatus: 'FAIL', detail: problem(generated) + '\n' + first(generated.stderr), run: generated });
     else {
         planned.push(...registries.entries.map(entry => ({ test: entry.id, kind: 'compiler-registry' })));
         for (const entry of registries.entries) planned.push(...(entry.testNames ?? []).map(name => ({ test: `${entry.id}::${name}`, kind: 'compiler-test' })));
+        // CompilerRegistries.jet's one-based I/N shard: every Nth entry in id order.
+        const ordered = [...registries.entries].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
         for (let index = 1; index <= options.jobs; index++) {
-            const shard = `${index}/${options.jobs}`, selected = partitionRegistries(registries.entries, shard);
+            const shard = `${index}/${options.jobs}`, selected = ordered.filter((_, offset) => offset % options.jobs === index - 1);
             if (!selected.length) continue;
             tasks.push(async () => {
                 const receipt = join(scratch, `registries-${index}.json`);
-                const argv = [process.execPath, join(root, 'Tools/agent/compiler-registries.mjs'), 'run', '--jet', jet, '--manifest', registryManifest, '--receipt', receipt, '--shard', shard, ...(options.runtime ? ['--runtime', realpathSync(options.runtime)] : [])];
+                const argv = [jet, join(root, 'Tools/agent/CompilerRegistries.jet'), 'run', '--jet', jet, '--manifest', registryManifest, '--receipt', receipt, '--shard', shard, ...(options.runtime ? ['--runtime', realpathSync(options.runtime)] : [])];
                 const run = await invoke(argv, root, 0, { JET_REGISTRY_TIMEOUT_MS: String(options.registryTimeout * 1000) });
                 const results = readJSON(receipt), byId = new Map((results?.entries ?? []).map(row => [row.id, row]));
                 if (!results || results.jet !== jet || results.shard !== shard || results.fullTotal !== registries.entries.length || results.total !== selected.length || byId.size !== selected.length || results.entries.some(row => !selected.some(entry => entry.id === row.id))) {

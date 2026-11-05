@@ -164,7 +164,7 @@ fn run() {
         }
         output :: "{scratch}/registries"
         manifest :: "{output}/manifest.json"
-        listed := run_child(&state, "registry-manifest", [String]{"node", "{root}/Tools/agent/compiler-registries.mjs", "manifest", head, "--out", output})
+        listed := run_child(&state, "registry-manifest", [String]{binary, "{root}/Tools/agent/CompilerRegistries.jet", "manifest", head, "--out", output})
         if listed.row.status == "PASS" -> registry_verdict(&listed.row, manifest, None, head, root, binary)
         passed :: listed.row.status == "PASS"
         record(&state, listed.row)
@@ -173,7 +173,7 @@ fn run() {
             next
         }
         receipt :: "{evidence}/registries.json"
-        ran := run_child(&state, "registries", [String]{"node", "{root}/Tools/agent/compiler-registries.mjs", "run", "--jet", binary, "--manifest", manifest, "--receipt", receipt})
+        ran := run_child(&state, "registries", [String]{binary, "{root}/Tools/agent/CompilerRegistries.jet", "run", "--jet", binary, "--manifest", manifest, "--receipt", receipt})
         if ran.row.status == "PASS" -> registry_verdict(&ran.row, manifest, Val(receipt), head, root, binary)
         record(&state, ran.row)
     }
@@ -512,11 +512,9 @@ fn publish(state: Verify) -[FS, Exec, IO]> () {
 // runner behavior only, never compiler or full-suite proof.
 FIXTURE_COMMIT :: "0123456789012345678901234567890123456789"
 
-FIXTURE_JET :: "#!/usr/bin/env bash\ncase \"$1\" in\n  */Tools/ci/TestShards.jet) printf 'golden\\nui\\ncases\\nregistries\\n'; exit 0 ;;\n  */Tools/agent/CloseoutGate.jet) [[ $FIXTURE_MODE == closeout ]] && exit 3; exit 0 ;;\n  */Tools/agent/ProofSource.jet) cat \"${{1%/Tools/agent/ProofSource.jet}}/fixture-export.txt\"; exit 0 ;;\n  */Tools/agent/*.jet) exit 0 ;;\nesac\n[[ \"$1\" == test && \"$2\" == */Compiler && \"$3\" == --profile ]] || exit 64\nsuite=$4\n[[ $suite == golden && $FIXTURE_MODE == signal ]] && kill -TERM $$\n[[ $suite == golden && $FIXTURE_MODE == ordinary ]] && exit 17\nstatus=PASS\n[[ $suite == ui && $FIXTURE_MODE == refused ]] && status=REFUSED\n[[ $suite == ui && $FIXTURE_MODE == corrupt ]] && printf changed >>Tools/agent/core-module-check.mjs\nprintf '{{\"jet\":\"%s\",\"results\":[{{\"case\":\"%s\",\"suite\":\"%s\",\"tier\":\"o0\",\"status\":\"%s\"}}]}}' \"$JET\" \"$suite\" \"$suite\" \"$status\" >\"$JET_CI_EVIDENCE_DIR/$suite.json\"\n"
+FIXTURE_JET :: "#!/usr/bin/env bash\ncase \"$1\" in\n  */Tools/ci/TestShards.jet) printf 'golden\\nui\\ncases\\nregistries\\n'; exit 0 ;;\n  */Tools/agent/CloseoutGate.jet) [[ $FIXTURE_MODE == closeout ]] && exit 3; exit 0 ;;\n  */Tools/agent/ProofSource.jet) cat \"${{1%/Tools/agent/ProofSource.jet}}/fixture-export.txt\"; exit 0 ;;\n  */Tools/agent/CompilerRegistries.jet) if [[ $2 == manifest ]]; then mkdir -p \"$5\"; printf '{{\"head\":\"%s\",\"repo\":\"%s\",\"completeCompilerRegistries\":true,\"entries\":[{{\"id\":\"fixture\"}}]}}' \"$3\" \"$(pwd -P)\" >\"$5/manifest.json\"; else [[ $FIXTURE_MODE == registry ]] && exit 1; [[ $(<\"$6\") =~ \\\"head\\\":\\\"([0-9a-f]+)\\\" ]]; printf '{{\"status\":\"PASS\",\"head\":\"%s\",\"jet\":\"%s\",\"total\":1,\"passed\":1,\"blocked\":0,\"failed\":0,\"entries\":[{{\"id\":\"fixture\",\"status\":\"PASS\"}}]}}' \"${{BASH_REMATCH[1]}}\" \"$4\" >\"$8\"; fi; exit 0 ;;\n  */Tools/agent/*.jet) exit 0 ;;\nesac\n[[ \"$1\" == test && \"$2\" == */Compiler && \"$3\" == --profile ]] || exit 64\nsuite=$4\n[[ $suite == golden && $FIXTURE_MODE == signal ]] && kill -TERM $$\n[[ $suite == golden && $FIXTURE_MODE == ordinary ]] && exit 17\nstatus=PASS\n[[ $suite == ui && $FIXTURE_MODE == refused ]] && status=REFUSED\n[[ $suite == ui && $FIXTURE_MODE == corrupt ]] && printf changed >>Tools/agent/core-module-check.mjs\nprintf '{{\"jet\":\"%s\",\"results\":[{{\"case\":\"%s\",\"suite\":\"%s\",\"tier\":\"o0\",\"status\":\"%s\"}}]}}' \"$JET\" \"$suite\" \"$suite\" \"$status\" >\"$JET_CI_EVIDENCE_DIR/$suite.json\"\n"
 
 FIXTURE_GIT :: "#!/usr/bin/env bash\n[[ $FIXTURE_MODE == pinned ]] && exit 19\nprintf '0123456789012345678901234567890123456789\\n'\n"
-
-FIXTURE_REGISTRIES :: "import {{mkdirSync,readFileSync,writeFileSync}} from 'node:fs';\nconst args=process.argv.slice(2);\nif(args[0]==='manifest'){{const dir=args[args.indexOf('--out')+1];mkdirSync(dir,{{recursive:true}});writeFileSync(dir+'/manifest.json',JSON.stringify({{head:args[1],repo:process.cwd(),completeCompilerRegistries:true,entries:[{{id:'fixture'}}]}}));}}\nelse {{if(process.env.FIXTURE_MODE==='registry')process.exit(1);const manifest=JSON.parse(readFileSync(args[args.indexOf('--manifest')+1]));writeFileSync(args[args.indexOf('--receipt')+1],JSON.stringify({{status:'PASS',head:manifest.head,jet:process.env.JET,total:1,passed:1,blocked:0,failed:0,entries:[{{id:'fixture',status:'PASS'}}]}}));}}\n"
 
 fn fixture_put(tree: String, path: String, text: String) -[FS]> () {
     file :: "{tree}/{path}"
@@ -533,7 +531,6 @@ fn fixture_tree(tree: String, runner: String, export: String) -[FS]> [String] {
         (path: "Tools/agent/core-coverage-census.mjs", text: "// fixture gate: passes\n"),
         (path: "Tools/agent/core-module-check.mjs", text: "// fixture gate: passes\n"),
         (path: "fixture-export.txt", text: "{export}\n"),
-        (path: "Tools/agent/compiler-registries.mjs", text: FIXTURE_REGISTRIES),
         (path: "bin/jet", text: FIXTURE_JET),
         (path: "bin/git", text: FIXTURE_GIT),
     }
