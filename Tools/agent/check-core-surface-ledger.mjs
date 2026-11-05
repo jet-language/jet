@@ -2539,6 +2539,35 @@ function writeCoreCallRegistry(source, declarations) {
     generatedCoreCallRegistry(source, read(CORE_CALL_EXTENSIONS_PATH), declarations),
   );
 }
+// The variant names of `enum <name> { … }` declared in one Core source file,
+// or null when that file does not declare it (a compiler-owned family). A
+// variant is an upper-case name at the enum body's top level; payloads,
+// discriminants and methods are skipped.
+function coreSourceEnumVariants(path, name) {
+  const text = read(path);
+  const header = new RegExp("(?:^|\\n)[ \\t]*(?:pub\\s+)?enum\\s+" + name + "\\s*\\{").exec(text);
+  if (!header) return null;
+  let end = header.index + header[0].length;
+  for (let depth = 1; depth && end < text.length; end++) {
+    if (text[end] === "{") depth++;
+    else if (text[end] === "}") depth--;
+  }
+  const body = text.slice(header.index + header[0].length, end - 1).replace(/\/\/[^\n]*/g, "");
+  const variants = [];
+  let depth = 0;
+  for (let at = 0; at < body.length;) {
+    const ch = body[at];
+    if ("({[".includes(ch)) { depth++; at++; continue; }
+    if (")}]".includes(ch)) { depth--; at++; continue; }
+    const word = depth === 0 ? /^[A-Za-z_][A-Za-z0-9_]*/.exec(body.slice(at)) : null;
+    if (!word) { at++; continue; }
+    if (word[0] === "fn" || word[0] === "impl") break;
+    if (/^[A-Z]/.test(word[0])) variants.push(word[0]);
+    at += word[0].length;
+  }
+  return variants;
+}
+
 // Core enum leaves for the Jet compiler's `core_enum_variants` (the Rust
 // CoreModuleExports query): the CoreLeafKind::Enum rows of the export table,
 // in Core.jet module declaration order.
@@ -2563,6 +2592,14 @@ function generatedCoreEnumRows(source, declarations) {
         throw new Error(CORE_SOURCE_PATH + ": Core enum leaf " + type.name + " has different variants in " + module.module);
       }
       seen.set(type.name, variants);
+      for (const entry of declarations.sourceModules) {
+        if (entry.module !== module.module) continue;
+        const declared = coreSourceEnumVariants(entry.path, type.name);
+        if (declared && declared.join("|") !== variants) {
+          throw new Error(CORE_SOURCE_PATH + ": Core enum leaf " + type.name + " of " + module.module +
+            " lists " + variants + " but " + entry.path + " declares " + declared.join("|"));
+        }
+      }
       lines.push(
         "    CoreModuleTypeExport{name: " + jetStringExpression(type.name) +
         ", kind: CoreLeafKind.Enum{variants: [String]{" +
