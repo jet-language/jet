@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6567,
-    "rev": 92367,
+    "rev": 92372,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -70448,6 +70448,21 @@
         {
           "at": "2026-11-05",
           "by": "Main",
+          "text": "I1 safety defect found by SelfMem2 (blocks the c8 heap diff): use-after-free in the compiler's return lowering (ir_return). A struct with no drop, bound out of an Option or Result box (if found == .Val(facts) -> return facts), is read from inside the box after the box is freed. The compiler hits it itself at JetSema Ownership/Copy.jet:469, which is why a --checked-alloc compiler rejects valid code. A draft fix (copy the value before the frees) plus a repro case exists, unbuilt; Builder3 lands it after c5. Also landing: the JetCli/Tests regression fix (JobRegistry.jet:82 bound before .jobs(); E2305 there was a true positive)."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Defect found by Builder3, unowned until an agent frees up: Jetpack/PackageModel/Tests does not compile on dev d65a463b64 (AuthorityResolver.jet:136, `files` unbound); it predates 100b8b4d70. It blocks no c5/c7/c3 work, but any full-green gate that builds Jetpack's tests will fail on it."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "c22 pin (Main ruling, greenfield cutover): the spec's pinned refinements-fixture obligation ID 349a5f45... hashes the retired Rust fixture's bytes (#Invariant on Index4 :: distinct Int, which today's Jet rejects). The fixture moves to the ratified Jet form (Index4 :: distinct Int(0..3), pick(xs: [String#4], i: Index4)), which yields the same formula fef21cce... and certificate 1daaaa1b...; the case pins the Jet fixture's own obligation ID, and spec proof-replay-decisions.md :609-617 is updated to name it. No new #Invariant syntax."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
           "text": "c2 progress, d0a4649d90: package.jet test profiles and suites parse and validate, and jet test --profile <p> (or defaults.test) runs the tests suite once per optimize level with a per-test time_limit, records rows under .jet/test/<p>/ (gitignored, with .jet/symbols/) and fails only on rows lost against the baseline (test_profiles_bound_fan_out_and_compare_baselines.case PASS; chain FIXED_POINT on the landing base; ui and cases A/B lost 0 changed 0; lane-check OK). Remaining for c2: the repository root profiles over the testkit suites."
         },
         {
@@ -71222,7 +71237,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-05T10:46:07.233Z",
+      "updated": "2026-11-05T11:04:33.250Z",
       "updatedBy": "Main",
       "goals": [
         "G11",
@@ -75267,7 +75282,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T11:29:47.978Z",
-      "updated": "2026-11-05T02:32:45.258Z",
+      "updated": "2026-11-05T11:11:51.456Z",
       "updatedBy": "Main"
     },
     {
@@ -167473,34 +167488,27 @@
       "cardId": "c09kjhit",
       "group": "other",
       "title": "Where does a module's and a package's metadata live, and how do you set it?",
-      "situation": "You asked for one cohesive design with no nested module member, written in the planned binding form where every function, method, type and module is a constant bound with ::. This revision makes a module's metadata its own typed fields, with defaults. You set a field with a field: value line at the top of the module, the same line package.jet already uses, and read it as pricing.category. The options differ only in how you read or write those fields.",
-      "gist": "Should a module's metadata be its own fields, read as pricing.category, or be read through #module, or be written with markers?",
+      "situation": "A package and a module each have a body: metadata fields first, then bindings. package.jet and module.jet are bodies with implicit braces; in any other file you write name :: package { ... } or name :: module { ... } and the metadata goes inside the braces. Every example uses the planned binding form, where every named thing is a constant bound with ::. The options differ only in how you read the fields.",
+      "gist": "Should a module's metadata fields be read directly, as pricing.category, or only through #module(pricing)?",
       "lesson": "A module groups functions under one name, such as pricing. A package is a project with a package.jet file. Both have metadata: a name, a file, docs, a version and a license. This vote decides how you set and read it.",
       "explainer": "",
       "story": "Mia's shop has a pricing module and an old discount module she wants to retire. Her About screen shows her version, authors and the version of the json package she uses. She marks discount as deprecated so its callers get a warning.",
       "inWild": "Python: a module keeps its metadata in reserved double-underscore names, such as __name__, __doc__ and __file__.\nRust: Cargo exposes package fields such as CARGO_PKG_VERSION as text, one macro read per field.\nJai: a module is a constant, Basic :: #import \"Basic\", and module settings are written where it is imported.",
-      "detail": "YOUR QUESTION\n\nYou said the last version was not cohesive: its module member nested metadata inside the module, and its code mixed old and new forms. This version drops the nested member and writes every example in the planned binding form.\n\nTHE FORM EVERY EXAMPLE USES\n\nD-DECL-BINDING1=B is ratified: every named thing is a constant bound with ::. A function is total :: fn(text: String) -> Int { … }. A type is Module :: struct { … }, and an inline module is pricing :: module { … }.\n\nThat same ruling keeps the file-module line, module pricing, because it loads a file rather than binding a value. Lambdas are fn(n) { n + 1 }, as D-LAMBDA-SHAPE1=C ratified. None of this is built yet, so every proposed example is marked not built.\n\nWHAT A MEANS\n\nA module's metadata are its own fields. The built-in type Module lists them: name, file, doc, package, maturity, category and deprecated. Every field has a default or is filled by the compiler.\n\nYou set a field with one line at the top of the module: category: \"billing\". That is the line form package.jet already uses, so module and package metadata are written the same way. You read it as pricing.category.\n\nA struct body already works this way. In a struct, x: Int is a field and norm1 :: fn(self) … is a member. In a module, category: \"billing\" sets a field and total :: fn … binds a member.\n\nA module is a value of type Module plus its members. So describe(pricing) passes it to a function that takes a Module. #module is the module a line is written in, beside the ratified #package.\n\nA package's metadata is the Package value its package.jet writes, with every field it has today plus authors. You read your own as #package.version and a dependency's as json.package.version.\n\nTHE CLASH RULE, EXACTLY\n\nIn every module, the seven names name, file, doc, package, maturity, category and deprecated are fields. A module-level binding with one of those names is the generic duplicate-name error, E0105, which lists the module's fields.\n\nNothing else is touched. Locals, parameters, struct fields, methods, types and members of structs may use all seven names. Package fields never clash, because they are read through package or #package.\n\nThe list is closed. Your own metadata is an ordinary constant, such as OWNER :: \"billing team\", read as pricing.OWNER. Adding a Module field later would need its own vote and a census.\n\nToday 9 module-level items use name or file, out of 59,105. They include Core/Files/Path.jet:102 and Core/Sys/Sys.jet:286. jet fix renames them and their callers once.\n\nWRITING A FIELD LINE\n\nOnly the seven field names may appear before the colon, and only the three marked yours to set. The value must have the field's type, so category: 3 is a type error.\n\nWriting a compiler-filled field, such as name: \"x\", is the generic error for a read-only field. Any other name, such as limit: 5, is the generic error that lists the legal forms: name :: value, name := value, or a field line.\n\nField lines come first, after the /// comment and before any binding. Each field may be written once. An inline module writes the same lines inside its braces.\n\nEDGE CASES\n\n- deprecated makes every use from another module warn, as #Deprecated warns today. It never fails the build.\n\n- A function that takes Module sees only the seven fields, as a trait value sees only its trait's members.\n\n- A dependency's Package is read-only. json.package.authority shows json's rules; only json's own build applies them.\n\n- Old package.jet files keep working, because every new field has a default.\n\n- Module and Package live in core.meta, not the Prelude. Reading their fields needs no import; naming the type does, as run.jet's use line shows. A type of yours named Module or Package still works (probe m05).\n\n- Every field is known while building. Metadata ships in the program only where code reads it.\n\n- reflect() is not part of this design for modules. pricing.reflect() is the generic unknown-member error, which lists the members and fields of pricing (D-TEACH-RECONCILE1=A).\n\nBEGINNER AND EXPERT\n\nA beginner writes no field lines, because every field has a default. They print #package.version on an About screen. An expert opts in to category, maturity or deprecated, and passes modules to tools that take a Module.\n\nWHAT RUNS TODAY\n\nProbes are in $JET_SCRATCH_ROOT/lanes/Research/ballots-2026-11-05/modvalue and modvalue3, run with the pinned compiler (jet@0.0.1#006bccd5).\n\n- f01 and f05: a category: \"billing\" line is an error today, at file top and inside a module. The line form is free.\n\n- f02 and f03: square :: fn(…) and pricing :: module { … } are not built yet. Both are parse errors today.\n\n- f06: #module is a parse error today. f07: a repeated module-level name is E0105, \"defined twice\".\n\n- f04 and f08: a #Meta line at a file's top is accepted and marks the item below it. No marker sets module metadata today.\n\n- m01_today prints 3, standard rules, m01_today and 0.0.0. Only $package.name and $package.version are readable; $package.license is E0107 (shop_license).\n\n- m03: print shows [Mia Chen] for a list of text and Tested for an enum case. Maturity is today's enum in Core/Compiler/Lang.jet:73.\n\nWHY NOT B, READ THROUGH #module\n\nB sets fields with the same lines as A, but reads them only as #module(pricing).category. A module member may then use any name, so nothing is renamed.\n\nThe cost is a second read form. Every outside read is #module(pricing) instead of pricing, and a module no longer passes as a Module itself. A pays 9 one-time renames instead.\n\nWHY NOT C, MARKERS WRITE THE FIELDS\n\nC reads the same fields as A, but writes them as #Meta(category: \"billing\") and #Deprecated(…) at the top of the module. That matches how a function sets #Meta today.\n\nBut a marker at a file's top already marks the item below it (probe f08). C needs a blank line to say the marker means the module instead. A field line has no such doubt.\n\nRATIFIED DECISIONS IT TOUCHES\n\nAll code is in D-DECL-BINDING1=B and D-LAMBDA-SHAPE1=C form. A uses D-ECO-FILEROOT1 for the Package value and extends D-META-HASH1=A with #module beside #package.\n\nD-MARK-META1=B's law that behavior-free metadata is a #Meta field still holds for functions and types. For modules, A records the narrower rule that metadata is a Module field. Choice point C2 of Docs/proposals/effect-types-2026-10-29.md is answered: modules are first-class values.",
+      "detail": "YOUR RULE\n\nA package in package.jet and a module in module.jet are implicitly wrapped in braces: the whole file is the body. A package or module written in any other file wraps its body in braces, as name :: package { ... } or name :: module { ... }. The metadata and optional fields go in the body, first, followed by the bindings. Both options follow this rule exactly; they differ only in how you read the fields.\n\nTHE FORM EVERY EXAMPLE USES\n\nD-DECL-BINDING1=B is ratified: every named thing is a constant bound with ::. A function is total :: fn(text: String) -> Int { ... }, a type is Module :: struct { ... }, and a module bound in a file is discount :: module { ... }. The file-module line, module pricing, stays as that ruling kept it, and finds pricing.jet or pricing/module.jet as today. Lambdas are fn(n) { n + 1 } (D-LAMBDA-SHAPE1=C). None of the proposed forms is built yet, so every proposed example is marked not built.\n\nTHE BODY\n\nA package body or module body holds field lines first, then bindings. A field line is name: value, the line form package.jet already uses. A binding is name :: value or name := value.\n\n- package.jet: the file is the package body. Its field lines are today's package.jet lines.\n\n- pricing/module.jet: the file is the module body. category: \"billing\" at its top sets a field.\n\n- Any other file: discount :: module { category: \"billing\" ... total :: fn ... } and tool :: package { name: \"tool\" ... }. The fields go inside the braces, first.\n\nA module's fields are those of the built-in type Module: name, file, doc, package, maturity, category and deprecated. name, file, doc and package are filled by the compiler. maturity, category and deprecated have defaults, so you opt in only to the ones you want. A package's fields are the Package fields package.jet has today, plus authors.\n\nWHAT A MEANS\n\nThe fields are the module's own. You read pricing.category, and describe(pricing) passes the module to a function that takes a Module. You read your own package as #package.version and a dependency's as json.package.version.\n\nWHY NOT B, READ THROUGH #module\n\nB writes the bodies and field lines exactly as A, but reads a module's fields only as #module(pricing).category. A module member may then use any name, so nothing is renamed. The cost is a second, longer read form, and a module no longer passes as a Module itself.\n\nTHE CLASH RULE IN A, EXACTLY\n\nIn every module body, the seven names name, file, doc, package, maturity, category and deprecated are fields. A binding in a module body with one of those names is the generic duplicate-name error, E0105, which lists the module's fields.\n\nNothing else is touched: locals, parameters, struct fields, methods, types and struct members may use all seven names. Package fields never clash, because they are read through package or #package. The list is closed; your own metadata is an ordinary constant, such as OWNER :: \"billing team\".\n\nToday 9 module-level items use name or file, out of 59,105, including Core/Files/Path.jet:102 and Core/Sys/Sys.jet:286; jet fix renames them and their callers once.\n\nFIELD LINES\n\nField lines come first in the body: at the top of package.jet or module.jet, after the /// comment, or right after the opening brace. Each field is written at most once, and the value must have the field's type, so category: 3 is a type error.\n\nWriting a compiler-filled field, such as name: \"x\", is the generic error for a read-only field. Any other name, such as limit: 5, is the generic error that lists the legal forms: name :: value, name := value, or a field line.\n\nEDGE CASES\n\n- deprecated makes every use from another module warn, as #Deprecated warns today. It never fails the build.\n\n- A module's doc is the /// comment at the top of module.jet, or the one above name :: module { ... }.\n\n- A function that takes Module sees only the seven fields, as a trait value sees only its trait's members.\n\n- A dependency's Package is read-only. json.package.authority shows json's rules; only json's own build applies them.\n\n- Old package.jet files keep working, because every new field has a default.\n\n- Module and Package live in core.meta, not the Prelude. Reading their fields needs no import; naming the type does, as run.jet's use line shows.\n\n- Every field is known while building. Metadata ships in the program only where code reads it.\n\nBEGINNER AND EXPERT\n\nA beginner writes no field lines in a module, because every field has a default, and prints #package.version on an About screen. An expert opts in to category, maturity or deprecated and passes modules to tools that take a Module.\n\nWHAT RUNS TODAY\n\nProbes are in $JET_SCRATCH_ROOT/lanes/Research/ballots-2026-11-05/modvalue and modvalue3, run with the pinned compiler (jet@0.0.1#006bccd5).\n\n- f01 and f05: a category: \"billing\" line is an error today, at file top and inside a module. The line form is free.\n\n- f02 and f03: square :: fn(...) and pricing :: module { ... } are not built yet; both are parse errors today.\n\n- f07: a repeated module-level name is E0105, \"defined twice\".\n\n- m01_today prints 3, standard rules, m01_today and 0.0.0. Only $package.name and $package.version are readable; $package.license is E0107.\n\n- Today module pricing finds pricing.jet, then pricing/module.jet (Compiler/JetDriver Loader.jet:2276-2287).\n\nRATIFIED DECISIONS IT TOUCHES\n\nAll code is in D-DECL-BINDING1=B and D-LAMBDA-SHAPE1=C form. Both options use D-ECO-FILEROOT1 for the Package value. B adds #module(m) beside the ratified #package (D-META-HASH1=A). D-MARK-META1=B's law that behavior-free metadata is a #Meta field still holds for functions and types; for packages and modules the metadata is a field of the body. Choice point C2 of Docs/proposals/effect-types-2026-10-29.md is answered: modules are first-class values.",
       "options": [
         {
           "key": "A",
-          "name": "A module's metadata are its own fields",
-          "detail": "Each module has the fields of the built-in type Module: name, file, doc, package, maturity, category and deprecated. You opt in with category: \"billing\" at the top of the module, and read pricing.category. Those seven names are taken at module level only; today 9 items are renamed once.",
-          "technical": "Sema gives each module type the fields of core.meta.Module, filled from the module line, file, owning package, /// comment and field lines. A field line is name: value at module top, before any binding, checked against the field type. A module-level binding named like a field is E0105. Package is PackageFacts' fields plus authors. #package is that value; #module is new. All values are known while building.",
-          "code": "// proposed (A), not built. Every named thing is a constant bound with ::, as D-DECL-BINDING1=B ratified.\n// A module's metadata are its own fields. A field: value line sets one; pricing.category reads it.\n// Five files plus the built-in types; run.jet prints the lines in its comments.\n\n// ===== core.meta: the two built-in metadata types =====\nModule :: struct {\n    name: String                      // set by the compiler: the module's name\n    file: String                      // set by the compiler: its file, from the package root\n    doc: String                       // set by the compiler: the /// comment at its top, or \"\"\n    package: Package                  // set by the compiler: the package that owns it\n    maturity: Maturity{.Tested}       // yours to set: .Experimental, .Tested or .Hardened\n    category: String{\"\"}              // yours to set: a group name for docs and tools\n    deprecated: Deprecated{none}      // yours to set: uses from other modules warn\n}\n\nPackage :: struct {                   // every package.jet field, with today's defaults\n    name: String\n    version: String{\"0.0.0\"}\n    description: String{none}\n    license: String{none}\n    authors: [String]{[String]{}}     // new: the one field package.jet lacks today\n    deps: [String: DepSpec]{[String: DepSpec]{}}\n    // edition, jet, repository, runtime, allocator, outputs, defaults, configs,\n    // authority and policy keep today's types and defaults.\n}\n\n// ===== package.jet: field: value lines, as today =====\nname: \"shop\"\nversion: \"0.3.0\"\nlicense: \"MIT\"\nauthors: [\"Mia Chen\"]\ndeps: {\n    json: \"1.4.2\",\n}\n\n// ===== pricing.jet =====\n/// Price rules for the shop.\ncategory: \"billing\"                   // opt in: every field not written keeps its default\n\ntotal :: fn(text: String) -> Int { text.len() }\n\n// ===== discount.jet =====\n/// Old discount rules, kept for one release.\ncategory: \"billing\"\nmaturity: .Experimental\ndeprecated: Deprecated{since: \"0.3.0\", use: \"pricing\"}\n\ntotal :: fn(text: String) -> Int { text.len() - 1 }\n\n// ===== run.jet =====\nuse json\nuse core.meta.[Module]                // describe names the type, so it imports it\nmodule pricing\nmodule discount\n\ndescribe :: fn(m: Module) -> String { \"{m.name} ({m.category}, {m.maturity})\" }\n\nrun :: fn() {\n    print(pricing.total(\"abc\"))           // 3\n    print(pricing.category)               // billing\n    print(pricing.doc)                    // Price rules for the shop.\n    print(pricing.file)                   // pricing.jet\n    print(describe(pricing))              // pricing (billing, Tested): a module is a Module value\n    print(describe(discount))             // discount (billing, Experimental)\n    print(discount.total(\"abc\"))          // 2, and the build warns: discount is deprecated since 0.3.0; use pricing\n    print(#module.name)                   // run: the module this line is in\n    print(#package.version)               // 0.3.0: the package this line is in\n    print(#package.authors)               // [Mia Chen]\n    print(json.package.version)           // 1.4.2: a dependency's version\n}"
+          "name": "A module's fields are read directly",
+          "detail": "A package or module body holds its metadata fields first: implicit braces in package.jet and module.jet, explicit braces in any other file. You read pricing.category, and a module passes as a Module. The seven field names are taken in module bodies, so 9 items are renamed once.",
+          "technical": "Sema gives each module the fields of core.meta.Module, filled from the file or binding, owning package, /// comment and the body's field lines. A field line is name: value at the top of a body, before any binding, checked against the field type. A binding in a module body named like a field is E0105. Package is PackageFacts' fields plus authors. #package is that value. All values are known while building.",
+          "code": "// proposed (A), not built. Every named thing is a constant bound with ::, as D-DECL-BINDING1=B ratified.\n// The body of a package or module holds its metadata fields first, then its bindings.\n// package.jet and module.jet are bodies with implicit braces; any other file wraps the body in braces.\n// Three files plus the built-in types; run.jet prints the lines in its comments.\n\n// ===== core.meta: the two built-in metadata types =====\nModule :: struct {\n    name: String                      // set by the compiler: the module's name\n    file: String                      // set by the compiler: its file, from the package root\n    doc: String                       // set by the compiler: the /// comment above it, or \"\"\n    package: Package                  // set by the compiler: the package that owns it\n    maturity: Maturity{.Tested}       // yours to set: .Experimental, .Tested or .Hardened\n    category: String{\"\"}              // yours to set: a group name for docs and tools\n    deprecated: Deprecated{none}      // yours to set: uses from other modules warn\n}\n\nPackage :: struct {                   // every package.jet field, with today's defaults\n    name: String\n    version: String{\"0.0.0\"}\n    description: String{none}\n    license: String{none}\n    authors: [String]{[String]{}}     // new: the one field package.jet lacks today\n    deps: [String: DepSpec]{[String: DepSpec]{}}\n    // edition, jet, repository, runtime, allocator, outputs, defaults, configs,\n    // authority and policy keep today's types and defaults.\n}\n\n// ===== package.jet: the whole file is the package's body, so its braces are implicit =====\nname: \"shop\"\nversion: \"0.3.0\"\nlicense: \"MIT\"\nauthors: [\"Mia Chen\"]\ndeps: {\n    json: \"1.4.2\",\n}\n\n// ===== pricing/module.jet: the whole file is the module's body, so its braces are implicit =====\n/// Price rules for the shop.\ncategory: \"billing\"                   // opt in: every field not written keeps its default\n\ntotal :: fn(text: String) -> Int { text.len() }\n\n// ===== run.jet: any other file wraps a module's body in braces =====\nuse json\nuse core.meta.[Module]                // describe names the type, so it imports it\nmodule pricing                        // loads pricing/module.jet\n\n/// Old discount rules, kept for one release.\ndiscount :: module {\n    category: \"billing\"               // metadata fields come first, inside the braces\n    maturity: .Experimental\n    deprecated: Deprecated{since: \"0.3.0\", use: \"pricing\"}\n\n    total :: fn(text: String) -> Int { text.len() - 1 }\n}\n\ndescribe :: fn(m: Module) -> String { \"{m.name} ({m.category}, {m.maturity})\" }\n\nrun :: fn() {\n    print(pricing.total(\"abc\"))           // 3\n    print(pricing.category)               // billing\n    print(pricing.doc)                    // Price rules for the shop.\n    print(pricing.file)                   // pricing/module.jet\n    print(discount.file)                  // run.jet\n    print(describe(pricing))              // pricing (billing, Tested): a module is a Module value\n    print(describe(discount))             // discount (billing, Experimental)\n    print(discount.total(\"abc\"))          // 2, and the build warns: discount is deprecated since 0.3.0; use pricing\n    print(#package.version)               // 0.3.0: the package this line is in\n    print(#package.authors)               // [Mia Chen]\n    print(json.package.version)           // 1.4.2: a dependency's version\n}\n\n// ===== another program: tool.jet, a one-file package with no package.jet =====\ntool :: package {\n    name: \"tool\"                      // the package's fields go inside its braces\n    version: \"0.1.0\"\n\n    run :: fn() { print(#package.version) }   // 0.1.0\n}\n"
         },
         {
           "key": "B",
-          "name": "Same fields, read only through #module",
-          "detail": "Fields are set as in A, but read as #module(pricing).category. A module member may use any name, so nothing is renamed. Every outside read is longer, and a module does not pass as a Module itself.",
-          "technical": "As A for field lines and types. The fields are not members of the module type. #module(m) is a new form that returns m's Module value; bare #module is the module where it is written. Nothing is reserved.",
-          "code": "// proposed (B), not built. Every named thing is a constant bound with ::, as D-DECL-BINDING1=B ratified.\n// Fields are set as in A, but read only through #module, so a module member may use any name.\n// Five files plus the built-in types; run.jet prints the lines in its comments.\n\n// ===== core.meta: the two built-in metadata types =====\nModule :: struct {\n    name: String                      // set by the compiler: the module's name\n    file: String                      // set by the compiler: its file, from the package root\n    doc: String                       // set by the compiler: the /// comment at its top, or \"\"\n    package: Package                  // set by the compiler: the package that owns it\n    maturity: Maturity{.Tested}       // yours to set: .Experimental, .Tested or .Hardened\n    category: String{\"\"}              // yours to set: a group name for docs and tools\n    deprecated: Deprecated{none}      // yours to set: uses from other modules warn\n}\n\nPackage :: struct {                   // every package.jet field, with today's defaults\n    name: String\n    version: String{\"0.0.0\"}\n    description: String{none}\n    license: String{none}\n    authors: [String]{[String]{}}     // new: the one field package.jet lacks today\n    deps: [String: DepSpec]{[String: DepSpec]{}}\n    // edition, jet, repository, runtime, allocator, outputs, defaults, configs,\n    // authority and policy keep today's types and defaults.\n}\n\n// ===== package.jet: field: value lines, as today =====\nname: \"shop\"\nversion: \"0.3.0\"\nlicense: \"MIT\"\nauthors: [\"Mia Chen\"]\ndeps: {\n    json: \"1.4.2\",\n}\n\n// ===== pricing.jet =====\n/// Price rules for the shop.\ncategory: \"billing\"                   // opt in: every field not written keeps its default\nname :: fn() -> String { \"standard rules\" }   // Mia's own name: no clash under B\n\ntotal :: fn(text: String) -> Int { text.len() }\n\n// ===== discount.jet =====\n/// Old discount rules, kept for one release.\ncategory: \"billing\"\nmaturity: .Experimental\ndeprecated: Deprecated{since: \"0.3.0\", use: \"pricing\"}\n\ntotal :: fn(text: String) -> Int { text.len() - 1 }\n\n// ===== run.jet =====\nuse json\nuse core.meta.[Module]                // describe names the type, so it imports it\nmodule pricing\nmodule discount\n\ndescribe :: fn(m: Module) -> String { \"{m.name} ({m.category}, {m.maturity})\" }\n\nrun :: fn() {\n    print(pricing.total(\"abc\"))           // 3\n    print(pricing.name())                 // standard rules: Mia's own function\n    print(#module(pricing).category)      // billing\n    print(#module(pricing).doc)           // Price rules for the shop.\n    print(#module(pricing).file)          // pricing.jet\n    print(describe(#module(pricing)))              // pricing (billing, Tested)\n    print(describe(#module(discount)))             // discount (billing, Experimental)\n    print(discount.total(\"abc\"))          // 2, and the build warns: discount is deprecated since 0.3.0; use pricing\n    print(#module.name)                   // run\n    print(#package.version)               // 0.3.0\n    print(#package.authors)               // [Mia Chen]\n    print(#module(json).package.version)  // 1.4.2\n}"
-        },
-        {
-          "key": "C",
-          "name": "Markers write, fields read",
-          "detail": "Fields are read as in A, but written as #Meta(category: \"billing\") and #Deprecated(…) at the top of the module. A blank line after them says they mark the module, not the item below.",
-          "technical": "As A for reading and for the seven taken names. #Meta and #Deprecated gain the .File and .Module sites. A file-top marker group followed by a blank line marks the module; without one it marks the next item, as today.",
-          "code": "// proposed (C), not built. Every named thing is a constant bound with ::, as D-DECL-BINDING1=B ratified.\n// Fields are read as in A, but written with marker lines at the top of the module.\n// Five files plus the built-in types; run.jet prints the lines in its comments.\n\n// ===== core.meta: the two built-in metadata types =====\nModule :: struct {\n    name: String                      // set by the compiler: the module's name\n    file: String                      // set by the compiler: its file, from the package root\n    doc: String                       // set by the compiler: the /// comment at its top, or \"\"\n    package: Package                  // set by the compiler: the package that owns it\n    maturity: Maturity{.Tested}       // yours to set: .Experimental, .Tested or .Hardened\n    category: String{\"\"}              // yours to set: a group name for docs and tools\n    deprecated: Deprecated{none}      // yours to set: uses from other modules warn\n}\n\nPackage :: struct {                   // every package.jet field, with today's defaults\n    name: String\n    version: String{\"0.0.0\"}\n    description: String{none}\n    license: String{none}\n    authors: [String]{[String]{}}     // new: the one field package.jet lacks today\n    deps: [String: DepSpec]{[String: DepSpec]{}}\n    // edition, jet, repository, runtime, allocator, outputs, defaults, configs,\n    // authority and policy keep today's types and defaults.\n}\n\n// ===== package.jet: field: value lines, as today =====\nname: \"shop\"\nversion: \"0.3.0\"\nlicense: \"MIT\"\nauthors: [\"Mia Chen\"]\ndeps: {\n    json: \"1.4.2\",\n}\n\n// ===== pricing.jet =====\n/// Price rules for the shop.\n#Meta(category: \"billing\")            // a module marker: the blank line below ends the module's markers\n\ntotal :: fn(text: String) -> Int { text.len() }\n\n// ===== discount.jet =====\n/// Old discount rules, kept for one release.\n#Meta(category: \"billing\", maturity: .Experimental)\n#Deprecated(since: \"0.3.0\", use: \"pricing\")\n\ntotal :: fn(text: String) -> Int { text.len() - 1 }\n\n// ===== run.jet =====\nuse json\nuse core.meta.[Module]                // describe names the type, so it imports it\nmodule pricing\nmodule discount\n\ndescribe :: fn(m: Module) -> String { \"{m.name} ({m.category}, {m.maturity})\" }\n\nrun :: fn() {\n    print(pricing.total(\"abc\"))           // 3\n    print(pricing.category)               // billing: written as #Meta, read as a field\n    print(pricing.doc)                    // Price rules for the shop.\n    print(pricing.file)                   // pricing.jet\n    print(describe(pricing))              // pricing (billing, Tested)\n    print(describe(discount))             // discount (billing, Experimental)\n    print(discount.total(\"abc\"))          // 2, and the build warns: discount is deprecated since 0.3.0; use pricing\n    print(#module.name)                   // run\n    print(#package.version)               // 0.3.0\n    print(#package.authors)               // [Mia Chen]\n    print(json.package.version)           // 1.4.2\n}"
+          "name": "Same bodies, fields read only through #module",
+          "detail": "Bodies and field lines are exactly as in A, but a module's fields are read as #module(pricing).category. A module member may use any name, so nothing is renamed. Every outside read is longer, and a module does not pass as a Module itself.",
+          "technical": "As A for bodies, field lines and types. The fields are not members of the module type. #module(m) is a new form that returns m's Module value; bare #module is the module where it is written. Nothing is reserved.",
+          "code": "// proposed (B), not built. Every named thing is a constant bound with ::, as D-DECL-BINDING1=B ratified.\n// Bodies and field lines are exactly as in A; the fields are read only through #module.\n// Three files plus the built-in types; run.jet prints the lines in its comments.\n\n// ===== core.meta: the two built-in metadata types =====\nModule :: struct {\n    name: String                      // set by the compiler: the module's name\n    file: String                      // set by the compiler: its file, from the package root\n    doc: String                       // set by the compiler: the /// comment above it, or \"\"\n    package: Package                  // set by the compiler: the package that owns it\n    maturity: Maturity{.Tested}       // yours to set: .Experimental, .Tested or .Hardened\n    category: String{\"\"}              // yours to set: a group name for docs and tools\n    deprecated: Deprecated{none}      // yours to set: uses from other modules warn\n}\n\nPackage :: struct {                   // every package.jet field, with today's defaults\n    name: String\n    version: String{\"0.0.0\"}\n    description: String{none}\n    license: String{none}\n    authors: [String]{[String]{}}     // new: the one field package.jet lacks today\n    deps: [String: DepSpec]{[String: DepSpec]{}}\n    // edition, jet, repository, runtime, allocator, outputs, defaults, configs,\n    // authority and policy keep today's types and defaults.\n}\n\n// ===== package.jet: the whole file is the package's body, so its braces are implicit =====\nname: \"shop\"\nversion: \"0.3.0\"\nlicense: \"MIT\"\nauthors: [\"Mia Chen\"]\ndeps: {\n    json: \"1.4.2\",\n}\n\n// ===== pricing/module.jet: the whole file is the module's body, so its braces are implicit =====\n/// Price rules for the shop.\ncategory: \"billing\"                   // opt in: every field not written keeps its default\n\nname :: fn() -> String { \"standard rules\" }   // yours: no clash with the name field\ntotal :: fn(text: String) -> Int { text.len() }\n\n// ===== run.jet: any other file wraps a module's body in braces =====\nuse json\nuse core.meta.[Module]\nmodule pricing                        // loads pricing/module.jet\n\n/// Old discount rules, kept for one release.\ndiscount :: module {\n    category: \"billing\"               // metadata fields come first, inside the braces\n    maturity: .Experimental\n    deprecated: Deprecated{since: \"0.3.0\", use: \"pricing\"}\n\n    total :: fn(text: String) -> Int { text.len() - 1 }\n}\n\ndescribe :: fn(m: Module) -> String { \"{m.name} ({m.category}, {m.maturity})\" }\n\nrun :: fn() {\n    print(pricing.total(\"abc\"))               // 3\n    print(pricing.name())                     // standard rules\n    print(#module(pricing).category)          // billing\n    print(#module(pricing).doc)               // Price rules for the shop.\n    print(describe(#module(pricing)))         // pricing (billing, Tested)\n    print(describe(#module(discount)))        // discount (billing, Experimental)\n    print(discount.total(\"abc\"))              // 2, and the build warns: discount is deprecated since 0.3.0; use pricing\n    print(#package.version)                   // 0.3.0\n    print(json.package.version)               // 1.4.2\n}\n"
         }
       ],
       "comparisons": [
@@ -167518,11 +167526,11 @@
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "One mechanism: a module's metadata are its own typed fields with defaults, set with the same field: value line package.jet uses and read as plain fields. A module then passes as a Module value.",
+        "why": "One mechanism: the metadata are the body's own typed fields with defaults, written first in the body and read as plain fields. A module then passes as a Module value.",
         "gains": [
-          "All module and package metadata is real typed fields with defaults.",
-          "One line to set a field and one plain read, the same for modules and packages.",
-          "Every example uses the ratified binding form, with nothing nested."
+          "Package and module metadata are typed fields with defaults, written first in the body.",
+          "One body rule: implicit braces in package.jet and module.jet, explicit braces anywhere else.",
+          "One plain read, pricing.category, the same as any field."
         ],
         "losses": [
           {
@@ -167534,25 +167542,21 @@
           {
             "key": "B",
             "reason": "B frees the seven names, but every outside read becomes #module(pricing), a second form."
-          },
-          {
-            "key": "C",
-            "reason": "C writes with markers that need a blank line to mean the module, and reads a value."
           }
         ],
-        "tradeoff": "Seven names taken at module level, for metadata you set and read like any field."
+        "tradeoff": "Seven names taken in module bodies, for metadata you read like any field."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing the BallotDesign-3 round-3 draft under the four-agent cap. Findings were that every option uses one binding form with no nested module member. Reserving seven module-level names is A's real cost, stated with the E0105 rule and a one-time jet fix rename."
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main. Every example now follows the owner's body rule: implicit braces in package.jet and module.jet, braces in any other file, metadata first. C wrote metadata as markers outside the body, which that rule excludes, so it was removed."
       },
       "checkInstructions": null,
       "surface": {
-        "gist": "Should a module's metadata be its own fields, read as pricing.category?",
-        "lesson": "A module groups functions, such as pricing. A package is a project with a package.jet file. Both have metadata such as a name, docs and a version.",
+        "gist": "Should a module's metadata fields be read directly, as pricing.category?",
+        "lesson": "A package or module body holds metadata fields first, then bindings. package.jet and module.jet have implicit braces; any other file writes name :: module { ... }.",
         "trio": {
           "current": {
             "note": "Today a module is only a name, and only the package name and version are readable. This file runs, in today's form.",
@@ -167567,23 +167571,23 @@
         "options": [
           {
             "key": "A",
-            "name": "Its own fields",
-            "gist": "Set a field with category: \"billing\"; read pricing.category.",
+            "name": "Read directly",
+            "gist": "Fields first in the body; read pricing.category.",
             "gains": [
               "Typed fields with defaults.",
-              "Same line form as package.jet."
+              "One plain read."
             ],
             "losses": [
-              "Seven names taken at module level."
+              "Seven names taken in module bodies."
             ],
             "proposed": {
-              "code": "// pricing.jet (proposed, not built)\n/// Price rules for the shop.\ncategory: \"billing\"                        // set a field: opt in\ntotal :: fn(text: String) -> Int { text.len() }\n\n// run.jet\nmodule pricing\nrun :: fn() {\n    print(pricing.total(\"abc\"))            // 3\n    print(pricing.category)                // billing\n    print(pricing.doc)                     // Price rules for the shop.\n    print(pricing.maturity)                // Tested: the default\n    print(#package.version)                // 0.3.0, from package.jet\n}"
+              "code": "// pricing/module.jet: the file is the body, braces implicit (proposed, not built)\ncategory: \"billing\"                        // metadata first\ntotal :: fn(text: String) -> Int { text.len() }\n\n// run.jet: another file, so the body goes in braces\nmodule pricing\ndiscount :: module {\n    maturity: .Experimental                // metadata first, inside the braces\n    total :: fn(text: String) -> Int { text.len() - 1 }\n}\nrun :: fn() {\n    print(pricing.category)                // billing\n    print(discount.maturity)               // Experimental\n}"
             }
           },
           {
             "key": "B",
             "name": "Read through #module",
-            "gist": "Set fields as in A; read #module(pricing).category.",
+            "gist": "Same bodies; read #module(pricing).category.",
             "gains": [
               "No names taken."
             ],
@@ -167591,31 +167595,16 @@
               "A second, longer read form."
             ],
             "proposed": {
-              "code": "// pricing.jet (proposed, not built)\n/// Price rules for the shop.\ncategory: \"billing\"                        // set a field: opt in\nname :: fn() -> String { \"standard rules\" } // yours: no clash\ntotal :: fn(text: String) -> Int { text.len() }\n\n// run.jet\nmodule pricing\nrun :: fn() {\n    print(pricing.name())                  // standard rules\n    print(#module(pricing).category)       // billing\n    print(#module(pricing).maturity)       // Tested: the default\n    print(#package.version)                // 0.3.0, from package.jet\n}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Markers write, fields read",
-            "gist": "Set fields with #Meta lines; read pricing.category as in A.",
-            "gains": [
-              "Same marker a function uses."
-            ],
-            "losses": [
-              "A blank line decides what a marker marks.",
-              "Seven names taken."
-            ],
-            "proposed": {
-              "code": "// pricing.jet (proposed, not built)\n/// Price rules for the shop.\n#Meta(category: \"billing\")                 // marks the module\n\ntotal :: fn(text: String) -> Int { text.len() }\n\n// run.jet\nmodule pricing\nrun :: fn() {\n    print(pricing.category)                // billing\n    print(pricing.doc)                     // Price rules for the shop.\n    print(pricing.maturity)                // Tested: the default\n    print(#package.version)                // 0.3.0, from package.jet\n}"
+              "code": "// pricing/module.jet: the file is the body, braces implicit (proposed, not built)\ncategory: \"billing\"                        // metadata first\nname :: fn() -> String { \"standard rules\" } // yours: no clash\n\n// run.jet: another file, so the body goes in braces\nmodule pricing\ndiscount :: module {\n    maturity: .Experimental                // metadata first, inside the braces\n    total :: fn(text: String) -> Int { text.len() - 1 }\n}\nrun :: fn() {\n    print(#module(pricing).category)       // billing\n    print(#module(discount).maturity)      // Experimental\n}"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One mechanism: metadata are the module's own typed fields, set and read like any field.",
+          "why": "One mechanism: metadata are the body's own typed fields, read like any field.",
           "gains": [
             "Typed fields with defaults, opt-in.",
-            "One line to set, one plain read."
+            "One body rule, one plain read."
           ],
           "losses": [
             {
@@ -167627,10 +167616,6 @@
             {
               "key": "B",
               "reason": "Every outside read needs #module(pricing)."
-            },
-            {
-              "key": "C",
-              "reason": "A blank line decides what a marker marks."
             }
           ],
           "tradeoff": "Seven names taken, for plain field reads."
@@ -169932,8 +169917,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-05T08:32:01.885Z"
+      "status": "ratified",
+      "created": "2026-11-05T08:32:01.885Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-05"
     }
   ],
   "questions": [
@@ -172707,6 +172694,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-05T11:11:51.456Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-EFFTYPE-MODVALUE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-05T11:04:33.250Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T11:04:18.220Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TEST-SUITE2",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-05T10:57:40.833Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-05T10:46:57.444Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-05T10:46:07.233Z",
       "by": "Main",
