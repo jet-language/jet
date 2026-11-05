@@ -21,7 +21,7 @@ while :; do
     exec 9>"$slots/$i"
     if flock -n 9; then
       exec systemd-run --user --slice=jetwork.slice --scope -q --unit="jw-$(basename "$0" .sh)-$$-$(date +%s%N)" -p MemoryMax=${SAFE_JET_MEM:-6G} -p MemorySwapMax=0 \
-        env TMPDIR="$JET_SCRATCH_ROOT" JET_NIX_TMP_CLEANED=1 timeout "$limit" $JET_REPO/Tools/agent/jet-env "$jet" "$@"
+        env TMPDIR="$JET_SCRATCH_ROOT" timeout "$limit" "$jet" "$@"
     fi
     exec 9>&-
   done

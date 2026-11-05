@@ -39,7 +39,7 @@ scratch=$JET_STATE_ROOT/scratch/TestGreen/tmp
 mkdir -p "$scratch"
 if ! ( cd "$tree" && unset JET JET_TOOLCHAIN_ROOT &&
        JET_TOOLCHAIN_ROOT=$tree JET_COMPILER_IDENTITY=$identity TMPDIR=$scratch NO_COLOR=1 \
-       timeout 1800 Tools/agent/jet-env "$jet" build Tools/testkit ) > "$log" 2>&1; then
+       timeout 1800 "$jet" build Tools/testkit ) > "$log" 2>&1; then
   echo "tk-build: testkit build failed; see $log" >&2
   exit 1
 fi

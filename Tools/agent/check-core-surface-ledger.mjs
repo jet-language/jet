@@ -39,9 +39,9 @@ const CORE_CALL_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreCallRows
 const CORE_CALL_ROWS_BEGIN = "// BEGIN GENERATED CORE CALL ROWS";
 const CORE_CALL_ROWS_END = "// END GENERATED CORE CALL ROWS";
 const CORE_ENUM_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet";
-// The Core source-ownership views' Jet generator, run by $JET through jet-env.
+// The Core source-ownership views' Jet generator, run by $JET, else `jet` on PATH.
 const CORE_ROWS_GENERATOR_PATH = "Tools/agent/CoreSourceRows.jet";
-const JET_ENV_PATH = "Tools/agent/jet-env";
+const JET = process.env.JET || "jet";
 // The owner-controlled syntax registry: every Syntax string constant a Core.jet
 // dispatcher row or the core.mem tier map names.
 const SYNTAX_DIR = "Compiler/JetFoundation/Data/Syntax";
@@ -2754,7 +2754,7 @@ function validateCoreCallRegistry(source, declarations) {
 
 function validateGeneratedViews(source, declarations) {
   // The Jet-hosted CLI's Core row table is generated from the same declarations.
-  execFileSync(join(ROOT, JET_ENV_PATH), ["jet", CORE_ROWS_GENERATOR_PATH, "--check"], { cwd: ROOT, stdio: "inherit" });
+  execFileSync(JET, [CORE_ROWS_GENERATOR_PATH, "--check"], { cwd: ROOT, stdio: "inherit" });
   if (!existsSync(join(ROOT, CORE_ENUM_ROWS_PATH)) ||
       read(CORE_ENUM_ROWS_PATH) !== generatedCoreEnumRows(source, declarations)) {
     throw new Error("CoreEnumRows.jet is stale; run --write to regenerate from Core.jet");
@@ -2768,7 +2768,7 @@ function validateGeneratedViews(source, declarations) {
 function writeCoreViews() {
   const source = read(CORE_SOURCE_PATH);
   const declarations = coreSourceFacts();
-  execFileSync(join(ROOT, JET_ENV_PATH), ["jet", CORE_ROWS_GENERATOR_PATH], { cwd: ROOT, stdio: "inherit" });
+  execFileSync(JET, [CORE_ROWS_GENERATOR_PATH], { cwd: ROOT, stdio: "inherit" });
   writeCoreCallRegistry(source, declarations);
   writeCoreEnumRows(source, declarations);
   writeCoreEnumPayloadRows();

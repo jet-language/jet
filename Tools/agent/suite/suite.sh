@@ -62,6 +62,7 @@ rm -rf "$fs/sc-$suite-$tag"
 # (2026-11-01: four shards of that took the machine into swap and the desktop down). 3 GiB per entry: at 2 GiB
 # (7 jobs in 16G) the cases suite hit the slot's memory-pressure kill.
 slot_mem=${SLOT_MEMORY_MAX:-16G}; slot_mem=${slot_mem%G}
+# Suite rows run host tools (C compilers, rustc, interpreters) that only jet-env supplies until jet does.
 JET_COMPILER_IDENTITY=$ID JET_TOOLCHAIN_ROOT=$PWD TMPDIR=$fs/tmp timeout 6800 "$tree/Tools/agent/jet-env" \
   "$TESTKIT" "$suite" --jet "$sg/jet-$tag/jet" "${jetpack[@]}" --jobs "${SUITE_JOBS:-$((slot_mem / 3))}" "$@" \
   --scratch "$fs/sc-$suite-$tag" > "$sg/$suite-$tag.txt" 2>&1

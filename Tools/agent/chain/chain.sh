@@ -78,7 +78,7 @@ while [ $# -gt 0 ]; do
   esac; shift
 done
 [ -n "$LEVEL$AUTO" ] || usage
-[ -d "$TREE/Compiler" ] && [ -x "$TREE/Tools/agent/jet-env" ] || { echo "chain.sh: $TREE is not a source export"; exit 2; }
+[ -d "$TREE/Compiler" ] && [ -d "$TREE/Tools/agent" ] || { echo "chain.sh: $TREE is not a source export"; exit 2; }
 [ -z "$SEEDPUB" ] && case $TREE in "$R14"|"$R14"/*) echo "chain.sh: refuse a tree under $R14 (the canonical root)"; exit 2;; esac
 base_src=${CHAIN_BASE_SRC:---base}
 if [ -z "$BASE" ]; then
@@ -179,7 +179,7 @@ build_stage() {
   rm -rf "$TREE/Compiler/JetCli/.jet/build" "$OUT/$n"; mkdir -p "$OUT/$n"
   JET_COMPILER_IDENTITY=$id JET_TOOLCHAIN_ROOT=$ROOT JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$LOGS/$n-keep-going.tsv" TMPDIR=$WORK/tmp \
     inroot systemd-run --user --scope -q -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 3600 \
-    prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" "$ROOT/Tools/agent/jet-env" bash "$NR" "$bd/jet" build --threads "$th" Compiler > "$LOGS/$n.out" 2> "$LOGS/$n.err"
+    prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" bash "$NR" "$bd/jet" build --threads "$th" Compiler > "$LOGS/$n.out" 2> "$LOGS/$n.err"
   local rc=$? rows; rows=$(awk 'NR>1' "$LOGS/$n-keep-going.tsv" 2>/dev/null | wc -l)
   local w r; read -r w r <<< "$(timefile "$LOGS/$n.time")"
   local b=$TREE/Compiler/JetCli/.jet/build/jet
@@ -228,6 +228,7 @@ pack_stage() {
   if [ "$MODE" != run ]; then MISS=$n; say "$n needs a build (key ${k:0:16})"; return 3; fi
   say "$n: prebuild-runtime.mjs with $(basename "$cd")"
   rm -rf "$cd/jet-runtime"; mkdir -p "$WORK/tmp"
+  # The pack compiles the runtime's vendored C with a host C toolchain, which only jet-env supplies until jet does.
   JET_COMPILER_IDENTITY=$id JET_TOOLCHAIN_ROOT=$ROOT TMPDIR=$WORK/tmp \
     inroot systemd-run --user --scope -q -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 1800 \
     prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" "$ROOT/Tools/agent/jet-env" bash "$NR" node "$ROOT/Tools/packaging/prebuild-runtime.mjs" "$cd/jet" "$cd/jet-runtime" --repo "$ROOT" > "$LOGS/$n.out" 2> "$LOGS/$n.err"
@@ -264,7 +265,7 @@ check_stage() {
     say "check $m with $(basename "$SEED")"
     (cd "$TREE" && JET_COMPILER_IDENTITY=$CID JET_TOOLCHAIN_ROOT=$TREE JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$LOGS/$n-keep-going.tsv" TMPDIR=$WORK/tmp \
       systemd-run --user --scope -q -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 1200 \
-      prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" "$TREE/Tools/agent/jet-env" bash "$NR" "$SEED/jet" check --threads 12 "$m" > "$LOGS/$n.out" 2> "$LOGS/$n.err")
+      prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" bash "$NR" "$SEED/jet" check --threads 12 "$m" > "$LOGS/$n.out" 2> "$LOGS/$n.err")
     rc=$?; rows=$(awk 'NR>1' "$LOGS/$n-keep-going.tsv" 2>/dev/null | wc -l)
     read -r w r <<< "$(timefile "$LOGS/$n.time")"
     [ "$rc" -ge 124 ] && transient=1

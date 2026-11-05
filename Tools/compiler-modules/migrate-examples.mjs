@@ -35,7 +35,7 @@ const repoAt = args.indexOf("--repo");
 const repo = resolve(repoAt >= 0 ? args[repoAt + 1] : join(here, "../.."));
 const scopes = args.filter((arg, index) => arg !== "--apply" && arg !== "--repo" && index !== repoAt + 1);
 const roots = scopes.length > 0 ? scopes : ["Examples", "Tools", "tests"];
-const jetCmd = (process.env.JET_CMD ?? `${repo}/Tools/agent/jet-env jet`).split(/\s+/);
+const jetCmd = process.env.JET_CMD ? process.env.JET_CMD.split(/\s+/) : [process.env.JET || "jet"];
 const SIMPLE_KEYS = new Set(["name", "version", "edition", "authority", "jet", "description", "license", "repository"]);
 const SKIP = new Set(["target", "node_modules", "build", "bin"]);
 const cachePath = join(stateRoot(), "compiler-modules/headers.json");

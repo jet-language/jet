@@ -22,7 +22,7 @@ inputs=$(node --input-type=module -e 'const [module, root, ...files] = process.a
 C=$(readlink -f "$JET_SEED")
 cd "$T" && JET_COMPILER_IDENTITY=$(cat "$C/IDENTITY") JET_TOOLCHAIN_ROOT=$T JET_KEEP_GOING=1 \
   timeout 1200 systemd-run --user --scope --quiet --collect -p MemoryMax=32G -p MemorySwapMax=0 -- \
-  nice -n 10 ionice -c2 -n7 taskset -c 16-27 prlimit --stack=1073741824:1073741824 -- "$T/Tools/agent/jet-env" "$C/jet" check --threads 10 Compiler/JetCli > "$T/check.out" 2> "$T/check.err"
+  nice -n 10 ionice -c2 -n7 taskset -c 16-27 prlimit --stack=1073741824:1073741824 -- "$C/jet" check --threads 10 Compiler/JetCli > "$T/check.out" 2> "$T/check.err"
 rc=$?
 rows=$(awk '/^Error/' "$T/check.err" | wc -l)
 if [ $rc = 0 ] && [ "$rows" = 0 ]; then echo "prescreen: clean"; exit 0; fi

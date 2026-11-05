@@ -380,6 +380,7 @@ async function packStage(ctx, gate) {
     copyFileSync(candidate.jet, join(dir, 'jet'));
     chmodSync(join(dir, 'jet'), 0o755);
     const env = { ...ctx.env, JET_COMPILER_IDENTITY: candidate.identity, JET_TOOLCHAIN_ROOT: tree };
+    // The pack compiles the runtime's vendored C with a host C toolchain, which only jet-env supplies until jet does.
     const argv = [...STACK, join(tree, 'Tools/agent/jet-env'), 'bash', '-c', NORUST, 'norust', 'node', join(tree, 'Tools/packaging/prebuild-runtime.mjs'), join(dir, 'jet'), join(dir, 'jet-runtime'), '--repo', tree];
     const result = await run(argv, { cwd: tree, env, out: join(work, 'logs/pack.log'), timeout: 3600 });
     if (result.rc !== 0 || !existsSync(join(dir, 'jet-runtime'))) return gate.row('pack', 'FAIL', `the pack rebuild by s2 failed rc=${result.rc}: ${tail(join(work, 'logs/pack.log'))}`);
@@ -399,7 +400,7 @@ async function jetpackCensus(ctx, side, jet, identity, root) {
     for (const dir of bootstrapScratch(worker)) rmSync(dir, { recursive: true, force: true });
     const env = { ...ctx.env, JET_KEEP_GOING: '1', JET_COMPILER_IDENTITY: identity, JET_TOOLCHAIN_ROOT: root, JETPACK_WORKER: worker, JET: jet };
     const log = join(ctx.work, `logs/jetpack-${side}.log`);
-    const result = await run([...STACK, join(root, 'Tools/agent/jet-env'), 'bash', 'Jetpack/Bootstrap/check.sh'], { cwd: root, env, out: log, timeout: 3600 });
+    const result = await run([...STACK, 'bash', 'Jetpack/Bootstrap/check.sh'], { cwd: root, env, out: log, timeout: 3600 });
     const errors = bootstrapScratch(worker).map(dir => join(dir, 'check-errors.txt')).find(existsSync);
     const receipt = bootstrapScratch(worker).map(dir => join(dir, 'check.receipt')).find(existsSync);
     // check.sh writes the receipt's `exit:` line last: without it the census is partial.
@@ -451,7 +452,7 @@ async function hostedStage(ctx, gate) {
     for (const dir of bootstrapScratch(worker)) rmSync(dir, { recursive: true, force: true });
     const env = { ...ctx.env, JET_COMPILER_IDENTITY: candidate.identity, JET_TOOLCHAIN_ROOT: tree, JETPACK_WORKER: worker, JET: candidate.jet };
     const log = join(work, 'logs/jetpack-hosted.log');
-    const result = await run([...STACK, join(tree, 'Tools/agent/jet-env'), 'bash', '-c', NORUST, 'norust', 'bash', 'Jetpack/Bootstrap/check.sh', '--hosted'], { cwd: tree, env, out: log, timeout: 3 * 3600 });
+    const result = await run([...STACK, 'bash', '-c', NORUST, 'norust', 'bash', 'Jetpack/Bootstrap/check.sh', '--hosted'], { cwd: tree, env, out: log, timeout: 3 * 3600 });
     const receipt = bootstrapScratch(worker).map(dir => join(dir, 'hosted.receipt')).find(existsSync);
     const text = receipt ? readFileSync(receipt, 'utf8') : '';
     const binary = /^hosted-binary: (.+)$/m.exec(text)?.[1];
@@ -477,7 +478,7 @@ async function hostedStage(ctx, gate) {
 async function testkitStage(ctx, gate) {
     const { candidate, tree, work } = ctx;
     const env = { ...ctx.env, JET_COMPILER_IDENTITY: candidate.identity, JET_TOOLCHAIN_ROOT: tree, JET: candidate.jet };
-    const result = await run([...STACK, join(tree, 'Tools/agent/jet-env'), candidate.jet, 'build', 'Tools/testkit/run.jet'], { cwd: tree, env, out: join(work, 'logs/testkit-build.log'), timeout: 3600 });
+    const result = await run([...STACK, candidate.jet, 'build', 'Tools/testkit/run.jet'], { cwd: tree, env, out: join(work, 'logs/testkit-build.log'), timeout: 3600 });
     const kit = join(tree, 'Tools/testkit/.jet/build/run');
     if (result.rc !== 0 || !existsSync(kit)) return gate.row('testkit', 'FAIL', `s2 could not build the testkit rc=${result.rc}: ${tail(join(work, 'logs/testkit-build.log'))}`);
     ctx.kit = kit;
@@ -497,6 +498,7 @@ async function suiteRun(ctx, side, suite, extra = []) {
         const tag = `${side}-${suite}${retry ? '-retry' : ''}-${index}`;
         const scratch = join(ctx.work, 'kit', `scratch-${tag}`);
         mkdirSync(scratch, { recursive: true });
+        // Suite rows run host tools (C compilers, rustc, interpreters) that only jet-env supplies until jet does.
         const argv = [...STACK, join(ctx.tree, 'Tools/agent/jet-env'), ctx.kit, suite, '--jet', compiler.jet, '--scratch', scratch, '--results', join(ctx.work, 'kit', `${tag}.json`)];
         if (!retry) argv.push('--shard', `${index}/${shards}`);
         argv.push('--jobs', String(retry ? shardJobs({ ...ctx.options, shards: 1 }) : shardJobs(ctx.options)));

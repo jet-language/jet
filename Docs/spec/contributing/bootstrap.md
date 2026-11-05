@@ -61,10 +61,12 @@ with `JET_TOOLCHAIN_ROOT=$PWD JET_COMPILER_IDENTITY=$(cat "$SEED/IDENTITY")`.
 
 ## The chain
 
-Run it in the Nix development environment (`Tools/agent/jet-env` or
-`nix develop`) from a checkout of the commit you want to build. `SEED` is the
-seed directory, `WORK` a scratch directory outside the checkout, and
-`JET_PACK_MUSL_LIB` the `lib` directory of a static musl
+Run it from a checkout of the commit you want to build. The compiler builds
+need nothing but `jet`; the runtime pack step compiles the runtime's vendored
+C, so run `prebuild-runtime.mjs` in the Nix development environment
+(`Tools/agent/jet-env` or `nix develop`), which supplies the host C toolchain.
+`SEED` is the seed directory, `WORK` a scratch directory outside the
+checkout, and `JET_PACK_MUSL_LIB` the `lib` directory of a static musl
 (`$(nix build --no-link --print-out-paths nixpkgs#pkgsStatic.musl)/lib`).
 
 ```sh

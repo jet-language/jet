@@ -68,11 +68,11 @@ revert_all() {
 # The runtime generators: the Jet package while it is the in-service form, else the node originals (in service until
 # their Jet candidate passes the cutover gate).
 if [ $rowregen = 1 ]; then
-  rr=$(JET_COMPILER_IDENTITY="$(awk 1 "$JET_SEED/IDENTITY")" JET_TOOLCHAIN_ROOT="$PWD" timeout 900 ./Tools/agent/jet-env "$JET_BASE_ROOT/latest/jet" run Tools/agent/CoreSourceRows.jet 2>&1); rrc=$?
+  rr=$(JET_COMPILER_IDENTITY="$(awk 1 "$JET_SEED/IDENTITY")" JET_TOOLCHAIN_ROOT="$PWD" timeout 900 "$JET_BASE_ROOT/latest/jet" run Tools/agent/CoreSourceRows.jet 2>&1); rrc=$?
   say "CoreSourceRows regeneration rc=$rrc $(printf '%s' "$rr" | tail -1)"
   [ $rrc -eq 0 ] || { say "CoreSourceRows regeneration FAILED; reverting"; revert_all; exit 5; }
 fi
-gen=$( if git ls-files --error-unmatch Tools/agent/RuntimeGenerators >/dev/null 2>&1; then timeout 900 "$JET_SEEDS/bin/jet" run Tools/agent/RuntimeGenerators; else for g in gen-runtime-trap-messages gen-runtime-lifecycle gen-runtime-stop-exports gen-runtime-host-errors gen-runtime-scheduler-messages gen-runtime-services-messages gen-runtime-test-messages gen-runtime-observe-messages gen-compiler-needed-text; do Tools/agent/jet-env node Tools/agent/$g.mjs || exit 1; done; fi 2>&1); grc=$?
+gen=$( if git ls-files --error-unmatch Tools/agent/RuntimeGenerators >/dev/null 2>&1; then timeout 900 "$JET_SEEDS/bin/jet" run Tools/agent/RuntimeGenerators; else for g in gen-runtime-trap-messages gen-runtime-lifecycle gen-runtime-stop-exports gen-runtime-host-errors gen-runtime-scheduler-messages gen-runtime-services-messages gen-runtime-test-messages gen-runtime-observe-messages gen-compiler-needed-text; do node Tools/agent/$g.mjs || exit 1; done; fi 2>&1); grc=$?
 say "RuntimeGenerators rc=$grc $(printf '%s' "$gen" | tail -2 | tr '\n' ' ')"
 # A set lookup, not `printf … | grep -q`: under pipefail, grep -q exiting early SIGPIPEs printf once the
 # path list passes the pipe buffer, which miscounted a large patch's own files as regenerated.

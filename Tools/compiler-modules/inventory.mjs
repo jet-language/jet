@@ -9,7 +9,7 @@
 //
 //   node Tools/compiler-modules/inventory.mjs [--json out.json] [--dot]
 //
-// JET_CMD selects the jet launcher (default: Tools/agent/jet-env jet).
+// JET_CMD selects the jet launcher (default: $JET, else `jet` on PATH).
 // Front-end JSON is cached by content hash under
 // $JET_STATE_ROOT/compiler-modules/ast (Tools/agent/roots.mjs).
 import { createHash } from "node:crypto";
@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const cacheDir = resolve(stateRoot(), "compiler-modules/ast");
-const jetCmd = (process.env.JET_CMD ?? `${repo}/Tools/agent/jet-env jet`).split(/\s+/);
+const jetCmd = process.env.JET_CMD ? process.env.JET_CMD.split(/\s+/) : [process.env.JET || "jet"];
 
 export const PACKAGES = [
   "JetFoundation", "JetLexer", "JetParser",

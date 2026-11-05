@@ -27,7 +27,7 @@ rm -rf "$S" "$OUT"; mkdir -p "$S" "$OUT"
 for f in "$@"; do if [ -e "$W/$f" ]; then mkdir -p "$S/$(dirname "$f")" && cp "$W/$f" "$S/$f"; else rm -f "$S/$f"; fi; done
 cd "$S" || exit 2
 JET_COMPILER_IDENTITY=$ID JET_TOOLCHAIN_ROOT=${CENSUS_TOOLCHAIN_ROOT:-$S} JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$OUT/check-keep-going.tsv" \
-  prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 "$S/Tools/agent/jet-env" "$C/jet" check --threads 12 Compiler/JetCli > "$OUT/check.out" 2> "$OUT/check.err"
+  prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 "$C/jet" check --threads 12 Compiler/JetCli > "$OUT/check.out" 2> "$OUT/check.err"
 crc=$?
 echo "check rc=$crc"
 # The keep-going report is the census: a dependency package's errors reach the stderr only as E0626.
@@ -37,7 +37,7 @@ node "$M/census-errors.mjs" "$OUT/check-keep-going.tsv" "$S" 2>&1 | awk 'NR<=21'
 rm -rf Compiler/JetCli/.jet/build
 JET_COMPILER_IDENTITY=$ID JET_TOOLCHAIN_ROOT=${CENSUS_BUILD_ROOT:-$S} \
   JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$OUT/build-keep-going.tsv" \
-  timeout 1800 prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 "$S/Tools/agent/jet-env" "$C/jet" build --threads 12 Compiler > "$OUT/build.out" 2> "$OUT/build.err"
+  timeout 1800 prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 "$C/jet" build --threads 12 Compiler > "$OUT/build.out" 2> "$OUT/build.err"
 brc=$?
 rows=$(awk 'NR>1' "$OUT/build-keep-going.tsv" 2>/dev/null | wc -l)
 echo "build rc=$brc rows=$rows"
@@ -55,7 +55,7 @@ ln -sfn "$OUT/runtime/out" "$(dirname "$(readlink -f "$SELF")")/jet-runtime"
 # keep-going, as chain s2 does; a sema/comptime row here would stop s2 (e.g. an unlowered inline module).
 if [ "${CENSUS_SELFCHECK:-1}" = 1 ]; then
   JET_COMPILER_IDENTITY="$ID" JET_TOOLCHAIN_ROOT="$S" JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$OUT/selfcheck-keep-going.tsv" \
-    timeout 1200 prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 "$S/Tools/agent/jet-env" "$SELF" check --threads 12 Compiler/JetCli > "$OUT/selfcheck.out" 2> "$OUT/selfcheck.err"
+    timeout 1200 prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 "$SELF" check --threads 12 Compiler/JetCli > "$OUT/selfcheck.out" 2> "$OUT/selfcheck.err"
   src=$?
   srows=$(awk 'NR>1' "$OUT/selfcheck-keep-going.tsv" 2>/dev/null | wc -l)
   echo "selfcheck rc=$src rows=$srows"

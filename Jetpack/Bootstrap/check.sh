@@ -3,8 +3,8 @@
 # repository's supported `jet` commands on it, mirroring Compiler/Bootstrap.
 # JET names the admitted native jet compiler; every stage uses it.
 #
-#   JET=<native jet> Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh   # jet check, one unit of every area
-#   JET=<native jet> Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --tests  # + AOT and default-tier tests
+#   JET=<native jet> bash Jetpack/Bootstrap/check.sh            # jet check, one unit of every area
+#   JET=<native jet> bash Jetpack/Bootstrap/check.sh --tests    # + AOT and default-tier tests
 #   JETPACK_WORKER=<name> ... check.sh --area PackageModel [--tests]       # one area + its declared deps
 #   ... check.sh --each [--tests]                                          # every area as its own unit
 #   JETPACK_WORKER=<name> ... check.sh --areas Foundation,PackageModel     # an explicit section list
@@ -206,7 +206,7 @@ unit_record() {
   elif [[ -n "$sorted_areas" ]]; then
     selection=" --areas $sorted_areas"
   fi
-  printf 'entry-command: JETPACK_WORKER=%s JET=%s Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh%s%s%s\n' "$worker" "$jet" "$([[ $with_tests == 1 ]] && echo ' --tests')" "$([[ $hosted == 1 ]] && echo ' --hosted')" "$selection"
+  printf 'entry-command: JETPACK_WORKER=%s JET=%s bash Jetpack/Bootstrap/check.sh%s%s%s\n' "$worker" "$jet" "$([[ $with_tests == 1 ]] && echo ' --tests')" "$([[ $hosted == 1 ]] && echo ' --hosted')" "$selection"
   printf 'worker: %s\n' "$worker"
   printf 'areas: %s\n' "${sorted_areas:-all}"
   printf 'proved-area: %s\n' "${own_area:-all selected}"
