@@ -4,10 +4,11 @@
 // and probe before anything runs, then runs the ready actions in deterministic
 // stages in the native sandbox against the local action cache (`JET_STORE_DIR`).
 use {
+    cli_files :: core.files
     jet_build_session.[BuildPlanExecution, BuildSessionAction, BuildSessionTarget, BuildSessionToolchain]
-    jet_driver.[JetDriverAuthorityPolicy, JetDriverFailure, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
+    jet_driver.[JetDriverAuthorityPolicy, JetDriverAuthorizedSourceFile, JetDriverFailure, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all]
-    jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
+    jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_build_entry_source, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
     jetpack_build.[
         ActionKind, ActionSpec, BuildArtifactStoreHandle, BuildExecutionError, BuildProvenance, BuildResourcePool,
         HermeticActionHandle, HermeticBuildContext, HermeticBuildError, HermeticBuildPlan, LinkerIdentity, ProbeHandle,
@@ -29,6 +30,29 @@ fn jet_cli_declares_build_entry(source: String) -> Bool Never! {
         }
     }
     false
+}
+
+// Whether the package enclosing `file` declares its build entry in another of
+// its source files or in `package.jet` (spec "Programmable builds": the entry
+// may live in any package source file or in `package.jet`; the build query
+// selects it). A package root or source tree that does not resolve is left to
+// the compile, which reports why.
+fn jet_cli_package_declares_build_entry(file: String) -[FS, Env]> Bool Never! {
+    cache := WorkspaceDeclarationCache.new()
+    found := String?{None}
+    if jet_cli_find_package_root_checked(&cache, jet_cli_parent(file) ?? ".") == {
+        .Ok(value) -> found = value
+        .Err(_) -> return false
+    }
+    root :: found ?? return false
+    files := [JetDriverAuthorizedSourceFile]{}
+    if jet_cli_package_sources(root, &files) != None -> return false
+    loop source_file in files {
+        if jet_cli_declares_build_entry(source_file.source) -> return true
+    }
+    manifest :: jet_cli_checked_file(root, JET_CLI_PACKAGE_FILE) ?? return false
+    source :: cli_files.read(manifest) ?? return false
+    pkg_build_entry_source(source) != None
 }
 
 // Run the selected actions of `graph` under the project root `root`, granted

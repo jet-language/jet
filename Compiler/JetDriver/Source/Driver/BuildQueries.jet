@@ -1,7 +1,7 @@
 // Read-only fn-build staging: ordinary Driver checking and comptime execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use {
-    jet_foundation.[Diagnostic, EffectRowEntry, Span, TComptimeValue, Type, sha256_hex]
+    jet_foundation.[Diagnostic, EffectRowEntry, Item, Span, TComptimeValue, Type, sha256_hex]
     jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
     jet_eval.[jet_eval_build_failed_diagnostic]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
@@ -160,22 +160,24 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_build_query_empty(^request, ^sources.diagnostics, false, Val("loaded build query has no exact entry module"))
     package :: sources.modules[sources.entry_module_index].package_identity
     selected := String?{None}
+    selected_site := ""
     network_declared := false
     span := Span{start: 0, end: 0}
     loop loaded_module in sources.modules {
         if loaded_module.package_identity != package -> next
         loop item in loaded_module.program.items {
-            // Only `fn build(b: Build)` is the build entry; any other `fn build` is ordinary code.
-            if item == .Func(function) && function.name == "build" && function.params.len() == 1 && function.params[0].ty == (Type.Named{name: "Build"}) {
+            if item == .Func(function) && jet_driver_item_is_build_entry(item) {
+                site :: jet_driver_build_entry_site(loaded_module.path, loaded_module.source, function.span.start)
                 if selected != None {
                     errors := ^sources.diagnostics
-                    &errors.push(jet_driver_diagnostic_without_span("E3520", "two build entries for the package", "one package has exactly one checked build authority", "keep one fn build in the package"))
+                    &errors.push(jet_driver_diagnostic_at_source("E3520", Val(function.name_span), loaded_module.path, 0, "Two build entries for one package: {selected_site} and {site}.", "One package has one build authority, so policy and provenance have one auditable home.", "Keep one `fn build` and remove every other entry."))
                     return jet_driver_build_query_empty(^request, ^errors, false, None)
                 }
                 // copy: `sources` keeps its module rows: on a duplicate build entry it returns
                 // `sources.diagnostics`. The selected path moves into
                 // jet_driver_compile_selection, which takes ownership of the entry path.
                 selected = Val(loaded_module.physical_path.copy())
+                selected_site = site
                 span = function.span
                 network_declared = jet_driver_build_declared_network(function.declared_effects)
             }
@@ -282,10 +284,25 @@ fn jet_driver_entry_package_has_build(request: JetDriverCompileRequest) -> Bool 
     loop loaded_module in load.modules {
         if loaded_module.package_identity != entry_package -> next
         loop item in loaded_module.program.items {
-            if item == .Func(function) && function.name == "build" && function.params.len() == 1 && function.params[0].ty == (Type.Named{name: "Build"}) -> return true
+            if jet_driver_item_is_build_entry(item) -> return true
         }
     }
     false
+}
+// Whether `item` is the build entry `fn build(b: Build)`; any other `fn build`
+// is ordinary code.
+fn jet_driver_item_is_build_entry(item: Item) -> Bool Never! {
+    if item == .Func(function) && function.name == "build" && function.params.len() == 1 && function.params[0].ty == (Type.Named{name: "Build"}) -> return true
+    false
+}
+// `path:line` of the byte offset `at` in `source`.
+fn jet_driver_build_entry_site(path: String, source: String, at: Int) -> String Never! {
+    line := 1
+    loop (index, byte) in source.bytes() {
+        if index >= at -> break
+        if byte == 10 -> line += 1
+    }
+    "`{path}:{line}`"
 }
 fn jet_driver_query_build_nodes(request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
     // Nodes are the checked graph's exact compiler facts, never a projection

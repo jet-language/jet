@@ -1095,8 +1095,9 @@ fn jet_cli_build_entry(jet_argv: [String], args: [String], passthrough: [String]
     entry :: jet_cli_check(jet_argv, args, "build", color, quiet, threads, json)
     if entry == {
         .Check(file, source, _, _, _, _, notice, _, _) -> {
-            // A file that declares `fn build(b: Build)` builds through it, as its package does.
-            if jet_cli_declares_build_entry(source) -> return JetCLIPlan.BuildPackage{file: file, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notice}
+            // A file whose package declares `fn build(b: Build)`, in it, in another
+            // source file or in `package.jet`, builds through it.
+            if jet_cli_declares_build_entry(source) || jet_cli_package_declares_build_entry(file) -> return JetCLIPlan.BuildPackage{file: file, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notice}
             if (passthrough ?? [String]{}).len() > 0 -> return jet_cli_build_args_refused(file, color)
             return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json}
         }

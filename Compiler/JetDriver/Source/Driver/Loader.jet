@@ -105,7 +105,7 @@ use {
         sema_unknown_module_alias,
     ]
     jet_pkg_model.[
-        ImportBoundary, PackageGrant, PackageParseError, pkg_inline_deps_collect, pkg_inline_deps_is_pinned,
+        ImportBoundary, PackageGrant, PackageParseError, pkg_build_entry_source, pkg_inline_deps_collect, pkg_inline_deps_is_pinned,
         pkg_inline_deps_l0203_unpinned, pkg_inline_deps_valid_package_name,
         pkg_inline_deps_version_matches, pkg_lex_workspace_declaration, pkg_manifest_parse_diagnostic,
     ]
@@ -1568,10 +1568,14 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
             // `env.jet`; spec "Project configuration") and a manifest-declared
             // Config compose project facts and are never source units. A
             // `package.jet` is manifest syntax, so it is no source even when
-            // selected.
+            // selected, except that one declaring the package's `fn build` is
+            // that entry's source unit (spec "Programmable builds"); its parse
+            // sees only the Jet declarations beside the manifest blocks
+            // (jet_driver_parse_job).
             selected_entry :: root.identity == snapshot.entry_root_identity && file.path == snapshot.entry_path
             configuration :: jet_driver_is_project_configuration(file.relative_path) && (!selected_entry || jet_driver_path_leaf(file.relative_path) == "package.jet")
-            if configuration || file.relative_path == "jet.toml" || package.configs.contains(file.relative_path) || (!file.relative_path.ends_with(".jet") && !selected_entry) -> next
+            build_manifest :: configuration && jet_driver_is_build_manifest(file.relative_path, file.source)
+            if (configuration && !build_manifest) || file.relative_path == "jet.toml" || package.configs.contains(file.relative_path) || (!file.relative_path.ends_with(".jet") && !selected_entry) -> next
             unit_path :: jet_driver_display_path(entry_root, file.path)
             &source_units.push(JetDriverSourceUnit{
                 root_index: root_index,
@@ -2236,11 +2240,12 @@ fn jet_driver_unit_is_loose(unit: JetDriverSourceUnit) -> Bool Never! {
 // A package is one namespace. Every `.jet` source of a
 // manifest package belongs to it except the package's payload module and its
 // project configuration; loose files and embedded Core modules have no namespace.
+// A `package.jet` source unit is the package's `fn build` (jet_driver_is_build_manifest).
 fn jet_driver_unit_is_namespace_member(unit: JetDriverSourceUnit) -> Bool Never! {
     if !unit.in_namespace -> return false
     parts := unit.relative_path.split("/").to_list()
     file_name :: &parts.pop() ?? ""
-    file_name != "pkg.jet" && !jet_driver_is_project_configuration(unit.relative_path)
+    file_name != "pkg.jet" && (unit.relative_path == "package.jet" || !jet_driver_is_project_configuration(unit.relative_path))
 }
 
 // The project configuration files (spec "Project configuration"): a
@@ -2689,7 +2694,8 @@ fn jet_driver_bind_package_namespaces(
         // (owner ruling B, like Cargo `[[bin]]`): `.Executable{ entry:
         // tool.run }` keeps `tool.jet`'s `run` its own. A package-root command
         // home (`run.jet`, `build.jet`, `dev.jet`, `test.jet`) keeps its
-        // command function too.
+        // command function too, and so does any file's build entry
+        // `fn build(b: Build)`: the build query reports two of them (E3520).
         names := [[NamedSpan]]{}
         loop module_index in members {
             unit :: source_units[modules[module_index].source_unit_index]
@@ -2707,8 +2713,11 @@ fn jet_driver_bind_package_namespaces(
             }
             member_names := [NamedSpan]{}
             member_private := [String]{}
+            build_entry :: loop item in modules[module_index].program.items {
+                if jet_driver_item_is_build_entry(item) -> break true
+            } ?? false
             loop declared in jet_driver_namespace_item_names(modules[module_index].program.items) {
-                if (named_entry && declared.name == "run") || declared.name == role_command {
+                if (named_entry && declared.name == "run") || declared.name == role_command || (build_entry && declared.name == "build") {
                     &member_private.push(declared.name)
                     next
                 }
@@ -3625,11 +3634,19 @@ fn jet_driver_source_unit_text(request: JetDriverCompileRequest, unit: JetDriver
     if unit.file_index < 0 || unit.file_index >= files.len() -> return None
     Val(files[unit.file_index].source)
 }
+// Whether `relative_path` is a package's `package.jet` whose `source` declares
+// a top-level `fn build` beside its manifest blocks.
+fn jet_driver_is_build_manifest(relative_path: String, source: String) -> Bool Never! {
+    relative_path == "package.jet" && pkg_build_entry_source(source) != None
+}
 fn jet_driver_parse_job(request: JetDriverCompileRequest, unit: JetDriverSourceUnit, runtime_entry: Bool) -> JetDriverParseJob {
     if !jet_driver_unit_is_core(unit) {
         text :: jet_driver_source_unit_text(request, unit) ?? return JetDriverParseJob.Missing
-        if runtime_entry -> return JetDriverParseJob.RuntimeEntry{text: text}
-        return JetDriverParseJob.Source{text: text}
+        // A `package.jet` unit parses as its `fn build` declarations alone, at
+        // their own byte offsets (the manifest blocks are blanked).
+        parsed_text :: if unit.source_origin == SemaSourceOrigin.Snapshot && jet_driver_is_build_manifest(unit.relative_path, text) -> pkg_build_entry_source(text) ?? text else -> text
+        if runtime_entry -> return JetDriverParseJob.RuntimeEntry{text: parsed_text}
+        return JetDriverParseJob.Source{text: parsed_text}
     }
     if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return JetDriverParseJob.Missing
     row :: request.core_sources[unit.file_index]

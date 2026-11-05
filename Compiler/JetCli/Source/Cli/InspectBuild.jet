@@ -145,6 +145,12 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
         built :: jet_cli_compile_target(source_path, executable.name, source, color, selected_options.copy(), threads, invocation, trace_sink)
         if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     }
+    loop library in selected.libraries {
+        source_path :: jet_cli_entry_join(root, library.source)
+        source :: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_library`", color)
+        checked :: jet_cli_check_library(source_path, source, color, threads, trace_sink)
+        if checked.exit_code != JET_DRIVER_EXIT_OK -> return checked
+    }
     // A `fn build` that selects no executable keeps the stock build of the
     // program beside it, named after its file.
     if selected.executables.len() == 0 {
@@ -152,6 +158,25 @@ fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build
         if jet_cli_top_level_function_lines(source, "run").len() > 0 -> return jet_cli_compile_target(file, jet_cli_stem(file), source, color, selected_options.copy(), threads, invocation, trace_sink)
     }
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// A library target builds as its importers compile it: its source checks
+// clean and nothing is written, so a clean check prints nothing.
+fn jet_cli_check_library(file: String, source: String, color: Bool, threads: Int?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled :: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink)
+    if compiled == {
+        .Refused(refusal) -> output = ^refusal
+        .Compiled(result, snapshot) -> {
+            errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
+            if errors.len() > 0 {
+                output = JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, errors, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            } else if result.internal_problem == .Val(problem) {
+                output = jet_cli_ice(problem)
+            }
+        }
+    }
+    output
 }
 
 // The entry root's package when its manifest declares `settings:`. The values

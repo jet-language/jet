@@ -177,11 +177,12 @@ fn build_session_finish(session: &BuildSession, returned: BuildSessionValue) -> 
 }
 // What `jet build` runs: the selected targets (the default and its dependencies, or every
 // target), dependencies first. `executables` compile their first source after the target's
-// actions ran; `unsupported` names the selected targets the build neither compiles nor
-// produces with actions (a non-executable kind without actions).
+// actions ran; `libraries` check theirs, as `jet check` does (a library is the source its
+// importers compile; `jet build --lib` is the linkable native library); `unsupported` names
+// the selected targets the build neither compiles, checks nor produces with actions.
 // `options` are the build options fn build set, its layer of D-SETTING-ORDER1.
 struct BuildPlanExecutable { name: String source: String }
-struct BuildPlanSelection { executables: [BuildPlanExecutable] unsupported: [String] options: [BuildSessionOption] }
+struct BuildPlanSelection { executables: [BuildPlanExecutable] libraries: [BuildPlanExecutable] unsupported: [String] options: [BuildSessionOption] }
 fn build_plan_selection(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
     permit :: plan.storage.guard_read()
     order := [Int]{}
@@ -213,16 +214,19 @@ fn build_plan_selection(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
         }
     }
     executables := [BuildPlanExecutable]{}
+    libraries := [BuildPlanExecutable]{}
     unsupported := [String]{}
     loop index in order {
         target :: permit.value.targets[index]
         if target.kind == "executable" && target.sources.len() > 0 {
             &executables.push(BuildPlanExecutable{name: target.name.copy(), source: target.sources[0].copy()})
+        } else if target.kind == "library" && target.sources.len() > 0 {
+            &libraries.push(BuildPlanExecutable{name: target.name.copy(), source: target.sources[0].copy()})
         } else if target.actions.len() == 0 {
             &unsupported.push("{target.name} ({target.kind})")
         }
     }
-    {executables: executables, unsupported: unsupported, options: permit.value.options.copy()}
+    {executables: executables, libraries: libraries, unsupported: unsupported, options: permit.value.options.copy()}
 }
 fn build_plan_graph(plan: BuildSessionPlan) -> BuildGraph Never! {
     permit :: plan.storage.guard_read()
