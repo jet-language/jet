@@ -134,6 +134,13 @@ fn sema_function_header_lint_err_params(function: Func, diagnostics: &[Diagnosti
     }
 }
 
+// L0510: a user function whose name is one the readable prelude opens
+// replaces that alias in its file; the declaration wins, and is worth seeing.
+fn sema_function_header_lint_prelude_shadow(function: Func, diagnostics: &[Diagnostic]) {
+    if function.compiler_generated || !SEMA_CALL_PRELUDE_NAMES.contains(function.name) -> return
+    &diagnostics.push(sema_lint("L0510", function.name_span, "Declaration {function.name} replaces a Core prelude alias", "The readable Core prelude opens this name automatically, and a user declaration wins in its file", "Keep the declaration to accept the shadow, or rename it to use the prelude alias"))
+}
+
 // L2401 (D-NARG1, Rust `Bundle/Validation.rs` and `Registration/Items.rs`): a
 // public function or method with a positional `Bool` parameter and no default
 // invites transposed `true`/`false` arguments at the call site.

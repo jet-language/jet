@@ -338,10 +338,6 @@ fn sema_call_try_ui_mount(module_name: String, member: String, alias: String, al
 
 fn sema_call_try_ui_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name != "core.ui" -> return SemaDirectSpecialCheck{handled: false, value: None}
-    if member == "node_role" {
-        sema_call_core_ui_node_role_lint(args, span, environment, program, &scopes, &diagnostics)
-        return SemaDirectSpecialCheck{handled: false, value: None}
-    }
     if member == "button" -> return sema_ui_handle_button(module_name, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if member == "text_input" -> return sema_ui_handle_text_input(module_name, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if member == "reactive_render" -> return sema_ui_handle_reactive_render(module_name, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

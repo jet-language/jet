@@ -773,6 +773,9 @@ struct SemaScopeTable {
     // `copies: .Explicit` is active for the function being
     // checked (package, module, or function scope).
     copies_explicit: Bool{false}
+    // The innermost `#Context` block: 0 outside one, 1 inside one without an
+    // `allocator:` field, 2 when an enclosing block names an allocator.
+    context_allocation: Int{0}
     // Derived from the immutable graph installed by seed_unit_policy.
     // Function rollback leaves this memo intact; snapshots may rebuild it.
     // A new graph/module setup reseeds it, including each staging version.
@@ -1507,6 +1510,7 @@ fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         transaction_wall_depth: source.transaction_wall_depth,
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
+        context_allocation: source.context_allocation,
         binding_undo: source.binding_undo.copy(),
         open_marks: source.open_marks,
         location_function: source.location_function,
@@ -1545,6 +1549,7 @@ fn sema_scope_mark(table: &SemaScopeTable) -> SemaScopeMark Never! {
             transaction_wall_depth: table.transaction_wall_depth,
             unit_explicit_units: table.unit_explicit_units,
             copies_explicit: table.copies_explicit,
+            context_allocation: table.context_allocation,
             open_marks: table.open_marks,
         },
     }
@@ -1584,6 +1589,7 @@ fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     table.transaction_wall_depth = saved.transaction_wall_depth
     table.unit_explicit_units = saved.unit_explicit_units
     table.copies_explicit = saved.copies_explicit
+    table.context_allocation = saved.context_allocation
     // Exact even when a nested mark was abandoned by an early return.
     table.open_marks = saved.open_marks
 }
@@ -2099,6 +2105,7 @@ fn sema_scope_light_copy(source: SemaScopeTable) -> SemaScopeTable Never! {
         transaction_wall_depth: source.transaction_wall_depth,
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
+        context_allocation: source.context_allocation,
         policy_modules: source.policy_modules.copy(),
         policy_rows: source.policy_rows.copy(),
         binding_undo: source.binding_undo.copy(),

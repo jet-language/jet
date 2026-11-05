@@ -960,6 +960,7 @@ fn sema_call_core_direct_checked(call: Call, expected: Type?, environment: SemaS
             if f32_math.handled -> return f32_math
             compute_alias :: sema_call_try_compute_alias(module_name, member, target, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if compute_alias.handled -> return SemaDirectSpecialCheck{handled: true, value: compute_alias.value}
+            if module_name == "core.ui" && member == "node_role" -> sema_call_core_ui_node_role_lint(call.args, call.name_span, environment, program, &scopes, &diagnostics)
             scopes.ownership_call_depth += 1
             value := sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             scopes.ownership_call_depth -= 1

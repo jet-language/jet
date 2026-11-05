@@ -1148,6 +1148,7 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         }
         arm_index += 1
     }
+    if subjectless_guard && !readiness -> sema_stmt_lint_same_enum_guards(arms, conditions, span, &diagnostics)
     else_result := [TStmt]?{None}
     else_fork :: sema_ownership_fork(&state)
     else_mark :: sema_scope_mark(&scopes)
@@ -3317,6 +3318,57 @@ fn sema_stmt_refutable_is_subjectless_guard(subject: Expr, span: Span) -> Bool N
     if subject == {
         .Bool(value, subject_span, _) -> return value && subject_span == span
         else -> return false
+    }
+}
+
+// L0302: every arm of a subjectless guard table opens with a pattern test on
+// the same place, and that place is a user enum; naming the subject makes the
+// table one exhaustively checked enum switch.
+fn sema_stmt_lint_same_enum_guards(arms: [SwitchArm], conditions: [SemaCheckedCondition?], span: Span, diagnostics: &[Diagnostic]) Never! {
+    if arms.len() < 2 -> return
+    first := ""
+    loop (index, arm) in arms {
+        path :: sema_stmt_leading_guard_path(arm.cond) ?? return
+        if index == 0 {
+            first = path
+        } else if path != first {
+            return
+        }
+    }
+    loop condition in conditions {
+        checked :: condition ?? next
+        enum_name :: sema_stmt_leading_guard_enum(checked.condition) ?? next
+        &diagnostics.push(sema_lint("L0302", span, "These arm heads all dispatch on `{enum_name}`", "Naming the subject makes one closed enum's cases explicit and exhaustively checked", "Write `if {first} == {{ ... }}` and put each variant pattern in an arm"))
+        return
+    }
+}
+
+fn sema_stmt_leading_guard_path(condition: Expr) -> String? Never! {
+    if condition == {
+        .PatternTest(subject, _, _, _) -> return sema_stmt_guard_subject_path(subject)
+        .Binary(op, left, _, _, _) -> return if op == BinOp.And -> sema_stmt_leading_guard_path(left) else -> None
+        else -> return None
+    }
+}
+
+fn sema_stmt_guard_subject_path(expr: Expr) -> String? Never! {
+    if expr == {
+        .Ident(name, _, _) -> return Val("{name}")
+        .Field(base, member, _, _) -> {
+            base_path :: sema_stmt_guard_subject_path(base) ?? return None
+            return Val("{base_path}.{member}")
+        }
+        .Copy(inner, _, _) | .Paren(inner, _, _) -> return sema_stmt_guard_subject_path(inner)
+        else -> return None
+    }
+}
+
+// The enum a checked guard head tests first, when its pattern names one.
+fn sema_stmt_leading_guard_enum(condition: TIfCond) -> String? Never! {
+    if condition == {
+        .IfLet(pattern, subject) -> return if pattern.enum_type != None -> Val(type_name(subject.ty)) else -> None
+        .And(left, _) -> return sema_stmt_leading_guard_enum(left)
+        else -> return None
     }
 }
 
@@ -8000,7 +8052,14 @@ fn sema_stmt_check_context_block(fields: [ContextField], body: [Stmt], span: Spa
         }
         &guards.push(TContextGuard{field: field.name, value: checked})
     }
+    previous_allocation :: scopes.context_allocation
+    names_allocator := false
+    loop field in fields {
+        if field.name == "allocator" -> names_allocator = true
+    }
+    scopes.context_allocation = if names_allocator || previous_allocation == 2 -> 2 else -> 1
     nested :: sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "context@{span.start}", loop_depth)
+    scopes.context_allocation = previous_allocation
     if !nested.complete -> return false
     if !complete -> return false
     &output.push(TStmt.ContextBlock{guards: guards, body: nested.value, span: span})

@@ -85,6 +85,8 @@ use {
         TTryConvert,
         ast_empty_lambda_meta,
         core_module_has_type,
+        diagnostic_with_edit,
+        TextEdit,
     ]
 }
 
@@ -3349,6 +3351,7 @@ fn sema_expr_core_module_method_checked(receiver: Expr, method: String, method_s
             if f32_math.handled -> return SemaMethodSpecialCheck{handled: true, value: f32_math.value}
             // `csv.query<Row>(path, SQL{…})` checks its literal SQL columns against `Row` (E2420).
             if module_name == "core.encoding.csv" && method == "query" && type_args.len() == 1 && args.len() == 2 -> sema_data_check_analytics_sql_schema(type_args[0], args[1].expr, expr_span(args[1].expr), environment, program, &diagnostics)
+            if module_name == "core.ui" && method == "node_role" -> sema_call_core_ui_node_role_lint(args, method_span, environment, program, &scopes, &diagnostics)
             scopes.ownership_call_depth += 1
             value := sema_call_core_check_source_owned(target, "{module_name}.{method}", type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             scopes.ownership_call_depth -= 1
@@ -3666,6 +3669,16 @@ fn sema_expr_function_field(receiver: Type, name: String, method_name: String, e
 }
 
 fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // L0505 / L0506: a growing call in a loop of a `core.mem` file, or inside
+    // a `#Context` block that names no allocator, may reach the global heap.
+    if method == "push" || method == "append" || method == "insert" || method == "add" || method == "add_new" {
+        if scopes.loop_depth > 0 && sema_stmt_module_uses_core_mem(environment, program) {
+            &diagnostics.push(sema_lint("L0505", method_span, "Heap growth inside a loop — consider an arena", "Each `push` may allocate on the global heap; in a hot loop that adds up", "Bind `arena :: mem.Arena.new()` outside the loop and use `arena.alloc(…)` for scratch data"))
+        }
+        if scopes.context_allocation == 1 {
+            &diagnostics.push(sema_lint("L0506", method_span, "Hidden allocation inside `#Context` without an allocator", "This call may allocate on the global heap while a scoped context is active", "Add `allocator: …` to the `#Context(…)` fields, or move the allocation outside the block"))
+        }
+    }
     // This rule a=A: `.new(...)` leaves only the static receiver implicit; the
     // ordinary expected type names it (E0356 when there is none).
     if receiver == .Ident(receiver_name, receiver_span, _) && receiver_name == "" {
@@ -3725,6 +3738,7 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     scopes.ownership_call_depth -= 1
     receiver_value :: receiver_checked ?? return None
     if method == "text" -> sema_expr_lint_default_body_text(receiver, receiver_value.ty, args, scopes, &diagnostics)
+    if method == "replace" -> sema_expr_lint_fixed_cleanup(receiver, receiver_value.ty, args, method_span, &diagnostics)
     // `.call(...)` on a function-typed receiver is the builtin
     // call projection, checked exactly like calling the value directly
     // (mirrors Rust CheckerInfer/calls/method_calls.rs METHOD_CALL on Type::Fn).
@@ -4355,6 +4369,35 @@ fn sema_expr_lint_default_body_text(receiver: Expr, receiver_type: Type, args: [
     if limit != SEMA_HTTP_DEFAULT_TEXT_LIMIT -> return
     span :: Span{start: start, end: expr_span(args[0].expr).end + 1}
     &diagnostics.push(sema_lint("L0516", span, "The default HTTP body text limit is passed through a lower-level body call", "`request.text()` and `response.text()` already read the body with the same default cap as `body().text({SEMA_HTTP_DEFAULT_TEXT_LIMIT})`", "Replace `body().text({SEMA_HTTP_DEFAULT_TEXT_LIMIT})` with `text()`"))
+}
+
+// L0518: `"{x:Fixed(n)}".replace(",", "")` removes grouping separators that
+// plain `Fixed(n)` output never has, so the cleanup changes nothing. The AST
+// keeps no call-end span, so the edit deletes from the receiver's end through
+// the byte after the last argument, the call's `)` as written.
+fn sema_expr_lint_fixed_cleanup(receiver: Expr, receiver_type: Type, args: [CallArg], method_span: Span, diagnostics: &[Diagnostic]) Never! {
+    if receiver_type != Type.String || args.len() != 2 -> return
+    loop arg in args {
+        if arg.label != None || arg.spread -> return
+    }
+    if !sema_expr_is_string_literal(args[0].expr, ",") || !sema_expr_is_string_literal(args[1].expr, "") -> return
+    if receiver == .Str(parts, _, _) {
+        if parts.len() != 1 -> return
+        if parts[0] == .Interp(_, format) {
+            if format == .Fixed(_) {
+                lint :: sema_lint("L0518", method_span, "Plain `Fixed(n)` output immediately removes grouping separators", "`Fixed(n)` is machine-plain; deleting this cleanup preserves the same text", "Delete `.replace(\",\", \"\")` from the `Fixed(n)` projection")
+                &diagnostics.push(diagnostic_with_edit(lint, TextEdit{span: Span{start: expr_span(receiver).end, end: expr_span(args[1].expr).end + 1}, new_text: ""}))
+            }
+        }
+    }
+}
+
+fn sema_expr_is_string_literal(expr: Expr, expected: String) -> Bool Never! {
+    if expr == .Str(parts, _, _) {
+        if parts.len() == 1 && parts[0] == .Lit(text) -> return text == expected
+        return parts.len() == 0 && expected == ""
+    }
+    false
 }
 
 // An integer a lint can read without running code: a literal, a sum,
