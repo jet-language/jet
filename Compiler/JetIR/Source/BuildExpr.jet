@@ -1815,16 +1815,18 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             return ir_core_call(&m, p, &b, expression_ty, record, args, concrete, widen_to_vec, span)
         }
         .NumericMethod(receiver, operation) -> return ir_numeric_method(&m, p, &b, expression_ty, receiver, operation, span)
-        .Never(reason) -> {
+        .Never(reason, goal_line) -> {
             if reason == "todo" {
                 // A reached `#Todo` goal (Trap.jet jet_todo_stop): the E3011
                 // stop at its file and line, naming the type it stands for.
+                // The checker's line serves a build with no source text (a
+                // comptime value).
                 string_row :: ir_string_row(&m)
                 source :: b.f.source_file.copy()
                 site :: b.line
                 file :: ir_temp(&m, &b, string_row)
                 ir_emit(&b.f, IROp.ConstText, file, ir_intern_text(&m, source), -1, -1, site)
-                line :: ir_word_const(&m, &b, ir_source_line_of(p, source, span.start) ?? site)
+                line :: ir_word_const(&m, &b, if goal_line > 0 -> goal_line else -> ir_source_line_of(p, source, span.start) ?? site)
                 expected :: ir_temp(&m, &b, string_row)
                 ir_emit(&b.f, IROp.ConstText, expected, ir_intern_text(&m, ir_type_name(expression_ty)), -1, -1, site)
                 _ :: ir_runtime(&m, &b, "jet_todo_stop", [Int]{file, line, expected}, -1)

@@ -1240,7 +1240,7 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         // is unreachable (codegen ends it in an Unreachable terminator), so it
         // never falls through to the join, exactly as
         // sema_stmt_refutable_switch_exits already assumes.
-        else_result = Val([TStmt]{TStmt.ExprStmt{value: sema_node(&context, Type.Named{name: "Never"}, NodeKind.Never{reason: "no else arm"}, span), span: span}})
+        else_result = Val([TStmt]{TStmt.ExprStmt{value: sema_node(&context, Type.Named{name: "Never"}, NodeKind.Never{reason: "no else arm", line: 0}, span), span: span}})
     }
     loop condition in conditions {
         if condition == None -> return SemaStatementResult{value: [TStmt]{}, complete: false}

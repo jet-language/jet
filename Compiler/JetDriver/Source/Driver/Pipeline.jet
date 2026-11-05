@@ -2924,7 +2924,7 @@ fn jet_driver_keep_going_trap_body(function: FnBody, reason: String) -> FnBody N
     // sorted by id with it first; the parameter defaults keep their nodes.
     stop_id := TEXPR_FIRST_LOCAL_ID
     if trapped.tree.nodes.len() > 0 && trapped.tree.nodes[0].id <= stop_id -> stop_id = trapped.tree.nodes[0].id - 1
-    nodes := [BodyNode]{BodyNode{id: stop_id, kind: NodeKind.Never{reason: reason}, span: function.source_span}}
+    nodes := [BodyNode]{BodyNode{id: stop_id, kind: NodeKind.Never{reason: reason, line: 0}, span: function.source_span}}
     loop node in trapped.tree.nodes -> &nodes.push(node)
     stop_type :: type_table_intern(&trapped.tree.types, Type.Named{name: "Never"})
     types := [TExprType]{TExprType{id: stop_id, ty: stop_type}}

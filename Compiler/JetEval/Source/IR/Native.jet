@@ -46,6 +46,7 @@ use {
         X64_COMPTIME_STOP_MESSAGE,
         X64_COMPTIME_STOP_REQUIRE,
         X64_COMPTIME_STOP_SHIFT,
+        X64_COMPTIME_STOP_TODO,
         X64_COMPTIME_TEXT,
         X64_COMPTIME_WRITE,
         os_page_round,
@@ -721,6 +722,18 @@ fn jet_eval_native_stop(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, d
             return
         }
         if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3010", Val(s.span), "`{message}`", "compile-time code stopped the build: a `panic`, a failed check or an unhandled failure in a `comptime` value is a compile error", "handle the failure inside the `comptime` block (`??` or an `.Ok`/`.Err` match), or fix the value the check rejects")})
+        return
+    }
+    // A reached `#Todo` (Trap.jet jet_todo_stop): the E3011 stop at its file
+    // and line, naming the type it stands for. A comptime value it reaches
+    // has no value to fold, so it stops the build.
+    if kind == X64_COMPTIME_STOP_TODO {
+        file :: jet_eval_ir_text(&s, a) ?? return
+        expected :: jet_eval_ir_text(&s, c) ?? return
+        what :: "`#Todo at {file}:{b} — expected {expected}`"
+        why :: if s.runtime_execution -> "this code is deliberately incomplete and reached a running program." else -> "compile-time code reached a `#Todo`, so the `comptime` value has no result: the code it stands for is deliberately incomplete."
+        fix :: if s.runtime_execution -> "implement the missing code before running the program." else -> "implement the missing code, or keep the `#Todo` out of the code a `comptime` value runs."
+        if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3011", Val(s.span), what, why, fix)})
         return
     }
     jet_eval_ir_problem(&s, "the comptime child stopped with kind {kind} ({a}, {b}, {c}, {d})")

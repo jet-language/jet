@@ -1665,7 +1665,7 @@ fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: 
         }
     }
     if node.kind == {
-        .RequireStop(_, _, _) | .Never(_) -> sema_effect_node_add_edge(&nodes, node_index, "__jet_panic__")
+        .RequireStop(_, _, _) | .Never(_, _) -> sema_effect_node_add_edge(&nodes, node_index, "__jet_panic__")
         // Rust `check_panic_call`: `value ?? panic(message)` stops through
         // the same sentinel as a bare `panic(message)`.
         .OrFallback(_, fallback, _) -> {
@@ -3262,7 +3262,7 @@ fn sema_effect_walk_binary(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
 // which the generic visitors cannot do.
 fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, node: BodyNode) {
     if node.kind == {
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .InvariantViolation(_, _) | .Absent | .SelectStart | .Never(_) | .TypeTest(_, _) -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .InvariantViolation(_, _) | .Absent | .SelectStart | .Never(_, _) | .TypeTest(_, _) -> {}
         .StrLit(parts) -> loop part in parts {
             if part == {
                 .Interpolation(value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)

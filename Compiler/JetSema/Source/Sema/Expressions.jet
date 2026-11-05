@@ -5257,11 +5257,12 @@ fn sema_expr_has_literal_hook(environment: SemaScopeEnvironment, program: SemaPr
 
 // Rust CheckerInfer/expr.rs: an unconstrained goal continues as Int, but
 // its goal row's card still says "(unknown)". Consumers read the function's
-// checked goal rows, never infer a type from the source spelling.
-fn sema_expression_todo(expected: Type?, span: Span, context: &SemaCheckContext) -> TExpr? Never! {
+// checked goal rows, never infer a type from the source spelling. `line` is
+// the goal's source line, which its E3011 stop names.
+fn sema_expression_todo(expected: Type?, span: Span, line: Int, context: &SemaCheckContext) -> TExpr? Never! {
     card :: if expected == .Val(ty) -> type_name(ty) else -> "(unknown)"
     &context.typed_goals.push(TTypedGoal{span: span, expected: card})
-    Val(sema_node(&context, expected ?? Type.Int, NodeKind.Never{reason: "todo"}, span))
+    Val(sema_node(&context, expected ?? Type.Int, NodeKind.Never{reason: "todo", line: line}, span))
 }
 
 // One expression level. Every recursive check passes through this frame, so
@@ -5373,8 +5374,8 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
         .Try(value, span, conversion, note, _) -> sema_expression_try(value, span, conversion, note, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .If(condition, then_body, then_value, else_body, else_value, span, _) -> sema_expression_if(condition, then_body, then_value, else_body, else_value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Lambda(lambda, _) -> sema_expression_lambda(lambda, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        .Todo(span, _, _) -> sema_expression_todo(expected, span, &context)
-        .NoElse(span, _) -> Val(sema_node(&context, expected ?? Type.Named{name: "Never"}, NodeKind.Never{reason: "no else arm"}, span))
+        .Todo(span, _, _) -> sema_expression_todo(expected, span, sema_source_line_at(environment.source_segments, span) ?? 0, &context)
+        .NoElse(span, _) -> Val(sema_node(&context, expected ?? Type.Named{name: "Never"}, NodeKind.Never{reason: "no else arm", line: 0}, span))
         .RawOf(value, span, _) -> {
             forbidden := context.unsafe_depth == 0
             if forbidden {
