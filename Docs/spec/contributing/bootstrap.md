@@ -30,8 +30,8 @@ of the UI suite with it, runs an example, lands a patch on a scratch copy of
 the checkout and validates a ballot. `TAG` is a published release (see
 [Where the first seed comes from](#where-the-first-seed-comes-from)); its
 runtime pack was built from the tag's commit. `PATCH` is a `git diff` of
-your change, `MSG` a file with its commit message, and `BALLOT` a ballot
-payload.
+your change, `MSG` a file with its commit message, `BALLOT` a ballot
+payload, and `NAME` and `EMAIL` your git identity.
 
 ```sh
 TAG=a0_NNN
@@ -44,7 +44,7 @@ mkdir ../seed && tar -xzf "../release/jet-$TAG-linux-x64.tar.gz" -C ../seed && S
 export PATH=$PWD/Compiler/JetCli/.jet/build:$PATH
 jet test Compiler --profile ui tests/ui/list_expected_type_mismatch.jet
 jet run Examples/features/basics/hello.jet
-git config user.name "Your Name" && git config user.email you@example.com
+git config user.name "$NAME" && git config user.email "$EMAIL"
 jet Tools/agent/Land.jet land --scratch-copy ../dev-copy "$PATCH" "$MSG"
 jet Tools/agent/ballots/Validate.jet "$BALLOT"
 ```
