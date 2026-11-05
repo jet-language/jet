@@ -303,9 +303,13 @@ the module table, then that one item, its signature and the types it names.
 Sema builds its usual records for those items only, on first use. A program
 that uses ten Core functions decodes about ten items.
 
-The whole-record checksum is checked when the toolchain is built and
-published, and the provenance carries the pack's digest. A compile does not
-rehash the pack.
+The whole-record checksum of the toolchain's own pack is checked when the
+toolchain is built and published, and the provenance carries the pack's
+digest. That pack ships inside the toolchain, with the same trust as the
+compiler binary, so a compile does not rehash it. This holds for the
+toolchain pack only. A pack read from any store (a package pack, section 9)
+is verified on every hit, as CACHEAUTH1=D requires, and a publisher's
+signature proves only who built it, never that its interface is true.
 
 Sema checks user code against those records exactly as it checks user code
 against Core today. The facts are the same facts: they were computed by the
@@ -338,6 +342,11 @@ Comptime uses the same code. A comptime batch is compiled at O0 and bound in
 memory to the runtime image and the Core code, then run in the compiler's
 child process, as today. So a Core function gives the same answer at
 compile time and at run time, by construction.
+
+Comptime always runs on the host. When the build's target is not the host,
+comptime links the host pack's code, never the target's, and that code is
+given the target's layout and build facts as values. Target code is never
+run on the host.
 
 The shipped code is built at the level the runtime pack's code uses. D-EXEC1
 already ratifies one shipped Core, compiled once per Jet version, so this is
@@ -547,12 +556,26 @@ either answer alone.
   whether a pack may come from a trusted store instead of a local build.
   Packages being edited stay outside any exception and compile fresh.
 - **What a package pack's name must cover.** Core reads one build fact, the
-  target operating system. A package may also read `$build.profile`,
-  `$build.settings.*` and `$package.*`. A package pack's name must therefore
-  include every build fact the package reads, on top of the compiler
-  identity, target, source digest and dependency interface digests that
-  `jet_driver_package_check_key` hashes today. A pack whose package reads a
-  fact outside its name is refused at build time.
+  target operating system. A package can read much more, and its pack's name
+  must cover everything the pack's content depends on, on top of the
+  compiler identity, target, source digest and dependency interface digests
+  that `jet_driver_package_check_key` hashes today:
+  - every build fact the package reads: `$build.profile`, `$build.settings.*`
+    and `$package.*`;
+  - the hashes of generated and embedded assets (today the identity's source
+    digest covers only the loaded Jet text and the manifest, while
+    ComptimeInputs records asset hashes apart);
+  - the body or artifact digests of dependencies wherever generics, inlining
+    or comptime read a dependency's bodies, not only its interface;
+  - foreign sources, the foreign toolchain and the link inputs;
+  - the CPU, ABI, target features and code-generation flags.
+
+  A pack whose content reads an input outside its name is refused at build
+  time.
+- **The ballot's recommendation.** It recommends verified installed packs
+  (option A): restored only after verification on every hit. Option D keeps
+  reuse local-only. Either one is an explicit new exception to the
+  2026-10-30 answer, not something already authorized.
 
 Everything else in this note is design: the pack layout, the reader, the
 level of the shipped code, the roots of reachability and the rebuild check
