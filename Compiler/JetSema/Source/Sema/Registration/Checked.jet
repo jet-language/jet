@@ -87,6 +87,7 @@ use {
         ast_comptime_generated_path,
         comptime_walk_calls,
         comptime_walk_identifiers,
+        core_bare_source_module,
         diagnostic_registry_row,
         expr_span,
         jet_target_layout_engine_with_registry,
@@ -96,6 +97,7 @@ use {
         owned_trait,
         owned_trait_arithmetic,
         owned_trait_is_operator,
+        symbol_kind_name,
         type_identity_equal,
         type_name,
         unit_family_distinct_defs,
@@ -3205,6 +3207,7 @@ fn sema_checked_coherence_register(graph: SemaRegistrationGraph, module_row: Sem
         &diagnostics.push(sema_error("E0731", span, "`{trait_name}` is a tag, but an `impl` block needs a trait", "a `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`", "declare `{trait_name}` as a `trait` with the method(s) it should provide"))
         return
     }
+    if !sema_checked_coherence_trait_known(graph, module_row, state, owner_name, trait_name, span, &diagnostics) -> return
     operator_trait :: owned_trait_is_operator(trait_name)
     arithmetic_trait :: owned_trait_arithmetic(trait_name)
     owner_type :: sema_checked_coherence_owner_type(state, owner_name)
@@ -3242,6 +3245,36 @@ fn sema_checked_coherence_register(graph: SemaRegistrationGraph, module_row: Sem
     }
     valid :: sema_owned_check_impl(owned, owner_type, rhs, methods, associated, sibling, state.distinct_bases.get(owner_name), span, &diagnostics)
     if operator_trait && valid -> sema_checked_coherence_add_operator(&state, owner_name, trait_name, rhs)
+}
+
+// E0923: the trait an `impl Type.Trait` block names is compiler-owned, declared
+// in this module, a core trait every module sees bare (`Diagnostic`), or
+// resolves to a trait through the module's scope.
+fn sema_checked_coherence_trait_known(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, state: SemaCheckedCoherence, owner_name: String, trait_name: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if owned_trait(trait_name) != None || state.traits.get(trait_name) != None -> return true
+    if core_bare_source_module(trait_name) == .Val(owner_module) && sema_checked_coherence_core_trait(graph, owner_module, trait_name) -> return true
+    resolved :: sema_type_graph_lookup_symbol(graph, module_row.module_identity, trait_name) ?? {
+        &diagnostics.push(sema_error("E0923", span, "`impl {owner_name}.{trait_name}` names no trait", "an `impl Type.Trait` block implements a trait the program declares or imports, or one the compiler owns; no trait named `{trait_name}` is in scope here", "declare or import `trait {trait_name}`, correct the trait name, or write `impl {owner_name} {{` for methods of `{owner_name}` alone"))
+        return false
+    }
+    kind :: sema_resolved_kind(graph, resolved)
+    if kind == SymbolKind.Trait -> return true
+    &diagnostics.push(sema_error("E0923", span, "`impl {owner_name}.{trait_name}` names no trait", "`{trait_name}` is a {symbol_kind_name(kind)}, and an `impl Type.Trait` block implements a trait", "name a trait after `{owner_name}.`, or write `impl {owner_name} {{` for methods of `{owner_name}` alone"))
+    false
+}
+
+// A bare core name is a trait when its core module declares it as one. A
+// program that never loads that module cannot tell, so the name stands.
+fn sema_checked_coherence_core_trait(graph: SemaRegistrationGraph, owner_module: String, trait_name: String) -> Bool {
+    loaded := false
+    loop index in 0..<graph.modules.len() {
+        if graph.modules[index].module_name != owner_module -> next
+        loaded = true
+        if sema_registration_lookup_name_at(graph, index, graph.modules[index].module_identity, trait_name) == .Val(found) {
+            if sema_resolved_kind(graph, found) == SymbolKind.Trait -> return true
+        }
+    }
+    !loaded
 }
 
 // Operator identity is the left owner, the trait and the right-hand type.

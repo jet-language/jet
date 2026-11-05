@@ -7587,6 +7587,18 @@ struct RetiredDeriveDebugStatement {
     }
 }
 
+struct ImplOfUnknownTrait {
+    impl Diagnostic {
+        code :: "E0923"
+        meaning :: "`impl Type.Trait` names no trait"
+        detail :: true
+        no_fix :: .Ambiguous
+        fn what(self) -> String { "`impl Point.Hash` names no trait" }
+        fn why(self) -> String { "An `impl Type.Trait` block implements a trait the program declares or imports, or one the compiler owns; no trait named `Hash` is in scope here." }
+        fn fix(self) -> String { "Declare or import `trait Hash`, correct the trait name, or write `impl Point {{` for methods of `Point` alone." }
+    }
+}
+
 struct RetiredDeriveStatement {
     impl Diagnostic {
         code :: "E0929"
