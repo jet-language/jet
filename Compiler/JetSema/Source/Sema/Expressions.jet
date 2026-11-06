@@ -5735,9 +5735,54 @@ sema_expr_check_list_literal: fn(elements: [Expr], span: Span, expected: Type?, 
     expanded := sema_expression_list_member_spreads(elements)
     checked := sema_expression_list(Expr.ListLit{elements: expanded, span: span, id: AST_NODE_GENERATED}, expanded, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if checked != None && sema_expr_repeated_list_head(elements) == .Val(head) {
-        diagnostics.push(sema_lint("L0523", span, "this list repeats `{head}` on every element", "a typed list head states the shared element type once and leaves each record body focused on its fields", "write `[{head}]{{{{…}}, {{…}}}}` and remove the repeated element heads"))
+        lint: sema_lint("L0523", span, "this list repeats `{head}` on every element", "a typed list head states the shared element type once and leaves each record body focused on its fields", "write `[{head}]{{{{…}}, {{…}}}}` and remove the repeated element heads")
+        // A fixed-length list keeps its literal: `[T]{…}` builds a growable one.
+        fixed := false
+        if expected == .Val(ty) {
+            if ty == .FixedList(_, _) -> fixed = true
+        }
+        edit := TextEdit?{None}
+        if !fixed -> edit = sema_expr_repeated_list_head_edit(elements, span, head, environment, program)
+        if edit == .Val(rewrite) -> diagnostics.push(diagnostic_with_edit(lint, rewrite)) else -> diagnostics.push(lint)
     }
     checked
+}
+
+// The L0523 rewrite of the list literal at `span`: `[Head]{` in place of `[`,
+// each element's head deleted, `}` in place of `]`; everything else, comments
+// and layout included, stays as written. A head written with anything but
+// blanks before its `{` (a comment, say) gets no edit.
+sema_expr_repeated_list_head_edit: fn(elements: [Expr], span: Span, head: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TextEdit? {
+    graph: program.registration_graph ?? return None
+    caller: sema_scope_caller_index(environment, graph) ?? return None
+    raw: graph.modules[caller].source.bytes()
+    if span.start < 0 || span.end > raw.len() || span.end - span.start < 2 -> return None
+    if raw[span.start] != 91 || raw[span.end - 1] != 93 -> return None
+    width: head.bytes().len()
+    out := "[{head}]{{"
+    at := span.start + 1
+    loop element in elements {
+        from: expr_span(element).start
+        brace := if from > at -> from else -> at
+        loop brace < span.end && raw[brace] != 123 -> brace += 1
+        if brace >= span.end -> return None
+        // The head ends at the last non-blank byte before the body's `{`.
+        head_end := brace
+        loop head_end > at && (raw[head_end - 1] == 32 || raw[head_end - 1] == 9 || raw[head_end - 1] == 10 || raw[head_end - 1] == 13) -> head_end -= 1
+        head_start: head_end - width
+        if head_start < at -> return None
+        written: String.from_bytes(raw[head_start..<head_end]) ?? return None
+        if written != head -> return None
+        if head_start > at {
+            before: Int.from_u8(raw[head_start - 1])
+            if (before >= 48 && before <= 57) || (before >= 65 && before <= 90) || (before >= 97 && before <= 122) || before == 95 || before == 46 -> return None
+        }
+        kept: String.from_bytes(raw[at..<head_start]) ?? return None
+        out = "{out}{kept}"
+        at = brace
+    }
+    rest: String.from_bytes(raw[at..<(span.end - 1)]) ?? return None
+    Val(TextEdit{span: span, new_text: "{out}{rest}}}"})
 }
 
 // L0523 (repeated_struct_list_edit): two or more elements that each spell the
