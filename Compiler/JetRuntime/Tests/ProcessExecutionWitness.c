@@ -278,7 +278,7 @@ int main(int argc, char **argv, char **envp) {
         check(pipe != 0 && pipe == jet_rt_handle_field_process_child_stdout(child), "stdout field lends one cell");
         int64_t data = 0, len = 0, error = 0;
         check(jet_process_stream_line_bytes_raw(pipe, &data, &len, &error) == 1 && error == 0 && len == 2 && memcmp((const void *)(intptr_t)data, "a\n", 2) == 0, "streamed first line");
-        jet_rt_free(data, len, 1);
+        jet_rt_free(data, len, 8);
         ProcessReceipt *r = NULL;
         check(jet_process_child_wait(child, &r, &e) == 1 && e == NULL && r != NULL, "stream wait ok");
         check(eq(receipt_output(r), "a\nb"), "receipt keeps streamed bytes");
@@ -297,9 +297,9 @@ int main(int argc, char **argv, char **envp) {
         jet_rt_handle_drop_process_child(child);
         int64_t data = 0, len = 0, error = 0;
         check(jet_process_stream_line_bytes_raw(held, &data, &len, &error) == 1 && error == 0 && len == 2 && memcmp((const void *)(intptr_t)data, "x\n", 2) == 0, "clone reads after the child alias drops");
-        jet_rt_free(data, len, 1);
+        jet_rt_free(data, len, 8);
         check(jet_process_stream_line_bytes_raw(held, &data, &len, &error) == 1 && error == 0 && len == 2 && memcmp((const void *)(intptr_t)data, "y\n", 2) == 0, "clone reads every line");
-        jet_rt_free(data, len, 1);
+        jet_rt_free(data, len, 8);
         check(jet_process_stream_line_bytes_raw(held, &data, &len, &error) == 1 && error == 0 && len == 0, "clone reaches EOF");
         jet_rt_handle_drop_process_stdout_stream(held);
         jet_rt_handle_drop_process_spec(s);
@@ -316,7 +316,7 @@ int main(int argc, char **argv, char **envp) {
         int64_t pipe = jet_rt_handle_field_process_child_stdout(child);
         int64_t data = 0, len = 0, error = 0;
         check(jet_process_stream_line_bytes_raw(pipe, &data, &len, &error) == 1 && error == 0 && len == 3 && memcmp((const void *)(intptr_t)data, "a\377\n", 3) == 0, "streamed raw bytes");
-        jet_rt_free(data, len, 1);
+        jet_rt_free(data, len, 8);
         ProcessReceipt *r = NULL;
         check(jet_process_child_wait(child, &r, &e) == 1 && e == NULL && r != NULL, "binary stream wait ok");
         check(eq(receipt_output(r), "a\357\277\275\n"), "streamed receipt text is lossy");

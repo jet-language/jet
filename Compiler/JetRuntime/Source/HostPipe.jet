@@ -99,7 +99,10 @@ fn pipe_output_name() -> I64 {
 }
 
 // The checked Core private primitives __stdout_line_bytes/__stderr_line_bytes
-// share this C result ABI: 1 => owned compact U8 data+len, 0 => owned IOError.
+// share this C result ABI: 1 => owned native U8 data+len, 0 => owned IOError.
+// The route makes the data the buffer of an owned [U8], so it is an align-8
+// block (jet_rt_alloc_8) whose count word unique and release read; an align-1
+// buffer has no count word, and they would write its neighbour's bytes.
 // Empty success means EOF/None; UTF8, error policy and CRLF belong to Core's
 // __stdout_next_line/__stderr_next_line, never to this buffered byte leaf.
 #Export(c) fn jet_process_stream_line_bytes_raw(pipe: I64, data_out: I64, len_out: I64, error_out: I64) -> I64 {
@@ -181,19 +184,13 @@ fn pipe_output_name() -> I64 {
     }
     if (line != I64{0}) {
         length :: rt_text_len(line)
-        capacity :: rt_text_word(wrapping(line + I64{16}))
-        bytes := rt_text_data(line)
-        // G1 compact U8 ownership frees length bytes, not builder capacity.
-        if (capacity != length) {
-            bytes = jet_rt_alloc(length, I64{1})
+        if (length != I64{0}) {
+            bytes :: jet_rt_alloc_8(length)
             rt_text_bytes_copy(bytes, rt_text_data(line), length)
-            jet_rt_string_drop(line)
-        } else {
-            // Transfer the data of this fresh builder, freeing only its header.
-            bytes = rt_text_take_unique_buffer(line)
+            fd_put(data_out, I64{0}, bytes)
+            fd_put(len_out, I64{0}, length)
         }
-        fd_put(data_out, I64{0}, bytes)
-        fd_put(len_out, I64{0}, length)
+        jet_rt_string_drop(line)
     }
     I64{1}
 }

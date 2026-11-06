@@ -915,15 +915,6 @@ fn rt_text_with_length(length: I64, capacity: I64) -> I64 {
     header
 }
 
-// Hands the caller the byte buffer of a text it uniquely owns (count 1, as
-// every fresh builder is) and frees only the header; capacity is the
-// caller-checked buffer size. A shared text is never taken apart.
-fn rt_text_take_unique_buffer(value: I64) -> I64 {
-    data :: rt_text_data(value)
-    rt_text_header_free(value)
-    data
-}
-
 #Export(c) fn jet_rt_string_builder_new() -> I64 { rt_text_copy(I64{1}, I64{0}) }
 
 #Export(c) fn jet_rt_string_builder_push(target: I64, value: I64) {
