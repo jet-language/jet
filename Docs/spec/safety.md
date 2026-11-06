@@ -4085,7 +4085,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Test.jet",
-      "line": 119,
+      "line": 132,
       "column": 9,
       "reason": "the OS leaf borrows at most eight initialized bytes from its own stack word"
     },
@@ -10149,7 +10149,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/TerminalColor.jet | 8:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TerminalInput.jet | 22:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TerminalProcessRoutes.jet | 58:9 | "TIOCSWINSZ borrows one initialized stack winsize word; the Child72 lock prevents close/recycling until ioctl returns" |
-| Compiler | Compiler/JetRuntime/Source/Test.jet | 119:9 | "the OS leaf borrows at most eight initialized bytes from its own stack word" |
+| Compiler | Compiler/JetRuntime/Source/Test.jet | 132:9 | "the OS leaf borrows at most eight initialized bytes from its own stack word" |
 | Compiler | Compiler/JetRuntime/Source/TestCapture.jet | 31:9 | "written under the TLS registry mutex" |
 | Compiler | Compiler/JetRuntime/Source/TestContracts.jet | 28:5 | "the harness main opens contracts before any test, so before any other thread observes one" |
 | Compiler | Compiler/JetRuntime/Source/TestReads.jet | 26:9 | "startup lends the immutable, null-terminated envp pointer array" |
