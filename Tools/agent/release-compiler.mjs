@@ -2,10 +2,12 @@
 // release-compiler.mjs: the release gate of the a0_NNN compiler train.
 //
 //   node Tools/agent/release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N]
-//        [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]
+//        [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR] [--check-gate]
 //
 // COMMIT is a commit on dev. The current release is `SEEDS/current` (default
-// $JET_SEEDS, Tools/agent/roots.mjs). The tool runs every check and
+// $JET_SEEDS, Tools/agent/roots.mjs). The run starts only with COMMIT's collect-all preflight
+// receipt for the current release (Tools/agent/land/preflight-receipt.mjs, written by
+// census-snap.sh); --check-gate says whether it would start and stops. The tool runs every check and
 // reports all of them; it does not stop at the first failure:
 //   chain     chain.sh builds s1, s2 and s3 of COMMIT from the current release, every stage
 //             under norust.sh, and must reach the fixed point (s2 == s3).
@@ -58,6 +60,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { commitSourceIdentity, gate, refusal } from './land/preflight-receipt.mjs';
 import { seedsRoot, stateRoot } from './roots.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
@@ -67,7 +70,7 @@ const STACK = ['prlimit', '--core=0', '--stack=1073741824:1073741824', '--'];
 const MUSL_DEFAULT = '/nix/store/wrng0xbxmz3m7slj6k14vip516wvkjdi-musl-static-x86_64-unknown-linux-musl-1.2.5/lib';
 // norust.sh, inline: drop every PATH directory holding cargo, rustc or rustup, refuse if one stays reachable.
 const NORUST = 'kept=; IFS=: read -r -a dirs <<< "$PATH"; for d in "${dirs[@]}"; do s=; for b in cargo rustc rustup; do [ -x "$d/$b" ] && s=1; done; [ -n "$s" ] || kept="$kept${kept:+:}$d"; done; export PATH="$kept"; for b in cargo rustc rustup; do if command -v "$b" >/dev/null 2>&1; then echo "norust: REFUSE $b still on PATH" >&2; exit 2; fi; done; exec "$@"';
-const USAGE = 'usage: release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]';
+const USAGE = 'usage: release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR] [--check-gate]';
 // The pool settings of each of `shards` `jet test` runs sharing one slot: the slot's memory cap split across
 // them (each pool alone would size its budget from the whole cgroup room), and `--jobs` only when given; the
 // pool's default is one entry per core while their claims fit the budget.
@@ -81,7 +84,7 @@ export function shardPool(options, shards, slotMemory = process.env.SLOT_MEMORY_
 // ---- pure helpers (release-compiler.test.mjs) ----
 
 export function parseArgs(argv) {
-    const options = { commit: '', summary: '', dispositions: '', minGains: 10, shards: 4, jobs: 0, timeout: 0, filter: '', seeds: '', work: '', errors: [] };
+    const options = { commit: '', summary: '', dispositions: '', minGains: 10, shards: 4, jobs: 0, timeout: 0, filter: '', seeds: '', work: '', checkGate: false, errors: [] };
     const values = new Map([['--summary', 'summary'], ['--dispositions', 'dispositions'], ['--filter', 'filter'], ['--seeds', 'seeds'], ['--work', 'work']]);
     const counts = new Map([['--min-gains', 'minGains'], ['--shards', 'shards'], ['--jobs', 'jobs'], ['--timeout', 'timeout']]);
     for (let i = 0; i < argv.length; i++) {
@@ -92,7 +95,8 @@ export function parseArgs(argv) {
             if (values.has(flag)) options[values.get(flag)] = value;
             else if (!/^\d+$/.test(value)) options.errors.push(`${flag} needs a whole number, not ${value}`);
             else options[counts.get(flag)] = Number(value);
-        } else if (flag.startsWith('-')) options.errors.push(`unknown option ${flag}`);
+        } else if (flag === '--check-gate') options.checkGate = true;
+        else if (flag.startsWith('-')) options.errors.push(`unknown option ${flag}`);
         else if (options.commit) options.errors.push(`one commit, not ${options.commit} and ${flag}`);
         else options.commit = flag;
     }
@@ -345,7 +349,9 @@ function preconditions(options) {
         }
     }
     if (workRoot === seeds || workRoot.startsWith(`${seeds}/`)) errors.push('the work root must be outside the seeds directory');
-    return { errors, seeds, workRoot, chain, musl, sha, release, dispositions };
+    // The preflight gate, once the run could otherwise start: COMMIT's receipt from a census by the current release.
+    const admission = errors.length ? null : gate(commitSourceIdentity(REPO, sha), release.identity);
+    return { errors, seeds, workRoot, chain, musl, sha, release, dispositions, admission };
 }
 
 function takeLock(workRoot) {
@@ -774,6 +780,14 @@ async function main() {
     if (pre.errors.length) {
         process.stderr.write(`${USAGE}\n${pre.errors.map(error => `release-compiler: ${error}`).join('\n')}\n`);
         return 2;
+    }
+    if (!pre.admission.admitted) {
+        process.stderr.write(`${refusal('release-compiler', pre.admission.reason, pre.release.dir, pre.sha)}\n`);
+        return 2;
+    }
+    if (options.checkGate) {
+        process.stdout.write(`release-compiler: admitted by ${pre.admission.reason}\n`);
+        return 0;
     }
     let lock = '';
     if (!process.env.JET_RELEASE_LOCK_HELD) {

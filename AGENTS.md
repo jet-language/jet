@@ -319,7 +319,12 @@ in one pass:
   before every compiler commit) and `Tools/agent/chain/chain.sh TREE LEVEL
   --dry-run`, which names every stage the launch would build. Every row is
   clean or carries a written disposition naming the commit in this launch that
-  fixes it. Launching to "see what fails next" is forbidden.
+  fixes it. Launching to "see what fails next" is forbidden. The launchers
+  enforce it: a clean census writes the snapshot's receipt
+  (`Tools/agent/land/preflight-receipt.mjs`, keyed on the compiler source
+  identity and the seed), and `chain.sh` full, `release-compiler.mjs` and
+  `publish-release.mjs build` refuse to start without the receipt for their
+  tree and seed; `--check-gate` gives the answer without launching.
 - **Every compiler phase has a collect-all mode, or that is the first defect.**
   Parse, imports, sema, comptime, codegen lowering, backend lowering, machine
   emission, object, link and run must each record a failing item as a census
