@@ -1,4 +1,4 @@
-// Link real Jet runtime object with -Wl,--wrap=jet_rt_free. No provider mocks.
+// Link real Jet runtime object. No provider mocks.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -8,7 +8,7 @@ typedef struct { int64_t tag; } Enum;
 typedef struct { const char *data; int64_t len, capacity; } Text;
 _Static_assert(sizeof(Enum) == 8, "shared native enum shell");
 extern void jet_rt_alloc_init(void);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Enum *jet_rt_handle_clone_process_resource_limit(const Enum *);
 extern void jet_rt_handle_drop_process_resource_limit(Enum *);
 extern bool jet_rt_handle_eq_process_resource_limit(const Enum *, const Enum *);
@@ -21,10 +21,11 @@ extern bool jet_rt_handle_eq_process_stream_mode(const Enum *, const Enum *);
 extern void jet_rt_string_drop(Text *);
 static void *watched;
 static unsigned frees, intercepted;
-void __wrap_jet_rt_free(void *pointer, int64_t bytes, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t bytes, int64_t align) {
     ++intercepted;
     if (pointer == watched) { assert(bytes == 8 && align == 8); assert(++frees == 1); }
-    __real_jet_rt_free(pointer, bytes, align);
 }
 static void text(Text *owned, const char *expected) {
     assert(owned->len == (int64_t)strlen(expected));
@@ -32,6 +33,7 @@ static void text(Text *owned, const char *expected) {
     jet_rt_string_drop(owned);
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     static const char *human[] = {"wall time", "CPU time", "memory", "open file handles", "output"};
     static const char *debug[] = {"WallTime", "CpuTime", "Memory", "OpenFiles", "Output"};
     jet_rt_alloc_init();

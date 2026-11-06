@@ -1,4 +1,4 @@
-// Real Jet object client, -Wl,--wrap=jet_rt_free; no providers.
+// Real Jet object client; no providers.
 #include <assert.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -8,7 +8,7 @@ typedef struct { unsigned char *data; int64_t length,capacity; } Text;
 typedef struct { Text *cert,*key; } Tls;
 _Static_assert(sizeof(Tls)==16 && offsetof(Tls,key)==8,"ServerTls16");
 extern void jet_rt_alloc_init(void);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern Tls *jet_rt_record_new_jet_http_server_tls(Text *,Text *);
@@ -18,9 +18,10 @@ extern Text *jet_rt_record_get_jet_http_server_tls_cert_pem(Tls *);
 extern Text *jet_rt_record_get_jet_http_server_tls_key_pem(Tls *);
 static struct { void *p; int64_t n,a; unsigned freed; } watched[28];
 static size_t count;
-void __wrap_jet_rt_free(void *p,int64_t n,int64_t a) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t n,int64_t a) {
     for(size_t i=0;i<count;i++) if(watched[i].p==p) assert(n==watched[i].n && a==watched[i].a && ++watched[i].freed==1);
-    __real_jet_rt_free(p,n,a);
 }
 static void watch(void *p,int64_t n,int64_t a) {
     assert(p && count<28); watched[count].p=p; watched[count].n=n; watched[count].a=a; watched[count++].freed=0;
@@ -41,6 +42,7 @@ static void run(const char *cert,const char *key) {
     jet_rt_handle_drop_jet_http_server_tls(b); jet_rt_string_drop(cg); jet_rt_string_drop(kg); jet_rt_string_drop(cg2); all_freed();
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init(); run("-----BEGIN CERTIFICATE-----\ncert\n-----END CERTIFICATE-----", "-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----");
     run("",""); run("arbitrary certificate text","caf\xc3\xa9 key"); jet_rt_handle_drop_jet_http_server_tls(NULL);
     puts("http server tls: borrowed ctor + deep owners + fresh getters ok"); return 0;

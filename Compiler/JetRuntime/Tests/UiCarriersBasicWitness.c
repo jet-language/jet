@@ -1,4 +1,4 @@
-/* REAL Jet objects only, linked with --wrap=jet_rt_alloc/jet_rt_free.
+/* REAL Jet objects only, with checked-heap alloc/free observers.
  * UiCarriersABI private layouts; never source/IR/Rust allocations.
  * width-stop/policy-stop are separate process modes: exit70, empty stdout,
  * stderr must match DataPlotStops-ctor-range.stderr. Execution unclaimed. */
@@ -11,8 +11,7 @@
 
 extern void jet_rt_alloc_init(void);
 extern int64_t jet_rt_alloc(int64_t, int64_t);
-extern int64_t __real_jet_rt_alloc(int64_t, int64_t);
-extern void __real_jet_rt_free(int64_t, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern int64_t jet_int_owned_from_i64(int64_t);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern void jet_rt_int_drop(int64_t);
@@ -36,8 +35,7 @@ extern int64_t jet_rt_record_get_text_width_controls(int64_t);
 static struct { int64_t address, bytes, alignment; bool live; } ledger[512];
 static size_t allocations, frees;
 static bool tracking;
-int64_t __wrap_jet_rt_alloc(int64_t bytes, int64_t alignment) {
-    int64_t address = __real_jet_rt_alloc(bytes, alignment);
+static void observe_alloc(int64_t address, int64_t bytes, int64_t alignment) {
     if (tracking) {
         assert(allocations < 512 && address != 0 && bytes > 0);
         assert((uint64_t)address % (uint64_t)alignment == 0);
@@ -48,9 +46,8 @@ int64_t __wrap_jet_rt_alloc(int64_t bytes, int64_t alignment) {
         ledger[allocations].alignment = alignment;
         ledger[allocations++].live = true;
     }
-    return address;
 }
-void __wrap_jet_rt_free(int64_t address, int64_t bytes, int64_t alignment) {
+static void observe_free(int64_t address, int64_t bytes, int64_t alignment) {
     if (tracking) {
         size_t i = allocations;
         while (i > 0) {
@@ -59,13 +56,11 @@ void __wrap_jet_rt_free(int64_t address, int64_t bytes, int64_t alignment) {
                 assert(ledger[i].bytes == bytes && ledger[i].alignment == alignment);
                 ledger[i].live = false;
                 ++frees;
-                __real_jet_rt_free(address, bytes, alignment);
                 return;
             }
         }
         assert(!"untracked or double free in real provider");
     }
-    __real_jet_rt_free(address, bytes, alignment);
 }
 static bool live(int64_t address) {
     for (size_t i = allocations; i > 0; --i)
@@ -98,6 +93,7 @@ static void enum_pair(int64_t (*clone)(int64_t), void (*drop)(int64_t), bool (*e
     drop(copied); drop(b); drop(0);
 }
 int main(int argc, char **argv) {
+    assert(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     tracking = true;
     if (argc == 2) {

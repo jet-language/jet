@@ -1,4 +1,4 @@
-// Real Jet providers only; link -Wl,--wrap=jet_rt_free. No Rust layout reads.
+// Real Jet providers only. No Rust layout reads.
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -16,7 +16,7 @@ typedef struct {
 _Static_assert(sizeof(Spec)==144 && offsetof(Spec,terminal)==112 && offsetof(Spec,wire)==120 && offsetof(Spec,directories)==128 && offsetof(Spec,parent_death)==136, "native Spec144");
 _Static_assert(sizeof(List)==24 && sizeof(Policy)==24, "canonical nested carriers");
 extern void jet_rt_alloc_init(void);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern int64_t jet_int_owned_from_i64(int64_t);
@@ -50,13 +50,14 @@ extern Spec *jet_process_spec_terminal_with_policy(Spec *,const Policy *);
 static struct { void *p; int64_t bytes,align; unsigned frees; } watched[256];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].p==p) {
         assert(bytes==watched[i].bytes && align==watched[i].align);
         assert(++watched[i].frees==1);
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(count<256);
@@ -180,6 +181,7 @@ static void modes_and_debug(void) {
     jet_rt_handle_drop_process_spec(a); jet_rt_string_drop(input); jet_rt_string_drop(plain);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc==2) {
         Spec *s=jet_std_process_cmd(NULL,0);

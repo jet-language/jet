@@ -1,4 +1,4 @@
-/* Real Jet runtime providers, --wrap=jet_rt_alloc/jet_rt_free; no C providers.
+/* Real Jet runtime providers, checked-heap alloc/free observers; no C providers.
  * Canonical native List<U8> is packed. Compose shared sequence stop fixes. */
 #include <assert.h>
 #include <stdbool.h>
@@ -15,8 +15,8 @@ typedef struct { uint64_t len,cap; unsigned char *data; } Bytes;
 typedef struct { H kind,first,second; } Event;
 _Static_assert(sizeof(Event)==24,"UiABI Event24");
 extern void jet_rt_alloc_init(void);
-extern H jet_rt_alloc(H,H),__real_jet_rt_alloc(H,H);
-extern void __real_jet_rt_free(H,H,H);
+extern H jet_rt_alloc(H,H);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern H jet_rt_handle_clone_jet_input_event(H),jet_rt_handle_clone_jet_tui_event(H);
 extern Text *jet_rt_string_from_static(const void *,H);
 extern void jet_rt_handle_drop_jet_input_event(H),jet_rt_handle_drop_jet_tui_event(H);
@@ -24,21 +24,18 @@ extern bool jet_rt_handle_eq_jet_input_event(H,H),jet_rt_handle_eq_jet_tui_event
 static struct { H address,bytes,align; bool live; } ledger[512];
 static size_t allocations,frees;
 static bool tracking;
-H __wrap_jet_rt_alloc(H bytes,H align) {
-    H address=__real_jet_rt_alloc(bytes,align);
+static void observe_alloc(H address, H bytes, H align) {
     if(tracking) {
         assert(address&&bytes>0&&allocations<512&&(uint64_t)address%(uint64_t)align==0);
         for(size_t i=0;i<allocations;++i)assert(!ledger[i].live||ledger[i].address!=address);
         ledger[allocations].address=address;ledger[allocations].bytes=bytes;ledger[allocations].align=align;ledger[allocations++].live=true;
     }
-    return address;
 }
-void __wrap_jet_rt_free(H address,H bytes,H align) {
+static void observe_free(H address,H bytes,H align) {
     if(tracking) {
-        for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==address&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;__real_jet_rt_free(address,bytes,align);return;}
+        for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==address&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;return;}
         assert(!"untracked or double free");
     }
-    __real_jet_rt_free(address,bytes,align);
 }
 static void balanced(void) {assert(allocations==frees);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live);allocations=frees=0;}
 static H text(const char *s) {return (H)(uintptr_t)jet_rt_string_from_static(s,(H)strlen(s));}
@@ -86,6 +83,7 @@ static void cases(bool tui,H kind,size_t n) {
     drop(ah);assert(eq(bh,bh));drop(bh);balanced();
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();tracking=true;
     for(H kind=0;kind<2;++kind)cases(false,kind,0);
     for(H kind=0;kind<7;++kind)cases(true,kind,0);

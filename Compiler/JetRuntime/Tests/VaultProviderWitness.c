@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
-// Real Jet vault state/codec only; link -Wl,--wrap=jet_rt_free for zeroization.
+// Real Jet vault state/codec only for zeroization.
 #include <assert.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -28,7 +28,7 @@ extern void jet_rt_vault_legacy_fixture(const void *, int64_t, const void *);
 extern void jet_rt_vault_invalid_legacy_fixture(const void *, int64_t);
 typedef struct { int64_t length, capacity; unsigned char *data; } ByteList;
 extern void *jet_rt_alloc(int64_t, int64_t);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern void jet_rt_string_drop(Text *);
 extern void stored_key_bytes_are_redacted_and_zeroized_on_drop(const Text *, ByteList *, const Text *, const Text *, void **);
 extern void jet_rt_vault_record_fixture_drop(void *);
@@ -113,7 +113,9 @@ static struct { void *data; int64_t capacity; unsigned frees; } observed[2];
 static size_t observed_count;
 static unsigned stream_error_frees;
 static int observe_stream_error;
-void __wrap_jet_rt_free(void *data, int64_t size, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *data, int64_t size, int64_t align) {
     if (observe_stream_error && size == 8192) {
         assert(align == 8 && ++stream_error_frees == 1);
         for (int64_t byte = 0; byte < size; ++byte) assert(((const unsigned char *)data)[byte] == 0);
@@ -122,7 +124,6 @@ void __wrap_jet_rt_free(void *data, int64_t size, int64_t align) {
         assert(size == observed[i].capacity && align == 8 && ++observed[i].frees == 1);
         for (int64_t byte = 0; byte < size; ++byte) assert(((const unsigned char *)data)[byte] == 0);
     }
-    __real_jet_rt_free(data, size, align);
 }
 static Text text(const char *s) { return (Text){(const unsigned char *)s, (int64_t)strlen(s), 0}; }
 static const char *const display[] = {
@@ -877,6 +878,7 @@ static void filesystem_batch_c(void) {
     fixture_remove_tree(temp);
 }
 int main(int argc, char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     jet_rt_host_arguments(argc, argv, environ);
     jet_rt_thread_init();

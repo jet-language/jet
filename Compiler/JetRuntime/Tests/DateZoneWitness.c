@@ -1,4 +1,4 @@
-// Real Jet-object client, link -Wl,--wrap=jet_rt_free; no mocks.
+// Real Jet-object client; no mocks.
 // Goldens: pinned rustc1.97.1 (8bab26f4f), Time51-71/1147-55/1680-88.
 #include <assert.h>
 #include <stdbool.h>
@@ -18,7 +18,7 @@ _Static_assert(sizeof(Zoned)==16 && offsetof(Zoned,zone)==8,"Zoned16");
 _Static_assert(sizeof(Rows)==24 && sizeof(Pair)==16,"List24 pair16");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_new(unsigned char *,int64_t);
 extern Text *jet_rt_string_clone(Text *);
 extern void jet_rt_string_drop(Text *);
@@ -37,12 +37,13 @@ extern Zone *jet_rt_handle_field_jet_zoned_date_time_zone(Zoned *);
 static struct { void *p; int64_t bytes,align; unsigned frees; } watched[48];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].p==p) {
         assert(bytes==watched[i].bytes && align==watched[i].align); assert(++watched[i].frees==1);
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(p && count<48); for(size_t i=0;i<count;++i) assert(watched[i].p!=p);
@@ -113,8 +114,8 @@ static void equality(void) {
 static void zones(void) {
     Zone *a=zone("\xcf\x80\n",0);
     Pair transitions[]={{0,1},{10,2},{10,0},{20,2}},infos[]={{0,0},{20700,UINT64_C(0xabcdef0000000080)},{-12600,1}};
-    watch_rows(a->transitions); __wrap_jet_rt_free(a->transitions,24,8); done(); a->transitions=rows(transitions,4,2);
-    watch_rows(a->infos); __wrap_jet_rt_free(a->infos->data,a->infos->capacity*16,8); __wrap_jet_rt_free(a->infos,24,8); done(); a->infos=rows(infos,3,1);
+    watch_rows(a->transitions); jet_rt_free(a->transitions,24,8); done(); a->transitions=rows(transitions,4,2);
+    watch_rows(a->infos); jet_rt_free(a->infos->data,a->infos->capacity*16,8); jet_rt_free(a->infos,24,8); done(); a->infos=rows(infos,3,1);
     Zone *b=jet_rt_handle_clone_jet_zone(a); assert(a!=b && a->name!=b->name && a->transitions!=b->transitions && a->infos!=b->infos);
     assert(a->transitions->data!=b->transitions->data && a->infos->data!=b->infos->data && b->infos->data[1].second==1);
     assert(jet_rt_handle_eq_jet_zone(a,b));
@@ -146,6 +147,7 @@ static void zones(void) {
     text_is(owned,"\xcf\x80\n"); watch_text(owned); jet_rt_string_drop(owned); done(); check_texts(s,d,g,"\xcf\x80\n");
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc==2) {
         Zoned *z=zoned(0,0,0,"Bad",0);
@@ -154,7 +156,7 @@ int main(int argc,char **argv) {
         } else {
             assert(strcmp(argv[1],"info-index-equals-length")==0 || strcmp(argv[1],"negative-info-index")==0);
             Pair transition={0,strcmp(argv[1],"negative-info-index")==0 ? UINT64_MAX : 1};
-            watch_rows(z->zone->transitions); __wrap_jet_rt_free(z->zone->transitions,24,8); done();
+            watch_rows(z->zone->transitions); jet_rt_free(z->zone->transitions,24,8); done();
             z->zone->transitions=rows(&transition,1,0);
         }
         (void)jet_rt_handle_show_jet_zoned_date_time(z);

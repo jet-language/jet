@@ -1,4 +1,4 @@
-// Real native runtime only, linked with -Wl,--wrap=jet_rt_free.
+// Real native runtime only.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -9,7 +9,7 @@ typedef struct { Text *path; } Store;
 typedef struct { Text *store; int64_t retention; } Runtime;
 _Static_assert(sizeof(Store) == 8 && sizeof(Runtime) == 16, "private service values");
 extern void jet_rt_alloc_init(void);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern int64_t jet_int_owned_from_i64(int64_t);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern int64_t jet_int_add(int64_t, int64_t);
@@ -31,12 +31,13 @@ extern int64_t jet_rt_record_get_jet_service_runtime_retention_ms(const Runtime 
 extern Text *jet_rt_handle_show_jet_service_runtime(const Runtime *);
 extern Text *jet_rt_handle_display_jet_service_runtime(const Runtime *);
 static struct { void *pointer; int64_t bytes, align; unsigned frees; } watched[3];
-void __wrap_jet_rt_free(void *pointer, int64_t bytes, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t bytes, int64_t align) {
     for (unsigned i = 0; i < 3; ++i) if (watched[i].pointer && pointer == watched[i].pointer) {
         assert(bytes == watched[i].bytes && align == watched[i].align);
         assert(++watched[i].frees == 1);
     }
-    __real_jet_rt_free(pointer, bytes, align);
 }
 static void watch(void *shell, int64_t bytes, Text *text) {
     watched[0].pointer = shell; watched[0].bytes = bytes; watched[0].align = 8;
@@ -62,6 +63,7 @@ static void render(Text *value, const char *prefix, const char *raw, size_t leng
     jet_rt_string_drop(value);
 }
 int main(int argc, char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if (argc == 2) {
         bool high = strcmp(argv[1], "range-high") == 0;

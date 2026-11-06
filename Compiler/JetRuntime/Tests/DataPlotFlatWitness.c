@@ -1,4 +1,4 @@
-/* REAL Jet objects only, linked with -Wl,--wrap=jet_rt_free.
+/* REAL Jet objects only.
  * Layout mirrors DataABI.jet private carriers, never Rust/source/IR. */
 #include <assert.h>
 #include <stdbool.h>
@@ -14,7 +14,7 @@ extern void jet_rt_alloc_init(void);
 extern Text *jet_rt_string_from_static(const void *, int64_t);
 extern void jet_rt_string_drop(Text *);
 extern void jet_rt_free(int64_t, int64_t, int64_t);
-extern void __real_jet_rt_free(int64_t, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern int64_t jet_int_owned_from_i64(int64_t);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern void jet_rt_int_drop(int64_t);
@@ -50,7 +50,9 @@ extern void jet_rt_record_seq_list_rec_jet_data_plot_field_push(Sequence *, int6
 
 static struct { int64_t address, bytes, alignment; bool freed; } watched[128];
 static size_t watched_count, intercepted;
-void __wrap_jet_rt_free(int64_t address, int64_t bytes, int64_t alignment) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(int64_t address, int64_t bytes, int64_t alignment) {
     ++intercepted;
     for (size_t i = 0; i < watched_count; ++i) {
         if (watched[i].address == address) {
@@ -59,7 +61,6 @@ void __wrap_jet_rt_free(int64_t address, int64_t bytes, int64_t alignment) {
             watched[i].freed = true;
         }
     }
-    __real_jet_rt_free(address, bytes, alignment);
 }
 static void watch(int64_t address, int64_t bytes, int64_t alignment) {
     assert(watched_count < 128);
@@ -116,6 +117,7 @@ static void scalar_value(int64_t a, int64_t b, bool equal) {
     finish(before);
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     static const unsigned char bytes[] = {'A', 0, 0xc3, 0xa9};
     Text *text = jet_rt_string_from_static(bytes, 4);

@@ -1,4 +1,4 @@
-// Link the real Jet object with --wrap=jet_rt_free. This is not a provider.
+// Link the real Jet object. This is not a provider.
 // Native layout mirrors NetErrorABI; Rust cites NetHTTP149-181,530-570 and NetError7-22.
 #include <assert.h>
 #include <stdbool.h>
@@ -14,7 +14,7 @@ _Static_assert(sizeof(Detail)==48 && offsetof(Detail,code)==40, "Net Detail48");
 _Static_assert(sizeof(DNS)==16 && offsetof(DNS,text)==8, "Net DNS16");
 _Static_assert(sizeof(Error)==16 && offsetof(Error,payload)==8, "Net Error16");
 extern void jet_rt_alloc_init(void);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern int64_t jet_int_owned_from_i64(int64_t);
@@ -61,12 +61,13 @@ static const int64_t tags[]={0,1,2,3,4,5,6,7,8,9,10,12,13,14}; // C ABI DNS11; r
 static struct { void *pointer; int64_t bytes,align; unsigned frees; } watched[128];
 static size_t watched_count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<watched_count;++i) if(watched[i].pointer==p) {
         assert(bytes==watched[i].bytes && align==watched[i].align && ++watched[i].frees==1);
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(p && watched_count<128);
@@ -144,6 +145,7 @@ static void all_variants(void) {
     jet_rt_int_drop(max);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc==2) {
         if(!strcmp(argv[1],"wrong-variant")) {

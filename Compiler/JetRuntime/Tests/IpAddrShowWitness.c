@@ -1,5 +1,5 @@
 // Link real Jet exports; IP24 clone/drop/eq come from canonical18eb2f82f.
-// Link -Wl,--wrap=jet_rt_free; no native List<U8> geometry is used here.
+//; no native List<U8> geometry is used here.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -11,7 +11,7 @@ typedef struct { unsigned char *data; int64_t length, capacity; } Text;
 _Static_assert(sizeof(IP) == 24 && offsetof(IP, octets) == 8, "canonical IP24");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t, int64_t);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern IP *jet_rt_handle_clone_jet_ip_addr(IP *);
 extern void jet_rt_handle_drop_jet_ip_addr(IP *);
 extern bool jet_rt_handle_eq_jet_ip_addr(IP *, IP *);
@@ -20,13 +20,14 @@ extern void jet_rt_string_drop(Text *);
 static struct { void *pointer; int64_t size, align; unsigned frees; } watched[4];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *pointer, int64_t size, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t size, int64_t align) {
     ++intercepted;
     for (size_t i = 0; i < count; ++i) if (pointer == watched[i].pointer) {
         assert(size == watched[i].size && align == watched[i].align);
         assert(++watched[i].frees == 1);
     }
-    __real_jet_rt_free(pointer, size, align);
 }
 static void watch(void *pointer, int64_t size, int64_t align) {
     assert(count < 4);
@@ -74,6 +75,7 @@ static void v6_case(const uint16_t segments[8], const char *expected) {
     address_case(6, octets, expected);
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     static const struct { uint16_t segments[8]; const char *expected; } cases[] = {
         {{0,0,0,0,0,0,0,0}, "::"},

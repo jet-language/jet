@@ -1,4 +1,4 @@
-/* Real composed Jet object; --wrap=jet_rt_free, real FD72 and Stream56. */
+/* Real composed Jet object, real FD72 and Stream56. */
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -9,7 +9,7 @@ typedef struct { int64_t mutex,number,closed; void *path,*buffer; int64_t mode,f
 typedef struct { FD *fd; int64_t reserved,read_shutdown,write_shutdown,read_ms,write_ms,mutex; } Stream;
 _Static_assert(sizeof(FD)==72 && offsetof(FD,closed)==16 && sizeof(Stream)==56 && offsetof(Stream,read_shutdown)==16 && offsetof(Stream,write_shutdown)==24,"canonical Host geometry");
 extern void jet_rt_alloc_init(void);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern FD *jet_fd_adopt_unbuffered_raw(int64_t,void *);
 extern Stream *jet_socket_stream_from_fd_raw(FD *);
 extern void jet_socket_stream_mark_shutdown_raw(Stream *,int64_t);
@@ -21,12 +21,14 @@ extern const bool *jet_rt_handle_field_jet_tcp_stream_write_shutdown(Stream *);
 static FD *watched_fd;
 static Stream *watched_stream;
 static unsigned fd_freed,stream_freed;
-void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *ptr,int64_t size,int64_t align) {
     if(ptr==watched_fd) { assert(!fd_freed && !stream_freed && size==72 && align==8); ++fd_freed; }
     if(ptr==watched_stream) { assert(fd_freed==1 && !stream_freed && size==56 && align==8); ++stream_freed; }
-    __real_jet_rt_free(ptr,size,align);
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     for(int64_t how=0;how<3;++how) {
         int pipefd[2]; assert(pipe(pipefd)==0);

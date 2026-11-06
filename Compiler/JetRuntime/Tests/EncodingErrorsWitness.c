@@ -1,4 +1,4 @@
-// Real Jet-object client; link -Wl,--wrap=jet_rt_free. No runtime providers.
+// Real Jet-object client. No runtime providers.
 // Layout assertions mirror EncodingABI.jet, never Rust layout.
 #include <assert.h>
 #include <stdbool.h>
@@ -18,7 +18,7 @@ _Static_assert(sizeof(Cause)==32 && offsetof(Cause, code)==16 && offsetof(Cause,
 _Static_assert(sizeof(Error)==80 && offsetof(Error,path)==56 && offsetof(Error,cause)==72, "EncodingABI error80");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t, int64_t);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *, int64_t);
 extern void jet_rt_string_drop(Text *);
 extern int64_t jet_int_owned_from_i64(int64_t);
@@ -56,13 +56,14 @@ extern Text *jet_rt_handle_debug_encoding_error(Error *);
 static struct { void *pointer; int64_t bytes, align; unsigned frees; } watched[80];
 static size_t watched_count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *pointer, int64_t bytes, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t bytes, int64_t align) {
     ++intercepted;
     for(size_t i=0;i<watched_count;++i) if(watched[i].pointer==pointer) {
         assert(watched[i].bytes==bytes && watched[i].align==align);
         assert(++watched[i].frees==1);
     }
-    __real_jet_rt_free(pointer,bytes,align);
 }
 static void watch(void *pointer,int64_t bytes,int64_t align) {
     assert(pointer && watched_count<80);
@@ -157,6 +158,7 @@ static void labels(void) {
     rendered(e,"CBOR State at byte 0, column 0: column only"); jet_rt_handle_drop_encoding_error(e); jet_rt_int_drop(zero);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc==2) {
         int64_t n=jet_int_owned_from_i64(INT64_MAX);

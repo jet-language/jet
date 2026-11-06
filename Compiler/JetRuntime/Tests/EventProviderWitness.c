@@ -1,5 +1,5 @@
-// Link real composed Jet runtime exports with -Wl,--wrap=jet_rt_alloc
-// -Wl,--wrap=jet_rt_free. Events.jet against the Rust meaning
+// Link real composed Jet runtime exports; checked-heap alloc and free
+// observers see every allocation. Events.jet against the Rust meaning
 // (JetEventScope/JetSubscription/JetEvent): registration order, priority, once,
 // cancellation, scope teardown, nested emit, the last Event handle dropped
 // mid-emit, and every provider allocation freed exactly once.
@@ -9,8 +9,8 @@
 #include <string.h>
 typedef struct { const char *data; int64_t length, capacity; } Text;
 extern void jet_rt_alloc_init(void);
-extern void *__real_jet_rt_alloc(int64_t, int64_t);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern void *jet_rt_alloc(int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern void jet_rt_string_drop(Text *);
 extern int64_t *jet_event_policy_sync(void);
 extern void jet_rt_handle_drop_jet_event_policy(int64_t *);
@@ -40,15 +40,13 @@ extern void jet_rt_handle_drop_jet_event_trace(void *);
 // Every live allocation, so each scenario proves it returns to its baseline.
 static struct { void *pointer; int64_t size; } live[4096];
 static size_t live_count, allocated;
-void *__wrap_jet_rt_alloc(int64_t size, int64_t alignment) {
-    void *pointer = __real_jet_rt_alloc(size, alignment);
+static void observe_alloc(void *pointer, int64_t size, int64_t alignment) {
     assert(live_count < sizeof live / sizeof live[0]);
     live[live_count].pointer = pointer;
     live[live_count++].size = size;
     ++allocated;
-    return pointer;
 }
-void __wrap_jet_rt_free(void *pointer, int64_t size, int64_t alignment) {
+static void observe_free(void *pointer, int64_t size, int64_t alignment) {
     if (pointer != NULL) {
         size_t at = 0;
         while (at < live_count && live[at].pointer != pointer) ++at;
@@ -59,7 +57,6 @@ void __wrap_jet_rt_free(void *pointer, int64_t size, int64_t alignment) {
             memset(pointer, 0xA5, (size_t)size);
         }
     }
-    __real_jet_rt_free(pointer, size, alignment);
 }
 
 // A handler closure as the lowering's lazy.callback adapter sees it.
@@ -315,6 +312,7 @@ static void event_dropped_mid_emit(void) {
 
 typedef void (*Scenario)(void);
 int main(void) {
+    assert(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     Scenario scenarios[] = {goldens, once_and_unsubscribe, priority_order, scope_teardown, cancelled_scope, mutation_during_dispatch, nested_emit, event_drop_first, event_dropped_mid_emit};
     goldens(); // warm any runtime-lifetime allocation before baselines

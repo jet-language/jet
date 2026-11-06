@@ -69,17 +69,17 @@ function command(bin,args,label,options={}){
  if(r.error||r.status!==0)throw Error(`${label}: ${r.error?.message??r.status}\n${r.stdout??''}${r.stderr??''}`);
  return r;
 }
-const fixtures=[['ProcessRoutesWitness','process routes: ok\n',false],
- ['ProcessExecutionWitness',readFileSync(join(root,'Compiler/JetRuntime/Tests/ProcessExecutionWitness.stdout'),'utf8'),false],
- ['TerminalProcessWitness',readFileSync(join(root,'Compiler/JetRuntime/Tests/TerminalProcessWitness.stdout'),'utf8'),true],
- ['ProcessSpecWitness',readFileSync(join(root,'Compiler/JetRuntime/Tests/ProcessSpecWitness.stdout'),'utf8'),true]];
-for(const [name,expected,wrap]of fixtures.filter(row=>!test||row[0]===test+'Witness')){
+const fixtures=[['ProcessRoutesWitness','process routes: ok\n'],
+ ['ProcessExecutionWitness',readFileSync(join(root,'Compiler/JetRuntime/Tests/ProcessExecutionWitness.stdout'),'utf8')],
+ ['TerminalProcessWitness',readFileSync(join(root,'Compiler/JetRuntime/Tests/TerminalProcessWitness.stdout'),'utf8')],
+ ['ProcessSpecWitness',readFileSync(join(root,'Compiler/JetRuntime/Tests/ProcessSpecWitness.stdout'),'utf8')]];
+for(const [name,expected]of fixtures.filter(row=>!test||row[0]===test+'Witness')){
  const object=join(out,name+'.o'),binary=join(out,name);
  const source=join(root,'Compiler/JetRuntime/Tests',name+'.c'),sourceHandle=fileObject(source);
  command(join(root,'Tools/agent/jet-env'),[nativeCCompiler,'-std=c11','-O1','-fno-stack-protector','-fno-PIE','-fno-builtin','-Wall','-Wextra','-Werror',...(test?['-DJET_PROCESS_JET_FIXTURES=1']:[]),'-c',source,'-o',object],name+'-compile');
  const cObjectHandle=fileObject(object);
  unchanged([...sharedInputs,{path:source,handle:sourceHandle}]);
- command(join(root,'Tools/agent/jet-env'),[nativeCCompiler,'-nostdlib','-static','-no-pie',crt[0].path,crt[1].path,object,...(wrap?['-Wl,--wrap=jet_rt_free']:[]),'-Wl,--start-group',pack,faultReport,...platform,'-Wl,--end-group',crt[2].path,'-o',binary],name+'-link');
+ command(join(root,'Tools/agent/jet-env'),[nativeCCompiler,'-nostdlib','-static','-no-pie',crt[0].path,crt[1].path,object,'-Wl,--start-group',pack,faultReport,...platform,'-Wl,--end-group',crt[2].path,'-o',binary],name+'-link');
  const executableHandle=fileObject(binary);
  unchanged([...sharedInputs,{path:source,handle:sourceHandle},{path:object,handle:cObjectHandle}]);
  const r=command(binary,[],name+'-execute');

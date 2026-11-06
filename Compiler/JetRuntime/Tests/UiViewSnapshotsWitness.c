@@ -1,4 +1,4 @@
-/* Link real providers --wrap=jet_rt_alloc/jet_rt_free. No C runtime mocks. */
+/* Link real providers; checked-heap alloc/free observers. No C runtime mocks. */
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -11,22 +11,19 @@ typedef struct {uint64_t len,cap;H *data;} Pairs;
 typedef struct {H fields[12];Pairs *pairs;} Plan;
 _Static_assert(sizeof(Plan)==104,"UiABI snapshot layouts");
 extern void jet_rt_alloc_init(void);
-extern H jet_rt_alloc(H,H),__real_jet_rt_alloc(H,H);
-extern void __real_jet_rt_free(H,H,H);
+extern H jet_rt_alloc(H,H);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern H jet_rt_handle_clone_jet_web_virtual_plan(H);
 extern void jet_rt_handle_drop_jet_web_virtual_plan(H);
 extern bool jet_rt_handle_eq_jet_web_virtual_plan(H,H);
 static struct {H address,bytes,align;bool live;} ledger[512];
 static size_t allocations,frees;
 static bool tracking;
-H __wrap_jet_rt_alloc(H bytes,H align) {
-    H address=__real_jet_rt_alloc(bytes,align);
+static void observe_alloc(H address, H bytes, H align) {
     if(tracking){assert(address&&bytes>0&&allocations<512&&(uint64_t)address%(uint64_t)align==0);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live||ledger[i].address!=address);ledger[allocations].address=address;ledger[allocations].bytes=bytes;ledger[allocations].align=align;ledger[allocations++].live=true;}
-    return address;
 }
-void __wrap_jet_rt_free(H address,H bytes,H align) {
-    if(tracking){for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==address&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;__real_jet_rt_free(address,bytes,align);return;}assert(!"untracked or double free");}
-    __real_jet_rt_free(address,bytes,align);
+static void observe_free(H address,H bytes,H align) {
+    if(tracking){for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==address&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;return;}assert(!"untracked or double free");}
 }
 static void balanced(void){assert(allocations==frees);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live);allocations=frees=0;}
 static void plan(size_t n) {
@@ -40,4 +37,4 @@ static void plan(size_t n) {
     if(n>1){H old=p->data[1];p->data[1]=p->data[3];p->data[3]=old;assert(!jet_rt_handle_eq_jet_web_virtual_plan(ah,bh));p->data[3]=p->data[1];p->data[1]=old;}
     jet_rt_handle_drop_jet_web_virtual_plan(ah);assert(jet_rt_handle_eq_jet_web_virtual_plan(bh,bh));jet_rt_handle_drop_jet_web_virtual_plan(bh);balanced();
 }
-int main(void){jet_rt_alloc_init();tracking=true;plan(0);plan(1);plan(17);jet_rt_handle_drop_jet_web_virtual_plan(0);balanced();puts("UI view snapshots: twelve raw fields, ordered sparse pairs and exact-once frees ok");return 0;}
+int main(void){assert(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1);jet_rt_alloc_init();tracking=true;plan(0);plan(1);plan(17);jet_rt_handle_drop_jet_web_virtual_plan(0);balanced();puts("UI view snapshots: twelve raw fields, ordered sparse pairs and exact-once frees ok");return 0;}

@@ -1,4 +1,4 @@
-// Real Jet-object client, -Wl,--wrap=jet_rt_free. No providers are mocked.
+// Real Jet-object client. No providers are mocked.
 // Golden renders: source ordinals65-123.
 #include <assert.h>
 #include <stdbool.h>
@@ -14,7 +14,7 @@ typedef struct { int64_t tag; } Operation;
 _Static_assert(sizeof(Error)==16 && offsetof(Error,payload)==8,"HTTP Error16");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern Error *jet_rt_handle_clone_jet_http_error(Error *);
@@ -28,9 +28,10 @@ extern void jet_rt_handle_drop_jet_http_operation(Operation *);
 extern bool jet_rt_handle_eq_jet_http_operation(Operation *,Operation *);
 static struct { void *p; int64_t n,a; unsigned freed; } watched[20];
 static size_t count;
-void __wrap_jet_rt_free(void *p,int64_t n,int64_t a) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t n,int64_t a) {
     for(size_t i=0;i<count;i++) if(watched[i].p==p) assert(n==watched[i].n && a==watched[i].a && ++watched[i].freed==1);
-    __real_jet_rt_free(p,n,a);
 }
 static void watch(void *p,int64_t n,int64_t a) {
     assert(p && count<20); watched[count].p=p; watched[count].n=n; watched[count].a=a; watched[count++].freed=0;
@@ -98,6 +99,7 @@ static void invalid(int mode,int64_t tag,int64_t payload) {
     assert(strstr(out,"record variant index out of range") && strstr(out,"<core.prelude>"));
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     for(int64_t i=0;i<3;i++) {
         Operation *a=jet_rt_alloc(8,8); a->tag=i; Operation *b=jet_rt_handle_clone_jet_http_operation(a),other={i+1};

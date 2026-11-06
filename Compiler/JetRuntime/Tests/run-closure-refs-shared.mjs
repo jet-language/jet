@@ -48,7 +48,7 @@ if (mode === 'assemble') {
         // into each image; this platform link takes it from the shared report source.
         const faultReport = faultReportObject(mkdtempSync(join(out, 'fault-report-')));
         command('link', [nativeCCompiler, '-std=c11', '-O2', join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c'), prefix + '.o', object, faultReport,
-            '-Wl,--wrap=jet_rt_alloc', '-Wl,--wrap=jet_rt_free', '-lpthread', '-ldl', '-lm', '-o', binary]);
+            '-lpthread', '-ldl', '-lm', '-o', binary]);
         writeFileSync(join(out, 'link.json'), JSON.stringify({sha: process.env.COMPOSED_SHA, lower, object, objectSha256: hash(object), faultReport, faultReportSha256: hash(faultReport), driverSha256: hash(join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c')), binarySha256: hash(binary)}, null, 2) + '\n');
     } else {
         const linked = JSON.parse(readFileSync(join(out, 'link.json'), 'utf8'));
@@ -56,7 +56,7 @@ if (mode === 'assemble') {
         const result = command('run', [binary], {timeout: 300000});
         const observed = JSON.parse(result.stdout);
         if (result.stderr !== '' || observed.checksum !== 54720000 || observed.workers !== 32 || observed.threads < 2 || observed.threads > 32 || observed.closure_allocs !== 1 || observed.closure_frees !== 1 || observed.closure_live !== 0) throw Error('wrong output or unbalanced closure allocator');
-        const receipt = {sha: process.env.COMPOSED_SHA, linked, observed, verdict: 'PASS', allocationCoverage: 'actual 168B eighteen-I64-capture closure box, observed through linker-wrapped Jet alloc/free; not the #4754 strict native instrumentation receipt'};
+        const receipt = {sha: process.env.COMPOSED_SHA, linked, observed, verdict: 'PASS', allocationCoverage: 'actual 168B eighteen-I64-capture closure box, observed through the checked heap\'s alloc/free observers; not the #4754 strict native instrumentation receipt'};
         writeFileSync(join(out, 'result.json'), JSON.stringify(receipt, null, 2) + '\n');
         console.log(JSON.stringify(receipt));
     }

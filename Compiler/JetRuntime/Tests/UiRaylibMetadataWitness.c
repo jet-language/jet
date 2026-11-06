@@ -1,4 +1,4 @@
-/* Real Jet providers --wrap=jet_rt_alloc/jet_rt_free, no C providers.
+/* Real Jet providers, checked-heap alloc/free observers, no C providers.
  * Cursor3 reuses febd2658e canonical inline E4+pos, never a second provider. */
 #include <assert.h>
 #include <stdbool.h>
@@ -16,8 +16,8 @@ typedef struct {Text *path,*name,*texture_path;Regions *regions;H present;int32_
 typedef struct {Text buf;uint64_t pos;} Cursor;
 _Static_assert(sizeof(Window)==32&&sizeof(Region)==40&&sizeof(Atlas)==64&&sizeof(Cursor)==32,"native-private layouts");
 extern void jet_rt_alloc_init(void);
-extern H jet_rt_alloc(H,H),__real_jet_rt_alloc(H,H);
-extern void __real_jet_rt_free(H,H,H);
+extern H jet_rt_alloc(H,H);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,H);
 extern void jet_rt_string_drop(Text *);
 extern H jet_int_owned_from_i64(H),jet_int_owned_to_i64(H);
@@ -36,14 +36,11 @@ extern void jet_rt_handle_drop_jet_cursor(H),jet_rt_handle_field_jet_cursor_buf(
 static struct {H address,bytes,align;bool live;} ledger[1024];
 static size_t allocations,frees;
 static bool tracking;
-H __wrap_jet_rt_alloc(H bytes,H align) {
-    H address=__real_jet_rt_alloc(bytes,align);
+static void observe_alloc(H address, H bytes, H align) {
     if(tracking){assert(address&&bytes>0&&allocations<1024&&(uint64_t)address%(uint64_t)align==0);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live||ledger[i].address!=address);ledger[allocations].address=address;ledger[allocations].bytes=bytes;ledger[allocations].align=align;ledger[allocations++].live=true;}
-    return address;
 }
-void __wrap_jet_rt_free(H address,H bytes,H align) {
-    if(tracking){for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==address&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;__real_jet_rt_free(address,bytes,align);return;}assert(!"untracked or double free");}
-    __real_jet_rt_free(address,bytes,align);
+static void observe_free(H address,H bytes,H align) {
+    if(tracking){for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==address&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;return;}assert(!"untracked or double free");}
 }
 static void balanced(void){assert(allocations==frees);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live);allocations=frees=0;}
 static Text *text(const char *s){return jet_rt_string_from_static(s,(H)strlen(s));}
@@ -79,4 +76,4 @@ static void cursor(const char *s,uint64_t pos) {
     size_t before=allocations;Text view={0};jet_rt_handle_field_jet_cursor_buf(ah,&view);assert(view.data==a->buf.data&&view.len==a->buf.len&&view.cap==a->buf.cap&&allocations==before);
     jet_rt_handle_drop_jet_cursor(ah);text_is(&b->buf,s);jet_rt_handle_drop_jet_cursor(bh);balanced();
 }
-int main(void){jet_rt_alloc_init();tracking=true;window(0);window(1);window(255);for(unsigned i=0;i<4;++i){atlas(i&1,i&2,0);atlas(i&1,i&2,17);}cursor("",UINT64_MAX);cursor("a\xc3\xa9",UINT64_C(0x8000000000000001));jet_rt_handle_drop_raylib_window(0);jet_rt_handle_drop_raylib_texture_atlas(0);jet_rt_handle_drop_jet_cursor(0);balanced();puts("UI raylib metadata and canonical Cursor: raw fields, ordered regions, option textures, projections and exact-once frees ok");return 0;}
+int main(void){assert(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1);jet_rt_alloc_init();tracking=true;window(0);window(1);window(255);for(unsigned i=0;i<4;++i){atlas(i&1,i&2,0);atlas(i&1,i&2,17);}cursor("",UINT64_MAX);cursor("a\xc3\xa9",UINT64_C(0x8000000000000001));jet_rt_handle_drop_raylib_window(0);jet_rt_handle_drop_raylib_texture_atlas(0);jet_rt_handle_drop_jet_cursor(0);balanced();puts("UI raylib metadata and canonical Cursor: raw fields, ordered regions, option textures, projections and exact-once frees ok");return 0;}

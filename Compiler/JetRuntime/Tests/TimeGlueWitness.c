@@ -1,4 +1,4 @@
-// Real Jet-object client, link --wrap=jet_rt_free. No provider substitutes.
+// Real Jet-object client. No provider substitutes.
 // Native TimeGlueABI only; source Core Instant is NOT a pointer carrier.
 // Render goldens: Time280-286/472-480/619-620/1760-1765, Duration195-197.
 #include <assert.h>
@@ -16,7 +16,7 @@ _Static_assert(sizeof(Triple)==24 && sizeof(Local)==32 && offsetof(Local,nanos)=
 _Static_assert(sizeof(Duration)==8 && sizeof(Unit)==8,"duration ABI");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern void jet_rt_string_drop(Text *);
 extern int64_t jet_int_owned_from_i64(int64_t);
 extern int64_t jet_int_owned_to_i64(int64_t);
@@ -54,12 +54,13 @@ extern bool jet_rt_handle_eq_duration_unit(Unit *,Unit *);
 static struct { void *pointer; int64_t bytes,align; unsigned frees; } watched[16];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].pointer==p) {
         assert(bytes==watched[i].bytes && align==watched[i].align); assert(++watched[i].frees==1);
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(p && count<16); for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
@@ -139,6 +140,7 @@ static void durations(void) {
     jet_rt_handle_drop_duration_unit(NULL);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc>1) {
         int64_t hi=jet_int_owned_from_i64(INT64_MAX),over=jet_int_add(hi,1);

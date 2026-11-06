@@ -1,4 +1,4 @@
-// Real Jet-object client, link --wrap=jet_rt_free. Private native ABI only.
+// Real Jet-object client. Private native ABI only.
 // Goldens: StructuralDebug91-120/310-319, CommonTypes6822-6828, Reflect56-69.
 #include <assert.h>
 #include <stdbool.h>
@@ -19,7 +19,7 @@ extern void jet_rt_alloc_init(void);
 extern void jet_rt_host_init(void);
 extern void *jet_std_io_stdout(void);
 extern int64_t jet_std_io_stdout_write(void *,Text *,void **);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern int64_t jet_int_owned_from_i64(int64_t);
@@ -66,12 +66,13 @@ extern Text *jet_rt_handle_show_jet_reflect_field(Field *);
 static struct { void *pointer; int64_t bytes,align; unsigned frees; } watched[256];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].pointer==p) {
         assert(bytes==watched[i].bytes && align==watched[i].align); assert(++watched[i].frees==1);
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(p && count<256); for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
@@ -159,6 +160,7 @@ static void reflections(void) {
     jet_rt_handle_drop_jet_reflect_value(NULL); jet_rt_handle_drop_jet_reflect_field(NULL);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc>1) {
         if(strcmp(argv[1],"bounds-equal")==0 || strcmp(argv[1],"bounds-negative")==0) {

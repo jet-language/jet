@@ -98,6 +98,10 @@ alloc_check_give_code := I64{0}
 alloc_check_sweep_code := I64{0}
 // 1 once jet_rt_alloc_check_init has installed the checked heap.
 alloc_check_linked := I64{0}
+// A C witness's take and give observers (jet_rt_alloc_check_observe), 0 for
+// none.
+alloc_check_take_observer := I64{0}
+alloc_check_give_observer := I64{0}
 
 // Layout::from_size_align(size.max(1), align): alignment must be a nonzero
 // power of two, and rounding the size to alignment must fit isize::MAX.
@@ -1384,6 +1388,8 @@ fn alloc_check_frames(out: I64, count: I64) {
         os_store_i64(wrapping(pointer + size), pointer.bit_xor(ALLOC_CHECK_TAIL))
     }
     alloc_check_frames(wrapping(pointer - I64{120}), I64{10})
+    observer :: alloc_check_take_observer
+    if (observer != I64{0}) -> _ := coll_call3(observer, pointer, size, align)
     pointer
 }
 
@@ -1409,6 +1415,8 @@ fn alloc_check_frames(out: I64, count: I64) {
             alloc_check_fail(I64{4}, pointer, size, align, size)
         }
     }
+    observer :: alloc_check_give_observer
+    if (observer != I64{0}) -> _ := coll_call3(observer, pointer, size, align)
     alloc_check_frames(wrapping(pointer - I64{200}), I64{10})
     alloc_check_fill(pointer, size)
     alloc_lock(lock)
@@ -1431,6 +1439,27 @@ fn alloc_check_frames(out: I64, count: I64) {
     }
     alloc_unlock(lock)
     I64{0}
+}
+
+// A C witness's allocation observer: `on_alloc` and `on_free` are C functions
+// (pointer, size, align), or 0 for none. The checked heap calls `on_alloc`
+// after every allocation and `on_free` on every free it accepts, before
+// poisoning the payload, so the witness sees the runtime's own allocations
+// and frees too: they reach jet_rt_alloc_check_take/_give whatever their call
+// site, where a link-time --wrap of jet_rt_alloc or jet_rt_free sees only
+// calls bound through the symbol, never the runtime object's internal ones.
+// A C host that links the runtime object runs checked
+// (jet_rt_alloc_check_init); outside checked mode nothing is installed and
+// this returns 0, else 1. An observer runs on the allocating or freeing
+// thread with no allocator lock held; it may allocate and free (it sees
+// those too), so it must not recurse unboundedly.
+#Export(c) fn jet_rt_alloc_check_observe(on_alloc: I64, on_free: I64) -> I64 {
+    if (alloc_class_limit != I64{0}) -> return I64{0}
+    #Unsafe("aligned whole-word stores; each checked take or give loads its observer word once") {
+        alloc_check_take_observer = on_alloc
+        alloc_check_give_observer = on_free
+    }
+    I64{1}
 }
 
 fn alloc_check_fill(pointer: I64, size: I64) {

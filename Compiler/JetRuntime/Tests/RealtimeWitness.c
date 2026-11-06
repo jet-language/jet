@@ -1,6 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
-// Link real Jet runtime with -pthread -Wl,--wrap=jet_rt_free. The wrapper
-// observes releases and always forwards; no clock, worker or allocator mocks.
+// Link real Jet runtime. The free observer only records releases; no clock,
+// worker or allocator mocks.
 #include <assert.h>
 #include <pthread.h>
 #include <sched.h>
@@ -12,7 +12,7 @@
 #include <time.h>
 extern uintptr_t jet_rt_alloc(int64_t, int64_t);
 extern void jet_rt_free(uintptr_t, int64_t, int64_t);
-extern void __real_jet_rt_free(uintptr_t, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern uintptr_t jet_rt_native_realtime_start(int64_t, int64_t, uintptr_t,
     uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 extern uintptr_t jet_rt_native_realtime_worker(uintptr_t);
@@ -55,12 +55,13 @@ _Static_assert(sizeof(struct List) == 24, "borrowed List24<Float>");
 static uintptr_t watched[16];
 static unsigned freed[16], watch_count;
 static pthread_mutex_t observer = PTHREAD_MUTEX_INITIALIZER;
-void __wrap_jet_rt_free(uintptr_t pointer, int64_t size, int64_t alignment) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(uintptr_t pointer, int64_t size, int64_t alignment) {
     assert(pthread_mutex_lock(&observer) == 0);
     for (unsigned i = 0; i < watch_count; ++i)
         if (watched[i] == pointer) assert(++freed[i] == 1);
     assert(pthread_mutex_unlock(&observer) == 0);
-    __real_jet_rt_free(pointer, size, alignment);
 }
 static void watch(uintptr_t pointer) {
     assert(pthread_mutex_lock(&observer) == 0);
@@ -307,6 +308,7 @@ static void stream_case(unsigned mode, bool last_drop) {
     releases();
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_thread_attach();
     deadlines(); ring(); concurrent_ring(); receipt_carriers();
     stream_case(0, false); stream_case(0, true);

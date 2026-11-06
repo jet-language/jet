@@ -1,4 +1,4 @@
-// Real native providers only; link with -Wl,--wrap=jet_rt_free.
+// Real native providers only.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -8,7 +8,7 @@ typedef struct { const char *data; int64_t len, capacity; } Text;
 typedef struct { int64_t tag; Text *payload; } Error;
 _Static_assert(sizeof(Error) == 16, "canonical private Error16");
 extern void jet_rt_alloc_init(void);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Error *jet_rt_handle_clone_jet_service_error(const Error *);
 extern void jet_rt_handle_drop_jet_service_error(Error *);
 extern bool jet_rt_handle_eq_jet_service_error(const Error *, const Error *);
@@ -46,14 +46,15 @@ static Text *(*const getters[])(const Error *) = {
 static void *watched[3];
 static int64_t sizes[3];
 static unsigned frees[3];
-void __wrap_jet_rt_free(void *pointer, int64_t bytes, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t bytes, int64_t align) {
     for (unsigned i = 0; i < 3; ++i) {
         if (watched[i] && pointer == watched[i]) {
             assert(bytes == sizes[i] && align == (i == 2 ? 1 : 8));
             assert(++frees[i] == 1);
         }
     }
-    __real_jet_rt_free(pointer, bytes, align);
 }
 static void drop(Error *value) {
     watched[0] = value; sizes[0] = 16;
@@ -70,6 +71,7 @@ static void text(const Text *value, const char *bytes, size_t length) {
     if (length) assert(memcmp(value->data, bytes, length) == 0);
 }
 int main(int argc, char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if (argc == 2) {
         for (unsigned i = 0; i < 10; ++i) {

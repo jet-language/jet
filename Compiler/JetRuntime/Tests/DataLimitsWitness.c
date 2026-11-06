@@ -1,4 +1,4 @@
-// Link the real Jet runtime object with -Wl,--wrap=jet_rt_free.
+// Link the real Jet runtime object.
 // This is a client, not a mock/provider. Layouts are DataABI's native carriers.
 #include <assert.h>
 #include <stdbool.h>
@@ -17,7 +17,7 @@ typedef struct {
 _Static_assert(sizeof(EncodingLimits) == 56 && offsetof(EncodingLimits, max_total_bytes) == 32 && offsetof(EncodingLimits, max_expansion_bytes) == 48, "EncodingLimits native ABI");
 _Static_assert(sizeof(DataLimits) == 40 && offsetof(DataLimits, max_output_rows) == 32, "DataLimits native ABI");
 extern void jet_rt_alloc_init(void);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern int64_t jet_int_owned_from_i64(int64_t);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern int64_t jet_int_add(int64_t, int64_t);
@@ -44,13 +44,14 @@ extern int64_t jet_rt_record_get_data_limits_max_output_rows(DataLimits *);
 static struct { void *pointer; int64_t size; unsigned frees; } watched[8];
 static size_t watched_count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *pointer, int64_t size, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t size, int64_t align) {
     ++intercepted;
     for (size_t i = 0; i < watched_count; ++i) if (watched[i].pointer == pointer) {
         assert(size == watched[i].size && align == 8);
         assert(++watched[i].frees == 1);
     }
-    __real_jet_rt_free(pointer, size, align);
 }
 static void watch(void *pointer, int64_t size) {
     assert(watched_count < sizeof(watched) / sizeof(watched[0]));
@@ -60,7 +61,7 @@ static void watch(void *pointer, int64_t size) {
     watched[watched_count++].frees = 0;
 }
 static void watch_done(void) {
-    assert(intercepted > 0); // Missing --wrap cannot silently pass.
+    assert(intercepted > 0); // A missing observer cannot silently pass.
     for (size_t i = 0; i < watched_count; ++i) assert(watched[i].frees == 1);
     watched_count = 0;
 }
@@ -143,6 +144,7 @@ static void data_cases(void) {
     jet_rt_handle_drop_data_limits(NULL);
 }
 int main(int argc, char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if (argc > 1) {
         int64_t edge = jet_int_owned_from_i64(INT64_MAX);

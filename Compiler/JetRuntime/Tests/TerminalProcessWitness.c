@@ -1,4 +1,4 @@
-// Real Jet route and Linux PTY witness; link -Wl,--wrap=jet_rt_free.
+// Real Jet route and Linux PTY witness.
 #define _GNU_SOURCE
 #include <assert.h>
 #include <errno.h>
@@ -21,7 +21,7 @@ typedef struct {
 _Static_assert(sizeof(Size)==16 && sizeof(Session)==8 && sizeof(IOError)==56, "native carriers");
 extern void jet_rt_alloc_init(void);
 extern void jet_rt_host_arguments(int64_t, char **, char **);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern void *jet_rt_alloc(int64_t, int64_t);
 extern int64_t jet_rt_world_new(void);
 extern void jet_rt_world_enter(int64_t, int64_t *);
@@ -78,12 +78,13 @@ extern void jet_rt_stop_drop(int64_t);
 extern void jet_rt_string_drop(Text *);
 static void *watched[3];
 static unsigned frees[3];
-void __wrap_jet_rt_free(void *p, int64_t bytes, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p, int64_t bytes, int64_t align) {
     for (unsigned i=0; i<3; ++i) if (watched[i] && p==watched[i]) {
         assert(bytes==(i?8:72) && align==8 && ++frees[i]==1);
         watched[i]=NULL; // Later genuine allocator reuse is a different owner.
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void text_eq(const Text *t, const char *s) {
     assert(t && t->len==(int64_t)strlen(s) && !memcmp(t->data,s,strlen(s)));
@@ -193,6 +194,7 @@ static void stop_gates(void) {
     jet_process_drop_raw(child); jet_rt_handle_drop_terminal_session(s);
 }
 int main(int argc, char **argv, char **envp) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init(); jet_rt_host_arguments(argc,argv,envp);
     real_pty(); nonterminal(); stop_gates();
     puts("terminal process resize: real PTY, dimensions, errors, ownership, world and stop gates");

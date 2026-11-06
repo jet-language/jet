@@ -1,4 +1,4 @@
-/* Real composed Jet native exports only. Link --wrap=jet_rt_free.
+/* Real composed Jet native exports only..
  * denied mode must take the canonical Jet panic exit70 with the exact E0712
  * message (seed exit101 is a registered seed defect, not a parity claim).
  * Workspace is called directly here; IR reachability is separately regen-owed. */
@@ -20,7 +20,7 @@ extern Authority *jet_authority_without(Authority *,Text *);
 extern Authority *jet_rt_handle_clone_jet_authority(Authority *);
 extern void jet_rt_handle_drop_jet_authority(Authority *);
 extern bool jet_rt_handle_eq_jet_authority(Authority *,Authority *);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 struct Watched { void *ptr; int64_t size,align; unsigned freed; };
 static struct Watched watched[8192];
 static size_t count;
@@ -30,14 +30,15 @@ static void watch(void *ptr,int64_t size,int64_t align) {
     for(size_t i=0;i<count;++i) assert(watched[i].ptr!=ptr || watched[i].freed);
     watched[count++]=(struct Watched){ptr,size,align,0};
 }
-void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *ptr,int64_t size,int64_t align) {
     ++interceptions;
     for(size_t i=count;i>0;--i) if(watched[i-1].ptr==ptr && !watched[i-1].freed) {
         assert(size==watched[i-1].size && align==watched[i-1].align);
         watched[i-1].freed=1;
         break;
     }
-    __real_jet_rt_free(ptr,size,align);
 }
 static Text borrow(const char *s) { return (Text){(unsigned char *)s,(int64_t)strlen(s),0}; }
 static bool same_text(Text *a,Text *b) {
@@ -83,6 +84,7 @@ static void narrow(Authority *held,const char *requested) {
     jet_rt_handle_drop_jet_authority(expected);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     Text fs=borrow("FS"),net=borrow("Net.Read"),fsread=borrow("FS.Read:repo"),near=borrow("FSX"),empty=borrow("");
     unsigned char nul_bytes[]={'N',0,'x'};

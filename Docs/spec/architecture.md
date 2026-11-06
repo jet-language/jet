@@ -100,6 +100,13 @@ An aggregate fixture object already contains the full Jet runtime and links
 without a second provider. Standalone C witnesses use `jet_runtime_jet.o`
 exactly once; the startup-bearing `jet_runtime.pack.o` is a program-link input,
 not an additional runtime object for a C program that defines its own `main`.
+A C witness that counts allocations or frees installs observers with
+`jet_rt_alloc_check_observe(on_alloc, on_free)` at the top of `main`. A C host
+that links the runtime object runs on the checked heap, which calls them for
+every block it hands out or takes back, the runtime's own included. A
+link-time `--wrap=jet_rt_free` does not see those: the runtime object binds its
+internal calls section-relative. `run-alloc-observer-witness.mjs` is the
+negative control: its leak mode keeps one buffer and must fail.
 Native scan proofs require the current native `scan.cases` receipt and the
 fresh Jet object/pack. Saved reference and evaluator TSVs are optional,
 explicitly named `--frozen-reference` and `--frozen-evaluator` inputs; a live

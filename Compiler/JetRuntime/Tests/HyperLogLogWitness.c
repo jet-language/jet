@@ -1,4 +1,4 @@
-// Link the real providers with -pthread -Wl,--wrap=jet_rt_free; no substitute implementation.
+// Link the real providers; no substitute implementation.
 #include <assert.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -17,12 +17,13 @@ extern int64_t jet_rt_native_hll_count(HLL *);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern void jet_rt_int_drop(int64_t);
 extern void jet_rt_string_drop(Text *);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 static HLL *watched;
 static unsigned frees;
-void __wrap_jet_rt_free(void *pointer, int64_t bytes, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t bytes, int64_t align) {
     if (pointer == watched) { assert(bytes == 272 && align == 8); assert(++frees == 1); }
-    __real_jet_rt_free(pointer, bytes, align);
 }
 static void count(HLL *value, int64_t expected) {
     int64_t result = jet_rt_native_hll_count(value);
@@ -39,6 +40,7 @@ static void *adds(void *pointer) {
     return NULL;
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     // Frozen ACTUAL offline oracle; sparse C initializers describe full 256-byte vectors.
     static const uint8_t four[256] = {[37]=9,[43]=9,[167]=10,[184]=9};
     static const uint8_t shared[256] = {[37]=9,[43]=9,[167]=10,[184]=9,[244]=13};

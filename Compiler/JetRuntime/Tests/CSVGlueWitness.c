@@ -1,4 +1,4 @@
-// Real Jet-object client; link -Wl,--wrap=jet_rt_free. CSVGlueABI only.
+// Real Jet-object client. CSVGlueABI only.
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -12,7 +12,7 @@ _Static_assert(sizeof(Row)==16 && offsetof(Row,line)==8,"CSVRow16");
 _Static_assert(sizeof(Fields)==24 && offsetof(Fields,data)==16,"List24");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_new(unsigned char *,int64_t);
 extern Row *jet_rt_handle_clone_csv_row(Row *);
 extern void jet_rt_handle_drop_csv_row(Row *);
@@ -20,13 +20,14 @@ extern bool jet_rt_handle_eq_csv_row(Row *,Row *);
 static struct { void *p; int64_t bytes,align; unsigned frees; } watched[48];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].p==p) {
         assert(bytes==watched[i].bytes && align==watched[i].align);
         assert(++watched[i].frees==1);
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(p && count<48);
@@ -78,6 +79,7 @@ static void check(int64_t length,int64_t spare,int64_t line) {
     watch_row(b); jet_rt_handle_drop_csv_row(b); done();
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init(); check(0,0,INT64_MIN); check(0,4,INT64_MAX); check(1,0,-1); check(5,3,INT64_MAX);
     jet_rt_handle_drop_csv_row(NULL); puts("CSVGlue recursive ownership/equality OK"); return 0;
 }

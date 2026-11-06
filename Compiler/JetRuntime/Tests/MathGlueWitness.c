@@ -1,4 +1,4 @@
-// Link against real Jet objects with -Wl,--wrap=jet_rt_free; no provider mocks.
+// Link against real Jet objects; no provider mocks.
 // Render oracle: rustc 1.97.1 (8bab26f4f 2026-07-14), f64 Display/Debug.
 #include <assert.h>
 #include <stdbool.h>
@@ -15,7 +15,7 @@ _Static_assert(sizeof(Size)==32 && offsetof(Size,max_height)==24,"Size32");
 _Static_assert(sizeof(Rng)==8,"Rng8");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern void jet_rt_string_drop(Text *);
 extern Text *jet_rt_float_debug(double);
 extern Text *jet_rt_float_to_string(double);
@@ -43,13 +43,14 @@ extern Text *jet_rt_handle_show_rng(Rng *);
 static struct { void *p; int64_t bytes,align; unsigned frees; } watched[24];
 static size_t count;
 static unsigned interceptions;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     ++interceptions;
     for(size_t i=0;i<count;++i) if(watched[i].p==p) {
         assert(bytes==watched[i].bytes && align==watched[i].align);
         assert(++watched[i].frees==1);
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(p && count<24);
@@ -125,6 +126,7 @@ static void old_debug(double value,const char *expected) {
     watch_text(a); watch_text(b); jet_rt_string_drop(a); jet_rt_string_drop(b); done();
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init(); equality(); rngs();
     complex_render(1,2,"1 + 2i"); complex_render(-0.0,-0.0,"-0 - 0i");
     complex_render(1e16,1e21,"10000000000000000 + 1000000000000000000000i");

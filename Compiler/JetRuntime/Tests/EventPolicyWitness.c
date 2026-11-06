@@ -1,4 +1,4 @@
-// Link real composed Jet runtime exports with -Wl,--wrap=jet_rt_free.
+// Link real composed Jet runtime exports.
 // Native policy carriers share EncodingABI's owned eight-byte ordinal word.
 #include <assert.h>
 #include <stdint.h>
@@ -6,7 +6,7 @@
 #include <stdio.h>
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t, int64_t);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern int64_t *jet_rt_handle_clone_jet_hook_policy(int64_t *);
 extern void jet_rt_handle_drop_jet_hook_policy(int64_t *);
 extern int64_t *jet_rt_handle_clone_jet_event_policy(int64_t *);
@@ -16,7 +16,9 @@ typedef void (*Drop)(int64_t *);
 static struct { void *pointer; unsigned frees; } watched[3];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *pointer, int64_t size, int64_t alignment) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t size, int64_t alignment) {
     ++intercepted;
     for (size_t i = 0; i < count; ++i) {
         if (pointer == watched[i].pointer) {
@@ -24,7 +26,6 @@ void __wrap_jet_rt_free(void *pointer, int64_t size, int64_t alignment) {
             assert(++watched[i].frees == 1);
         }
     }
-    __real_jet_rt_free(pointer, size, alignment);
 }
 static void watch(void *pointer) {
     assert(count < 3);
@@ -57,6 +58,7 @@ static void policy_cases(Clone clone, Drop drop) {
     }
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     policy_cases(jet_rt_handle_clone_jet_hook_policy, jet_rt_handle_drop_jet_hook_policy);
     policy_cases(jet_rt_handle_clone_jet_event_policy, jet_rt_handle_drop_jet_event_policy);

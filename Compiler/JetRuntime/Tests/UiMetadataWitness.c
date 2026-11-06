@@ -1,12 +1,12 @@
-// Real Jet providers only. Link with -Wl,--wrap=jet_rt_free to count frees;
-// the observer always forwards to the real allocator, never replaces ownership.
+// Real Jet providers only. A free observer counts frees; it never replaces
+// ownership.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-extern void __real_jet_rt_free(uintptr_t, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern uintptr_t jet_rt_handle_clone_jet_ui_accessibility(uintptr_t);
 extern void jet_rt_handle_drop_jet_ui_accessibility(uintptr_t);
 extern bool jet_rt_handle_eq_jet_ui_accessibility(uintptr_t, uintptr_t);
@@ -31,10 +31,11 @@ _Static_assert(sizeof(struct State) == 16, "State16 ABI");
 _Static_assert(sizeof(struct Shortcut) == 16, "Shortcut16 ABI");
 static uintptr_t watched[128];
 static unsigned releases[128], watched_count;
-void __wrap_jet_rt_free(uintptr_t pointer, int64_t size, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(uintptr_t pointer, int64_t size, int64_t align) {
     for (unsigned i = 0; i < watched_count; ++i)
         if (watched[i] == pointer) assert(++releases[i] == 1);
-    __real_jet_rt_free(pointer, size, align);
 }
 static void watch(uintptr_t pointer) {
     assert(pointer && watched_count < 128);
@@ -66,6 +67,7 @@ static uintptr_t word(uintptr_t pointer, unsigned offset) {
     return result;
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     const struct Text name = {(const unsigned char *)"name", 4, 0};
     const struct Text description = {(const unsigned char *)"desc", 4, 0};
     const struct Text value = {(const unsigned char *)"\xce\xbb", 2, 0};
