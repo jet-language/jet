@@ -873,6 +873,14 @@ fn jet_driver_resolve_package_dependencies(packages: &[JetDriverPackageInfo], sn
                     }
                 }
                 else -> {
+                    // A git dependency binds the authorized root of its name:
+                    // the host authorizes only the source-store entry the
+                    // project's lock pins for it (jet_cli_locked_git_root).
+                    if jet_driver_dependency_is_git(dependency.source) {
+                        loop candidate in packages {
+                            if candidate.name == dependency.name && candidate.root_index != package.root_index -> dependency.target_root_index = candidate.root_index
+                        }
+                    }
                     if jet_driver_dependency_selector(dependency.source, dependency.name) == .Val(selector) {
                         candidate_root := Int?{None}
                         ambiguous := false
@@ -897,6 +905,11 @@ fn jet_driver_resolve_package_dependencies(packages: &[JetDriverPackageInfo], sn
         }
         packages[package_index] = package
     }
+}
+
+// A `{ git: …, tag|branch|rev: … }` dependency record.
+fn jet_driver_dependency_is_git(source: String) -> Bool {
+    source.starts_with("{{") && source.contains("git:")
 }
 
 fn jet_driver_manifest_entry_function(source_path: String, tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, diagnostics: &[Diagnostic]) -> JetDriverPackageEntry? {

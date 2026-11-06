@@ -1,10 +1,10 @@
 // The `jetpack` binary entry (Rust jetpack-bin main.rs).
 // `jet` execs this engine by name for every engine verb instead of linking
 // it in-process. The entry answers the `--engine-protocol` handshake before
-// any engine startup, routes the two hidden sandbox-host protocols, and
-// otherwise runs the verb. The hidden build-plugin and compiler-extension
-// hosts live only in this entry, so the jetpack library linked into `jet`
-// carries neither.
+// any engine startup, routes the hidden host protocols, and otherwise runs
+// the verb. The hidden build-plugin, compiler-extension and
+// package-dependency hosts live only in this entry, so the jetpack library
+// linked into `jet` carries none of them.
 // The same binary is the two publication helpers (Rust bins
 // jetpack-nix-index and jetpack-trust-root) when invoked under their names.
 
@@ -22,5 +22,6 @@ fn cli_jetpack_main(argv: [String]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, R
     args :: cli_tail(argv, 1)
     if args.get(0) == .Val(verb) && verb == EXTENSION_HOST_SUBCOMMAND -> return cli_run_compiler_extension_host(cli_tail(args, 1))
     if args.get(0) == .Val(verb) && verb == BUILD_PLUGIN_HOST_SUBCOMMAND -> return cli_run_build_plugin_host(cli_tail(args, 1))
+    if args.get(0) == .Val(verb) && verb == PACKAGE_DEPENDENCY_HOST_SUBCOMMAND -> return cli_run_package_dependency_host(cli_tail(args, 1))
     cli_run(args)
 }

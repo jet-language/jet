@@ -22,3 +22,45 @@ fn jet_cli_engine_commands(command: String, raw: [String]) -> JetCLIPlan? Never!
     }
     None
 }
+
+// The hidden engine host of the package-dependency commands (Jetpack/CLI
+// Hosts/PackageDependencyHost.jet); its version is part of the protocol.
+JET_CLI_PACKAGE_ENGINE_VERB :: "__package-v1"
+
+// `jet add|remove|fetch|update [<dep>]` and the lock check of
+// `jet build --locked`: the front selects the package root of `start` and
+// its project entry; the engine edits that Package carrier and runs the
+// package fetch. `jet fetch --lock <script>` locks a loose script, which has
+// no project: the engine gets `start` and no entry. `words` are the
+// command's words as typed, command first.
+fn jet_cli_package_engine(start: String, words: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    command :: words[0]
+    if command == "fetch" && words.contains("--lock") {
+        argv := [String]{JET_CLI_PACKAGE_ENGINE_VERB, start, "", if color -> "1" else -> "0", if json -> "1" else -> "0"}
+        loop word in words -> &argv.push(word)
+        return JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Engine{engine: JET_CLI_JETPACK_BINARY, verb: command, argv: argv}}
+    }
+    root :: if jet_cli_require_inspect_root(start, "error: `jet {command}` needs a project — no `package.jet` found here or above", color) == {
+        .Root(path) -> path
+        .Refused(plan) -> { return plan }
+    }
+    notices := [String]{}
+    entry :: if jet_cli_find_project_entry(root, command, color, &notices) == {
+        .Entry(found) -> found.path
+        .Refused(plan) -> { return plan }
+        .Absent -> jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)
+    }
+    argv := [String]{JET_CLI_PACKAGE_ENGINE_VERB, root, entry, if color -> "1" else -> "0", if json -> "1" else -> "0"}
+    loop word in words -> &argv.push(word)
+    JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Engine{engine: JET_CLI_JETPACK_BINARY, verb: command, argv: argv}}
+}
+
+// The command's words from the jet-owned argv: from the command word on.
+fn jet_cli_command_words(jet_argv: [String], command: String) -> [String] Never! {
+    words := [String]{}
+    loop word in jet_argv {
+        if words.len() == 0 && word != command -> next
+        &words.push(word)
+    }
+    words
+}

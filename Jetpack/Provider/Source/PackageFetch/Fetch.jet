@@ -6,7 +6,7 @@ fn pkg_fetch(verification: &StoreVerification, project_root: String, manifest: M
     roots :: pkg_resolve_roots()
     context :: ProviderCtx{fixtures: provider_fixtures_from_env(None), store_dir: roots.hangar_dir(), offline: options.locked, project_dir: Val(root), nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
     if options.locked {
-        lock :: existing ?? return Err(pkg_fetch_error("E1202", "`{UNIFIED_LOCK_FILE}` is missing", "locked mode requires an exact package graph", "run `jet fetch` and commit `.jet/lock`"))
+        lock :: existing ?? return Err(pkg_fetch_error("E1202", pkg_fetch_missing_lock_what(manifest), "locked mode requires an exact package graph", "run `jet fetch` and commit `.jet/lock`"))
         pkg_lock_verify_lock_matches_manifest(lock, manifest, files.join(root, UNIFIED_LOCK_FILE)) ?? return Err(pkg_fetch_lock_error(err))
         pkg_lock_verify_all_manifest_deps_locked(manifest, lock) ?? return Err(PackageFetchError{diagnostic: err.diagnostic()})
         lock.validate_completeness() ?? return Err(PackageFetchError{diagnostic: err.diagnostic()})
@@ -51,6 +51,15 @@ fn pkg_fetch(verification: &StoreVerification, project_root: String, manifest: M
     lock.semantic_text = if semantic.records.len() > 0 || semantic.inputs.len() > 0 || semantic.source_maps.len() > 0 -> trust_write_semantic_lock(semantic) else -> ""
     pkg_lock_write_atomically(root, pkg_lock_write(lock).bytes()) ?? return Err(pkg_fetch_lock_error(err))
     Ok(PackageFetchResult{lock: lock, directories: directories})
+}
+// The missing-lock headline names the dependencies it leaves unlocked.
+fn pkg_fetch_missing_lock_what(manifest: Manifest) -> String Never! {
+    names :: pkg_lock_manifest_dependency_names(manifest)
+    if names.len() == 0 -> return "`{UNIFIED_LOCK_FILE}` is missing"
+    quoted := [String]{}
+    loop name in names -> &quoted.push("`{name}`")
+    verb :: if names.len() == 1 -> "is" else -> "are"
+    "`{UNIFIED_LOCK_FILE}` is missing, so {quoted.join(", ")} {verb} not locked"
 }
 fn pkg_fetch_provenance(lock: LockFile, manifest: Manifest) PackageFetchError! {
     requirement :: if manifest.authority.trust == .Val(trust) -> trust.require ?? ProvenanceRequirement.Unrequired else -> ProvenanceRequirement.Unrequired

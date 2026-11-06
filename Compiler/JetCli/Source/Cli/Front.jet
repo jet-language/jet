@@ -836,7 +836,7 @@ fn jet_cli_doc(jet_argv: [String], args: [String], color: Bool, quiet: Bool, jso
 // Build flags whose Jet port has not landed: refused, never ignored.
 JET_CLI_BUILD_UNPORTED_FLAGS :: [String]{
     "--lib", "--verify", "--import",
-    "--builder", "--locked", "-p", "--output", "--gate",
+    "--builder", "-p", "--output", "--gate",
     // D-BUILD-WATCH1=A (#6322 C4): refused until the shared watch engine
     // drives `jet build`, never a silent single build.
     "--watch",
@@ -1110,6 +1110,37 @@ fn jet_cli_authority_flags(jet_argv: [String], color: Bool) -> JetCLIAuthorityFl
 // after `--` (`passthrough`) go to the package's `fn build` (`b.args()`).
 fn jet_cli_build(jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     jet_cli_with_build_options(jet_cli_build_entry(jet_argv, args, passthrough, color, quiet, threads, json), jet_argv, quiet)
+}
+
+// `jet build --locked`: the engine's locked fetch checks `.jet/lock` against
+// the manifest and the verified store, opening no network connection, before
+// the stock build runs. A `fn build` package's locked generated-input check
+// (E3512) is not built yet, so its `--locked` build is refused.
+fn jet_cli_locked_build(raw: [String], jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    unlocked := [String]{}
+    loop word in jet_argv {
+        if word != "--locked" -> &unlocked.push(word)
+    }
+    planned :: jet_cli_build(unlocked, args, passthrough, color, quiet, threads, json)
+    if planned == {
+        .Build(file, _, _, _, _, _, _, _, _) -> {
+            check :: jet_cli_package_engine(jet_cli_parent(file) ?? ".", [String]{"fetch", "--locked", "--quiet"}, color, json)
+            if check == .InspectB(inspect) {
+                if inspect == .Engine(_, _, check_argv) {
+                    separator :: jet_cli_owned_end(raw)
+                    build := [String]{}
+                    loop (index, word) in raw {
+                        if index < separator && word == "--locked" -> next
+                        &build.push(word)
+                    }
+                    return JetCLIPlan.LockedBuild{check: check_argv, build: build}
+                }
+            }
+            return check
+        }
+        .BuildPackage(_, _, _, _, _, _, _) -> return jet_cli_not_ported("build --locked", color)
+        else -> return planned
+    }
 }
 
 // The `jet build` plan at the stock options, its entry resolved. Words after
@@ -1952,7 +1983,10 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "crash" -> return jet_cli_crash(args, color)
         "debug" -> return jet_cli_debug(jet_argv, args, color)
         "check" -> return jet_cli_check_settled(jet_argv, args, color, quiet, threads, json)
-        "build" -> return jet_cli_build(jet_argv, args, passthrough, color, quiet, threads, json)
+        "build" -> {
+            if jet_argv.contains("--locked") -> return jet_cli_locked_build(raw, jet_argv, args, passthrough, color, quiet, threads, json)
+            return jet_cli_build(jet_argv, args, passthrough, color, quiet, threads, json)
+        }
         "run" -> return jet_cli_run(jet_argv, args, passthrough, false, false, color, quiet, verbose, threads)
         // `jet dev`: the program rebuilt and rerun on every source change, from
         // the `fn dev` its command home declares, else the stock `jet run` entry.
@@ -2024,8 +2058,8 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "toolchain" -> return jet_cli_self_toolchain(json)
         "init" -> return jet_cli_init(jet_argv, args, color, quiet, json)
         // D-JPK-TOOLCHAIN1=A (#179): `jet update jet [<channel>]` moves the
-        // toolchain pin; a dependency refresh needs the package fetch, which
-        // is not built and falls to the E2104 refusal below.
+        // toolchain pin; every other update refreshes dependencies through
+        // the engine's package fetch.
         "update" -> {
             if args.len() > 1 && args[1] == "jet" {
                 if jet_cli_require_inspect_root(cli_files.cwd() ?? ".", "error: `jet update jet` needs a project — no `package.jet` found here or above", color) == {
@@ -2033,7 +2067,9 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
                     .Refused(plan) -> return plan
                 }
             }
+            return jet_cli_package_engine(cli_files.cwd() ?? ".", jet_cli_command_words(jet_argv, command), color, json)
         }
+        "add" | "remove" | "fetch" -> return jet_cli_package_engine(cli_files.cwd() ?? ".", jet_cli_command_words(jet_argv, command), color, json)
         "doctor" -> return jet_cli_doctor_plan(raw, jet_argv, color)
         // `run_test_compare(target, jet_argv, mode)`.
         "test-compare" -> return JetCLIPlan.Comparison{target: if args.len() > 1 -> args[1] else -> "", argv: jet_argv, json: json}
