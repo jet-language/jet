@@ -15,6 +15,8 @@ use {
 
 AUDIT_DIR :: "audit"
 STAGE_DIR :: "release"
+// The release-asset prefix of a C toolchain pack (jet's CC_PACK_ASSETS).
+CC_PACK_PREFIX :: "jet-cc-pack-"
 RECEIPTS_DIR :: "receipts"
 
 // The key that signs a candidate and the public key publish trusts.
@@ -126,13 +128,16 @@ fn candidate_audited(dir: String, digest: String) -[FS]> Bool Never! {
 }
 
 // The seed archive of `dir` at `out`: the seed files and SHA256SUMS, with
-// names, owners and times fixed so the same inputs give the same bytes.
-fn pack_archive(dir: String, out: String) -[FS, Exec, Time.Wait]> Problem? Never! {
+// names, owners and times fixed so the same inputs give the same bytes. The
+// combined archive (`with_packs`) also carries the C toolchain packs, which
+// stay outside SHA256SUMS because jet checks them against its own hash.
+fn pack_archive(dir: String, out: String, with_packs: Bool{false}) -[FS, Exec, Time.Wait]> Problem? Never! {
     argv := [String]{"tar", "--sort=name", "--owner=0", "--group=0", "--numeric-owner", "--mtime=@0", "--use-compress-program=gzip -n", "-cf", out.copy()}
     loop name in SEED_FILES {
         if files.exists(files.join(dir, name)) -> &argv.push(name.copy())
     }
     &argv.push("SHA256SUMS")
+    if with_packs -> &argv.extend(cc_pack_names(dir))
     ran :: run_argv(argv, dir)
     if ran.code != 0 -> return Val(problem(INPUT, "packing {files.basename(out)} failed (exit {ran.code}): {ran.errors.trim()}"))
     None
@@ -204,10 +209,35 @@ fn shipped_names(dir: String) -[FS]> [String] Never! {
     names
 }
 
-// The staged assets in upload order, as they are on disk now.
+// The C toolchain packs in `dir`: release-compiler.mjs puts this host's
+// `jet-cc-pack-<system>.tar.zst` beside jet, where jet looks for it first.
+fn cc_pack_names(dir: String) -[FS]> [String] Never! {
+    names := [String]{}
+    entries :: files.list_dir(dir) ?? return names
+    loop entry in entries {
+        if entry.name.starts_with(CC_PACK_PREFIX) && entry.name.ends_with(".tar.zst") -> &names.push(entry.name.copy())
+    }
+    &names.sort()
+    names
+}
+
+// The combined jet+pack archive beside seed asset `asset`
+// (`jet-a0_NNN-linux-x64.tar.gz` gives `jet-a0_NNN-linux-x64-cc.tar.gz`).
+fn combined_asset_name(asset: String) -> String Never! {
+    "{asset.removesuffix(".tar.gz")}-cc.tar.gz"
+}
+
+// The staged assets in upload order, as they are on disk now: the seed
+// archive, its .sha256, jet, IDENTITY and SHA256SUMS, then the combined
+// archive and the packs when the seed carries a pack.
 fn staged_artifacts(stage: String, asset: String) -[FS]> [Artifact] Problem! {
     out := [Artifact]{}
-    names :: [String]{asset, "{asset}.sha256", "jet", "IDENTITY", "SHA256SUMS"}
+    names := [String]{asset, "{asset}.sha256", "jet", "IDENTITY", "SHA256SUMS"}
+    packs :: cc_pack_names(stage)
+    if packs.len() > 0 {
+        &names.push(combined_asset_name(asset))
+        &names.extend(packs)
+    }
     loop name in names {
         found :: file_artifact(files.join(stage, name), name) ?? return Err(problem(STALE, "the staged asset {name} is missing: {err.text}"))
         &out.push(found)
@@ -215,8 +245,9 @@ fn staged_artifacts(stage: String, asset: String) -[FS]> [Artifact] Problem! {
     Ok(out)
 }
 
-// Stages DIR/release/: the seed archive and its .sha256, jet, IDENTITY,
-// SHA256SUMS of those, and NOTES.md.
+// Stages DIR/release/: the seed archive and its .sha256, jet, IDENTITY, and
+// when the seed carries a C toolchain pack, the pack and the combined archive
+// of jet and the pack; SHA256SUMS of those, and NOTES.md.
 fn stage_assets(dir: String, asset: String) -[FS, Exec, Time.Wait]> Problem? Never! {
     stage :: files.join(dir, STAGE_DIR)
     files.create_dir_all(stage) ?? return Val(problem(INPUT, "cannot create {stage}: {err}"))
@@ -227,8 +258,18 @@ fn stage_assets(dir: String, asset: String) -[FS, Exec, Time.Wait]> Problem? Nev
     files.copy(files.join(dir, "jet"), files.join(stage, "jet")) ?? return Val(problem(INPUT, "cannot copy jet: {err}"))
     files.set_mode(files.join(stage, "jet"), 493) ?? return Val(problem(INPUT, "cannot make the staged jet executable: {err}"))
     files.copy(files.join(dir, "IDENTITY"), files.join(stage, "IDENTITY")) ?? return Val(problem(INPUT, "cannot copy IDENTITY: {err}"))
+    summed := [String]{asset, "jet", "IDENTITY"}
+    packs :: cc_pack_names(dir)
+    if packs.len() > 0 {
+        combined :: combined_asset_name(asset)
+        if pack_archive(dir, files.join(stage, combined), with_packs: true) == .Val(failed) -> return Val(failed)
+        loop name in packs {
+            files.copy(files.join(dir, name), files.join(stage, name)) ?? return Val(problem(INPUT, "cannot copy {name}: {err}"))
+        }
+        &summed.push(combined)
+        &summed.extend(packs)
+    }
     sums := [Artifact]{}
-    summed :: [String]{asset, "jet", "IDENTITY"}
     loop name in summed {
         found :: file_artifact(files.join(stage, name), name) ?? return Val(err)
         &sums.push(found)

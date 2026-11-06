@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
-import { COMPILER_ALIASES, compareSuites, jetpackKeys, linkCompilerAliases, mergeTreeConflicts, nextReleaseName, parseArgs, parseChainResult, parseDispositions, seedAssetName, shardPool } from './release-compiler.mjs';
+import { fileURLToPath } from 'node:url';
+import { CC_PACK_SOURCE, COMPILER_ALIASES, SEED_FILES, ccPackAssets, ccPackProblem, compareSuites, jetpackKeys, linkCompilerAliases, mergeTreeConflicts, nextReleaseName, parseArgs, parseChainResult, parseDispositions, seedAssetName, shardPool } from './release-compiler.mjs';
 
 const row = (id, tier, status, suite = 'ui') => ({ suite, case: id, tier, status, detail: '' });
 
@@ -14,6 +15,24 @@ test('the next release name follows the highest a0_NNN', () => {
 
 test('the seed asset names the release and the host it runs on', () => {
     assert.equal(seedAssetName('a0_022', 'linux', 'x64'), 'jet-a0_022-linux-x64.tar.gz');
+});
+
+test('the seed names its release, so jet can download its own C toolchain pack', () => {
+    assert.ok(SEED_FILES.includes('RELEASE'));
+});
+
+test('the C toolchain pack hash the release checks is the one jet embeds', () => {
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../..', CC_PACK_SOURCE), 'utf8');
+    const rows = ccPackAssets(source);
+    const host = rows.find(row => row.platform === 'linux-x64');
+    assert.ok(host, 'CC_PACK_ASSETS embeds the linux-x64 pack');
+    assert.match(host.file, /^jet-cc-pack-.*\.tar\.zst$/);
+    assert.match(host.sha256, /^[0-9a-f]{64}$/);
+    assert.ok(host.size > 0);
+    assert.equal(ccPackProblem(host, { sha256: host.sha256, size: host.size }), '');
+    const problem = ccPackProblem(host, { sha256: '0'.repeat(64), size: host.size });
+    assert.match(problem, new RegExp(`jet embeds ${host.sha256}`));
+    assert.match(problem, /update CC_PACK_ASSETS/);
 });
 
 test('the release ships jet-cc, jet-cxx and jet-c++ as hard links of jet', () => {

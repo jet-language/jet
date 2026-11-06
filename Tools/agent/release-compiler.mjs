@@ -11,6 +11,9 @@
 //             under norust.sh, and must reach the fixed point (s2 == s3).
 //   pack      the runtime pack, rebuilt by s2 without Rust, must equal the chain's pack2 byte
 //             for byte.
+//   cc-pack   Tools/agent/cc-pack.nix builds this host's C toolchain pack from pinned sources
+//             (the only place Nix runs); its SHA-256 and size must equal CC_PACK_ASSETS in
+//             Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet, the hash jet embeds.
 //   jetpack   Jetpack/Bootstrap/check.sh (keep-going) with s2 on COMMIT must show no failure
 //             row the current release showed (recorded when it was cut, else rerun on its own
 //             tree), and must finish if the release's census did; `check.sh --hosted` builds
@@ -26,7 +29,8 @@
 // clean: they are the expensive part (AGENTS.md, expensive launches are gated).
 //
 // Pass: writes SEEDS/a0_NNN (the next number) with jet, jet-runtime/, jetpack, toolchain/,
-// IDENTITY, SOURCE, SHA256SUMS, current.env, RELEASE.json, RELEASE.md, MERGE_MSG, TAG_MSG and
+// IDENTITY, RELEASE, the C toolchain pack, SOURCE, SHA256SUMS, current.env, RELEASE.json,
+// RELEASE.md, MERGE_MSG, TAG_MSG and
 // evidence/, then prints the commands for Main: make it current (jet-use), merge it to master
 // as `Merge dev: a0_NNN <summary>`, tag it, push, and publish it as the tag's GitHub release
 // with `jet run Tools/release/Main.jet -- candidate SEEDS/a0_NNN`, then `-- publish SEEDS/a0_NNN`.
@@ -114,8 +118,25 @@ export function seedAssetName(release, platform = process.platform, arch = proce
 // `jet c++`. They are hard links of `jet` (a real binary, not a wrapper); the CLI reads
 // argv[0] (JetCli Host.jet `jet_cli_alias_args`).
 export const COMPILER_ALIASES = ['jet-cc', 'jet-cxx', 'jet-c++'];
-// What a seed directory ships (SHA256SUMS covers them; jetpack is absent from some).
-export const SEED_FILES = ['jet', ...COMPILER_ALIASES, 'jetpack', 'jet-runtime', 'IDENTITY'];
+// What a seed directory ships (SHA256SUMS covers them; jetpack is absent from some). RELEASE holds the
+// release name, which jet uses to download its own C toolchain pack from the release.
+export const SEED_FILES = ['jet', ...COMPILER_ALIASES, 'jetpack', 'jet-runtime', 'IDENTITY', 'RELEASE'];
+
+// The jet source that embeds each host's C toolchain pack (file, SHA-256, size) in CC_PACK_ASSETS.
+export const CC_PACK_SOURCE = 'Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet';
+
+// The CC_PACK_ASSETS rows of CC_PACK_SOURCE's text: [{ platform, file, sha256, size }].
+export function ccPackAssets(text) {
+    const start = text.indexOf('CC_PACK_ASSETS ::');
+    if (start < 0) return [];
+    const end = text.indexOf('} }', start);
+    const table = text.slice(start, end < 0 ? text.length : end);
+    return [...table.matchAll(/\{([^{}]*)\}/g)].map(match => {
+        const field = name => new RegExp(`\\b${name}:\\s*"([^"]*)"`).exec(match[1])?.[1] ?? '';
+        const size = /\bsize:\s*(\d+)/.exec(match[1]);
+        return { platform: field('platform'), file: field('file'), sha256: field('sha256'), size: size ? Number(size[1]) : 0 };
+    }).filter(row => row.file);
+}
 
 export function linkCompilerAliases(dir) {
     for (const alias of COMPILER_ALIASES) linkSync(join(dir, 'jet'), join(dir, alias));
@@ -390,6 +411,30 @@ async function packStage(ctx, gate) {
     gate.row('pack', 'PASS', `rebuilt by s2 without Rust, byte-identical to pack2 (${files} files, ${result.wall}s)`);
 }
 
+// Why the pack built from pinned sources cannot ship with this jet, or '' when it can: its SHA-256 and
+// size must be the ones jet embeds, because jet refuses any other pack.
+export function ccPackProblem(expected, built) {
+    if (built.sha256 === expected.sha256 && built.size === expected.size) return '';
+    return `the C toolchain pack built from pinned sources is sha256 ${built.sha256} (${built.size} bytes), but jet embeds ${expected.sha256} (${expected.size} bytes) for ${expected.file}: update CC_PACK_ASSETS in ${CC_PACK_SOURCE}`;
+}
+
+// Builds this host's C toolchain pack with Tools/agent/cc-pack.nix (Nix runs only on the release
+// machine) and checks it against the hash jet embeds; assemble() ships it beside jet.
+async function ccPackStage(ctx, gate) {
+    const { work, tree } = ctx;
+    const platform = `${process.platform}-${process.arch}`;
+    const expected = ccPackAssets(readFileSync(join(tree, CC_PACK_SOURCE), 'utf8')).find(row => row.platform === platform);
+    if (!expected) return gate.row('cc-pack', 'FAIL', `${CC_PACK_SOURCE} embeds no C toolchain pack for ${platform}`);
+    const link = join(work, 'cc-pack-result'), log = join(work, 'logs/cc-pack.log');
+    const result = await run(['nix-build', join(tree, 'Tools/agent/cc-pack.nix'), '--out-link', link], { cwd: tree, env: ctx.env, out: log, timeout: 12 * 3600 });
+    const path = join(link, expected.file);
+    if (result.rc !== 0 || !existsSync(path)) return gate.row('cc-pack', 'FAIL', `nix-build Tools/agent/cc-pack.nix failed rc=${result.rc}: ${tail(log)}`);
+    const problem = ccPackProblem(expected, { sha256: sha256File(path), size: statSync(path).size });
+    if (problem) return gate.row('cc-pack', 'FAIL', problem);
+    ctx.ccPack = { path, file: expected.file };
+    gate.row('cc-pack', 'PASS', `${expected.file} rebuilt from pinned sources matches the hash jet embeds (${expected.sha256.slice(0, 16)}, ${expected.size} bytes, ${result.wall}s)`);
+}
+
 function bootstrapScratch(worker) {
     const root = join(stateRoot(), 'jetpack-bootstrap');
     return existsSync(root) ? readdirSync(root).filter(name => name.startsWith(`${worker}-`)).map(name => join(root, name)) : [];
@@ -623,6 +668,11 @@ function assemble(ctx, gate, plan) {
     exportCommit(sha, join(temp, 'toolchain'));
     const verified = `self-host chain from ${release.name} without Rust reaches the fixed point s2 == s3 (jet ${candidate.sha.slice(0, 16)}); runtime pack rebuilt by s2 is byte-identical; golden/ui/cases ${gains.suites} rows gained, ${lost.length} lost${lost.length ? ` (${[...new Set(lost.map(row => row.disposition.card))].join(', ')})` : ''}; ${ctx.jetpackSummary}${candidate.jetpack ? '; jetpack engine built by s2' : ''}`;
     writeFileSync(join(temp, 'IDENTITY'), `${candidate.identity}\n`);
+    writeFileSync(join(temp, 'RELEASE'), `${next}\n`);
+    // The C toolchain pack sits beside jet, where jet looks first; it stays out of SHA256SUMS
+    // because jet checks it against the hash it embeds.
+    copyFileSync(ctx.ccPack.path, join(temp, ctx.ccPack.file));
+    chmodSync(join(temp, ctx.ccPack.file), 0o644);
     writeFileSync(join(temp, 'SOURCE'), `${sha} (dev, ${next}: self-hosted s2 of ${sha.slice(0, 9)} from seed ${release.name}; ${verified}; release-compiler.mjs ${date})\n`);
     writeFileSync(join(temp, 'current.env'), [
         '# Newest verified self-hosted compiler (written by release-compiler.mjs; jet-use installs it).',
@@ -684,6 +734,7 @@ async function release(options, pre) {
     writeFileSync(join(ctx.tree, '.chain-base'), `${sha}\n`);
     cpSync(release.toolchain, ctx.releaseTree, { recursive: true, verbatimSymlinks: true });
     await chainStage(ctx, gate);
+    await ccPackStage(ctx, gate);
     if (ctx.candidate) {
         await packStage(ctx, gate);
         await jetpackStage(ctx, gate);
