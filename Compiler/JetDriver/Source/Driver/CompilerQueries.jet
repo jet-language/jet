@@ -383,6 +383,11 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
             module_sources = jet_driver_compiler_check_module_sources(load, canonical, input.request.canonical_effect_source, input.parsed) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
         }
     }
+    setting_refusals :: jet_driver_setting_override_diagnostics(load, input.request)
+    if setting_refusals.len() > 0 {
+        loop diagnostic in setting_refusals -> &load.diagnostics.push(diagnostic)
+        return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
+    }
     target_option := jet_driver_selected_target_machine(input.request, &load.diagnostics)
     if target_option == None -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     target :: target_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)

@@ -11,6 +11,7 @@ use {
     jet_foundation.[
         AppAuthorizedDirectory,
         BuildOptions,
+        BuildSettingOverride,
         AppAuthorizedDirectoryEntry,
         CompilerThreads,
         CompilerTraceSink,
@@ -1208,10 +1209,11 @@ struct JetCLIOverlay {
 // policy-marked copy of the entry; nothing is written), traced through
 // `trace_sink`: the process's one sink, which `jet_cli_main` opens for
 // `build`, `run`, `check`, `test` and `emit` (`--trace`, JET_TRACE_FILE).
-fn jet_cli_compile_entry(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+// `settings` are the command line's `--set` writers (`jet check`).
+fn jet_cli_compile_entry(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) -> &overlays.push(JetCLIOverlay{path: file, source: replacement})
-    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink)
+    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings)
 }
 
 // An overlay or entry path as the snapshot spells it: the canonical path of a
@@ -1300,11 +1302,11 @@ fn jet_cli_prepare_refusal(what: String, fix: String, color: Bool) -> JetDriverV
 // source loader and its authorization stay the one in this file. The source
 // walk is the `sources` span; the request carries `trace_sink` into the
 // driver's phases.
-fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}) -> JetCLICompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared :: jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    jet_cli_compile_prepared(^prepared, None, trace_sink)
+    jet_cli_compile_prepared(^prepared, None, trace_sink, settings)
 }
 
 // How many source files a prepared compile authorizes; -1 for a refusal.
@@ -1317,8 +1319,8 @@ fn jet_cli_prepared_file_count(prepared: JetCLIPrepared) -> Int Never! {
 
 // Compile `prepared` (`jet_cli_compile_overlays`). `input_log`, when given,
 // records every comptime input file the compile reads (`embed_file`,
-// `embed_bytes`, `find`).
-fn jet_cli_compile_prepared(prepared: ^JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+// `embed_bytes`, `find`); `settings` are the `--set` writers.
+fn jet_cli_compile_prepared(prepared: ^JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}) -> JetCLICompiled {
     if ^prepared == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1326,6 +1328,7 @@ fn jet_cli_compile_prepared(prepared: ^JetCLIPrepared, input_log: Shared<JetDriv
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()
+            selected.setting_overrides = settings
             library_prefix :: cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT")
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads :: selected.compiler_threads.copy()
@@ -1374,6 +1377,7 @@ fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, entry: String?, options
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()
             if options.profile != "" -> selected.profile = options.profile
+            selected.setting_overrides = options.settings.copy()
             contributed := jet_cli_contributed_request(^selected, color)
             // copy: `refusal` is a payload view of `contributed`.
             if contributed.refusal == .Val(refusal) -> return JetCLIExecutableCompiled.Refused{output: refusal.copy()}

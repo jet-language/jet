@@ -5,6 +5,7 @@ use {
     jet_pkg_model.[BuildStamp, ImportBoundary, LockedBuildContribution, PackageGrant]
     jet_foundation.[
         AppAuthorizedDirectory,
+        BuildSettingOverride,
         CompilerThreads,
         compiler_threads_single,
         CompilerTraceSink,
@@ -271,6 +272,9 @@ struct JetDriverCompileRequest {
     // `fn build` contributed to declared settings, which
     // jet_driver_build_settings folds over the defaults and profile values.
     build_contributions: [LockedBuildContribution]{[LockedBuildContribution]{}}
+    // The `--set name=value` writers, the command-line layer of that fold
+    // (BuildFactChain.jet).
+    setting_overrides: [BuildSettingOverride]{[BuildSettingOverride]{}}
 }
 
 struct JetDriverGatePolicy {

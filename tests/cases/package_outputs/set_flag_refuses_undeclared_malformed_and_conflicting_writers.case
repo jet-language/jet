@@ -1,0 +1,36 @@
+# `--set name=value` is the command-line writer of a declared package setting
+# (BuildFactChain.jet): an undeclared name is E0302, a word that is not
+# `name=value` is the E2104 usage error, two command-line values for one
+# setting are the contribution law's same-layer conflict (E3521), and a value
+# the setting's type refuses is sema's E0302 where the setting is read. The
+# explain chain refuses the same writers the compile refuses.
+fixture: ../../../Examples/features/packages/typed_settings
+env: NO_COLOR=1
+step: jet run --set retries=3
+exit: 1
+stderr: ~ "E0302" # the registered undeclared-setting code
+stderr: ~ "`$build.settings.retries` is undeclared" # names the setting
+stderr: ~ "`--set retries=3`" # names the writer
+step: jet build --set tls
+exit: 2
+stderr: ~ "E2104" # a usage error
+stderr: ~ "`--set tls` isn't `name=value`" # names the malformed word
+step: jet run --set tls=true --set tls=false
+exit: 1
+stderr: ~ "E3521" # the same-layer conflict code
+stderr: ~ "Fact `Build.Settings.tls` has conflicting values at the command line layer" # names the fact and layer
+stderr: ~ "`command line:--set tls=false` writes false; `command line:--set tls=true` writes true" # names both writers
+stderr: !~ "-->" # no writer sits at a span of the entry file
+step: jet run --set tls=maybe
+exit: 1
+stderr: ~ "E0302" # sema refuses the value where the setting is read
+step: jet explain build.settings.tls --set retries=3
+exit: 1
+stderr: ~ "`$build.settings.retries` is undeclared" # explain refuses what the compile refuses
+step: jet explain build.settings.tls --set tls=true --set tls=false
+exit: 1
+stderr: ~ "E3521" # explain refuses what the compile refuses
+step: jet explain build.settings.tls --profile=release
+exit: 0
+stdout: ~ "Build.Settings.tls = false" # the profile writer is effective
+stdout: ~ "[effective] optimization bundle / package false at package.jet:build.release.settings.tls:0..0" # one line per writer

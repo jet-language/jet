@@ -93,6 +93,7 @@ use {
     jet_foundation.[
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
         AUTHORITY_PANIC_ROOT,
+        BuildSettingOverride,
         CompilerThreads,
         CompilerTraceSink,
         DIAGNOSTIC_ERROR,
@@ -634,7 +635,7 @@ fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRe
         if package.identity == load.package_identity {
             package_name = package.name
             package_version = package.version ?? ""
-            settings = jet_driver_build_settings(package, request.profile, request.build_contributions)
+            settings = jet_driver_build_settings(package, request.profile, request.build_contributions, request.setting_overrides)
         }
     }
     if package_name.len() == 0 {
@@ -671,24 +672,17 @@ fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRe
     }
 }
 
-// Each declared setting's value for `profile`: its default, then the value
-// the selected `build:` profile gives it, then the value the package's
-// `fn build` contributed, as the lock records it (D-CONF-SPLIT1: the
-// function's environment layer is above the profile's optimization-bundle
-// layer).
-fn jet_driver_build_settings(package: JetDriverPackageInfo, profile: String, contributions: [LockedBuildContribution]) -> [SemaBuildSetting] Never! {
+// Each declared setting's value for `profile`: the effective writer of its
+// chain (jet_driver_setting_writers): its default, then the value the selected
+// `build:` profile gives it, then the value the package's `fn build`
+// contributed, as the lock records it (D-CONF-SPLIT1: the function's
+// environment layer is above the profile's optimization-bundle layer), then
+// a `--set` value.
+fn jet_driver_build_settings(package: JetDriverPackageInfo, profile: String, contributions: [LockedBuildContribution], overrides: [BuildSettingOverride]) -> [SemaBuildSetting] Never! {
     settings := [SemaBuildSetting]{}
     loop setting in package.settings {
-        value := setting.default
-        loop entry in package.profile_settings {
-            if entry.profile == profile && entry.name == setting.name -> value = entry.value
-        }
-        key :: "Build.Settings.{setting.name}"
-        loop contribution in contributions {
-            if contribution.package != package.name || contribution.key != key || contribution.layer != "environment" -> next
-            value = jet_driver_locked_setting_text(contribution.value) ?? value
-        }
-        &settings.push(SemaBuildSetting{name: setting.name, ty: setting.ty, value: value})
+        writers :: jet_driver_setting_writers(package, setting, profile, contributions, overrides)
+        &settings.push(SemaBuildSetting{name: setting.name, ty: setting.ty, value: jet_driver_setting_effective_text(writers)})
     }
     settings
 }
@@ -3521,6 +3515,13 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Check), false, trace)
     }
     jet_driver_unsafe_check(request, &load)
+    // Every `--set` writer names a declared setting of the entry package and
+    // agrees with the other command-line writers (BuildFactChain.jet).
+    setting_refusals :: jet_driver_setting_override_diagnostics(load, request)
+    if setting_refusals.len() > 0 {
+        loop diagnostic in setting_refusals -> &load.diagnostics.push(diagnostic)
+        return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Load), false, trace)
+    }
 
     target_machine_option := jet_driver_selected_target_machine(request, &load.diagnostics)
     if target_machine_option == None {
