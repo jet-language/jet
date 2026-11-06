@@ -18,7 +18,7 @@ authoritative; this reference replaces a generic in-skill checklist.
   `Docs/spec/diagnostics.md`; preserve registered code and What/Why/Fix meaning.
 - For an example, read `Docs/spec/contributing/examples.md` and
   `Examples/README.md`, exercise the exact example path after a fresh binary,
-  and update only its matching golden under `Examples/features/expected/`.
+  and update only its matching golden under `Examples/`.
   Trace embedded example paths, snapshots, harness lists, and generated uses
   before moving a file.
 - Record only evidence for the changed acceptance criterion. Never claim a

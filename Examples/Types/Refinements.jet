@@ -1,0 +1,16 @@
+// One interval fact feeds the fixed-list index prover,
+// so `faces[roll.raw() - 1]` needs no runtime bounds check.
+Die: distinct Int(1..6)
+
+// The Die interval proves this fixed-list read cannot stop.
+pick: fn(faces: [String#6], roll: Die) -[!Panic]> String { return faces[roll.raw() - 1].copy() }
+
+checked: fn(raw: Int) -> Die { Ok(Die.from_int(raw)) }
+
+run: fn() {
+    roll: Die.from_int(3)
+    faces: [String#6]{"zero", "one", "two", "three", "four", "five"}
+    print(pick(faces, roll))
+    from_runtime: checked(4) ?? Die.from_int(1)
+    print(pick(faces, from_runtime))
+}

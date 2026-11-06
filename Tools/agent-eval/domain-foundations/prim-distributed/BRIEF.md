@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-Build, as library Jet: a work-stealing parallel map over 16 cores; a two-process message-passing job (spawn workers, typed messages over sockets or pipes, collect results); a bounded channel pipeline with backpressure; and a keyed windowed stream (event time, watermarks) over an in-memory source with recovery from a checkpoint. Use Examples/features/concurrency/**, streams/**, net/socket_echo.jet, io/process_builder.jet. Time the parallel map against Rayon or Python multiprocessing.
+Build, as library Jet: a work-stealing parallel map over 16 cores; a two-process message-passing job (spawn workers, typed messages over sockets or pipes, collect results); a bounded channel pipeline with backpressure; and a keyed windowed stream (event time, watermarks) over an in-memory source with recovery from a checkpoint. Use Examples/Concurrency/**, streams/**, net/socket_echo.jet, io/process_builder.jet. Time the parallel map against Rayon or Python multiprocessing.
 
 ## Answer these
 

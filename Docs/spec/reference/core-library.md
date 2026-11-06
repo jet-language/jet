@@ -532,11 +532,11 @@ loop row in left.zip_pad(right, fill: 0) {
 ```
 
 Examples covering the eager/lazy boundary and the adapter ledger are in
-[`iter_adapters.jet`](../../../Examples/features/collections/iter_adapters.jet),
-[`lazy_iter.jet`](../../../Examples/features/collections/lazy_iter.jet),
-[`list_surface.jet`](../../../Examples/features/collections/list_surface.jet),
-[`map_surface.jet`](../../../Examples/features/collections/map_surface.jet), and
-[`set.jet`](../../../Examples/features/collections/set.jet).
+[`iter_adapters.jet`](../../../Examples/Collections/Iterators/IterAdapters.jet),
+[`lazy_iter.jet`](../../../Examples/Collections/Iterators/IterAdapters.jet),
+[`list_surface.jet`](../../../tests/run/CollectionsAndMethods/ListSurface.jet),
+[`map_surface.jet`](../../../tests/run/CollectionsAndMethods/MapSurface.jet), and
+[`set.jet`](../../../Examples/Collections/Set.jet).
 
 ### Operation contract
 
@@ -559,7 +559,7 @@ success. `zip` rejects unequal lengths, `zip_short` stops at the shortest
 input, and `zip_pad` pads to the longest; the zip family and `para_*` keep
 their dedicated checkers. `min_by` and `max_by` keep the last item on ties
 (#2298), and list methods stay eager by default (D-CORE-EAGER1,
-D-CORE-EAGER2). [`operation_contract.jet`](../../../Examples/features/collections/operation_contract.jet)
+D-CORE-EAGER2). [`operation_contract.jet`](../../../Examples/Collections/OperationContract.jet)
 runs each of these cases.
 
 <!-- BEGIN GENERATED COLLECTION OPERATIONS -->
@@ -1302,8 +1302,8 @@ the safe `core.crypto` functions remain the default.
 
 Raw callers own protocol selection, byte validation, and the `#Unsafe` audit;
 raw X25519 still rejects non-contributory peers. See
-[`crypto_suite.jet`](../../../Examples/features/crypto/crypto_suite.jet) and
-[`crypto_envelope.jet`](../../../Examples/features/crypto/crypto_envelope.jet).
+[`crypto_suite.jet`](../../../Examples/Crypto/CryptoSuite.jet) and
+[`crypto_envelope.jet`](../../../Examples/Crypto/CryptoEnvelope.jet).
 
 The expert secret-byte projections return owned copies, not transfers out of
 the original zeroizing owner. The private JETC v2 engine uses those projections
@@ -1425,8 +1425,8 @@ destroys the owned credential through its zeroizing drop path. Expiry wipes the
 resident byte storage with the same volatile kernel used by explicit secret
 close, without a copied buffer or a replacement allocation. A system clock adds
 the `Time` effect. See
-[`vault_keys.jet`](../../../Examples/features/crypto/vault_keys.jet) and
-[`expiring_secret.jet`](../../../Examples/features/memory/expiring_secret.jet).
+[`vault_keys.jet`](../../../Examples/Crypto/VaultKeys.jet) and
+[`expiring_secret.jet`](../../../Examples/Memory/ExpiringSecret.jet).
 
 The wrapper stores its optional credential and original clock observer in Jet.
 It samples that observer under the storage guard, and expires only when
@@ -1471,8 +1471,8 @@ optional. `AuthError` retains `MalformedToken`, `UnsupportedToken`,
 Session cookies use the fixed `jet_session=` form with `HttpOnly`, `Secure`,
 `SameSite=Lax`, and `Path=/` attributes. Session helpers take explicit
 millisecond timestamps and lifetimes. See
-[`auth_tokens.jet`](../../../Examples/features/crypto/auth_tokens.jet) and
-[`auth_sessions.jet`](../../../Examples/features/crypto/auth_sessions.jet).
+[`auth_tokens.jet`](../../../Examples/Crypto/AuthSessions.jet) and
+[`auth_sessions.jet`](../../../Examples/Crypto/AuthSessions.jet).
 
 ### `core.sync` — replica-aware CRDT values
 
@@ -1578,7 +1578,7 @@ after the port was not ready.
 `Modified`, `Removed`, `Error`, `Exited`, or `Ready`. `WatchEvent` carries
 `domain`, `kind`, `path`, `detail`, `pid`, and `port`. Match all variants when
 handling a closed event enum. See
-[`watcher.jet`](../../../Examples/features/io/watcher.jet).
+[`watcher.jet`](../../../Examples/Systems/Files/Watcher.jet).
 
 The checked `WatchEvent.kind` field has type `WatchKind`, with the same six
 variant names; it is distinct from the independently exported `WatchEventKind`.
@@ -1636,10 +1636,10 @@ Read a buffered handle with `reader.read_line()`: each call mutably lends
 the reader and returns `String? !IOError`. Ordinary failure propagation
 preserves the optional line, so EOF remains `None` rather than an I/O error.
 
-The executable terminal-source examples cover binary-file composition, UTF-8
-stderr, CRLF line reads and EOF, plus confirmation with a closed-input default:
-[`terminal_source.jet`](../../../Examples/features/io/terminal_source.jet) and
-[`terminal_confirm.jet`](../../../Examples/features/io/terminal_confirm.jet).
+The executable terminal examples cover binary-file composition, UTF-8
+stderr, CRLF line reads and EOF, plus confirmation with an empty-answer default:
+[`TerminalSource.jet`](../../../tests/run/CoreIO/TerminalSource.jet) and
+[`TerminalParity.jet`](../../../Examples/Systems/Terminal/TerminalParity.jet).
 Their programs and transcripts are shared by the golden and native harnesses;
 they do not require a bespoke Rust test or direct `rustc` invocation.
 
@@ -1715,8 +1715,8 @@ The direct functions are useful when a typed builder is unnecessary:
 | `positionals(tree)` / `remainder(tree)` | `[String]` | Read positional values. |
 | `program(tree)` / `wants_help(tree)` | `String` / `Bool` | Read `argv[0]` or help intent. |
 
-See [`args_spec.jet`](../../../Examples/features/io/args_spec.jet) and
-[`args_audit.jet`](../../../Examples/features/io/args_audit.jet).
+See [`args_spec.jet`](../../../Examples/Systems/CLI/ArgsSpec.jet) and
+[`args_audit.jet`](../../../Examples/Systems/CLI/ArgsAudit.jet).
 
 ### `core.reflect` — runtime structural reflection (D-ANY-JAI1)
 
@@ -1908,7 +1908,7 @@ tests such as
 The export registry is
 [`Prelude/Core.jet`](../../../Compiler/Prelude/Core.jet); the
 data example used later is
-[`data_analysis.jet`](../../../Examples/features/tooling/data_analysis.jet).
+[`data_analysis.jet`](../../../Examples/Data/Analysis/DataAnalysis.jet).
 
 `core.process` represents a child process as an explicit argument vector and a
 policy-bearing `ProcessSpec`. `process.cmd` never invokes a shell: each
@@ -2263,7 +2263,7 @@ Reductions use a scalar left-to-right fold, so the reduction order is part of
 the reproducible fixed-array contract (D-LINALG1; `to_array` is the fixed-array bridge, D-FIXARR1).
 Arithmetic results are ordinary math values: lane reads, swizzles, and methods
 operate directly on them, including temporary receivers such as `(a + a).dot(a)`.
-See [`vector_result_values.jet`](../../../Examples/features/lowlevel/vector_result_values.jet).
+See [`vector_result_values.jet`](../../../tests/run/UnsafeAndRuntime/VectorResultValues.jet).
 
 Swizzles (D-SWIZZLE1) name lanes with `x`, `y`, `z`, and `w` on `Vec2`,
 `Vec3`, `Vec4`, `F32x4`, and `F64x2`. A read of one lane is `lane`; a read of
@@ -2274,7 +2274,7 @@ N lanes is the declaration's `__swizzleN` and yields `Vec2`/`Vec3`/`Vec4`
 `v.zx + e`. An `F32x4` write narrows each `Float` with `F32.from_float` and
 stops when a value is outside the F32 range. A lane the type does not have is
 E3110, and a write that names a lane twice (`v.xx = …`) is E3111. See
-[`swizzle.jet`](../../../Examples/features/lowlevel/swizzle.jet).
+[`swizzle.jet`](../../../Examples/LowLevel/Swizzle.jet).
 
 ```jet
 rotate: fn(v: Vec3, transform: Mat3) -> Vec3 {
@@ -3970,7 +3970,7 @@ Outside a browser (`jet run`, a native build), each of `local` and `session`
 is one process-wide in-memory store, and the two stay separate: `set`
 replaces a key's value, `remove` and `clear` touch only their own store,
 and the empty key is an ordinary key. The golden
-`Examples/features/web/storage_local_session.jet` shows this on O0, O1 and O2.
+`Examples/Apps/Web/StorageLocalSession.jet` shows this on O0, O1 and O2.
 
 ### `Cell<T>` — local interior mutability
 
@@ -4125,7 +4125,7 @@ including for empty text. This is a separate operation from the module function
 reports a base outside `2..=36` as a parse error. `Cursor.over(text)` is the consuming scanner for
 structured text: `skip_ws`, `take_pattern`, and `take_until` advance the cursor
 and return an ordinary error value on a miss. The scanner example is
-[`Examples/features/parsing/text-cursor.jet`](../../../Examples/features/parsing/text-cursor.jet).
+[`Examples/Text/TextCursor.jet`](../../../Examples/Text/TextCursor.jet).
 
 ### `Cursor` — consuming text scanner
 
@@ -4176,8 +4176,8 @@ panic or silent truncation.
 | `reader.take_pattern(pattern) -> (holes…) !String` | tuple | Match and consume a literal binary prefix. |
 
 Use `fs.read_bytes` and `fs.write_bytes` for raw file bytes. The complete
-scanner examples are [`binary-reader.jet`](../../../Examples/features/parsing/binary-reader.jet)
-and [`text-cursor.jet`](../../../Examples/features/parsing/text-cursor.jet).
+scanner examples are [`binary-reader.jet`](../../../Examples/Data/Binary/BinaryReader.jet)
+and [`text-cursor.jet`](../../../Examples/Text/TextCursor.jet).
 
 ## Numeric surface
 
@@ -4585,7 +4585,7 @@ helpers, value-based differentiation, linear algebra, FFT, and serialization.
 `Auto` selects the CPU reference path; an explicit unsupported device returns a
 typed capability error rather than silently falling back. The source is
 [`Core/Compute/Compute.jet`](../../../Core/Compute/Compute.jet), with executable
-examples under [`Examples/features/tooling/`](../../../Examples/features/tooling/).
+examples under [`Examples/Tooling/`](../../../Examples/Tooling/).
 This is one ranked Tensor operation family with an explicit placement contract (`D-COMPUTE1=D`; `D-COMPUTE-TYPE1=D`; `D-COMPUTE-PLACE1=D`). Gradient and value-and-gradient calls remain explicit, checked value-based transforms (`D-COMPUTE-GRAD1=E`).
 The registered compute vocabulary is the sole nominal owner of tensors,
 devices, streams, and transform receipts. Core source imports that vocabulary;
@@ -4791,7 +4791,7 @@ limits are part of the safety boundary. Every decoder bounds its decoded
 output, never only its compressed input, so a small input that expands still
 stops at the 64 MiB cap with `Unsupported`. Encoders and writers never signal
 failure with an empty or unchanged buffer; they return the typed error.
-`Examples/features/io/archive_hostile.jet` exercises truncated, bad-checksum,
+`tests/run/CoreIO/ArchiveHostile.jet` exercises truncated, bad-checksum,
 output-bomb, 4,097-entry, and traversal-name inputs for every codec.
 
 ### `core.archive.gzip` — bounded gzip files
@@ -5067,16 +5067,16 @@ conventions remain in force.
 Executable examples are organized by capability. Useful entry points for this
 part include:
 
-- [`Examples/features/parsing/text-cursor.jet`](../../../Examples/features/parsing/text-cursor.jet)
-  and [`binary-reader.jet`](../../../Examples/features/parsing/binary-reader.jet)
+- [`Examples/Text/TextCursor.jet`](../../../Examples/Text/TextCursor.jet)
+  and [`binary-reader.jet`](../../../Examples/Data/Binary/BinaryReader.jet)
   for consuming scanners;
-- [`Examples/features/io/files.jet`](../../../Examples/features/io/files.jet)
-  and [`Examples/features/io/cli.jet`](../../../Examples/features/io/cli.jet)
+- [`Examples/Systems/Files/Files.jet`](../../../Examples/Systems/Files/Files.jet)
+  and [`Examples/Systems/CLI/CLIArgs.jet`](../../../Examples/Systems/CLI/CLIArgs.jet)
   for capability-bound I/O;
-- [`Examples/features/serde/json_integer_fidelity.jet`](../../../Examples/features/serde/json_integer_fidelity.jet)
+- [`Examples/Data/JSON/JSONIntegerFidelity.jet`](../../../Examples/Data/JSON/JSONIntegerFidelity.jet)
   for typed encoding behavior;
-- [`Examples/features/tooling/compute_tensor.jet`](../../../Examples/features/tooling/compute_tensor.jet)
-  and [`app_live.jet`](../../../Examples/features/tooling/app_live.jet)
+- [`Examples/Math/Compute/ComputeTensor.jet`](../../../Examples/Math/Compute/ComputeTensor.jet)
+  and [`app_live.jet`](../../../Examples/Tooling/DevLoop/AppLive.jet)
   for compute and web surfaces;
 - [`tests/conformance/corpus/core/`](../../../tests/conformance/corpus/core/)
   for small, checked examples of the exported Core contracts.

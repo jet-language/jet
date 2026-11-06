@@ -1,0 +1,49 @@
+// A default may reference an earlier parameter.
+// `height: Int{width}` fills height with whatever width was given.
+Rect: struct {
+    width: Int
+    height: Int
+
+    square: fn(width: Int, height: Int{width}) -> Rect { {width: width, height: height} }
+}
+
+box_dims: fn(w: Int, h: Int{w}, d: Int{h}) -> String { "{w}x{h}x{d}" }
+
+run: fn() {
+    s: Rect.square(5)
+    print("{s.width}x{s.height}")
+    r: Rect.square(5, 3)
+    print("{r.width}x{r.height}")
+    print(box_dims(4))
+    print(box_dims(4, 2))
+    print(box_dims(4, 2, 1))
+    default_binder_carriers_lesson()
+    default_binder_refs_lesson()
+}
+
+// A parameter default may read an earlier parameter of any carrier: a String
+// interpolation and a list's length, as well as an Int. A call that omits the
+// argument binds the default from the earlier argument.
+label: fn(name: String, title: String{"{name}!"}) -> String { "{title}" }
+counted: fn(values: [Int], count: Int{values.len()}) -> Int { count }
+
+default_binder_carriers_lesson: fn() {
+    print(label("jet"))
+    print(label("jet", "plain"))
+    print(counted([1, 2, 3]))
+    print(counted([1, 2, 3], 9))
+}
+
+// A parameter default may read earlier parameters. Each call that omits the
+// argument binds the default with those parameters' declared types.
+span: fn(start: Int, end: Int{start + 10}) -> Int { end - start }
+
+window: fn(start: Int, size: Int{4}, end: Int{start + size * 2}) -> Int { end }
+
+default_binder_refs_lesson: fn() {
+    print(span(5))
+    print(span(5, 7))
+    print(window(1))
+    print(window(1, 2))
+    print(window(1, 2, 3))
+}

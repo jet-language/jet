@@ -1,0 +1,48 @@
+// Structured `task.group` with nested combinators.
+package: {
+    name: "task_group"
+    authority: { allow: [IO, Mem.Alloc, Time] }
+}
+
+use time: core.time
+
+sum_range: fn(first: Int, last: Int) -> Int {
+    total := 0
+    loop n in first..last -> total += n
+    return total
+}
+
+fast_val: fn() -> Int { 42 }
+
+spin: fn(value: Int, turns: Int) -> Int {
+    total := value
+    loop _ in 1..turns {
+        total += 1
+        total -= 1
+    }
+    return total
+}
+
+bump: fn(value: Int) -> Int { value + 1 }
+
+run: fn() {
+    task.group g {
+        print("inside task.group")
+        results: task.all {sum_range(1, 25), sum_range(26, 50)} ?? panic("task.all failed")
+        print(results[0] + results[1])
+        winner: task.race {fast_val(), {
+            time.sleep(200ms)
+            sum_range(1, 500000)
+        }} ?? panic("race failed")
+        print(winner)
+    }
+    // `task.all` can name its results.
+    named: task.all {first: spin(10, 10000), second: spin(20, 1), third: spin(30, 100)} ?? panic("task.all failed")
+    print(named.first, named.second, named.third)
+    // Dynamic fan-out uses the same `task.group`; the limit bounds active
+    // children and the group joins every child at close.
+    task.group workers(limit: 3) {
+        results: task.all {bump(1), bump(2), bump(3), bump(4)} ?? panic("task.all failed")
+        print(results)
+    }
+}

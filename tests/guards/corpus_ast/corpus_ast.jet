@@ -1267,7 +1267,7 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
             "call:path.starts_with", "literal:json-wire", "call:url.query.split", "fn:same_strings",
             "call:String.replace", "call:crypto.sha256_bytes"}
     first_build := Span?{None}
-    if policy_applies(manifest, path, row, "first-hour-doc-recipe") && path == "Examples/features/types/typed_literal_forms.jet" {
+    if policy_applies(manifest, path, row, "first-hour-doc-recipe") && path == "Examples/Types/TypedLiteralForms.jet" {
         policy_visit_program(program, (expression) -> {
             if first_build == None && policy_is_build_command_literal(expression) -> first_build = Val(expr_span(expression))
         })
@@ -1587,7 +1587,7 @@ policy_has_rule: fn(violations: [PolicyOccurrence], rule: String) -> Bool {
 }
 policy_ast_test_semantic_shapes: fn() PolicyError! {
     manifest: policy_manifest()
-    path: "Examples/features/basics/first_hour.jet"
+    path: "Examples/Basics/FirstHour.jet"
     positive: policy_evaluate_source(manifest, path, "run: fn() {{ args: process.args() }}")
     assert(policy_has_rule(positive, "raw-cli-fixed-shape"))
     loop violation in positive -> assert_eq(violation.file, path)
@@ -1598,7 +1598,7 @@ policy_ast_test_semantic_shapes: fn() PolicyError! {
 #Test("semantic_rules_use_ast_shapes_not_source_text") { policy_ast_test_semantic_shapes() ?? panic("{err.message}") }
 policy_ast_test_cli_boundaries: fn() PolicyError! {
     manifest: policy_manifest()
-    path: "Examples/features/basics/first_hour.jet"
+    path: "Examples/Basics/FirstHour.jet"
     repeated: policy_evaluate_source(manifest, path, "run: fn() {{\n    first: process.args()\n    second: process.args()\n}}")
     assert(policy_has_rule(repeated, "raw-cli-process-boundary"))
     single: policy_evaluate_source(manifest, path, "run: fn() {{ args: process.args() }}")
@@ -1609,12 +1609,12 @@ policy_ast_test_cli_boundaries: fn() PolicyError! {
 policy_ast_test_allow_source_reason: fn() PolicyError! {
     manifest: policy_manifest()
     error := ""
-    if policy_evaluate_source(manifest, "Examples/features/text/unreviewed_allow.jet", "run: fn() {{ #Allow(jet.UnitScalarRewrap) print(\"kept\") }}") == {
+    if policy_evaluate_source(manifest, "Examples/Text/unreviewed_allow.jet", "run: fn() {{ #Allow(jet.UnitScalarRewrap) print(\"kept\") }}") == {
         .Err(failure) -> error = failure.message
         .Ok(_) -> panic("maintained guidance allowance must explain itself")
     }
     assert(error.contains("reason at its source site"), error)
-    policy_evaluate_source(manifest, "Examples/features/text/reviewed_allow.jet", "run: fn() {{ #Allow(jet.UnitScalarRewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }}")
+    policy_evaluate_source(manifest, "Examples/Text/reviewed_allow.jet", "run: fn() {{ #Allow(jet.UnitScalarRewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }}")
     Ok()
 }
 #Test("maintained_guidance_allow_explains_itself_at_the_source_site") { policy_ast_test_allow_source_reason() ?? panic("{err.message}") }
@@ -1671,16 +1671,16 @@ policy_check_shapes: fn(cases: [PolicyShapeCase]) PolicyError! {
 }
 policy_ast_test_reintroduced_ceremony: fn() PolicyError! {
     cases: [PolicyShapeCase]{
-        PolicyShapeCase{path: "Examples/features/basics/hello.jet", source: "print(\"hello\")", rule: "entry-explicit", present: true},
-        PolicyShapeCase{path: "Docs/spec/guides/first-hour.md", source: "jet build Examples/features/basics/first_hour.jet", rule: "first-hour-doc-recipe", present: true},
-        PolicyShapeCase{path: "Examples/features/types/typed_literal_forms.jet", source: "run: fn() {{ print(\"jet build Examples/features/types/typed_literal_forms.jet\") }}", rule: "first-hour-doc-recipe", present: true},
-        PolicyShapeCase{path: "Examples/features/serde/reintroduced.jet", source: "#Codable\nSample: struct {{\n    value: Int\n}}\nrun: fn() {{}}", rule: "codable-structural", present: true},
-        PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "run: fn() {{\n    delay: Duration.hours(2) ?? return Err(\"duration\")\n}}", rule: "duration-constant-safe", present: true},
-        PolicyShapeCase{path: "Examples/features/basics/reintroduced_effect.jet", source: "use fs: core.files\nrun: fn() -[FS, IO]> {{\n    path: \"input.txt\"\n    text: fs.read(path)\n    print(text)\n}}", rule: "effect-row-inference", present: true},
-        PolicyShapeCase{path: "Examples/features/concurrency/parallel_scan.jet", source: "use fs: core.files\nrun: fn() {{\n    path: \"input.txt\"\n    text: fs.read(path.copy())\n}}", rule: "readonly-copy", present: true},
-        PolicyShapeCase{path: "Examples/features/io/reintroduced.jet", source: "use fs: core.files\nrun: fn() {{\n    path: \"input.txt\"\n    text: fs.read(path) ?? return Err(\"read\")\n}}", rule: "error-identity", present: true},
-        PolicyShapeCase{path: "Examples/features/concurrency/reintroduced.jet", source: "run: fn() {{\n    task.group g {{\n        task.race {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
-        PolicyShapeCase{path: "Examples/features/concurrency/reintroduced.jet", source: "run: fn() {{\n    task.group g {{\n        task.any {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
+        PolicyShapeCase{path: "Examples/Basics/Hello.jet", source: "print(\"hello\")", rule: "entry-explicit", present: true},
+        PolicyShapeCase{path: "Docs/spec/guides/first-hour.md", source: "jet build Examples/Basics/FirstHour.jet", rule: "first-hour-doc-recipe", present: true},
+        PolicyShapeCase{path: "Examples/Types/TypedLiteralForms.jet", source: "run: fn() {{ print(\"jet build Examples/Types/TypedLiteralForms.jet\") }}", rule: "first-hour-doc-recipe", present: true},
+        PolicyShapeCase{path: "Examples/Data/reintroduced.jet", source: "#Codable\nSample: struct {{\n    value: Int\n}}\nrun: fn() {{}}", rule: "codable-structural", present: true},
+        PolicyShapeCase{path: "Examples/Memory/reintroduced.jet", source: "run: fn() {{\n    delay: Duration.hours(2) ?? return Err(\"duration\")\n}}", rule: "duration-constant-safe", present: true},
+        PolicyShapeCase{path: "Examples/Basics/reintroduced_effect.jet", source: "use fs: core.files\nrun: fn() -[FS, IO]> {{\n    path: \"input.txt\"\n    text: fs.read(path)\n    print(text)\n}}", rule: "effect-row-inference", present: true},
+        PolicyShapeCase{path: "Examples/Concurrency/Parallel/ParallelScan.jet", source: "use fs: core.files\nrun: fn() {{\n    path: \"input.txt\"\n    text: fs.read(path.copy())\n}}", rule: "readonly-copy", present: true},
+        PolicyShapeCase{path: "Examples/Systems/reintroduced.jet", source: "use fs: core.files\nrun: fn() {{\n    path: \"input.txt\"\n    text: fs.read(path) ?? return Err(\"read\")\n}}", rule: "error-identity", present: true},
+        PolicyShapeCase{path: "Examples/Concurrency/reintroduced.jet", source: "run: fn() {{\n    task.group g {{\n        task.race {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
+        PolicyShapeCase{path: "Examples/Concurrency/reintroduced.jet", source: "run: fn() {{\n    task.group g {{\n        task.any {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
         PolicyShapeCase{path: "tests/agent_workloads/adapters/reintroduced.jet", source: "run: fn() {{\n    line_number := 0\n    loop item in items {{\n        line_number += 1\n        seen: line_number\n    }}\n}}", rule: "indexed-sequence", present: true},
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "run: fn() {{\n    value: Regex{{\"IMG\"}}\n}}", rule: "regex-capture-recipe", present: true},
     }
@@ -1714,24 +1714,24 @@ policy_ast_test_walk_shapes: fn() PolicyError! {
 #Test("walk_policy_distinguishes_file_only_filters_from_directory_tree_walks") { policy_ast_test_walk_shapes() ?? panic("{err.message}") }
 policy_ast_test_crypto_module: fn() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
-        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use crypto: core.crypto\nrun: fn() {{ crypto.sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: true},
-        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use crypto: core.crypto\nrun: fn() {{ crypto.sha256(\"abc\".bytes()).hex() }}", rule: "crypto-naming-fact", present: false},
-        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "run: fn() {{ sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: false},
+        PolicyShapeCase{path: "Examples/Crypto/reintroduced.jet", source: "use crypto: core.crypto\nrun: fn() {{ crypto.sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: true},
+        PolicyShapeCase{path: "Examples/Crypto/reintroduced.jet", source: "use crypto: core.crypto\nrun: fn() {{ crypto.sha256(\"abc\".bytes()).hex() }}", rule: "crypto-naming-fact", present: false},
+        PolicyShapeCase{path: "Examples/Crypto/reintroduced.jet", source: "run: fn() {{ sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: false},
     })
     Ok()
 }
 #Test("crypto_digest_rule_uses_the_resolved_core_module") { policy_ast_test_crypto_module() ?? panic("{err.message}") }
 policy_ast_test_migration_shapes: fn() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
-        PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "run: fn() {{ delay: Duration.seconds(1.5) }}", rule: "duration-constant-safe", present: true},
-        PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "run: fn(seconds: Float) {{ delay: Duration.seconds(seconds) }}", rule: "duration-constant-safe", present: false},
-        PolicyShapeCase{path: "Examples/features/text/reintroduced.jet", source: "run: fn() {{ value: Meter.from_float(source.raw() * 2) }}", rule: "unit-scalar-rewrap", present: true},
-        // The Rust case named Examples/features/types/unit_family.jet. Its scope row
+        PolicyShapeCase{path: "Examples/Memory/reintroduced.jet", source: "run: fn() {{ delay: Duration.seconds(1.5) }}", rule: "duration-constant-safe", present: true},
+        PolicyShapeCase{path: "Examples/Memory/reintroduced.jet", source: "run: fn(seconds: Float) {{ delay: Duration.seconds(seconds) }}", rule: "duration-constant-safe", present: false},
+        PolicyShapeCase{path: "Examples/Text/reintroduced.jet", source: "run: fn() {{ value: Meter.from_float(source.raw() * 2) }}", rule: "unit-scalar-rewrap", present: true},
+        // The Rust case named Examples/Types/Units/UnitFamily.jet. Its scope row
         // is retired: Currency is nominal (D-QUAL3, D-DIST1), `Usd * Int` is E0127,
         // so the example's rewrap is the language's own conversion. The shape keeps
         // its proof under the time examples' scope.
-        PolicyShapeCase{path: "Examples/features/time/reintroduced.jet", source: "subtotal: fn(price: Usd, qty: Int) -> Usd {{ Usd.from_float(price.raw() * Float.from_int(qty)) }}", rule: "unit-scalar-rewrap", present: true},
-        PolicyShapeCase{path: "Examples/features/text/reintroduced.jet", source: "run: fn() {{ value: Meter.from_float(source.raw() * calibrate(2.0)) }}", rule: "unit-scalar-rewrap", present: false},
+        PolicyShapeCase{path: "Examples/Systems/Time/reintroduced.jet", source: "subtotal: fn(price: Usd, qty: Int) -> Usd {{ Usd.from_float(price.raw() * Float.from_int(qty)) }}", rule: "unit-scalar-rewrap", present: true},
+        PolicyShapeCase{path: "Examples/Text/reintroduced.jet", source: "run: fn() {{ value: Meter.from_float(source.raw() * calibrate(2.0)) }}", rule: "unit-scalar-rewrap", present: false},
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "run: fn() {{ print(\"{{value:Fixed(2)}}\".replace(\",\", \"\")) }}", rule: "plain-format-fact", present: true},
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "run: fn() {{ print(\"{{value:Grouped(2)}}\".replace(\",\", \"\")) }}", rule: "plain-format-fact", present: false},
         PolicyShapeCase{path: "Tools/tower/run.jet", source: "duplicate_equal: fn(left: Dyn, right: Dyn) -> Bool {{ return true }}", rule: "dyn-domain-policy", present: true},
@@ -1809,7 +1809,7 @@ policy_ast_test_engine_entry_protocol: fn() PolicyError! {
 policy_ast_test_cli_recipe_inventory: fn() PolicyError! {
     manifest: policy_manifest()
     policy_check_cli_recipe_inventory(manifest, ".")
-    typed_selectors: [String]{"file:Tools/adoption/fixtures/clean-project/run.jet", "file:Examples/features/basics/first_hour.jet", "file:Examples/features/basics/onboarding/run.jet", "file:Docs/spec/guides/first-hour.md", "root:Tools/gauntlet/entries", "root:tests/agent_workloads/adapters", "root:tests/compiled_workloads/adapters/jet"}
+    typed_selectors: [String]{"file:Tools/adoption/fixtures/clean-project/run.jet", "file:Examples/Basics/FirstHour.jet", "file:Examples/Basics/Onboarding/run.jet", "file:Docs/spec/guides/first-hour.md", "root:Tools/gauntlet/entries", "root:tests/agent_workloads/adapters", "root:tests/compiled_workloads/adapters/jet"}
     loop selector in typed_selectors {
         found := false
         loop row in manifest.sources {
@@ -1819,7 +1819,7 @@ policy_ast_test_cli_recipe_inventory: fn() PolicyError! {
         }
         assert(found, "missing CLI recipe source row: {selector}")
     }
-    expert_selectors: [String]{"file:Examples/features/io/args_spec.jet", "file:Examples/features/io/args_audit.jet", "file:Examples/features/io/cli_args.jet", "file:Examples/features/io/watcher.jet", "file:Tools/gauntlet/entries/taskfile-cli/jet/run.jet"}
+    expert_selectors: [String]{"file:Examples/Systems/CLI/ArgsSpec.jet", "file:Examples/Systems/CLI/ArgsAudit.jet", "file:Examples/Systems/CLI/CLIArgs.jet", "file:Examples/Systems/Files/Watcher.jet", "file:Tools/gauntlet/entries/taskfile-cli/jet/run.jet"}
     loop selector in expert_selectors {
         found := false
         expected: if selector.contains("args_spec.jet") || selector.contains("args_audit.jet") -> "builder-cli" else -> "raw-cli"
@@ -1910,7 +1910,7 @@ policy_ast_test_planted_rule_pairs: fn() PolicyError! {
         // A closed synthetic manifest makes one rule active, independently of
         // real corpus exceptions or scope changes. Checked-manifest tests above
         // still require every original source/provenance/classification.
-        path: if pair.rule == "first-hour-doc-recipe" -> "Examples/features/types/typed_literal_forms.jet" else -> "planted/{pair.rule}.jet"
+        path: if pair.rule == "first-hour-doc-recipe" -> "Examples/Types/TypedLiteralForms.jet" else -> "planted/{pair.rule}.jet"
         manifest := PolicyManifest{sources: [PolicySourceRow]{PolicySourceRow{selector: "file:{path}", role: "canonical-teaching", profile: "typed-cli", decision: "planted", proof: "planted", owner: "corpus-policy", reason: "planted AST pair"}}, scopes: [corpus_manifest.PolicyScopeRow]{corpus_manifest.PolicyScopeRow{rule: pair.rule, selector: "file:{path}", reason: "planted AST pair"}}, producers: [corpus_manifest.PolicyProducerRow]{}, artifacts: [corpus_manifest.PolicyArtifactRow]{}, findings: [corpus_manifest.PolicyFindingRow]{}, exceptions: [corpus_manifest.PolicyExceptionRow]{}}
         bad: policy_evaluate_source(manifest, path, pair.rejected)
         assert(bad.len() == 1, "{pair.rule}: exactly one planted violation")
@@ -1930,7 +1930,7 @@ policy_ast_test_planted_rule_pairs: fn() PolicyError! {
 policy_ast_test_explicit_entry: fn() PolicyError! {
     manifest: policy_manifest()
     // The Rust original also named Examples/learn/entry_law.jet; Examples/learn left the corpus with `jet learn` (09473f1db5).
-    paths: [String]{"Examples/features/types/entry_law.jet", "tests/agent_workloads/llm_digest/first_program.jet"}
+    paths: [String]{"Examples/Types/entry_law.jet", "tests/agent_workloads/llm_digest/first_program.jet"}
     accepted: [String]{"run: fn() {{ print(\"hello\") }}", "VALUE: 1\nhelper: fn() -> Int {{ VALUE }}\nrun: fn() {{ print(helper()) }}", "helper: fn() -> Int {{ 1 }}"}
     rejected: [String]{"print(\"hello\")", "print(\"before\")\nrun: fn() {{ print(\"inside\") }}\nprint(\"after\")"}
     loop path in paths {
@@ -1973,11 +1973,11 @@ policy_ast_test_manifest_scoped_inventory: fn() PolicyError! {
 // `package.jet` declares under `configs:` leaves the corpus.
 policy_ast_test_declared_config_exclusion: fn() PolicyError! {
     manifest: policy_manifest()
-    declared: "Examples/features/tooling/compiler_api_package/config"
+    declared: "Examples/Metaprogramming/BuildTime/CompilerAPIPackage/config"
     discovery: policy_discover_manifest_files(manifest, ".")
     assert(discovery.config_candidates.contains(declared), "the package config directory is a discovery candidate")
     assert(policy_declared_config(".", declared), "compiler_api_package declares configs: [\"config/release.jet\"]")
-    assert(!policy_declared_config(".", "Examples/features/tooling/missing_package/config"), "a config directory without a parsable package.jet stays in the corpus")
+    assert(!policy_declared_config(".", "Examples/Tooling/missing_package/config"), "a config directory without a parsable package.jet stays in the corpus")
     inventory: policy_ast_inventory(manifest, ".")
     loop entry in inventory.files -> assert(!entry.path.starts_with("{declared}/"), "declared package config left in the corpus: {entry.path}")
     Ok()

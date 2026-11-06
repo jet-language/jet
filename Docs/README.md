@@ -44,7 +44,7 @@ strategic guidance document.
 
 | Question | Source of truth |
 |---|---|
-| Keywords, sigils, and names | [Syntax registry](../Compiler/JetFoundation/Data/Syntax/) and [examples](../Examples/features/) |
+| Keywords, sigils, and names | [Syntax registry](../Compiler/JetFoundation/Data/Syntax/) and [examples](../Examples/) |
 | Language checks | The semantic checker ([`Compiler/JetSema/`](../Compiler/JetSema/Source/)) and [tests](../tests/) |
 | Core APIs and runtime meaning | [Core library sources](../Core/) and the [Prelude](../Compiler/Prelude/) |
 | Diagnostic text | [Diagnostic registry](../Compiler/Prelude/Diagnostics.jet), [UI snapshots](../tests/ui/), and `jet explain <CODE>` |

@@ -1,0 +1,55 @@
+package: {
+    name: "ui_ui_view_tree"
+    version: "0.1.0"
+    authority: { allow: [Browser, Exec, IO, Mem.Alloc] }
+}
+// One canonical UiNode tree. A signal change re-runs the render
+// effect, while the diff paints only canonical leaves whose content changed.
+use {
+    ui: core.ui
+    reactive: core.reactive
+}
+
+repaint: fn(old: [UINode], updated: [UINode]) -> Int {
+    backend := ui.null_backend()
+    n := 0
+    i := 0
+    loop leaf in updated {
+        same := false
+        if i < old.len() {
+            if leaf.label == old[i].label -> same = true
+        }
+        if !same {
+            backend.layout(leaf, ui.rect(0.0, Float.from_int(i), leaf.width, leaf.height))
+            backend.paint(leaf)
+            n += 1
+        }
+        i += 1
+    }
+    loop cmd in backend.commands() -> print("repaint: {cmd}")
+    return n
+}
+
+run: fn() {
+    initial: [UINode]{ui.text("a"), ui.text("b")}
+    leaves := reactive.signal(initial)
+    backend := ui.tui_backend()
+    render_backend := backend.copy()
+    ui.reactive_render(
+    () -> {
+        tree: ui.box(leaves.get())
+        size: render_backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+        render_backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+        render_backend.paint(tree)
+    },
+    )
+    empty: [UINode]{}
+    before: leaves.get()
+    print("initial repaints: {repaint(empty, before)}")
+    print("renders: {backend.render_count()}")
+    leaves.set([ui.text("a"), ui.text("zz")])
+    after: leaves.get()
+    print("update repaints: {repaint(before, after)}")
+    print("renders: {backend.render_count()}")
+    loop line in backend.frame_lines() -> print("frame: {line}")
+}

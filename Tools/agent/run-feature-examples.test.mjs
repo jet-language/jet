@@ -110,49 +110,48 @@ test("argument filters, tier and concurrency options parse", () => {
   assert.throws(() => parseArgs(["--tier", "emit"]), /--tier expects one of run, build/u);
 });
 
-test("feature discovery excludes expected and hidden trees", () => {
+test("feature discovery excludes hidden trees", () => {
   const entries = collectFeatureExamples();
   assert.ok(entries.length > 700);
-  assert.equal(entries.some((entry) => entry.shown.includes("/expected/")), false);
   assert.equal(entries.some((entry) => entry.shown.includes("/.jet/")), false);
 });
 
 test("web-targeted sources are skipped for native execution", () => {
-  const entry = collectFeatureExamples().find((candidate) => candidate.stem === "web/web_wasm_map");
+  const entry = collectFeatureExamples().find((candidate) => candidate.stem === "Apps/Web/WebWasmIntExport");
   assert.ok(entry);
   assert.equal(nativeRunIsWebTarget(entry), true);
 });
 
 test("a single `jet run` or `built` case step supplies the run flags or program arguments", () => {
-  const entry = { stem: "effects/authority_allow_flag", shown: "Examples/features/effects/authority_allow_flag.jet", path: "/repo/Examples/features/effects/authority_allow_flag.jet" };
+  const entry = { stem: "ErrorsAndEffects/Effects/AuthorityAllowFlag", shown: "Examples/ErrorsAndEffects/Effects/AuthorityAllowFlag.jet", path: "/repo/Examples/ErrorsAndEffects/Effects/AuthorityAllowFlag.jet" };
   const shown = entry.shown;
   assert.deepEqual(runArgs(entry, null), ["run", shown]);
-  assert.deepEqual(runArgs(entry, "step: jet run --allow=Env,Time authority_allow_flag.jet\n"), ["run", "--allow=Env,Time", "authority_allow_flag.jet"]);
+  assert.deepEqual(runArgs(entry, "step: jet run --allow=Env,Time AuthorityAllowFlag.jet\n"), ["run", "--allow=Env,Time", "AuthorityAllowFlag.jet"]);
   assert.deepEqual(runArgs(entry, "normalize: argv0\n"), ["run", shown]);
   assert.deepEqual(runArgs(entry, "step: built alpha beta\n"), ["run", shown, "--", "alpha", "beta"]);
   assert.deepEqual(runArgs(entry, "step: build\nstep: built alpha\n"), ["run", shown, "--", "alpha"]);
   assert.deepEqual(runArgs(entry, "step: built\n"), ["run", shown]);
   assert.deepEqual(runArgs(entry, "step: jet run --allow=Env other.jet\n"), ["run", shown]);
-  assert.deepEqual(runArgs(entry, "step: build\nstep: jet run -A authority_allow_flag.jet\n"), ["run", "-A", "authority_allow_flag.jet"]);
+  assert.deepEqual(runArgs(entry, "step: build\nstep: jet run -A AuthorityAllowFlag.jet\n"), ["run", "-A", "AuthorityAllowFlag.jet"]);
   assert.deepEqual(runArgs(entry, "step: built a\nstep: built b\n"), ["run", shown]);
 });
 
 test("a case's own `jet run` step runs from the example's directory", () => {
-  const entry = { stem: "effects/authority_core_method", shown: "Examples/features/effects/authority_core_method.jet", path: "/repo/Examples/features/effects/authority_core_method.jet" };
-  assert.equal(runCwd(entry, "step: jet run authority_core_method.jet\n", "/stage"), "/stage/Examples/features/effects");
+  const entry = { stem: "ErrorsAndEffects/Effects/AuthorityAllowFlag", shown: "Examples/ErrorsAndEffects/Effects/AuthorityAllowFlag.jet", path: "/repo/Examples/ErrorsAndEffects/Effects/AuthorityAllowFlag.jet" };
+  assert.equal(runCwd(entry, "step: jet run AuthorityAllowFlag.jet\n", "/stage"), "/stage/Examples/ErrorsAndEffects/Effects");
   assert.equal(runCwd(entry, "step: built\n", "/stage"), "/stage");
   assert.equal(runCwd(entry, null, "/stage"), "/stage");
-  assert.ok(runCwd(entry, "step: jet run authority_core_method.jet\n", undefined).endsWith("/Examples/features/effects"));
+  assert.ok(runCwd(entry, "step: jet run AuthorityAllowFlag.jet\n", undefined).endsWith("/Examples/ErrorsAndEffects/Effects"));
 });
 
 test("a refused run's full file paths compare relative to the example's directory, or as {work} for a case step", () => {
-  const entry = { stem: "safety/v_failure_cases/null_field", shown: "Examples/features/safety/v_failure_cases/null_field.jet", path: "/repo/Examples/features/safety/v_failure_cases/null_field.jet" };
-  const report = "Error [jet.InvalidConstructionField]: missing\n  --> /stage/Examples/features/safety/v_failure_cases/null_field.jet:10:16\n";
-  assert.equal(withoutExampleDirectory(report, entry, null, "/stage"), "Error [jet.InvalidConstructionField]: missing\n  --> null_field.jet:10:16\n");
-  const stepped = { stem: "effects/authority_denied", shown: "Examples/features/effects/authority_denied.jet", path: "/repo/Examples/features/effects/authority_denied.jet" };
-  const caseText = "step: jet run authority_denied.jet\n";
+  const entry = { stem: "Memory/NullField", shown: "Examples/Memory/NullField.jet", path: "/repo/Examples/Memory/NullField.jet" };
+  const report = "Error [jet.InvalidConstructionField]: missing\n  --> /stage/Examples/Memory/NullField.jet:10:16\n";
+  assert.equal(withoutExampleDirectory(report, entry, null, "/stage"), "Error [jet.InvalidConstructionField]: missing\n  --> NullField.jet:10:16\n");
+  const stepped = { stem: "ErrorsAndEffects/Effects/AuthorityDenied", shown: "Examples/ErrorsAndEffects/Effects/AuthorityDenied.jet", path: "/repo/Examples/ErrorsAndEffects/Effects/AuthorityDenied.jet" };
+  const caseText = "step: jet run AuthorityDenied.jet\n";
   const cwd = runCwd(stepped, caseText, "/stage");
-  assert.equal(withoutExampleDirectory("  --> /stage/Examples/features/effects/authority_denied.jet:12:4\n", stepped, caseText, cwd), "  --> {work}/authority_denied.jet:12:4\n");
+  assert.equal(withoutExampleDirectory("  --> /stage/Examples/ErrorsAndEffects/Effects/AuthorityDenied.jet:12:4\n", stepped, caseText, cwd), "  --> {work}/AuthorityDenied.jet:12:4\n");
 });
 
 test("a case's own `stdout: = FILE` assertion names the expected stdout", () => {
@@ -180,9 +179,9 @@ test("a case's `stdout: one-of` assertion accepts any of its exact snapshots", (
 });
 
 test("the build tier builds with the case's run flags", () => {
-  const entry = { stem: "effects/authority_allow_flag", shown: "Examples/features/effects/authority_allow_flag.jet", path: "/repo/Examples/features/effects/authority_allow_flag.jet" };
+  const entry = { stem: "ErrorsAndEffects/Effects/AuthorityAllowFlag", shown: "Examples/ErrorsAndEffects/Effects/AuthorityAllowFlag.jet", path: "/repo/Examples/ErrorsAndEffects/Effects/AuthorityAllowFlag.jet" };
   assert.deepEqual(buildArgs(entry, null), ["build", entry.shown]);
-  assert.deepEqual(buildArgs(entry, "step: jet run --allow=Env,Time authority_allow_flag.jet\n"), ["build", "--allow=Env,Time", entry.shown]);
+  assert.deepEqual(buildArgs(entry, "step: jet run --allow=Env,Time AuthorityAllowFlag.jet\n"), ["build", "--allow=Env,Time", entry.shown]);
   assert.deepEqual(buildArgs(entry, "step: built alpha beta\n"), ["build", entry.shown]);
 });
 
@@ -246,13 +245,13 @@ test("a case whose host requirement is missing is skipped, as testkit SKIP-HOST"
 });
 
 test("known-failing ledger rows and case headers own failures and reject stale passes, as testkit", () => {
-  const ledger = parseKnownLedger("# repo-relative ID\tcard\treason\n\nExamples/features/serde/edges\t#3236\towned mismatch\nExamples/features/web/app\t#4957\towned project\nmalformed row\n");
+  const ledger = parseKnownLedger("# repo-relative ID\tcard\treason\n\nExamples/Data/Edges\t#3236\towned mismatch\nExamples/Apps/Web/App\t#4957\towned project\nmalformed row\n");
   assert.equal(ledger.length, 2);
-  assert.equal(knownFailingAnnotation("Examples/features/serde/edges.jet", null, ledger), "#3236 owned mismatch");
-  assert.equal(knownFailingAnnotation("Examples/features/web/app/run.jet", null, ledger), "#4957 owned project");
-  assert.equal(knownFailingAnnotation("Examples/features/serde/edges_other.jet", null, ledger), null);
-  assert.equal(knownFailingAnnotation("Examples/features/serde/edges.jet", "# KNOWN-FAILING #4868 header\nstep: built\n", ledger), "#4868 header");
-  const mismatch = { stem: "serde/edges", shown: "Examples/features/serde/edges.jet", status: "no-match", detail: "stdout" };
+  assert.equal(knownFailingAnnotation("Examples/Data/Edges.jet", null, ledger), "#3236 owned mismatch");
+  assert.equal(knownFailingAnnotation("Examples/Apps/Web/App/run.jet", null, ledger), "#4957 owned project");
+  assert.equal(knownFailingAnnotation("Examples/Data/EdgesOther.jet", null, ledger), null);
+  assert.equal(knownFailingAnnotation("Examples/Data/Edges.jet", "# KNOWN-FAILING #4868 header\nstep: built\n", ledger), "#4868 header");
+  const mismatch = { stem: "Data/Edges", shown: "Examples/Data/Edges.jet", status: "no-match", detail: "stdout" };
   assert.deepEqual(applyKnownFailing(mismatch, "#3236 owned mismatch"), { ...mismatch, status: "known-failing", detail: "#3236 owned mismatch: no-match stdout" });
   assert.equal(applyKnownFailing({ ...mismatch, status: "failed", detail: "exit 101" }, "#3236 owned mismatch").status, "known-failing");
   assert.equal(applyKnownFailing({ ...mismatch, status: "passed", detail: "" }, "#3236 owned mismatch").status, "unexpected-pass");

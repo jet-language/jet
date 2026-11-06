@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-Implement, as library Jet: a Rational type over the core BigInt, a Decimal with a scale, and money arithmetic with rounding modes; use them with literals, operators, comparisons, formatting, JSON round trip, and a sum over 1e6 values. Check what the language gives a library author: operator traits, literal suffixes or constructors, generic numeric bounds, const evaluation. Mine the deleted ballot for M-EXACT-NUMERIC ($JET_STATE_ROOT/dx2/ballots/ if present) and Examples/features/operators/**, Examples/features/traits/**, Examples/features/comptime/**.
+Implement, as library Jet: a Rational type over the core BigInt, a Decimal with a scale, and money arithmetic with rounding modes; use them with literals, operators, comparisons, formatting, JSON round trip, and a sum over 1e6 values. Check what the language gives a library author: operator traits, literal suffixes or constructors, generic numeric bounds, const evaluation. Mine the deleted ballot for M-EXACT-NUMERIC ($JET_STATE_ROOT/dx2/ballots/ if present) and Examples/Math/**, Examples/Types/Traits/**, Examples/Metaprogramming/Comptime/**.
 
 ## Answer these
 

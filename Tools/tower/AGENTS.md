@@ -119,7 +119,7 @@ Always pass `--by <your-agent-name>`.
   tower card claim '#12' --by me                # renewable lease vs double work
 tower card update '#12' --phase building --log "started X" --by me
 tower card update '#12' --plan "1. ... 2. ..." --by me
-tower card update '#12' --refs "Docs/spec/foo.md,Examples/features/bar.jet"  # explicit doc pointers (also auto-harvested from body/plan into `tower brief`)
+tower card update '#12' --refs "Docs/spec/foo.md,Examples/bar.jet"  # explicit doc pointers (also auto-harvested from body/plan into `tower brief`)
 tower question answer <qid> --text "..." --by me
 tower message add '#12' --text "..." --by me
 tower message done <id> --by owner

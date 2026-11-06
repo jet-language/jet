@@ -1,0 +1,16 @@
+// Display vs Debug interpolation + #Redact
+User: struct {
+    id: Int
+    email: String
+    #Redact password_hash: String
+}
+
+impl User.Display {
+    display: fn(self) -> String { "{self.email} (#{self.id})" }
+}
+
+run: fn() {
+    u: User{id: 42, email: "w@example.com", password_hash: "$2b$12$secret"}
+    print("user: {u}")
+    print("debug: {u:Debug}")
+}

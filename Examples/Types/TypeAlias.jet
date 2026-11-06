@@ -1,0 +1,83 @@
+// Transparent generic type aliases shorten fallible signatures.
+// Owner ruling #6176: an alias is a `Name: Type` or `Name<T>: Type`
+// declaration; the `alias` keyword is gone.
+use core.math.random
+
+#Error
+AppError: enum {
+    Empty
+}
+
+Parsed<T>: T AppError!
+
+parse_count: fn(raw: String) -> Parsed<Int> { if raw == "" -> Err(AppError.Empty) else -> Ok(42) }
+
+Point: struct {
+    x: Int
+}
+
+Box: struct<T> {
+    value: T
+}
+
+P<T>: Point
+
+Wrapped<T>: Box<T>
+
+Chained<T>: Wrapped<T>
+
+Spot: Point
+
+shapes: module {
+    Pair<T>: Box<T>
+}
+
+run: fn() {
+    n: parse_count("7") ?? 0
+    print(n)
+    p: P<Int>{x: 3}
+    print(p.x)  // aliases of non-generic targets discard the alias's arguments
+    boxed: Wrapped<Int>{value: 7}
+    print(boxed.value)
+    chained: Chained<String>{value: "jet"}
+    print(chained.value)
+    spot: Spot{x: 5}
+    print(spot.x)
+    pair: shapes.Pair<Int>{value: 9}
+    print(pair.value)
+    type_alias_meaning_lesson()
+}
+
+// Owner ruling #6176: meaning, never casing, separates an alias from a
+// constant. A declaration with type parameters, or whose right side is only a
+// type, is an alias. A bare path right side is an alias when it names a type
+// and a constant otherwise; ordinary scoping decides a name that is both.
+// Examples/Modules/PubConstants pins `MAX: limits.MAX_ITEMS`.
+
+Meter: struct {
+    value: Int
+}
+
+RNG: random.RNG
+Stride: Meter
+BASE: 10
+LIMIT: BASE
+
+// `URL` is a prelude type, but this file's constant shadows it, so `LINK`
+// names the constant and is a constant too.
+URL: 3
+LINK: URL
+
+draw: fn(generator: &RNG) -> Int {
+    generator.int(1, 6)
+}
+
+type_alias_meaning_lesson: fn() {
+    generator := random.rng(7)
+    roll: draw(generator)
+    print(roll >= 1 && roll <= 6)
+    print(BASE + LIMIT)
+    stride: Stride{value: 4}
+    print(stride.value)
+    print(LINK + 1)
+}

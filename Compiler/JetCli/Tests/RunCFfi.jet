@@ -56,9 +56,9 @@ run: fn() {
     scratch: files.absolute(args[1].copy()) ?? fail("cannot resolve {args[1]}: {err}")
     repo: files.canonicalize(".") ?? fail("cannot resolve the repository root: {err}")
     files.create_dir_all(scratch.copy()) ?? fail("cannot create {scratch}: {err}")
-    copy_tree("{repo}/Examples/features/lowlevel/native_c", "{scratch}/native_c")
+    copy_tree("{repo}/Examples/Interop/FFI/NativeC", "{scratch}/native_c")
     copy_tree("{repo}/Core/Vendor/Sqlite3", "{scratch}/sqlite3")
-    native_expected: files.read("{repo}/Examples/features/expected/lowlevel/native_c/run.out") ?? fail("cannot read run.out: {err}")
+    native_expected: files.read("{repo}/Examples/Interop/FFI/NativeC.out") ?? fail("cannot read NativeC.out: {err}")
     check_fixture(jet.copy(), scratch.copy(), "native_c".copy(), native_expected)
     check_fixture(jet.copy(), scratch.copy(), "sqlite3/Fixture", "sqlite-memory=42\n")
 }

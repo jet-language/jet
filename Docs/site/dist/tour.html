@@ -51,11 +51,11 @@
   <section>
     <h2 id="hello">Hello, and the whole toolchain</h2>
     <p>This example runs from one file; no project setup is shown. fn run is where running starts.</p>
-    <div class="code"><div class="code-head"><span>Examples/features/basics/hello.jet</span></div><div class="code-body"><pre><code><span class="c">// Your first program. `fn run` is where running starts.</span>
+    <div class="code"><div class="code-head"><span>Examples/Basics/Hello.jet</span></div><div class="code-body"><pre><code><span class="c">// Your first program. `fn run` is where running starts.</span>
 <span class="k">fn</span> <span class="f">run</span>() {
     <span class="f">print</span>(<span class="s">"hello, world"</span>)
     <span class="k">return</span>
-}</code></pre></div><div class="code-out"><span class="ps">$ jet run Examples/features/basics/hello.jet</span><br>hello, world</div></div>
+}</code></pre></div><div class="code-out"><span class="ps">$ jet run Examples/Basics/Hello.jet</span><br>hello, world</div></div>
     <div class="term"><span class="ps">$</span> <span class="cmd">jet run hello.jet</span> <span class="dim"># run it</span>
 <span class="ps">$</span> <span class="cmd">jet check hello.jet</span> <span class="dim"># check without running</span>
 <span class="ps">$</span> <span class="cmd">jet test hello.jet</span> <span class="dim"># run the #Test blocks</span>
@@ -76,9 +76,9 @@
   </section>
 
   <section>
-    <h2 id="functions">Functions and effect rows<span class="sec-file">Examples/features/basics/signature_shape.jet</span></h2>
+    <h2 id="functions">Functions and effect rows<span class="sec-file">Examples/Basics/BodyRules.jet</span></h2>
     <p>A result type sits bare after the parameters; -&gt; starts the body. Effects split the arrow: -[IO]&gt; says this function touches the outside world, and the compiler checks it. Omit the row and Jet infers it; write it and Jet enforces it.</p>
-    <div class="code"><div class="code-head"><span>Examples/features/basics/signature_shape.jet</span></div><div class="code-body"><pre><code><span class="c">// D-SIG-SHAPE1=B: a result is bare after the parameters and `-&gt;` starts the body.</span>
+    <div class="code"><div class="code-head"><span>Examples/Basics/BodyRules.jet</span></div><div class="code-body"><pre><code><span class="c">// D-SIG-SHAPE1=B: a result is bare after the parameters and `-&gt;` starts the body.</span>
 <span class="k">fn</span> <span class="f">double</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-&gt;</span> n * <span class="n">2</span>
 
 <span class="k">fn</span> <span class="f">bump</span>(n: <span class="t">Int</span>) <span class="t">Int</span> <span class="g">-[IO]&gt;</span> {
@@ -86,13 +86,13 @@
     n + <span class="n">1</span>
 }
 
-<span class="k">fn</span> <span class="f">run</span>() <span class="g">-[IO]&gt;</span> { <span class="f">print</span>(<span class="f">bump</span>(<span class="f">double</span>(<span class="n">20</span>))) }</code></pre></div><div class="code-out"><span class="ps">$ jet run Examples/features/basics/signature_shape.jet</span><br>40<br>41</div></div>
+<span class="k">fn</span> <span class="f">run</span>() <span class="g">-[IO]&gt;</span> { <span class="f">print</span>(<span class="f">bump</span>(<span class="f">double</span>(<span class="n">20</span>))) }</code></pre></div><div class="code-out"><span class="ps">$ jet run Examples/Basics/BodyRules.jet</span><br>40<br>41</div></div>
   </section>
 
   <section>
-    <h2 id="matching">Pattern matching is a table<span class="sec-file">Examples/features/basics/pattern_matching.jet</span></h2>
+    <h2 id="matching">Pattern matching is a table<span class="sec-file">Examples/Basics/PatternMatching.jet</span></h2>
     <p>An arm table reads like the decision it makes. Or-patterns share a body, wildcards skip what does not matter, and else catches the rest.</p>
-    <div class="code"><div class="code-head"><span>Examples/features/basics/pattern_matching.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">describe_conn</span>(c: <span class="t">Conn</span>) <span class="t">String</span> <span class="g">-&gt;</span> {
+    <div class="code"><div class="code-head"><span>Examples/Basics/PatternMatching.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">describe_conn</span>(c: <span class="t">Conn</span>) <span class="t">String</span> <span class="g">-&gt;</span> {
     <span class="k">if</span> c == {
         .Active(id) | .Reconnecting(id) <span class="g">-&gt;</span> {
             <span class="c">// D-PATO: or-pattern — Active and Reconnecting share the same body.</span>
@@ -120,9 +120,9 @@
   </section>
 
   <section>
-    <h2 id="defaults">Defaults ride the type<span class="sec-file">Examples/features/basics/default_refs.jet</span></h2>
+    <h2 id="defaults">Defaults ride the type<span class="sec-file">Examples/Basics/DefaultRefs.jet</span></h2>
     <p>A default value lives on the parameter's type, and it may name an earlier parameter.</p>
-    <div class="code"><div class="code-head"><span>Examples/features/basics/default_refs.jet</span></div><div class="code-body"><pre><code><span class="c">// D-NARG-D2 (S61): a default may reference an earlier parameter.</span>
+    <div class="code"><div class="code-head"><span>Examples/Basics/DefaultRefs.jet</span></div><div class="code-body"><pre><code><span class="c">// D-NARG-D2 (S61): a default may reference an earlier parameter.</span>
 <span class="c">// `height: Int{width}` fills height with whatever width was given.</span>
 <span class="k">struct</span> <span class="t">Rect</span> {
     width: <span class="t">Int</span>
@@ -141,13 +141,13 @@
     <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>))
     <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>))
     <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>, <span class="n">2</span>, <span class="n">1</span>))
-}</code></pre></div><div class="code-out"><span class="ps">$ jet run Examples/features/basics/default_refs.jet</span><br>5x5<br>5x3<br>4x4x4<br>4x2x2<br>4x2x1</div></div>
+}</code></pre></div><div class="code-out"><span class="ps">$ jet run Examples/Basics/DefaultRefs.jet</span><br>5x5<br>5x3<br>4x4x4<br>4x2x2<br>4x2x1</div></div>
   </section>
 
   <section>
-    <h2 id="loops">Loops produce values<span class="sec-file">Examples/features/basics/loop_values.jet</span></h2>
+    <h2 id="loops">Loops produce values<span class="sec-file">Examples/Basics/ComprehensionForms.jet</span></h2>
     <p>This example uses the collection loop form to produce values, filter with a guard, and stop at a prefix.</p>
-    <div class="code"><div class="code-head"><span>Examples/features/basics/loop_values.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">run</span>() {
+    <div class="code"><div class="code-head"><span>Examples/Basics/ComprehensionForms.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">run</span>() {
     values <span class="g">::</span> [<span class="t">Int</span>]{<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>}
     doubled <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="g">-&gt;</span> value * <span class="n">2</span>
     even <span class="g">::</span> <span class="k">loop</span> value <span class="k">in</span> values <span class="k">if</span> value % <span class="n">2</span> == <span class="n">0</span> <span class="g">-&gt;</span> value
@@ -164,9 +164,9 @@
   </section>
 
   <section>
-    <h2 id="concurrency">Explicit task lifetimes<span class="sec-file">Examples/features/concurrency/tasks_join_all.jet</span></h2>
+    <h2 id="concurrency">Explicit task lifetimes<span class="sec-file">Examples/Concurrency/TasksJoinAll.jet</span></h2>
     <p>This example shows explicit task joins, collection, racing, and detachment. Each operation is visible at its use site.</p>
-    <div class="code"><div class="code-head"><span>Examples/features/concurrency/tasks_join_all.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">run</span>() {
+    <div class="code"><div class="code-head"><span>Examples/Concurrency/TasksJoinAll.jet</span></div><div class="code-body"><pre><code><span class="k">fn</span> <span class="f">run</span>() {
     <span class="c">// Join discharges the duty and yields the value.</span>
     joined <span class="g">::</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
     <span class="f">print</span>(joined.<span class="f">join</span>() <span class="g">??</span> <span class="f">panic</span>(<span class="s">"join failed"</span>))
@@ -193,9 +193,9 @@
   </section>
 
   <section>
-    <h2 id="files">Files, honestly<span class="sec-file">Examples/features/io/files.jet</span></h2>
+    <h2 id="files">Files, honestly<span class="sec-file">Examples/Systems/Files/Files.jet</span></h2>
     <p>File operations return real errors and carry the FS effect. The happy path stays short; the failure path is visible.</p>
-    <div class="code"><div class="code-head"><span>Examples/features/io/files.jet</span></div><div class="code-body"><pre><code><span class="k">use</span> core.files <span class="k">as</span> fs
+    <div class="code"><div class="code-head"><span>Examples/Systems/Files/Files.jet</span></div><div class="code-body"><pre><code><span class="k">use</span> core.files <span class="k">as</span> fs
 
 <span class="k">fn</span> <span class="f">run</span>() {
     path <span class="g">::</span> <span class="s">"/tmp/jet_m10_files.txt"</span>
@@ -212,7 +212,7 @@
     <div class="term"><span class="ps">$</span> <span class="cmd">jet build --target web counter.jet</span> <span class="dim"># try the web target</span></div>
   </section>
 
-  <p>The corpus these samples come from lives in Examples/features in the repository, next to the golden outputs that keep them honest.</p>
+  <p>The corpus these samples come from lives in Examples in the repository, next to the golden outputs that keep them honest.</p>
   <div class="hero-ctas"><a class="btn btn-primary" href="install.html"><svg class="delta" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M15 8 L3 2.5 L6 8 L3 13.5 Z"/></svg>Install jet</a><a class="btn btn-ghost" href="https://github.com/jet-language/jet">GitHub</a></div>
 </article>
 </main>

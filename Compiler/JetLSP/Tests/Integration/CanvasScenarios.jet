@@ -219,10 +219,10 @@ CanvasCase: struct {
         entry: if matrix -> dir.join("run.jet") else -> dir.join("main.jet")
         big_fixture: if name == BIG_PROJECT_SCENARIO -> write_big_fixture(dir)
         else if name == "canvas-onboarding-tour" {
-            fs.copy(repo.join("Examples/features/tooling/canvas_blueprint_demo.jet"), entry).expect("copy Canvas onboarding example source")
+            fs.copy(repo.join("Examples/Tooling/CanvasBlueprintDemo.jet"), entry).expect("copy Canvas onboarding example source")
             none
         } else if name == DEVSERVER_REAL_CLIENT_SCENARIO {
-            fs.copy(repo.join("Examples/features/web/ui_showcase.jet"), entry).expect("copy Canvas devserver regression source")
+            fs.copy(repo.join("Examples/Apps/Web/UIShowcase.jet"), entry).expect("copy Canvas devserver regression source")
             none
         } else if matrix {
             fs.write(dir.join("package.jet"), "name: \"canvas_session_matrix\"\nversion: \"0.1.0\"\noutputs: {{\n    cli: .Executable{{ name: \"cli\", entry: run }}\n    service: .Service{{ name: \"service\", entry: serve }}\n    web: .Executable{{ name: \"web\", entry: web }}\n    ui: .Executable{{ name: \"ui\", entry: ui }}\n    game: .Executable{{ name: \"game\", entry: game }}\n    library: .Library{{ name: \"library\", entry: run }}\n    build: .Check{{ name: \"build\", entry: build }}\n}}\ndefaults: {{ run: cli }}\n").expect("write Canvas session matrix package fixture")
@@ -235,7 +235,7 @@ CanvasCase: struct {
                 fs.write(dir.join("package.jet"), "name: \"canvas_library\"\nversion: \"0.1.0\"\n").expect("write Canvas library package fixture")
             }
             if name == "library-panel-events" {
-                fs.copy(repo.join("Examples/features/ui/events.jet"), entry).expect("copy Canvas library events source")
+                fs.copy(repo.join("Examples/Apps/UI/Events.jet"), entry).expect("copy Canvas library events source")
             } else {
                 source: if name == "debug-breakpoints-run-control-gestures" || name == "debug-runtime-values-staleness-liveness" -> DEBUG_DEMO
                     else if name.starts_with("canvas-rad-callback-") || name == "canvas-rad-handler-navigation" -> CALLBACK_DEMO

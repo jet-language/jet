@@ -5,7 +5,7 @@ compiler behavior. This page is for API authors and documentation tooling. The
 closed values are registered in
 [`PackageFiles.jet`](../../../Compiler/JetFoundation/Data/Syntax/PackageFiles.jet),
 and the source-backed example is
-[`Examples/features/syntax/maturity_tags.jet`](../../../Examples/features/syntax/maturity_tags.jet).
+[`Examples/Metaprogramming/Attributes/MaturityTags.jet`](../../../Examples/Metaprogramming/Attributes/MaturityTags.jet).
 
 ## The three values
 

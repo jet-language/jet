@@ -14,12 +14,12 @@ const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'link', 'run'].includes(mode)) throw Error('usage: run-trap-source-fixtures.mjs OUT assemble|lower|link|run');
 const out = resolve(output);
 const cases = [
-  { name: 'checked-defer', example: 'release_defer_panic', native: true, task: true, status: 0 },
-  { name: 'plain-defer', example: 'release_defer_panic', native: false, task: true, status: 70 },
-  { name: 'plain-defer-root', example: 'release_defer_panic', native: false, task: false, status: 70 },
-  { name: 'plain-byte-identity', example: 'release_defer_lifo', native: false, task: false, status: 0 },
-  { name: 'cleanup-panic', example: 'release_defer_panic', native: true, task: true, status: 70, cleanupPanic: true },
-  { name: 'cleanup-cancel', example: 'release_defer_lifo', native: true, task: true, status: 0, cleanupCancel: true },
+  { name: 'checked-defer', example: 'ReleaseDeferPanic', native: true, task: true, status: 0 },
+  { name: 'plain-defer', example: 'ReleaseDeferPanic', native: false, task: true, status: 70 },
+  { name: 'plain-defer-root', example: 'ReleaseDeferPanic', native: false, task: false, status: 70 },
+  { name: 'plain-byte-identity', example: 'ReleaseDeferLifo', native: false, task: false, status: 0 },
+  { name: 'cleanup-panic', example: 'ReleaseDeferPanic', native: true, task: true, status: 70, cleanupPanic: true },
+  { name: 'cleanup-cancel', example: 'ReleaseDeferLifo', native: true, task: true, status: 0, cleanupCancel: true },
 ];
 function command(name, binary, args, options = {}, expected = 0) {
   const result = spawnSync(binary, args, { cwd: root, encoding: 'utf8', maxBuffer: 1 << 27, ...options });
@@ -32,7 +32,7 @@ if (mode === 'assemble') {
   for (const c of cases) {
     const unit = join(out, c.name);
     mkdirSync(join(unit, 'Source'), { recursive: true });
-    const sourcePath = `Examples/features/memory/${c.example}.jet`;
+    const sourcePath = `tests/run/Ownership/${c.example}.jet`;
     let source = readFileSync(join(root, sourcePath), 'utf8');
     if (!c.native) source = source.replace('run: fn()', '#Export(c) run: fn()');
     if (c.cleanupPanic) source = source.replace('close: fn(&&self) { print("close {self.name}") }', 'close: fn(&&self) {\n    print("close {self.name}")\n    if self.name == "second" -> panic("close stop")\n}');
@@ -68,7 +68,7 @@ if (mode === 'assemble') {
   const results = new Map();
   for (const c of cases) {
     const result = command(c.name + '-run', join(out, c.name, 'hosted'), [], { timeout: 30000 }, c.status);
-    const base = readFileSync(join(root, `Examples/features/expected/memory/${c.example}.out`), 'utf8');
+    const base = readFileSync(join(root, `tests/run/Ownership/${c.example}.out`), 'utf8');
     const expected = c.cleanupPanic ? 'body\nclose second\n' : base + (c.native && c.task ? (c.cleanupCancel ? 'task cancelled; process continued\n' : 'task published; process continued\n') : '');
     if (result.stdout !== expected) throw Error(`${c.name}: registered closes did not run exactly once in LIFO order: ${JSON.stringify(result.stdout)} != ${JSON.stringify(expected)}`);
     if (c.status === 0 && result.stderr !== '') throw Error(`${c.name}: unexpected stderr`);

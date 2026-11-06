@@ -1,0 +1,42 @@
+// Card #2291: mutating methods on indexed collection elements update storage.
+// `outer` and `lists` are mutable bindings; `i` and `k` are immutable selectors.
+// Indexing a mutable collection exposes the selected element's write contract,
+// so `push` changes the original nested storage rather than a temporary copy.
+// Each print is the observed write, not merely permission to write.
+Bucket: struct {
+    values: [Int]
+}
+
+run: fn() {
+    outer := [[1, 2], [3]]
+    i: 0
+    outer[i].push(9)
+    print(outer)
+
+    lists := [String:[Int]]{"x": [1, 2]}
+    k: "x"
+    lists[k].push(3)
+    print(lists)
+
+    buckets := [Bucket{values: [1]}]
+    buckets[0].values.push(2)
+    print(buckets)
+
+    map_rows := [[String:[Int]]{"x": [4]}]
+    map_rows[0][k].push(5)
+    print(map_rows)
+    struct_list_mutation_lesson()
+}
+
+// Indexed struct fields are mutable places.
+Point: struct {
+    x: Int
+}
+
+struct_list_mutation_lesson: fn() {
+    points := [Point]{{x: 1}, {x: 2}}
+    points[0].x = 11
+    print(points[0].x)
+    points[0].x += 1
+    print(points[0].x)
+}

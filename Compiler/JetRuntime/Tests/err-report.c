@@ -58,17 +58,17 @@ static void equal(Text *value,const char *expected) {
 static Text borrowed(char *value) { return (Text){value,(W)strlen(value),0,0}; }
 static void journey_goldens(void) {
     // Literal bytes; no regenerated approximation.
-    Text file=borrowed("Examples/features/errors/error_context.jet");
+    Text file=borrowed("Examples/ErrorsAndEffects/Errors/ErrorContext.jet");
     Text empty=borrowed(""), a=borrowed("read_raw"), b=borrowed("parse_config"), c=borrowed("load_config"), d=borrowed("run");
     Text n1=borrowed("reading raw config"), n2=borrowed("loading config app.toml");
     Hop origin={&a,&file,4,1,&empty,1,&empty}, first={&b,&file,7,1,&n1,1,&empty}, second={&c,&file,12,1,&n2,1,&empty}, third={&d,&file,16,1,&empty,1,&empty};
     Hop *hops[]={&first,&second,&third}; Journey journey={&origin,{3,3,hops}};
     const char *plain=
-        "  failed here: read_raw (Examples/features/errors/error_context.jet:4)\n"
+        "  failed here: read_raw (Examples/ErrorsAndEffects/Errors/ErrorContext.jet:4)\n"
         " Trail [E3002] (3 hops via ?, origin first):\n"
-        "  1. parse_config (Examples/features/errors/error_context.jet:7) — reading raw config\n"
-        "  2. load_config (Examples/features/errors/error_context.jet:12) — loading config app.toml\n"
-        "  3. run (Examples/features/errors/error_context.jet:16)\n";
+        "  1. parse_config (Examples/ErrorsAndEffects/Errors/ErrorContext.jet:7) — reading raw config\n"
+        "  2. load_config (Examples/ErrorsAndEffects/Errors/ErrorContext.jet:12) — loading config app.toml\n"
+        "  3. run (Examples/ErrorsAndEffects/Errors/ErrorContext.jet:16)\n";
     equal(jet_journey_render_styled(&journey,false,0),plain);
     equal(jet_journey_render_styled(&journey,false,80),
         "  failed here: read_raw (…/errors/error_context.jet:4)\n"

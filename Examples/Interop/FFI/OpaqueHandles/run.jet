@@ -1,0 +1,55 @@
+// Generated opaque C handles stay checked at the Jet boundary. Handle loans
+// and ownership transfers still require an audited gate.
+// `zlib.h` is generated with `jet inspect bind <vendor-zlib.h> --pkg z`;
+// this minimal fixture is named `z.h` so the canonical `c.z` link key stays
+// declaration-driven. `expat.h` is the same for Expat's XML parser.
+use {
+    zlib: "include/z.h"
+    xml: "include/expat.h"
+}
+
+// Expat reads a document as C bytes; ASCII text fits I8 unchanged.
+xml_bytes: fn(text: String) -> [I8] {
+    out := [I8]{}
+    loop byte in text.bytes() -> out.push(I8{Int.from_u8(byte)})
+    out
+}
+
+run: fn() {
+    gzip := zlib.gzopen("Examples/Interop/FFI/OpaqueHandles/sample.txt.gz", "rb")
+    bytes := [I8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+    expected: [I8]{99, 112, 112, 32, 98, 114, 105, 100, 103, 101, 32, 108, 105, 110, 101, 32}
+    capacity: bytes.len()
+    shelf: xml_bytes("<shelf><book/><book/></shelf>")
+    broken: xml_bytes("<shelf>\n<book></shelf>")
+    parser := xml.xml_parser_create("UTF-8")
+    rejecting := xml.xml_parser_create("UTF-8")
+    read_count := 0
+    close_status := 0
+    parsed := 0
+    rejected := 0
+    error_code := 0
+    error_line := 0
+    error_column := 0
+
+    // Keep only capability-bearing C calls in the audited region.
+    #Unsafe("fixed headers define handle close ownership, exclusive buffers, and bounded output lengths") {
+        read_count = zlib.gzread(gzip, bytes, capacity)
+        close_status = zlib.gzclose(gzip.move())
+        parsed = xml.xml_parse(parser, shelf, shelf.len(), 1)
+        rejected = xml.xml_parse(rejecting, broken, broken.len(), 1)
+        error_code = xml.xml_get_error_code(rejecting)
+        error_line = xml.xml_get_current_line_number(rejecting)
+        error_column = xml.xml_get_current_column_number(rejecting)
+        xml.xml_parser_free(parser.move())
+    }
+    // `rejecting` is never handed back: its generated #Close frees it when
+    // it goes out of scope.
+
+    if read_count != expected.len() -> panic("gzip fixture length changed")
+    if bytes != expected -> panic("gzip fixture decoded content changed")
+    print("gzip-bytes={read_count} decoded-ok={bytes == expected}")
+    if close_status != 0 -> panic("gzclose failed")
+    print("xml-parsed={parsed} xml-rejected={rejected}")
+    print("xml-error={error_code} at {error_line}:{error_column}")
+}

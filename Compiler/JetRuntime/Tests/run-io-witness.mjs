@@ -21,8 +21,8 @@ assert.equal(normal.stderr, '');
 assert.equal(normal.stdout, readFileSync(resolve(here, 'IOWitness.stdout'), 'utf8'));
 // Reuse canonical registry footer goldens, while pinning this family's header
 // and source location. No host Rust type rendering is involved in the oracle.
-const panicFooter = readFileSync(resolve(repo, 'Examples/features/expected/collections/step_by_zero.err.out'), 'utf8').split('\n').slice(2).join('\n');
-const numericFooter = readFileSync(resolve(repo, 'Examples/features/expected/collections/list_bounds.err.out'), 'utf8').split('\n').slice(2).join('\n');
+const panicFooter = readFileSync(resolve(repo, 'tests/run/CollectionsAndMethods/StepByZero.err.out'), 'utf8').split('\n').slice(2).join('\n');
+const numericFooter = readFileSync(resolve(repo, 'Examples/Collections/ListBounds.err.out'), 'utf8').split('\n').slice(2).join('\n');
 const recordStop = 'Stop [E3001]: `panic: record variant index out of range`\n  --> <core.prelude>:0\n' + panicFooter;
 const numericStop = 'Stop [E3010]: `native Int argument exceeds host range`\n  --> <core.prelude>:0\n' + numericFooter;
 for (const mode of ['bad-op-low', 'bad-op-high', 'bad-limit-low', 'bad-limit-high', 'wrong-limit', 'wrong-context', 'limit-as-context', 'code-overflow', 'code-underflow']) {

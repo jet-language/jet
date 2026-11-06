@@ -1,0 +1,11 @@
+// Expert variant of first_hour.jet.
+// Hand-walks raw `process.args()` instead of the `#CLI` typed entry the flagship teaches.
+use process: core.process
+
+run: fn() {
+    args: process.args()
+    project: if args.len() > 0 -> args.get(0) ?? "first-hour" else -> "first-hour"
+    steps: ["check source", "build binary", "run smoke test"]
+    print("Shipping {project}")
+    loop step in steps -> print("[ok] {step}")
+}

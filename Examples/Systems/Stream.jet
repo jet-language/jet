@@ -1,0 +1,48 @@
+// E2-M7: streaming I/O with RAII handles.
+// Files close automatically on every exit path, including `?` early returns.
+package: {
+    name: "stream"
+    authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Time.Wait] }
+}
+
+use {
+    fs: core.files
+    files: core.files
+}
+
+count_lines: fn(src: String) -> Int IOError! {
+    handle: files.open(src.copy())
+    n := 0
+    loop line in handle.lines() -> n += 1
+    return Ok(n)
+}
+
+copy_upper: fn(src: String, dst: String) -> Int IOError! {
+    input: files.open(src.copy())
+    output: files.create(dst.copy())
+    n := 0
+    loop line in input.lines() {
+        output.write_line(line.to_upper())
+        n += 1
+    }
+    return Ok(n)
+}
+
+run: fn() {
+    src: Path.from("/tmp").join("jet_m7_src.txt").to_string()
+    dst: Path.from("/tmp").join("jet_m7_dst.txt").to_string()
+    // Write test data via the whole-file helper (kept as sugar).
+    wrote: fs.write(src, "alpha\nbeta\ngamma")
+    // Stream-copy with uppercase transform — bounded memory.
+    copied: copy_upper(src, dst)
+    // Verify: read destination and print.
+    result: fs.read(dst)
+    print(result)
+    // Count lines streaming.
+    n: count_lines(src)
+    print("lines: {n}")
+    // std.path helpers.
+    print(Path.from("/home/user/file.txt").parent())
+    print(Path.from("/home/user/file.txt").extension())
+    print(Path.from("/home/user/../file.txt").normalize().to_string())
+}

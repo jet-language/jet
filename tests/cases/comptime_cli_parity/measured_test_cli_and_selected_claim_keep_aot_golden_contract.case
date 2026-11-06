@@ -5,7 +5,7 @@ step: jet build main.jet
 exit: 0
 step: built
 exit: 0
-stdout: = ../../../Examples/features/expected/tooling/test_target.out
+stdout: = ../../../Examples/Tooling/Testing/TestTarget.out
 step: jet test --help
 exit: 0
 stdout: ~ "--filter" # Original help contains.
@@ -17,7 +17,7 @@ stdout: ~ "ns" # Original selected contains timing unit.
 # The original ran bench.jet in place, outside the scratch package. A copy under
 # {work} joins package `work`, whose main.jet already declares `run` (E0624
 # DuplicatePackageName), so the bench runs from the case's own tmp directory.
-copy: {root}/Examples/features/tooling/bench.jet {tmp}/bench/bench.jet
+copy: {root}/Examples/Tooling/Performance/Bench.jet {tmp}/bench/bench.jet
 step: jet test bench.jet --measure --json
 cwd: {tmp}/bench
 env: JET_STORE_DIR={work}/bench-cache
@@ -43,5 +43,5 @@ normalize: json stdout $.median_ns : number # timing varies
 normalize: json stdout $.mean_ns : number # timing varies
 normalize: json stdout $.max_ns : number # timing varies
 exit: 0
-stdout: = ../../../Examples/features/expected/tooling/bench.measure.out
+stdout: = ../../../Examples/Tooling/Performance/Bench.measure.out
 

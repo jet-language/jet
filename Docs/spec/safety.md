@@ -8,7 +8,7 @@ sema checks the gate and its obligations in
 The focused [`unsafe_ratchet` cases](../../tests/cases/guard_selftest/) and the
 [`ratchet checker`](../../Tools/agent/UnsafeRatchet.jet) provide the
 repository proof; gated examples live under
-[`Examples/features/`](../../Examples/features/). Terms such as stream and
+[`Examples/`](../../Examples/). Terms such as stream and
 reader follow the [Jet vocabulary](vocabulary.md).
 
 ## The audited escape
@@ -214,15 +214,15 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1336,
+  "total": 1335,
   "counts": {
     "Compiler": 675,
     "Core": 186,
     "Docs": 8,
-    "Examples": 42,
+    "Examples": 35,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 409
+    "tests": 415
   },
   "regions": [
     {
@@ -6310,294 +6310,245 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Examples",
-      "file": "Examples/features/crypto/crypto_migration.jet",
+      "file": "Examples/Crypto/CryptoMigration.jet",
       "line": 33,
       "column": 5,
       "reason": "AES-256-GCM protocol interoperability"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/crypto/crypto_suite.jet",
+      "file": "Examples/Crypto/CryptoSuite.jet",
       "line": 38,
       "column": 5,
       "reason": "known-answer check reads the RFC 7748 shared secret"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/crypto/expert_projection.jet",
+      "file": "Examples/Crypto/ExpertProjection.jet",
       "line": 35,
       "column": 5,
       "reason": "expert cryptography is an explicit opt-in"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/crypto/primitive_matrix.jet",
-      "line": 104,
-      "column": 5,
-      "reason": "known-answer check reads the RFC 7748 shared secret"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/crypto/primitive_matrix.jet",
-      "line": 166,
-      "column": 5,
-      "reason": "expert known-answer vectors need raw key bytes"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/crypto/random_api_split.jet",
+      "file": "Examples/Crypto/RandomAPISplit.jet",
       "line": 35,
       "column": 5,
       "reason": "compare the typed and raw HKDF rungs"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/crypto/vault_keys.jet",
+      "file": "Examples/Crypto/VaultKeys.jet",
       "line": 43,
       "column": 5,
       "reason": "restore audited raw signing-key material"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/effects/audited_gate_ladder.jet",
+      "file": "Examples/ErrorsAndEffects/Effects/AuditedGateLadder.jet",
       "line": 6,
       "column": 5,
       "reason": "the audited block has no low-level operation"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/effects/single_use_discard.jet",
-      "line": 35,
+      "file": "Examples/ErrorsAndEffects/Effects/SingleUse.jet",
+      "line": 85,
       "column": 5,
       "reason": "event cancelled; the ticket admits to nothing, so voiding it is correct"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/errors/transact_os_stop.jet",
-      "line": 33,
-      "column": 5,
-      "reason": "the stop runs the shared cleanup boundary"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/io/cleanup_matrix.jet",
-      "line": 35,
-      "column": 5,
-      "reason": "the stop runs the shared cleanup boundary"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/io/cleanup_matrix.jet",
-      "line": 80,
-      "column": 5,
-      "reason": "the exit callbacks have no captured state"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/io/os_process_control.jet",
-      "line": 31,
-      "column": 5,
-      "reason": "POSIX process and pipe control for the core.sys surface"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/io/os_stop_cleanup.jet",
-      "line": 26,
-      "column": 5,
-      "reason": "the stop callback uses the shared cleanup boundary"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/io/process_exit_cleanup.jet",
-      "line": 22,
-      "column": 5,
-      "reason": "the exit callback has no captured state"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/io/system_privileged_entry.jet",
-      "line": 10,
-      "column": 5,
-      "reason": "run only inside a disposable user namespace with a dedicated test identity"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/io/system_projection.jet",
-      "line": 21,
-      "column": 5,
-      "reason": "the clock file was created above in this test-owned directory"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/io/system_projection.jet",
-      "line": 27,
-      "column": 5,
-      "reason": "fork and reap both children before returning"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/lowlevel/inline_asm.jet",
-      "line": 8,
-      "column": 1,
-      "reason": "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/lowlevel/inline_asm.jet",
-      "line": 19,
-      "column": 5,
-      "reason": "call the audited register-only assembly contract"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/lowlevel/inline_c.jet",
+      "file": "Examples/Interop/FFI/InlineC.jet",
       "line": 6,
       "column": 1,
       "reason": "the scalar ABI contract matches the C definition"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/lowlevel/inline_c.jet",
+      "file": "Examples/Interop/FFI/InlineC.jet",
       "line": 13,
       "column": 1,
       "reason": "the scalar ABI contract deliberately returns a mismatched result"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/lowlevel/inline_c.jet",
+      "file": "Examples/Interop/FFI/InlineC.jet",
       "line": 19,
       "column": 5,
       "reason": "call the audited inline C contract"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/lowlevel/inline_c.jet",
+      "file": "Examples/Interop/FFI/InlineC.jet",
       "line": 26,
       "column": 9,
       "reason": "call the audited inline C contract with bounded Int values"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/lowlevel/inline_c.jet",
+      "file": "Examples/Interop/FFI/InlineC.jet",
       "line": 32,
       "column": 9,
       "reason": "call the audited inline C contract with a deliberately wrong C result"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/lowlevel/lowlevel.jet",
-      "line": 8,
-      "column": 5,
-      "reason": "`cell` is live on this stack frame and the pointer never escapes"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/lowlevel/mem_from_addr_direct.jet",
-      "line": 11,
-      "column": 5,
-      "reason": "the borrowed value is live in the caller and the pointer never escapes"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/lowlevel/mmio_board_write.jet",
-      "line": 9,
-      "column": 5,
-      "reason": "stand-in MMIO cell stays on this stack frame"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/lowlevel/opaque_handles/run.jet",
+      "file": "Examples/Interop/FFI/OpaqueHandles/run.jet",
       "line": 36,
       "column": 5,
       "reason": "fixed headers define handle close ownership, exclusive buffers, and bounded output lengths"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/lowlevel/pointer_cast_deref.jet",
+      "file": "Examples/LowLevel/InlineAsm.jet",
+      "line": 8,
+      "column": 1,
+      "reason": "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/LowLevel/InlineAsm.jet",
+      "line": 19,
+      "column": 5,
+      "reason": "call the audited register-only assembly contract"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/LowLevel/LowLevel.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "`cell` is live on this stack frame and the pointer never escapes"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/LowLevel/LowLevel.jet",
+      "line": 22,
+      "column": 5,
+      "reason": "`cell` is a live Int on this stack frame; the pointer never escapes"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/LowLevel/MMIOBoardWrite.jet",
+      "line": 9,
+      "column": 5,
+      "reason": "stand-in MMIO cell stays on this stack frame"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/LowLevel/PointerCastDeref.jet",
       "line": 11,
       "column": 5,
       "reason": "flag is live on this stack frame and the pointer never escapes"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/lowlevel/unsafe_obligations.jet",
+      "file": "Examples/LowLevel/UnsafeObligations.jet",
       "line": 9,
       "column": 5,
       "reason": "cell stays live and the pointer remains local"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/memory/expiring_secret.jet",
-      "line": 22,
-      "column": 5,
-      "reason": "vault key import: expiring secret lifetime"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/memory/pin.jet",
-      "line": 43,
-      "column": 5,
-      "reason": "node storage is fixed for the returned pin; self_addr names this place"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/memory/rawptr.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "`cell` is a live Int on this stack frame; the pointer never escapes"
-    },
-    {
-      "package": "Examples",
-      "file": "Examples/features/memory/uninit.jet",
+      "file": "Examples/Memory/Allocation/Uninit.jet",
       "line": 12,
       "column": 5,
       "reason": "uninitialized plain-data storage is filled before every read"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/memory/unsafe_sentries.jet",
+      "file": "Examples/Memory/ExpiringSecret.jet",
+      "line": 22,
+      "column": 5,
+      "reason": "vault key import: expiring secret lifetime"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/Memory/Pin.jet",
+      "line": 43,
+      "column": 5,
+      "reason": "node storage is fixed for the returned pin; self_addr names this place"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/Memory/Unsafe/UnsafeSentries.jet",
       "line": 7,
       "column": 5,
       "reason": "pointer is used only after arena reset to prove quarantine"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/memory/unsafe_sentries_package_off/run.jet",
+      "file": "Examples/Memory/Unsafe/UnsafeSentriesPackageOff/run.jet",
       "line": 7,
       "column": 5,
       "reason": "the local cell is live for this package-policy proof"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/memory/unsafe_sentries_provenance.jet",
+      "file": "Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet",
       "line": 6,
       "column": 5,
       "reason": "external address must be a live allocation"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/memory/unsafe_sentries_source_off.jet",
+      "file": "Examples/Memory/Unsafe/UnsafeSentriesSourceOff.jet",
       "line": 7,
       "column": 5,
       "reason": "the local cell is live for this raw read"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/text/checked_text_runtime_hole.jet",
+      "file": "Examples/Systems/Process/OSProcessControl.jet",
+      "line": 31,
+      "column": 5,
+      "reason": "POSIX process and pipe control for the core.sys surface"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/Systems/Process/ProcessExitCleanup.jet",
+      "line": 23,
+      "column": 5,
+      "reason": "the exit callback has no captured state"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/Systems/Process/SystemPrivilegedEntry.jet",
+      "line": 10,
+      "column": 5,
+      "reason": "run only inside a disposable user namespace with a dedicated test identity"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/Systems/Process/SystemProjection.jet",
+      "line": 21,
+      "column": 5,
+      "reason": "the clock file was created above in this test-owned directory"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/Systems/Process/SystemProjection.jet",
+      "line": 27,
+      "column": 5,
+      "reason": "fork and reap both children before returning"
+    },
+    {
+      "package": "Examples",
+      "file": "Examples/Text/CheckedText/CheckedTextRuntimeHole.jet",
       "line": 24,
       "column": 5,
       "reason": "checked text example output"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/text/checked_text_runtime_hole_stop.jet",
+      "file": "Examples/Text/CheckedText/CheckedTextRuntimeHoleStop.jet",
       "line": 23,
       "column": 5,
       "reason": "checked text example output"
     },
     {
       "package": "Examples",
-      "file": "Examples/features/tooling/checked_text_type.jet",
+      "file": "Examples/Text/CheckedText/CheckedTextType.jet",
       "line": 20,
       "column": 5,
       "reason": "checked text example output"
@@ -9166,17 +9117,59 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
-      "file": "tests/run/core_crypto_foundations/crypto_aead_tampering_is_rejected_across_tiers.jet",
+      "file": "tests/run/CoreCryptoFoundations/CryptoAeadTamperingIsRejectedAcrossTiers.jet",
       "line": 16,
       "column": 5,
       "reason": "fixed AEAD tamper vector"
     },
     {
       "package": "tests",
-      "file": "tests/run/patterns_and_fields/fixed_size_list_widens_at_core_call.jet",
+      "file": "tests/run/CoreCryptoFoundations/PrimitiveMatrix.jet",
+      "line": 104,
+      "column": 5,
+      "reason": "known-answer check reads the RFC 7748 shared secret"
+    },
+    {
+      "package": "tests",
+      "file": "tests/run/CoreCryptoFoundations/PrimitiveMatrix.jet",
+      "line": 166,
+      "column": 5,
+      "reason": "expert known-answer vectors need raw key bytes"
+    },
+    {
+      "package": "tests",
+      "file": "tests/run/CoreIO/CleanupMatrix.jet",
+      "line": 35,
+      "column": 5,
+      "reason": "the stop runs the shared cleanup boundary"
+    },
+    {
+      "package": "tests",
+      "file": "tests/run/CoreIO/CleanupMatrix.jet",
+      "line": 80,
+      "column": 5,
+      "reason": "the exit callbacks have no captured state"
+    },
+    {
+      "package": "tests",
+      "file": "tests/run/FailureFoundation/TransactOSStop.jet",
+      "line": 33,
+      "column": 5,
+      "reason": "the stop runs the shared cleanup boundary"
+    },
+    {
+      "package": "tests",
+      "file": "tests/run/PatternsAndFields/FixedSizeListWidensAtCoreCall.jet",
       "line": 5,
       "column": 5,
       "reason": "fixed signature vector"
+    },
+    {
+      "package": "tests",
+      "file": "tests/run/UnsafeAndRuntime/MemFromAddrDirect.jet",
+      "line": 11,
+      "column": 5,
+      "reason": "the borrowed value is live in the caller and the pointer never escapes"
     },
     {
       "package": "tests",
@@ -9588,11 +9581,11 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | 675 |
 | Core | 186 |
 | Docs | 8 |
-| Examples | 42 |
+| Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
-| tests | 409 |
-| **total** | **1336** |
+| tests | 415 |
+| **total** | **1335** |
 
 ### Regions
 
@@ -10467,48 +10460,41 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_runtime_asm_reach.jet | 22:9 | "call the audited register-only assembly contract" |
 | Docs | Docs/proposals/jai-style-sample/Data.jet | 1274:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
 | Docs | Docs/proposals/jai-style-sample/Data.jet | 1886:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Examples | Examples/features/crypto/crypto_migration.jet | 33:5 | "AES-256-GCM protocol interoperability" |
-| Examples | Examples/features/crypto/crypto_suite.jet | 38:5 | "known-answer check reads the RFC 7748 shared secret" |
-| Examples | Examples/features/crypto/expert_projection.jet | 35:5 | "expert cryptography is an explicit opt-in" |
-| Examples | Examples/features/crypto/primitive_matrix.jet | 104:5 | "known-answer check reads the RFC 7748 shared secret" |
-| Examples | Examples/features/crypto/primitive_matrix.jet | 166:5 | "expert known-answer vectors need raw key bytes" |
-| Examples | Examples/features/crypto/random_api_split.jet | 35:5 | "compare the typed and raw HKDF rungs" |
-| Examples | Examples/features/crypto/vault_keys.jet | 43:5 | "restore audited raw signing-key material" |
-| Examples | Examples/features/effects/audited_gate_ladder.jet | 6:5 | "the audited block has no low-level operation" |
-| Examples | Examples/features/effects/single_use_discard.jet | 35:5 | "event cancelled; the ticket admits to nothing, so voiding it is correct" |
-| Examples | Examples/features/errors/transact_os_stop.jet | 33:5 | "the stop runs the shared cleanup boundary" |
-| Examples | Examples/features/io/cleanup_matrix.jet | 35:5 | "the stop runs the shared cleanup boundary" |
-| Examples | Examples/features/io/cleanup_matrix.jet | 80:5 | "the exit callbacks have no captured state" |
-| Examples | Examples/features/io/os_process_control.jet | 31:5 | "POSIX process and pipe control for the core.sys surface" |
-| Examples | Examples/features/io/os_stop_cleanup.jet | 26:5 | "the stop callback uses the shared cleanup boundary" |
-| Examples | Examples/features/io/process_exit_cleanup.jet | 22:5 | "the exit callback has no captured state" |
-| Examples | Examples/features/io/system_privileged_entry.jet | 10:5 | "run only inside a disposable user namespace with a dedicated test identity" |
-| Examples | Examples/features/io/system_projection.jet | 21:5 | "the clock file was created above in this test-owned directory" |
-| Examples | Examples/features/io/system_projection.jet | 27:5 | "fork and reap both children before returning" |
-| Examples | Examples/features/lowlevel/inline_asm.jet | 8:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
-| Examples | Examples/features/lowlevel/inline_asm.jet | 19:5 | "call the audited register-only assembly contract" |
-| Examples | Examples/features/lowlevel/inline_c.jet | 6:1 | "the scalar ABI contract matches the C definition" |
-| Examples | Examples/features/lowlevel/inline_c.jet | 13:1 | "the scalar ABI contract deliberately returns a mismatched result" |
-| Examples | Examples/features/lowlevel/inline_c.jet | 19:5 | "call the audited inline C contract" |
-| Examples | Examples/features/lowlevel/inline_c.jet | 26:9 | "call the audited inline C contract with bounded Int values" |
-| Examples | Examples/features/lowlevel/inline_c.jet | 32:9 | "call the audited inline C contract with a deliberately wrong C result" |
-| Examples | Examples/features/lowlevel/lowlevel.jet | 8:5 | "`cell` is live on this stack frame and the pointer never escapes" |
-| Examples | Examples/features/lowlevel/mem_from_addr_direct.jet | 11:5 | "the borrowed value is live in the caller and the pointer never escapes" |
-| Examples | Examples/features/lowlevel/mmio_board_write.jet | 9:5 | "stand-in MMIO cell stays on this stack frame" |
-| Examples | Examples/features/lowlevel/opaque_handles/run.jet | 36:5 | "fixed headers define handle close ownership, exclusive buffers, and bounded output lengths" |
-| Examples | Examples/features/lowlevel/pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
-| Examples | Examples/features/lowlevel/unsafe_obligations.jet | 9:5 | "cell stays live and the pointer remains local" |
-| Examples | Examples/features/memory/expiring_secret.jet | 22:5 | "vault key import: expiring secret lifetime" |
-| Examples | Examples/features/memory/pin.jet | 43:5 | "node storage is fixed for the returned pin; self_addr names this place" |
-| Examples | Examples/features/memory/rawptr.jet | 7:5 | "`cell` is a live Int on this stack frame; the pointer never escapes" |
-| Examples | Examples/features/memory/uninit.jet | 12:5 | "uninitialized plain-data storage is filled before every read" |
-| Examples | Examples/features/memory/unsafe_sentries.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
-| Examples | Examples/features/memory/unsafe_sentries_package_off/run.jet | 7:5 | "the local cell is live for this package-policy proof" |
-| Examples | Examples/features/memory/unsafe_sentries_provenance.jet | 6:5 | "external address must be a live allocation" |
-| Examples | Examples/features/memory/unsafe_sentries_source_off.jet | 7:5 | "the local cell is live for this raw read" |
-| Examples | Examples/features/text/checked_text_runtime_hole.jet | 24:5 | "checked text example output" |
-| Examples | Examples/features/text/checked_text_runtime_hole_stop.jet | 23:5 | "checked text example output" |
-| Examples | Examples/features/tooling/checked_text_type.jet | 20:5 | "checked text example output" |
+| Examples | Examples/Crypto/CryptoMigration.jet | 33:5 | "AES-256-GCM protocol interoperability" |
+| Examples | Examples/Crypto/CryptoSuite.jet | 38:5 | "known-answer check reads the RFC 7748 shared secret" |
+| Examples | Examples/Crypto/ExpertProjection.jet | 35:5 | "expert cryptography is an explicit opt-in" |
+| Examples | Examples/Crypto/RandomAPISplit.jet | 35:5 | "compare the typed and raw HKDF rungs" |
+| Examples | Examples/Crypto/VaultKeys.jet | 43:5 | "restore audited raw signing-key material" |
+| Examples | Examples/ErrorsAndEffects/Effects/AuditedGateLadder.jet | 6:5 | "the audited block has no low-level operation" |
+| Examples | Examples/ErrorsAndEffects/Effects/SingleUse.jet | 85:5 | "event cancelled; the ticket admits to nothing, so voiding it is correct" |
+| Examples | Examples/Interop/FFI/InlineC.jet | 6:1 | "the scalar ABI contract matches the C definition" |
+| Examples | Examples/Interop/FFI/InlineC.jet | 13:1 | "the scalar ABI contract deliberately returns a mismatched result" |
+| Examples | Examples/Interop/FFI/InlineC.jet | 19:5 | "call the audited inline C contract" |
+| Examples | Examples/Interop/FFI/InlineC.jet | 26:9 | "call the audited inline C contract with bounded Int values" |
+| Examples | Examples/Interop/FFI/InlineC.jet | 32:9 | "call the audited inline C contract with a deliberately wrong C result" |
+| Examples | Examples/Interop/FFI/OpaqueHandles/run.jet | 36:5 | "fixed headers define handle close ownership, exclusive buffers, and bounded output lengths" |
+| Examples | Examples/LowLevel/InlineAsm.jet | 8:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
+| Examples | Examples/LowLevel/InlineAsm.jet | 19:5 | "call the audited register-only assembly contract" |
+| Examples | Examples/LowLevel/LowLevel.jet | 8:5 | "`cell` is live on this stack frame and the pointer never escapes" |
+| Examples | Examples/LowLevel/LowLevel.jet | 22:5 | "`cell` is a live Int on this stack frame; the pointer never escapes" |
+| Examples | Examples/LowLevel/MMIOBoardWrite.jet | 9:5 | "stand-in MMIO cell stays on this stack frame" |
+| Examples | Examples/LowLevel/PointerCastDeref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
+| Examples | Examples/LowLevel/UnsafeObligations.jet | 9:5 | "cell stays live and the pointer remains local" |
+| Examples | Examples/Memory/Allocation/Uninit.jet | 12:5 | "uninitialized plain-data storage is filled before every read" |
+| Examples | Examples/Memory/ExpiringSecret.jet | 22:5 | "vault key import: expiring secret lifetime" |
+| Examples | Examples/Memory/Pin.jet | 43:5 | "node storage is fixed for the returned pin; self_addr names this place" |
+| Examples | Examples/Memory/Unsafe/UnsafeSentries.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
+| Examples | Examples/Memory/Unsafe/UnsafeSentriesPackageOff/run.jet | 7:5 | "the local cell is live for this package-policy proof" |
+| Examples | Examples/Memory/Unsafe/UnsafeSentriesProvenance.jet | 6:5 | "external address must be a live allocation" |
+| Examples | Examples/Memory/Unsafe/UnsafeSentriesSourceOff.jet | 7:5 | "the local cell is live for this raw read" |
+| Examples | Examples/Systems/Process/OSProcessControl.jet | 31:5 | "POSIX process and pipe control for the core.sys surface" |
+| Examples | Examples/Systems/Process/ProcessExitCleanup.jet | 23:5 | "the exit callback has no captured state" |
+| Examples | Examples/Systems/Process/SystemPrivilegedEntry.jet | 10:5 | "run only inside a disposable user namespace with a dedicated test identity" |
+| Examples | Examples/Systems/Process/SystemProjection.jet | 21:5 | "the clock file was created above in this test-owned directory" |
+| Examples | Examples/Systems/Process/SystemProjection.jet | 27:5 | "fork and reap both children before returning" |
+| Examples | Examples/Text/CheckedText/CheckedTextRuntimeHole.jet | 24:5 | "checked text example output" |
+| Examples | Examples/Text/CheckedText/CheckedTextRuntimeHoleStop.jet | 23:5 | "checked text example output" |
+| Examples | Examples/Text/CheckedText/CheckedTextType.jet | 20:5 | "checked text example output" |
 | Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 569:9 | "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler" |
 | Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 745:5 | "source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here" |
 | Jetpack | Jetpack/Provider/Batteries/embedded/embedded.jet | 181:9 | "host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address" |
@@ -10875,8 +10861,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/fuzz/sema/differential/ex_crypto_crypto_migration.jet | 28:5 | "AES-256-GCM protocol interoperability" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet | 10:5 | "`cell` is live on this stack frame and the pointer never escapes" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
-| tests | tests/run/core_crypto_foundations/crypto_aead_tampering_is_rejected_across_tiers.jet | 16:5 | "fixed AEAD tamper vector" |
-| tests | tests/run/patterns_and_fields/fixed_size_list_widens_at_core_call.jet | 5:5 | "fixed signature vector" |
+| tests | tests/run/CoreCryptoFoundations/CryptoAeadTamperingIsRejectedAcrossTiers.jet | 16:5 | "fixed AEAD tamper vector" |
+| tests | tests/run/CoreCryptoFoundations/PrimitiveMatrix.jet | 104:5 | "known-answer check reads the RFC 7748 shared secret" |
+| tests | tests/run/CoreCryptoFoundations/PrimitiveMatrix.jet | 166:5 | "expert known-answer vectors need raw key bytes" |
+| tests | tests/run/CoreIO/CleanupMatrix.jet | 35:5 | "the stop runs the shared cleanup boundary" |
+| tests | tests/run/CoreIO/CleanupMatrix.jet | 80:5 | "the exit callbacks have no captured state" |
+| tests | tests/run/FailureFoundation/TransactOSStop.jet | 33:5 | "the stop runs the shared cleanup boundary" |
+| tests | tests/run/PatternsAndFields/FixedSizeListWidensAtCoreCall.jet | 5:5 | "fixed signature vector" |
+| tests | tests/run/UnsafeAndRuntime/MemFromAddrDirect.jet | 11:5 | "the borrowed value is live in the caller and the pointer never escapes" |
 | tests | tests/ui/audited_gate_ladder_forbidden/run.jet | 3:5 | "the organization policy refuses this audited escape" |
 | tests | tests/ui/cffi_out_pointer_requires_unsafe.jet | 14:1 | "the local slot remains live for the complete C call" |
 | tests | tests/ui/checked_text_raw_requires_unsafe.jet | 22:5 | "audited literal" |

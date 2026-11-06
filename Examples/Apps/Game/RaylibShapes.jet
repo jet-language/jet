@@ -1,0 +1,92 @@
+package: {
+    name: "raylib_shapes"
+    authority: {
+    allow: [IO, GPU]
+    }
+}
+use rl: core.game.raylib
+
+// One frame of raylib's 2D shapes drawn by Jet's software rasterizer: float
+// rectangles, outlines, gradients, rounded rectangles, circle and ellipse
+// outlines, rings and sectors, and regular polygons, some translucent and some
+// clipped by the canvas. With JET_RAYLIB_CAPTURE set, end_drawing writes the
+// canvas as a PAM image; the golden pins its SHA-256 on every tier.
+run: fn() {
+    window: rl.window_open(96, 72, "Jet shapes")
+    rl.begin_drawing(window)
+    rl.clear_background(rl.color(12, 14, 24, 255))
+    rl.draw_rectangle_gradient_v(0, 0, 96, 24, rl.color(30, 60, 140, 255), rl.color(10, 20, 40, 255))
+    rl.draw_rectangle_gradient_h(-6, 60, 50, 16, rl.color(255, 80, 40, 255), rl.color(40, 200, 120, 96))
+    rl.draw_rectangle_gradient_ex(rl.rectangle(52.25, 40.5, 30.0, 20.0), rl.color(255, 0, 0, 255), rl.color(0, 255, 0, 255), rl.color(0, 0, 255, 255), rl.color(255, 255, 0, 255))
+    rl.draw_rectangle_rec(rl.rectangle(3.4, 3.6, 10.5, 6.25), rl.color(240, 240, 240, 255))
+    rl.draw_rectangle_lines(16, 2, 12, 9, rl.color(255, 200, 0, 255))
+    rl.draw_rectangle_lines_ex(rl.rectangle(30.0, 2.0, 14.0, 10.0), 3.0, rl.color(120, 220, 255, 160))
+    rl.draw_rectangle_rounded(rl.rectangle(48.0, 3.0, 22.0, 12.0), 0.6, 0, rl.color(200, 90, 220, 255))
+    rl.draw_rectangle_rounded(rl.rectangle(89.9, 40.0, 0.75, 6.0), 0.5, 4, rl.color(255, 255, 255, 255))
+    rl.draw_rectangle_rounded_lines(rl.rectangle(73.5, 3.5, 18.0, 14.0), 0.5, 6, rl.color(255, 255, 255, 200))
+    rl.draw_rectangle_rounded_lines(rl.rectangle(4.0, 14.0, 8.0, 5.0), 0.0, 0, rl.color(90, 255, 120, 255))
+    rl.draw_circle_lines(24, 34, 9, rl.color(255, 120, 120, 255))
+    rl.draw_ellipse(48, 30, 11.5, 6.25, rl.color(60, 180, 255, 140))
+    rl.draw_ellipse_lines(48, 30, 13.0, 8.0, rl.color(255, 255, 255, 255))
+    rl.draw_ring(rl.vector2(76.5, 30.0), 10.0, 5.0, -30.0, 210.0, 0, rl.color(255, 170, 40, 220))
+    rl.draw_ring_lines(rl.vector2(76.5, 30.0), 11.0, 13.5, 0.0, 360.0, 24, rl.color(180, 180, 255, 255))
+    rl.draw_ring(rl.vector2(10.0, 50.0), 0.0, 9.0, 200.0, 20.0, 5, rl.color(250, 60, 120, 200))
+    rl.draw_poly(rl.vector2(30.0, 54.0), 6, 8.0, 15.0, rl.color(120, 255, 200, 255))
+    rl.draw_poly_lines(rl.vector2(30.0, 54.0), 5, 10.5, 0.0, rl.color(255, 255, 0, 255))
+    rl.draw_poly(rl.vector2(92.0, 66.0), 2, 9.0, 90.0, rl.color(255, 255, 255, 100))
+    rl.draw_pixel(95, 71, rl.color(255, 0, 255, 255))
+    rl.draw_pixel(-1, 5, rl.color(255, 0, 255, 255))
+    rl.end_drawing()
+    rl.close_window(window)
+    print("shapes=96x72 frame=presented")
+    collisions()
+    centered_titles()
+}
+
+// raylib's collision checks are plain functions over its Vector2 and
+// Rectangle: no window and no effect. A paddle sweeps right one step at a
+// time; each line reports what it touches at that step.
+collisions: fn() {
+    wall: rl.rectangle(40.0, 0.0, 8.0, 30.0)
+    ball: rl.vector2(30.0, 20.0)
+    slope_from: rl.vector2(0.0, 30.0)
+    slope_to: rl.vector2(60.0, 0.0)
+    loop step in 0..<4 {
+        paddle: rl.rectangle(Float{step * 12}, 16.0, 10.0, 4.0)
+        hits_wall: rl.check_collision_recs(paddle, wall)
+        hits_ball: rl.check_collision_circle_rec(ball, 3.0, paddle)
+        overlap: rl.get_collision_rec(paddle, wall)
+        print("step={step} wall={hits_wall} ball={hits_ball} overlap_width={Int.from_float(overlap.width) ?? -1}")
+    }
+    corner: rl.vector2(48.0, 30.0)
+    print("corner_inside={rl.check_collision_point_rec(corner, wall)}")
+    print("near_corner={rl.check_collision_point_circle(rl.vector2(51.0, 34.0), corner, 5.0)}")
+    print("ball_on_slope={rl.check_collision_circle_line(ball, 3.0, slope_from, slope_to)}")
+    print("point_on_slope={rl.check_collision_point_line(rl.vector2(20.0, 20.0), slope_from, slope_to, 1)}")
+    triangle: rl.check_collision_point_triangle(ball, rl.vector2(20.0, 10.0), rl.vector2(40.0, 30.0), rl.vector2(20.0, 30.0))
+    print("ball_in_triangle={triangle}")
+    star: [rl.RaylibVector2]{rl.vector2(10.0, 0.0), rl.vector2(13.0, 7.0), rl.vector2(20.0, 7.0), rl.vector2(14.0, 12.0), rl.vector2(16.0, 20.0), rl.vector2(10.0, 15.0), rl.vector2(4.0, 20.0), rl.vector2(6.0, 12.0), rl.vector2(0.0, 7.0), rl.vector2(7.0, 7.0)}
+    print("star_center={rl.check_collision_point_poly(rl.vector2(10.0, 10.0), star)} star_notch={rl.check_collision_point_poly(rl.vector2(10.0, 18.0), star)}")
+    crossing: rl.check_collision_lines(slope_from, slope_to, rl.vector2(0.0, 0.0), rl.vector2(60.0, 30.0)) ?? rl.vector2(-1.0, -1.0)
+    print("slopes_cross_at={Int.from_float(crossing.x) ?? -1},{Int.from_float(crossing.y) ?? -1}")
+    print("circles={rl.check_collision_circles(ball, 3.0, rl.vector2(36.0, 28.0), 7.0)}")
+}
+
+// measure_text reports the width draw_text covers, with no window and no
+// effect, so a title can be centered on a 320-pixel screen before drawing.
+centered: fn(name: String, text: String, size: Int) {
+    width: rl.measure_text(text, size)
+    print("{name} size={size} width={width} x={(320 - width) /% 2}")
+}
+
+centered_titles: fn() {
+    centered("Hi", "Hi", 10)
+    centered("Hi", "Hi", 4)
+    centered("Hi", "Hi", 15)
+    centered("Hi", "Hi", 25)
+    centered("PAUSED", "PAUSED", 20)
+    centered("Score: 1200", "Score: 1200", 10)
+    centered("Game\\nOver!", "Game\nOver!", 30)
+    centered("naïve", "naïve", 10)
+    centered("(empty)", "", 20)
+}

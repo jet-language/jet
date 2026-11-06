@@ -1,0 +1,40 @@
+// External values carry origin facts until a typed decode or
+// an explicit #Scrub gate clears them. Raw sinks reject the uncleared value;
+// the rejected SQL.raw line below is executable in tests/taint.rs.
+use json: core.encoding.json
+
+#Codable
+Config: struct {
+    name: String
+}
+
+// The audited cleaning step: takes untrusted text, returns a value the rest of
+// the program may trust. A real sanitizer would reject shell metacharacters; here
+// it keeps only the part before any space, which is enough to make the point.
+#Scrub(Input) shell_arg: fn(raw: #Input String) -> String { raw.split(" ").to_list()[0] }
+
+failed_decode: fn() -> String {
+    json.decode<Config>("not-json") ?? return "decode failed"
+    return "decode unexpectedly succeeded"
+}
+
+typed_decode: fn() -> String {
+    config: json.decode<Config>("{{\"name\":\"Ada\"}}") ?? return "typed decode failed"
+    return "typed decode: {config.name}"
+}
+
+run: fn() {
+    print(failed_decode())
+    print(typed_decode())
+
+    // `SQL.raw(raw)` is rejected with E0721 while `raw` carries its origin
+    // fact. The checked test keeps this refusal live without making the example
+    // itself fail to compile.
+    print("raw sink refused: E0721")
+
+    // Untrusted input, marked at its source. Taint spreads through the binding.
+    name: #Input "world danger; rm -rf /"
+    // Clean it. The sanitizer's result is trusted after the explicit gate.
+    safe: shell_arg(name)
+    print("#Scrub: {safe}")
+}

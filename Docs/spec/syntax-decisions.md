@@ -464,7 +464,7 @@ Calls resolve a lexical value binding before a same-named file function,
 including when the binding is a lambda. This does not relax the no-shadowing
 rule for two bindings within one function.
 
-See the executable [lambda interface example](../../Examples/features/callable/lambda_interface.jet).
+See the executable [lambda interface example](../../Examples/Basics/Functions/LambdaInterface.jet).
 
 **S47 — Function types & captures**: fn type `fn(T1, T2) -> R`; each unmarked
 parameter has plain read access (D-MEM-PARAM1). Named `fn`s coerce to function
@@ -549,7 +549,7 @@ labelled rewrite of the first candidate; labels are the deconfliction
 mechanism. User Jet definitions remain unique (D-CAP10), and S83 multi-head
 dispatch remains variant-driven, so this rule does not add user overloading.
 
-Corpus boundaries: `Examples/features/basics/named_args.jet` covers `/` and
+Corpus boundaries: `Examples/Basics/Functions/NamedArgs.jet` covers `/` and
 `*` zones, skipped defaults in `connect`, a defaulted slot and variadic tail
 in `collect`, and adjacent same-type `Float` parameters in `Rect.new`, both
 bare and labelled. `tests/ui/call_mapping_type_boundary.jet` proves that types
@@ -906,8 +906,8 @@ ownership escape follows the same materialization rules as other read views.
 Map tables require an `else` arm unless an arm consists solely of irrefutable
 optional entries and permits extra keys with `..`.
 
-Executable examples: `Examples/features/patterns/record_list_patterns.jet`
-and `Examples/features/patterns/map_patterns.jet`.
+Executable examples: `Examples/Types/Patterns/RecordListPatterns.jet`
+and `Examples/Types/Patterns/MapPatterns.jet`.
 
 **D-FLOWTYPE1=A — Optional narrowing after presence checks** *(ratified
 2026-07-24, card #746)*: for a direct immutable local or parameter of type
@@ -1489,8 +1489,8 @@ implementations.
 
 **D-ALIAS-OP1=B** *(ratified 2026-08-06, card #1513; amends D-TYPEALIAS1)*:
 Alias declarations bind with `::`; the retired `=` spelling emits E0378. The
-canonical executable proof is `Examples/features/types/type_alias.jet` with
-`Examples/features/expected/types/type_alias.out`.
+canonical executable proof is `Examples/Types/TypeAlias.jet` with
+`Examples/Types/TypeAlias.out`.
 Aliases preserve the target's construction syntax: an alias of a struct
 constructs the struct, including substituted generic field types. A parameter
 the target never names is accepted and its argument is discarded
@@ -1520,8 +1520,8 @@ adapters. Default `Int` arithmetic never takes an overflow-trap path. Fixed
 width integers keep trap-by-default arithmetic and expose explicit
 `checked_*`, `wrapping_*`, and `saturating_*` receiver methods; fixed-width and
 FFI conversions range-check and report E1003. The canonical executable proof is
-`Examples/features/text/int_exact.jet` with
-`Examples/features/expected/text/int_exact.out`.
+`Examples/Math/IntExact.jet` with
+`Examples/Math/IntExact.out`.
 
 **D-BIGINT1** *(superseded by D-INTBIG1 and amended by D-TYPE2-NUM1=A,
 2026-08-06)*: the former public `BigInt` spelling and its explicit constructors
@@ -1621,7 +1621,7 @@ Write `.lazy()` first to enter the same deferred `Iter<T>` vocabulary, so
 already arrive over time, such as file lines, streams, channels, and
 `String.split`, remain deferred. The rest of the D-ITERTOOLS1 adapter ledger
 stays on `Iter`; the #1479 surface is covered by
-`Examples/features/collections/iter_adapters.jet` under this split. Adjacent
+`Examples/Collections/Iterators/IterAdapters.jet` under this split. Adjacent
 eager adapters may fuse when their intermediate is not observable, without
 changing callback order or count.
 
@@ -1918,8 +1918,8 @@ into neither middle state pays for neither. Constants:
 `Compiler/JetFoundation/Data/Syntax/PackageFiles.jet`. The one carrier is the
 compiler's single `?T`/`T !E` outcome lowering, so every tier names one type.
 Examples:
-`Examples/features/errors/or_err.jet` and
-`Examples/features/errors/partial_and_notes.jet`.
+`Examples/ErrorsAndEffects/Errors/OrErr.jet` and
+`Examples/ErrorsAndEffects/Errors/PartialAndNotes.jet`.
 
 **D-FAIL-ERROR1=A — `Err` is the default error value** *(ratified 2026-08-06,
 card #1528)*: `Err("msg")` builds the default error. Labels add `code` and
@@ -2093,7 +2093,7 @@ Types declared in different modules retain distinct checked identities even
 when their leaf names are equal. Import aliases select the declaring module;
 lowering consumes that resolved identity, never a bundle-wide leaf-name search.
 The executable witness is
-[`same_type_names`](../../Examples/features/modules/same_type_names/run.jet).
+[`same_type_names`](../../tests/run/Modules/SameTypeNames/run.jet).
 
 `.[ ]` has one prefix-member law. In expression position, entries remain
 members and produce their values (`point.[x, y]`); after `use`, entries produce
@@ -3519,7 +3519,7 @@ the marker registry because a stage is not a rule about a target. The
 
 Constant: `COMPTIME_MARK` in
 `Compiler/JetFoundation/Data/Syntax/CoreSurface.jet`. Examples:
-`Examples/features/comptime/comptime_block.jet` and `comptime_if.jet`.
+`Examples/Metaprogramming/Comptime/PrepBlock.jet` and `comptime_if.jet`.
 
 **D-LAYOUT-FACTS1=B — Compiler-owned type facts** *(spelling amended by
 D-COMPILER-NS1=A)*: `T.$layout`, `T.$name` and `T.$fields` are one closed spelling,
@@ -5285,7 +5285,7 @@ connection parameter.
 `DB.Read`/`DB.Write` leaf inference above, the `-[DB.Read]>` qualification
 proof, the `E0740` hidden-write reject (`tests/ui/db_read_query_hidden_write`),
 and `DBConnection`/`DBError` nameability, with a runnable example
-(`Examples/features/io/db_read_footprint.jet`). The #1158 reconciliation now
+(`Examples/Data/Database/DBReadFootprint.jet`). The #1158 reconciliation now
 ships the local production seam: `DBScope.live` registers a policy-aware
 rerunner, AOT binds results to the canonical `JetSignal<T>`, the ambient/JIT
 adapter calls the same Prelude, and matching write-set invalidations publish
@@ -5359,7 +5359,7 @@ c.gtk4` through the S59 `pkg-config gtk4` path; a missing gtk4 at build time is
 the existing **E3201** (names the fix — install gtk4 / add the `c@system` dep
 / enter `nix develop`). `jet run` opens the window; `JET_UI_HEADLESS=1` skips
 it so tests/CI terminate. Example:
-`Examples/features/ui/ui_native_linux.jet`; structural + link proof in
+`Examples/Apps/UI/UINativeLinux.jet`; structural + link proof in
 `tests/cross.rs` (`gtk_backend_*`). macOS/Windows native backends stay out of
 scope (their `comptime` arms degrade honestly).
 **D-STYLEUNIT1 (=A, ratified 2026-07-03, c2qj06uq)**: UI style lengths are
@@ -5367,7 +5367,7 @@ unit-family literals — `core.ui.style` declares `#UnitFamily(Length) { px }`
 (D-QUAL3), so `width: 320px` is a compile-checked `Px` value via the one
 ratified unit mechanism (D-UNITLIT1); no second style-only unit system (I8).
 Supersedes Phase 3's interim `Length` struct pair. *Shipped* (Tower c134):
-`Examples/features/ui/ui_typed_style.jet` declares `#UnitFamily(Length) { px }`
+`Examples/Apps/UI/UITypedStyle.jet` declares `#UnitFamily(Length) { px }`
 and its `Style` record carries `width: Px`/`height: Px`; the interim `Length`
 struct/enum pair is deleted. A distinct-typed struct/enum field (`width: Px`,
 `Length(Px)`) is an ordinary checked field, and a container's derived debug
@@ -7346,7 +7346,7 @@ same-named job on the next build. Retired words are not reserved.
 it launches with `ProcessSpec.env(key, value)`, and a small ordinary helper
 applies the same setting to several commands. The job's own process
 environment never changes, so jobs running side by side in one graph cannot
-see each other's settings. Example: `Examples/features/script_job/job_env.jet`.
+see each other's settings. Example: `Examples/Tooling/DevLoop/JobEnv.jet`.
 
 **D-CMD-OVERRIDE1=C — every live command may be expert-overridden** *(ratified
 2026-08-05, card #1451; amended by D-CLAIM-BENCH1=A)*: `test: fn(suite:
@@ -8329,7 +8329,7 @@ level; any other block value computes at run time, where O1 and O2 may still
 fold it. `name: comptime { value }` that fails stops the build with E3010.
 This corrects the 2026-09-30 entry below, which called an ALL_CAPS
 `NAME: value` an ordinary runtime constant. Example:
-`Examples/features/comptime/fold_constants.jet`.
+`Examples/Metaprogramming/Comptime/FoldConstants.jet`.
 
 **2026-10-23 — `prep` retired; `comptime` is the one compile-time word**:
 every form that `prep` led (`prep { … }`, `NAME: prep { value }`,
@@ -9375,10 +9375,10 @@ Internal module identities never appear in a message.
 takes write access may be handed it with `&` (`bump(&total)`), like a local.
 Other static cells (plain mutable module bindings, `#Static`) keep E0223.
 `#Persist` on a local binding keeps E0145. Example:
-`Examples/features/devloop/persist_write_borrow.jet` (prints `1`).
+`tests/run/DevLoop/PersistWriteBorrow.jet` (prints `1`).
 
 **2026-10-22 — D-PREP-LOCAL1=A** *(card #5091)*: `name: comptime { value }`
 inside a function body is supported: the block runs while building and every
 read of `name` is the prepared value (a read counts as a use, so no unused
-binding lint). Example: `Examples/features/comptime/prep_local_value.jet`
+binding lint). Example: `Examples/Metaprogramming/Comptime/PrepBlock.jet`
 (prints `8`).

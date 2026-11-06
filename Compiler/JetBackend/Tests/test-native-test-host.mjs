@@ -22,7 +22,7 @@ for(const example of examples)for(const [policy,args]of policies){
  const runs=[];
  for(const [side,binary]of [['native',hosted]]){
   rmSync(work,{recursive:true,force:true});mkdirSync(work,{recursive:true});
-  copyFileSync(join(repo,'Examples/features',example),join(work,'case.jet'));
+  copyFileSync(join(repo,'Examples',example),join(work,'case.jet'));
   writeFileSync(join(work,'package.jet'),'name: "native_test_example"\nversion: "0.0.1"\nedition: "2026"\n');
   const run=spawnSync(binary,['test','--color=never',...args,'case.jet'],{cwd:work,env:{...process.env,JET_TOOLCHAIN_ROOT:repo,JET_TEST_JSON:'1',NO_COLOR:'1',TERM:'dumb'},encoding:'utf8',timeout:600000,maxBuffer:64<<20});
   writeFileSync(join(out,`${name}.${side}.stdout`),run.stdout??'');writeFileSync(join(out,`${name}.${side}.stderr`),run.stderr??'');

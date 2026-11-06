@@ -1,5 +1,5 @@
 // Like the Rust host this maintainer operation publishes the example first and
-// its expected bytes next.
+// its expected bytes next, beside it.
 use {
     cli_files: core.files
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
@@ -7,7 +7,6 @@ use {
 
 JetCLIDevtoolsExample: struct {
  directory: String
- expected_directory: String
  path: String
  expected_path: String
  source: String
@@ -21,13 +20,12 @@ jet_cli_devtools_example: fn(spec: String) -> JetCLIDevtoolsExample JetCLIReadEr
  if split == 0 || split >= bytes.len() - 1 -> return Err(jet_cli_read_error("expected `<topic>/<name>`, got `{spec}`"))
  topic: spec.slice(0..<split)
  name: spec.slice((split + 1)..<bytes.len())
- directory: cli_files.join("Examples/features", topic)
- expected_directory: cli_files.join("Examples/features/expected", topic)
+ directory: cli_files.join("Examples", topic)
  greeting: "scaffold: {topic}/{name}"
  Ok(JetCLIDevtoolsExample{
- directory: directory, expected_directory: expected_directory,
- path: cli_files.join(directory, "{name}.jet"), expected_path: cli_files.join(expected_directory, "{name}.out"),
- source: "// TODO: describe Examples/features/{topic}/{name}.jet\nrun: fn() {{\n    print(\"{greeting}\")\n}}\n",
+ directory: directory,
+ path: cli_files.join(directory, "{name}.jet"), expected_path: cli_files.join(directory, "{name}.out"),
+ source: "// TODO: describe Examples/{topic}/{name}.jet\nrun: fn() {{\n    print(\"{greeting}\")\n}}\n",
  expected: "{greeting}\n",
  })
 }
@@ -41,7 +39,6 @@ jet_cli_devtools_new_example: fn(args: [String], color: Bool) -[FS]> JetCLIPlan 
  example: jet_cli_devtools_example(args[0]) ?? return jet_cli_fail("E2104", err.message, jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
  if cli_files.exists(example.path) -> return jet_cli_fail("E2104", "`{example.path}` already exists", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
  cli_files.create_dir_all(example.directory) ?? return jet_cli_devtools_example_error("couldn't create `{example.directory}`: {jet_cli_io_error_text(err)}", color)
- cli_files.create_dir_all(example.expected_directory) ?? return jet_cli_devtools_example_error("couldn't create `{example.expected_directory}`: {jet_cli_io_error_text(err)}", color)
  cli_files.write(example.path, example.source) ?? return jet_cli_devtools_example_error("couldn't write `{example.path}`: {jet_cli_io_error_text(err)}", color)
  cli_files.write(example.expected_path, example.expected) ?? return jet_cli_devtools_example_error("couldn't write `{example.expected_path}`: {jet_cli_io_error_text(err)}", color)
  // This maintainer command deliberately prints confirmations even with --json

@@ -1,12 +1,13 @@
 # tests/ui_backend.rs::ui_host_rights_source_preserves_storage_across_hosted_tiers at tests/ui_backend.rs:12; hand-port
-# assert_example_cli_tiers_agree_with_package: Examples/features/ui/host_rights.jet declares its inline package, so the case adds none.
+# assert_example_cli_tiers_agree_with_package: the fixture's host_rights.jet (the former UI host-rights example) declares its inline package, so the case adds none.
+fixture: ui_host_rights_source_preserves_storage_across_hosted_tiers.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 env: JETPACK_ENV=1
-step release: jet run --release {root}/Examples/features/ui/host_rights.jet
+step release: jet run --release host_rights.jet
 exit: 0
-stdout: = ../../../Examples/features/expected/ui/host_rights.out # include_str!("../Examples/features/expected/ui/host_rights.out")
-step default: jet run {root}/Examples/features/ui/host_rights.jet
+stdout: = ui_host_rights_source_preserves_storage_across_hosted_tiers.host_rights.out
+step default: jet run host_rights.jet
 exit: == release # the tier-agreement harness exit code agrees with release
 stdout: == release # the tier-agreement harness output agrees with release

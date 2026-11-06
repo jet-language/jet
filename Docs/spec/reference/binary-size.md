@@ -20,14 +20,14 @@ x86-64 target and compare the produced file size in bytes:
 
 | Workload | Example | CI cap |
 |---|---|---:|
-| Hello | `Examples/features/basics/hello.jet` | 512,000 |
-| CLI | `Examples/features/io/cli.jet` | 524,288 |
-| Small HTTP service | `Examples/features/net/http_server_tasks.jet` | 3,145,728 |
-| Library | `Examples/features/modules/library.jet` | 4,194,304 |
-| Low-level | `Examples/features/lowlevel/lowlevel.jet` | 4,194,304 |
-| Freestanding | `Examples/features/lowlevel/freestanding.jet` | 4,194,304 |
+| Hello | `Examples/Basics/Hello.jet` | 512,000 |
+| CLI | `Examples/Systems/CLI/CLIArgs.jet` | 524,288 |
+| Small HTTP service | `Examples/Network/HTTP/HTTPServer.jet` | 3,145,728 |
+| Library | `Examples/Modules/Library.jet` | 4,194,304 |
+| Low-level | `Examples/LowLevel/LowLevel.jet` | 4,194,304 |
+| Freestanding | `Examples/LowLevel/Freestanding.jet` | 4,194,304 |
 
-The test also exercises `Examples/features/collections/wordcount.jet` as a
+The test also exercises `Examples/Collections/WordCount.jet` as a
 small-profile comparison: its `--small` artifact must be smaller than the
 default artifact. That comparison is an invariant, not a fixed byte budget.
 
@@ -37,7 +37,7 @@ Build the same source in a clean directory with the same target and inspect the
 resulting executable size:
 
 ```sh
-jet build --small Examples/features/basics/hello.jet
+jet build --small Examples/Basics/Hello.jet
 ```
 
 The gate compares the file size with the cap and requires a positive result.

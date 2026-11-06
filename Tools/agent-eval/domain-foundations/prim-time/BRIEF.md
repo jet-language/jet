@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-Build, as library Jet over the core time types: business-day arithmetic with an exchange holiday calendar; recurring schedules with time zones and DST; and astronomical time scales (UTC, TAI, TT, UT1 with leap seconds) with conversions to Julian dates. Use Examples/features/time/**.
+Build, as library Jet over the core time types: business-day arithmetic with an exchange holiday calendar; recurring schedules with time zones and DST; and astronomical time scales (UTC, TAI, TT, UT1 with leap seconds) with conversions to Julian dates. Use Examples/Systems/Time/**.
 
 ## Answer these
 

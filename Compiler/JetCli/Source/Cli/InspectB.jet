@@ -349,13 +349,13 @@ jet_cli_digest_core_module_text: fn() -> String Never! {
 jet_cli_llm_digest: fn() -> String Never! {
     marker_text: jet_cli_digest_marker_text(marker_source_read(MARKER_SOURCE))
     idiom_suites_lines: [String]{
-        "Each idiom has one executable, golden-backed source of truth under `Examples/suites/`.",
+        "Each idiom has one executable, golden-backed source of truth under `Examples/Apps/Programs/`.",
         "",
-        "- Dispatch: `Examples/suites/dispatch.jet` — ordered dispatch tables and grouped aliases.",
-        "- Failure: `Examples/suites/failure.jet` — implicit failure flow, typed expert contracts, and one conversion rail.",
-        "- Finite state: `Examples/suites/finite_state.jet` — enums, variant groups, tags, and typestate transitions.",
-        "- Ownership: `Examples/suites/ownership.jet` — reused views, explicit `.copy()` boundaries, and cost visibility.",
-        "- Wire output: `Examples/suites/wire_output.jet` — canonical JSON writer bytes and a `#Codable` round trip.",
+        "- Dispatch: `Examples/Apps/Programs/Dispatch.jet` — ordered dispatch tables and grouped aliases.",
+        "- Failure: `Examples/Apps/Programs/Failure.jet` — implicit failure flow, typed expert contracts, and one conversion rail.",
+        "- Finite state: `Examples/Apps/Programs/FiniteState.jet` — enums, variant groups, tags, and typestate transitions.",
+        "- Ownership: `Examples/Apps/Programs/Ownership.jet` — reused views, explicit `.copy()` boundaries, and cost visibility.",
+        "- Wire output: `Examples/Apps/Programs/WireOutput.jet` — canonical JSON writer bytes and a `#Codable` round trip.",
     }
     idiom_suites_body: idiom_suites_lines.join("\n")
     first_program_lines: [String]{
@@ -843,7 +843,7 @@ jet_cli_inspect_env_host: fn(file: String, source: String, base_dir: String, col
 // `jet inspect semindex <file.jet>`: the semantic index of the checked entry,
 // compiled by the host (`JetCLIPlan.Semindex`).
 jet_cli_semindex: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
-    path: jet_cli_inspect_first_positional(args) ?? return jet_cli_inspect_b_fail("E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex Examples/features/basics/hello.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    path: jet_cli_inspect_first_positional(args) ?? return jet_cli_inspect_b_fail("E2104", "`jet inspect semindex` needs an entry file", "jet inspect semindex Examples/Basics/Hello.jet", color, json, JET_DRIVER_EXIT_USER_ERROR)
     JetCLIPlan.Semindex{file: jet_cli_inspect_absolutize(path), color: color, json: json}
 }
 
@@ -855,7 +855,7 @@ jet_cli_inspect_output: fn(args: [String], color: Bool, json: Bool) -> JetCLIPla
     // E0201) is copied into the filtered list (owner: `positionals`).
     positionals: loop argument in args if !argument.starts_with("-") -> argument.copy()
     if positionals.len() == 0 {
-        return jet_cli_inspect_b_fail("E2104", "`jet inspect output` needs an entry file", "run `jet inspect output Examples/features/tooling/output_callable.jet`", color, json, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_inspect_b_fail("E2104", "`jet inspect output` needs an entry file", "run `jet inspect output Examples/Tooling/OutputCallable.jet`", color, json, JET_DRIVER_EXIT_USAGE)
     }
     // copy: `positionals[1]` stays in its list (owner: `positionals`; no move out of an element,
     // E0225) and the arm's value owns its own.

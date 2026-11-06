@@ -17,8 +17,7 @@ import { fileURLToPath } from "node:url";
 import { scratchRoot } from "./roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const FEATURES = join(ROOT, "Examples/features");
-const EXPECTED = join(FEATURES, "expected");
+const FEATURES = join(ROOT, "Examples");
 const JET = process.env.JET;
 const SCRATCH_BASE = process.env.JET_TEST_SCRATCH_DIR ?? scratchRoot();
 const EXPECTED_FAIL_EXITS = new Set([1, 70]);
@@ -73,7 +72,7 @@ function relativeFeature(path) {
 
 function entryFor(path) {
   const rel = relativeFeature(path);
-  const shown = `Examples/features/${rel}`;
+  const shown = `Examples/${rel}`;
   const stem = rel.endsWith("/run.jet")
     ? rel.slice(0, -"/run.jet".length)
     : rel.slice(0, -extname(rel).length);
@@ -86,8 +85,9 @@ function collectProject(dir, entries) {
     entries.push(entryFor(run));
     return;
   }
+  if (existsSync(join(dir, "package.jet")) || existsSync(join(dir, "workspace.jet"))) return;
   for (const child of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (child.name === "expected" || child.name.startsWith(".")) continue;
+    if (child.name.startsWith(".")) continue;
     const childPath = join(dir, child.name);
     if (child.isDirectory()) collectProject(childPath, entries);
     else if (child.isFile() && child.name.endsWith(".jet")) entries.push(entryFor(childPath));
@@ -104,7 +104,7 @@ export function collectFeatureExamples(featuresDir = FEATURES) {
 // `jet emit --<tier> <example>`, checked after the example's run passes.
 export const EMIT_TIERS = ["ast", "mir", "lir"];
 
-// The example's goldens. A case whose only run step asserts
+// The example's goldens, beside its source. A case whose only run step asserts
 // `stdout: = FILE` compares stdout with that file instead of `<stem>.out`,
 // as testkit Golden.jet does for an explicit stdout assertion. One that
 // asserts `stdout: one-of FILE FILE… # reason` accepts any of those exact
@@ -112,16 +112,16 @@ export const EMIT_TIERS = ["ast", "mir", "lir"];
 // `kit_steps_one_of` does; a missing snapshot is null and matches nothing.
 function readExpected(stem, caseText) {
   const stdoutFile = caseStdoutFile(caseText);
-  const outPath = stdoutFile === null ? join(EXPECTED, `${stem}.out`) : join(EXPECTED, dirname(stem), stdoutFile);
-  const errPath = join(EXPECTED, `${stem}.err.out`);
-  const stderrPath = join(EXPECTED, `${stem}.stderr.out`);
+  const outPath = stdoutFile === null ? join(FEATURES, `${stem}.out`) : join(FEATURES, dirname(stem), stdoutFile);
+  const errPath = join(FEATURES, `${stem}.err.out`);
+  const stderrPath = join(FEATURES, `${stem}.stderr.out`);
   const emit = {};
   for (const tier of EMIT_TIERS) {
-    const path = join(EXPECTED, `${stem}.${tier}.out`);
+    const path = join(FEATURES, `${stem}.${tier}.out`);
     emit[tier] = existsSync(path) ? readFileSync(path, "utf8") : null;
   }
   const alternatives = caseStdoutAlternatives(caseText)?.map((file) => {
-    const path = join(EXPECTED, dirname(stem), file);
+    const path = join(FEATURES, dirname(stem), file);
     return existsSync(path) ? readFileSync(path, "utf8") : null;
   }) ?? null;
   return {
@@ -281,15 +281,15 @@ export function asRunCommand(stderr) {
 }
 
 function readCase(stem) {
-  const path = join(EXPECTED, `${stem}.case`);
+  const path = join(FEATURES, `${stem}.case`);
   return existsSync(path) ? readFileSync(path, "utf8") : null;
 }
 
-// The example's interactive input: `<stem>.stdin` under expected/, which
-// testkit Golden.jet pipes to the example's last step. Without one the run
+// The example's interactive input: `<stem>.stdin` beside its source,
+// which testkit Golden.jet pipes to the example's last step. Without one the run
 // reads an empty, closed stdin.
 function readStdin(stem) {
-  const path = join(EXPECTED, `${stem}.stdin`);
+  const path = join(FEATURES, `${stem}.stdin`);
   return existsSync(path) ? readFileSync(path, "utf8") : null;
 }
 

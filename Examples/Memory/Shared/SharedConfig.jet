@@ -1,0 +1,37 @@
+package: {
+    name: "memory_shared_config"
+    version: "0.1.0"
+    authority: { allow: [Exec, IO, Mem.Alloc, Mem.Rc, Time.Wait] }
+}
+
+// `Shared<T>` is a
+// lock-guarded shared value — "a copyable door". `shared x` builds the cell
+// (`T` inferred from `x`). A field read is one locked read and a field write is
+// one locked write, so each statement is one atomic step; several statements
+// commit together under `#Transact`. Cloning `Shared<T>` is always a cheap
+// handle clone, never a deep copy of `T` — that's what lets it cross a `task`
+// boundary with no `^`, unlike an ordinary struct.
+AppConfig: struct {
+    name: String
+    hits: Int
+}
+
+handle: fn(id: Int, config: Shared<AppConfig>) -> String {
+    label: config.name
+    return "request {id} on {label}"
+}
+
+run: fn() {
+    config: shared AppConfig{name: "jet-server", hits: 0}
+    // Every spawned task captures `config` with no `^` — a `Shared<T>` is
+    // meant to be handed to as many concurrent tasks as needed.
+    t1: task handle(1, config)
+    t2: task handle(2, config)
+    t3: task handle(3, config)
+    print(t1.join() ?? panic("task 1 failed"))
+    print(t2.join() ?? panic("task 2 failed"))
+    print(t3.join() ?? panic("task 3 failed"))
+    config.hits += 1
+    total: config.hits
+    print("hits={total}")
+}

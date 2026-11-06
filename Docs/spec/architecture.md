@@ -473,7 +473,7 @@ Engines must not special-case these surface forms:
 | `task ^name { … }` | The existing task lambda with an explicit consuming capture; the task-crossing prover owns legality. | D-CONC-FREEZE1=A |
 
 The freeze form is a lowering rule, not an engine-side capture check; web has
-no separate freeze policy. [`freeze_capture.jet`](../../Examples/features/concurrency/freeze_capture.jet)
+no separate freeze policy. [`freeze_capture.jet`](../../Examples/Concurrency/FreezeCapture.jet)
 is its cross-lens fixture.
 
 Generic call evidence belongs to the caller's lexical scope, not the callee's
@@ -504,7 +504,7 @@ checked concrete signature and effective callable-return carrier, never an
 unspecialized `fn(T)` template or a raw source return type. A generic target
 without a complete checked instance is a lowering invariant failure;
 it cannot fall back to the template's ordinary function name. The executable
-example is [`package_members`](../../Examples/features/modules/package_members/run.jet).
+example is [`package_members`](../../Examples/Modules/PackageMembers/run.jet).
 
 Core runtime-carrier type imports follow the authoritative Core export ledger
 even when no source nominal declaration exists. Import aliases preserve the
@@ -696,12 +696,12 @@ Runtime representation is not the checked field type. In particular, default
 `Err.cause` value and place reads use the shared
 cause projection to expose
 `Err?`, not the runtime's boxed recursive storage. The
-[default error example](../../Examples/features/errors/default_err_value.jet)
+[default error example](../../Examples/ErrorsAndEffects/Errors/DefaultErrValue.jet)
 covers present, absent and repeated cause reads.
 Returned `View` and `ViewMut` signatures retain the checked owner provenance:
 both Rust emitters attach an explicit lifetime to the returned reference and
 its owner parameter, not to unrelated borrowed parameters. Static-only views
-use `'static`. The [borrowed view example](../../Examples/features/memory/borrowed_view_len.jet)
+use `'static`. The [borrowed view example](../../tests/run/Ownership/BorrowedViewLen.jet)
 covers a multi-parameter return, chained and stored length reads, indexing,
 and iteration without converting the borrowed slice to a list.
 
@@ -1380,7 +1380,7 @@ hidden behind `jet dev`.
 
 Browser automation coverage includes provision, lifecycle, locators, network,
 artifacts, checked CDP, and privacy, with examples under
-`Examples/features/net/browser_*.jet` and hostile proofs in
+`Examples/Network/Browser/` and hostile proofs in
 `tests/cases/browser_bidi/` / `tests/cases/browser_lock/`. Live browser binaries remain
 host-supplied; the product path always speaks BiDi over the existing WebSocket
 transport.
@@ -1728,11 +1728,11 @@ parity. Its pinned baseline allows at most 15% latency or peak-RSS regression,
 an interquartile spread of 100% or less, and at most five Tukey-fence outliers;
 exact stdout/stderr hashes, phase totals, and workload identity remain part of
 each row. The five active corpus rows are ordered
-`Examples/features/basics/hello.jet`,
-`Examples/features/collections/wordcount.jet`,
-`Examples/features/serde/json.jet`,
-`Examples/features/basics/pattern_matching.jet`, and
-`Examples/features/devloop/job_runner.jet`; `job_runner` is fifth.
+`Examples/Basics/Hello.jet`,
+`Examples/Collections/WordCount.jet`,
+`Examples/Data/JSON/JSON.jet`,
+`Examples/Basics/PatternMatching.jet`, and
+`Examples/Tooling/DevLoop/JobRunner.jet`; `job_runner` is fifth.
 A baseline is valid only for its pinned machine and toolchain.
 
 The code-action engine uses the same semantic index. It ships unique workspace

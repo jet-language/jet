@@ -359,7 +359,7 @@ export function census(root = ROOT) {
   for (const [path, source] of sources) {
     doctestPrograms(source).forEach((program, index) => record(program, `${path}#doctest-${index + 1}`, "doctests", moduleName(path)));
   }
-  for (const [directory, kind] of [["Examples/features", "examples"], ["tests", "tests"]]) {
+  for (const [directory, kind] of [["Examples", "examples"], ["tests", "tests"]]) {
     for (const path of filesUnder(root, directory)) {
       const extension = extname(path);
       if (![".jet", ".rs", ".mjs", ".js"].includes(extension)) continue;

@@ -8,7 +8,7 @@ Critical-area probe: build the program end to end; every part matters; write bat
 
 ## Build this
 
-A firmware program as one Jet package for a Cortex-M target (cross build; run what you can under an emulator or host replay): a board description, GPIO and timer MMIO with typed registers, an interrupt handler with bounded handoff to a task, a DMA transfer with ownership of the buffer, a UART driver with a bounded ring buffer, a deadline-checked control loop with a WCET estimate, a flash image with a signed slot and a rollback rule, and a debug/flash receipt. Start from Examples/features/lowlevel/** (freestanding, cross, mmio_board_write, target_machine_board, inline_asm, layout_c, unsafe_obligations), Examples/features/memory/**, Examples/features/safety/**.
+A firmware program as one Jet package for a Cortex-M target (cross build; run what you can under an emulator or host replay): a board description, GPIO and timer MMIO with typed registers, an interrupt handler with bounded handoff to a task, a DMA transfer with ownership of the buffer, a UART driver with a bounded ring buffer, a deadline-checked control loop with a WCET estimate, a flash image with a signed slot and a rollback rule, and a debug/flash receipt. Start from Examples/LowLevel/** (freestanding, cross, mmio_board_write, target_machine_board, inline_asm, layout_c, unsafe_obligations), Examples/Memory/**, Examples/Text/CheckedText/**.
 
 ## Answer these
 

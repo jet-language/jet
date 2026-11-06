@@ -525,8 +525,8 @@ policy_test_exception_source_roles: fn() {
 #Test("exceptions_are_limited_to_expert_or_negative_sources") { policy_test_exception_source_roles() }
 policy_test_canonical_source_exception: fn() {
     manifest := policy_manifest()
-    manifest.exceptions.push(PolicyExceptionRow{rule: "entry-explicit", selector: "file:Examples/features/basics/hello.jet", site: "stmt:top-level@0..0", expected: "1", protocol: "fixture", reason: "planted"})
-    error: "exception entry-explicit file:Examples/features/basics/hello.jet requires an expert-lesson or negative-diagnostic source, found CanonicalTeaching"
+    manifest.exceptions.push(PolicyExceptionRow{rule: "entry-explicit", selector: "file:Examples/Basics/Hello.jet", site: "stmt:top-level@0..0", expected: "1", protocol: "fixture", reason: "planted"})
+    error: "exception entry-explicit file:Examples/Basics/Hello.jet requires an expert-lesson or negative-diagnostic source, found CanonicalTeaching"
     assert(policy_validate_manifest(manifest).contains(error), "canonical source cannot absorb a violation")
 }
 #Test("corpus manifest planted canonical-source exception") { policy_test_canonical_source_exception() }
@@ -539,9 +539,9 @@ policy_test_unclassified_inventory_entries: fn() {
     assert(error.contains("site=inventory:source@0..0"), "inventory byte site")
     assert(error.contains("replacement="), "inventory replacement")
     assert_eq(error, "unclassified eligible source: unclassified/new-maintained-program.jet; file=unclassified/new-maintained-program.jet; rule=corpus-inventory; site=inventory:source@0..0; why=every maintained source and generated producer needs an explicit manifest boundary; replacement=add one exact manifest row with its role, owner, reason, and provenance")
-    producer_error: policy_audit_inventory(manifest, [String]{"Examples/features/basics/hello.jet"}, [String]{"producer:new.rs#render"}).join("\n")
+    producer_error: policy_audit_inventory(manifest, [String]{"Examples/Basics/Hello.jet"}, [String]{"producer:new.rs#render"}).join("\n")
     assert(producer_error.contains("unclassified generated-source producer"), "a synthetic producer without provenance must fail")
-    assert_eq(policy_audit_inventory(manifest, [String]{"Examples/features/basics/hello.jet"}, [String]{"producer:Jetpack/Integrations/Source/Foreign/Binders/Lua.jet#pkg_lua_render_jet"}), [String]{})
+    assert_eq(policy_audit_inventory(manifest, [String]{"Examples/Basics/Hello.jet"}, [String]{"producer:Jetpack/Integrations/Source/Foreign/Binders/Lua.jet#pkg_lua_render_jet"}), [String]{})
 }
 #Test("inventory_rejects_new_source_or_producer_without_a_row") { policy_test_unclassified_inventory_entries() }
 policy_test_occurrence_scoped_exceptions: fn() {

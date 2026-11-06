@@ -1,0 +1,27 @@
+// One expanded formatter for selector and API.
+use fmt: core.text.fmt
+
+Team: struct {
+    name: String
+    members: [String]
+}
+
+Org: struct {
+    title: String
+    note: String
+    teams: [Team]
+}
+
+run: fn() {
+    org: Org{
+        title: "acme",
+        note: "a{{b}}c",
+        teams: [Team]{
+            {name: "core", members: ["ada", "brian", "casey"]},
+            {name: "web", members: ["dana"]},
+        },
+    }
+    print("{org:Pretty}")
+    print("{org=:Pretty}")
+    print(fmt.pretty("{org:Debug}"))
+}

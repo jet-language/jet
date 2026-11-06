@@ -3415,7 +3415,7 @@ sema_stmt_lint_same_subject_dispatch: fn(statements: [Stmt], environment: SemaSc
         if sema_stmt_categorical_guard_subject(statements[index]) == .Val(subject) {
             loop run_end < statements.len() && sema_stmt_categorical_guard_subject(statements[run_end]) == (Val(subject)) -> run_end += 1
             if run_end - index >= 3 && sema_stmt_guard_run_keeps_subject(statements, index, run_end, subject) {
-                diagnostic := sema_lint("L0514", sema_compiler_index_stmt_span(statements[index]), "Adjacent categorical guards over `{subject}` can be one ordered subject table", "Exclusive guards repeat one stable subject; an ordered table keeps the categories together", "Rewrite as `if {subject} == {{ … }}` and group aliases with `|`; see `Examples/suites/dispatch.jet`")
+                diagnostic := sema_lint("L0514", sema_compiler_index_stmt_span(statements[index]), "Adjacent categorical guards over `{subject}` can be one ordered subject table", "Exclusive guards repeat one stable subject; an ordered table keeps the categories together", "Rewrite as `if {subject} == {{ … }}` and group aliases with `|`; see `Examples/Apps/Programs/Dispatch.jet`")
                 if sema_stmt_same_subject_table_edit(statements, index, run_end, subject, environment, program) == .Val(edit) -> diagnostic = diagnostic_with_edit_grade(diagnostic, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview)
                 diagnostics.push(diagnostic)
             }

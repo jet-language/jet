@@ -27,8 +27,8 @@ and rejects with `JetHostExitError` (its `status`) otherwise, or
 `jet_dom_runtime.js` drive the modules directly.
 
 ```sh
-jet build --target web Examples/features/basics/hello.jet
-node Examples/features/basics/.jet/build/app.js
+jet build --target web Examples/Basics/Hello.jet
+node Examples/Basics/.jet/build/app.js
 ```
 
 `jet run`, `jet dev` and `jet test` run Linux x86-64 images only and refuse
@@ -90,40 +90,33 @@ fall back to CPU. Native hosts retain the typed fail-closed WebGPU provider.
 
 ## Source-backed examples
 
-The top-level source set under `Examples/features/web/` is the contract checked
+The top-level source set under `Examples/Apps/Web/` is the contract checked
 by [`tests/cases/web_examples_doc/web_examples_are_documented_and_have_expected_outputs.case`](../../../tests/cases/web_examples_doc/web_examples_are_documented_and_have_expected_outputs.case).
 Each file is named here so documentation review cannot silently omit a new example:
 
-- `package.jet`
-- `app_hello.jet`
-- `app_typed_args.jet`
-- `browser_surface.jet`
-- `forms_table.jet`
-- `query_lifecycle.jet`
-- `state_surface.jet`
-- `store_history.jet`
-- `ui_showcase.jet`
-- `ui_web_click.jet`
-- `ui_web_mount.jet`
-- `ui_web_reactive.jet`
-- `web_app.jet`
-- `web_compute.jet`
-- `web_compute_webgpu.jet`
-- `web_hello.jet`
-- `web_wasm_callback.jet`
-- `web_wasm_for_in.jet`
-- `web_wasm_int_export.jet`
-- `web_wasm_list.jet`
-- `web_wasm_list_string.jet`
-- `web_wasm_map.jet`
-- `web_wasm_range.jet`
-- `web_wasm_string.jet`
-- `web_wasm_string_param.jet`
+- `AppHello.jet`
+- `AppTypedArgs.jet`
+- `BrowserSurface.jet`
+- `FormsTable.jet`
+- `QueryLifecycle.jet`
+- `StateSurface.jet`
+- `StorageLocalSession.jet`
+- `StoreHistory.jet`
+- `UIShowcase.jet`
+- `UIWebClick.jet`
+- `UIWebMount.jet`
+- `UIWebReactive.jet`
+- `WebApp.jet`
+- `WebCompute.jet`
+- `WebComputeWebGPU.jet`
+- `WebHello.jet`
+- `WebWasmCallback.jet`
+- `WebWasmIntExport.jet`
 
-Expected output and browser harness artifacts live under
-`Examples/features/expected/web/`; browser outputs use the `*.web.out` or
-`*.harness.out` suffixes. The example source and harness are the executable
-truth for API spellings and output behavior.
+Each example's golden sits beside its source in `Examples/Apps/Web/`: a
+`.out` file, a browser `.web.out` or `.harness.out` file, or a `.case`
+golden. The example source and harness are the executable truth for API
+spellings and output behavior.
 
 ## Related boundaries
 

@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-As a tool author: read a Jet file's lossless syntax tree through whatever `jet inspect` exposes and write a formatter-safe rename over it; query the build graph (`jet inspect explain-build`, build receipts) to implement a "what changed" report; replay a recorded run headlessly; and write a load runner that drives an HTTP service with a deterministic threshold. Use Examples/features/tooling/**, reflection/**, devloop/**, and `jet --help`.
+As a tool author: read a Jet file's lossless syntax tree through whatever `jet inspect` exposes and write a formatter-safe rename over it; query the build graph (`jet inspect explain-build`, build receipts) to implement a "what changed" report; replay a recorded run headlessly; and write a load runner that drives an HTTP service with a deterministic threshold. Use Examples/Tooling/**, reflection/**, devloop/**, and `jet --help`.
 
 ## Answer these
 

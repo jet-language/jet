@@ -1,0 +1,22 @@
+// Err is both the default error type and its constructor.
+inspect: fn() {
+    error: Err("parse failed", code: "CFG404", cause: Err("unexpected token at line 3"))
+    print(error.message)
+    print(error.code ?? "none")
+    print((error.cause ?? Err("missing cause")).message)
+    print((Err("without cause").cause ?? Err("missing cause")).message)
+    print((error.cause ?? Err("missing cause")).message)
+}
+
+explicit: fn() -> Int { Err("explicit failure") }
+
+implicit: fn() -> Int { Err("implicit failure") }
+
+#Error
+TypedFailure: enum {
+    Stopped
+}
+
+typed_arm: fn() -> Int TypedFailure! { Err(TypedFailure.Stopped) }
+
+run: fn() { inspect() }

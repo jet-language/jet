@@ -1,0 +1,71 @@
+// Typed Core data slice.
+package: {
+    name: "data_core"
+    authority: { allow: [Env, FS, IO] }
+}
+
+use data: core.data
+
+#Codable
+Ticket: struct {
+    team: String
+    minutes: Float
+}
+
+Empty: struct {
+
+}
+
+Box: struct<T> {
+    value: T
+}
+
+run: fn() {
+    raw: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
+    rows: data.csv<Ticket>(raw) ?? panic("bad csv")
+    print("rows: {rows.len()}")
+    means: data.query(rows)
+        .group_by(t -> t.team)
+        .mean(t -> t.minutes)
+        .collect() ?? panic("mean groups")
+    sums: data.query(rows)
+        .group_by(t -> t.team)
+        .sum(t -> t.minutes)
+        .collect() ?? panic("sum groups")
+    counts: data.query(rows)
+        .group_by(t -> t.team)
+        .count()
+        .collect() ?? panic("count groups")
+    loop g in counts -> print("{g.key}: count={g.value}")
+    loop g in sums -> print("{g.key}: sum={g.value}")
+    loop g in means -> print("{g.key}: mean={g.value}")
+    values: [Float]{2.0, 4.0, 6.0}
+    mean: data.mean(values) ?? panic("mean")
+    print("series mean: {mean}")
+    print(data.bar_text(counts) ?? panic("bar"))
+    svg: data.bar_svg(counts) ?? panic("svg")
+    print("svg bytes: {svg.len()}")
+    status: data.status()
+    print("status: {status[0].step} {status[0].path}")
+    json_schema()
+}
+
+// JSON ingest, the schema of the row type, and a filtered select. The schema
+// of a field-less struct is empty; a generic struct reports its concrete field.
+json_schema: fn() {
+    raw: "[{{\"team\":\"Core\",\"minutes\":4.0}},{{\"team\":\"Tools\",\"minutes\":5.0}},{{\"team\":\"Core\",\"minutes\":8.0}}]"
+    rows: data.json<Ticket>(raw) ?? panic("bad json")
+    loop c in data.schema(rows) -> print("{c.name}:{c.type_name}")
+    selected: data.query(rows)
+        .filter(t -> t.minutes >= 5.0)
+        .collect() ?? panic("filter")
+    print("selected:{selected.len()}")
+    loop t in selected -> print("{t.team}:{t.minutes}")
+    empty_units: [Empty]{}
+    print("empty_struct:{data.schema(empty_units).len()}")
+    boxed: [Box<Int>]{}
+    loop c in data.schema(boxed) -> print("generic:{c.name}:{c.type_name}")
+    loop status in data.status() {
+        if status.step == "core.data.json" || status.step == "core.data.schema" -> print("{status.step}:{status.path}")
+    }
+}

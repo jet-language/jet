@@ -311,14 +311,14 @@ run: fn() (HTTPError | NetError | IOError)! {
 When repository context is available, use these executable suites as the owning
 examples instead of inventing a parallel teaching form:
 
-- `Examples/suites/dispatch.jet` — ordered dispatch tables and grouped aliases.
-- `Examples/suites/failure.jet` — implicit failure flow, typed expert contracts,
+- `Examples/Apps/Programs/Dispatch.jet` — ordered dispatch tables and grouped aliases.
+- `Examples/Apps/Programs/Failure.jet` — implicit failure flow, typed expert contracts,
   and one conversion rail.
-- `Examples/suites/finite_state.jet` — enums, variant groups, and typestate
+- `Examples/Apps/Programs/FiniteState.jet` — enums, variant groups, and typestate
   transitions.
-- `Examples/suites/ownership.jet` — reused views, explicit `~` boundaries, and
+- `Examples/Apps/Programs/Ownership.jet` — reused views, explicit `~` boundaries, and
   cost visibility.
-- `Examples/suites/wire_output.jet` — canonical JSON writer bytes and a
+- `Examples/Apps/Programs/WireOutput.jet` — canonical JSON writer bytes and a
   `#Codable` round trip.
 
 ## 7. Cold-agent rules

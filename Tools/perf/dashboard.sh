@@ -998,7 +998,7 @@ prepare_fixture() {
 # release binary must not expose it as an argv subcommand.
 job_argument_for_program() {
     case "$1" in
-        Examples/features/devloop/job_runner.jet|Tools/perf/edits/job_runner.jet)
+        Examples/Tooling/DevLoop/JobRunner.jet|Tools/perf/edits/job_runner.jet)
             printf '%s\n' greet
             ;;
         *)
@@ -1455,7 +1455,7 @@ parity_check_job_runner() {
     parity_listing_root="$run_dir/parity-job-runner-listing"
     rm -rf "$parity_listing_root"
     mkdir -p "$parity_listing_root"
-    prepare_fixture "$parity_listing_root" Examples/features/devloop/job_runner.jet Examples/features/expected/devloop/job_runner.greet.out
+    prepare_fixture "$parity_listing_root" Examples/Tooling/DevLoop/JobRunner.jet Examples/Tooling/DevLoop/JobRunner.greet.out
     parity_run_process "$parity_listing_root/jobs.status" "$parity_listing_root/jobs.stdout" "$parity_listing_root/jobs.stderr" "$parity_listing_root" \
         env NO_COLOR=1 "$JET_BIN" jobs
     parity_require_status "$(sed -n '1p' "$parity_listing_root/jobs.status")" job-runner/jobs
@@ -1466,9 +1466,9 @@ parity_check_job_runner() {
     } > "$parity_listing_root/jobs.expected"
     parity_compare "$parity_listing_root/jobs.expected" "$parity_listing_root/jobs.stdout" job-runner/jobs-output
 
-    parity_check_job_runner_case base Examples/features/devloop/job_runner.jet \
-        Examples/features/expected/devloop/job_runner.greet.out \
-        Examples/features/expected/devloop/job_runner.seed_data.out
+    parity_check_job_runner_case base Examples/Tooling/DevLoop/JobRunner.jet \
+        Examples/Tooling/DevLoop/JobRunner.greet.out \
+        Examples/Tooling/DevLoop/JobRunner.seed_data.out
     parity_check_job_runner_case edit Tools/perf/edits/job_runner.jet \
         Tools/perf/edits/job_runner.out Tools/perf/edits/job_runner.seed_data.out
 }
@@ -1518,9 +1518,9 @@ run_parity_checks() {
         parity_run_dev_case "edit-$(safe_id "$parity_edit")" "$parity_edit" "$parity_edit_expected" "$parity_program-run-representative-edit"
     done < "$CORPUS"
     parity_check_job_runner
-    parity_run_case trait-object Examples/features/types/traits.jet Examples/features/expected/types/traits.out
-    parity_run_case effects Examples/features/effects/effects.jet Examples/features/expected/effects/effects.out
-    parity_run_case closure Examples/features/basics/bare_lambda_param.jet Examples/features/expected/basics/bare_lambda_param.out
+    parity_run_case trait-object Examples/Types/Traits/Traits.jet Examples/Types/Traits/Traits.out
+    parity_run_case effects Examples/ErrorsAndEffects/Effects/Effects.jet Examples/ErrorsAndEffects/Effects/Effects.out
+    parity_run_case closure tests/run/CoreAndClosures/BareLambdaParam.jet tests/run/CoreAndClosures/BareLambdaParam.out
     parity_check_diagnostic
     PARITY_RECEIPT=verified
     parity_rows_file="$run_dir/rows.with-parity.tsv"

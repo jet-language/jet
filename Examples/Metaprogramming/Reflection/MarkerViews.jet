@@ -1,0 +1,35 @@
+// `T.reflect()` in comptime is the declared type's TypeInfo.
+// Its marker facts are two named views over the one registration table:
+// `markers` is what the declaration wrote, and `expanded_markers` is what
+// those markers expanded to. Neither list is folded into the other; a capability marker
+// such as `Comparable` expands to itself.
+#Codable
+Order: struct {
+    id: Int
+    total: Int
+}
+
+#Comparable
+OrderID: distinct Int
+
+names: fn(markers: [MarkerInfo]) -> String {
+    written := [String]{}
+    loop marker in markers -> written.push(marker.name)
+    written.join(",")
+}
+
+ORDER_WRITTEN: comptime { names(Order.reflect().markers) }
+ORDER_EXPANDED: comptime { names(Order.reflect().expanded_markers) }
+ORDER_HAS_CODABLE: comptime { Order.reflect().has_marker("Codable") }
+ORDER_HAS_ENCODE: comptime { Order.reflect().has_marker("Encode") }
+ID_WRITTEN: comptime { names(OrderID.reflect().markers) }
+ID_EXPANDED: comptime { names(OrderID.reflect().expanded_markers) }
+
+run: fn() {
+    print("Order written: {ORDER_WRITTEN}")
+    print("Order expanded: {ORDER_EXPANDED}")
+    print("Order has_marker(Codable): {ORDER_HAS_CODABLE}")
+    print("Order has_marker(Encode): {ORDER_HAS_ENCODE}")
+    print("OrderID written: {ID_WRITTEN}")
+    print("OrderID expanded: {ID_EXPANDED}")
+}

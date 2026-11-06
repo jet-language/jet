@@ -35,12 +35,12 @@ import { copyFeatureProject, featureProjectRoot } from "./run-feature-examples.m
 import { scratchRoot as sharedScratchRoot } from "./roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const FEATURES = join(ROOT, "Examples/features");
+const FEATURES = join(ROOT, "Examples");
 const UI_DIR = join(ROOT, "tests/ui");
 const DIFFERENTIAL_DIR = join(ROOT, "tests/fuzz/sema/differential");
 const CANARY_DIR = join(ROOT, "tests/compiler-diff/canary");
 const CANARY_CANDIDATE = join(ROOT, "tests/compiler-diff/canary-candidate.mjs");
-const EXAMPLE_STDIN_DIR = join(FEATURES, "expected");
+const EXAMPLE_STDIN_DIR = FEATURES;
 const EXT = "jet";
 const WORKSPACE_FILE = "workspace.jet";
 
@@ -193,75 +193,55 @@ export function goldenFailureExit(stem, stderr) {
     });
     return contradicted ? null : 70;
   }
-  // #1474: this source disables logging before log.fatal exits 1.
-  if (stderr === "") return stem === "io/log_fatal" ? 1 : null;
+  if (stderr === "") return null;
   // Source-proved entry returns, matching kit_golden_failure_exit in Compiler/JetTestKit/Source/Golden.jet;
-  // fatal_exit explicitly calls process.exit(1), and an E1803 authority refusal
+  // FatalExit explicitly calls process.exit(1), and an E1803 authority refusal
   // exits 1 before anything runs. An arbitrary Error prefix is not an exit oracle.
   switch (stem) {
-    case "errors/propagation_journey":
-    case "errors/propagation_journey_direct":
-    case "errors/propagation_journey_one_hop":
-    case "errors/propagation_journey_core":
-    case "errors/error_context":
-    case "errors/default_error_conversion":
-    case "errors/default_err_edge":
-    case "errors/fatal_exit":
-    case "serde/decode_error_exit":
-    case "crypto/crypto_error_run":
-    case "effects/authority_core_method":
-    case "effects/authority_denied":
-    case "effects/authority_partial":
-    case "effects/authority_undeclared":
+    case "ErrorsAndEffects/Errors/PropagationJourney":
+    case "ErrorsAndEffects/Errors/ErrorContext":
+    case "ErrorsAndEffects/Errors/DefaultErrorConversion":
+    case "ErrorsAndEffects/Errors/DefaultErrEdge":
+    case "ErrorsAndEffects/Errors/FatalExit":
+    case "Data/DecodeErrorExit":
+    case "Crypto/CryptoErrorRun":
+    case "ErrorsAndEffects/Effects/AuthorityDenied":
+    case "ErrorsAndEffects/Effects/AuthorityPartial":
+    case "ErrorsAndEffects/Effects/AuthorityUndeclared":
       return 1;
     default:
       return null;
   }
 }
 
-// Mirrors kit_golden_collect (Compiler/JetTestKit/Source/Golden.jet): project roots own their descendants.
+// Mirrors kit_golden_collect (Compiler/JetTestKit/Source/Golden.jet): every flat
+// `.jet` is an entry, a `run.jet` folder is one entry, and a package or
+// workspace folder without `run.jet` is not an entry.
 export function collectGoldenEntries(exDir = FEATURES) {
   const entries = [];
-  const push = (path, stem, shown) => entries.push({ path, stem, shown });
-  const collectProject = (dir) => {
-    const name = basename(dir);
-    if (name.startsWith(".") || name === "expected") return;
-    const run = join(dir, `run.${EXT}`);
-    if (existsSync(run)) {
-      const stem = relative(exDir, dir).replaceAll("\\", "/");
-      push(run, stem, `Examples/features/${stem}/run.${EXT}`);
-      return;
-    }
-    if (existsSync(join(dir, `package.${EXT}`)) || existsSync(join(dir, WORKSPACE_FILE))) return;
+  const visit = (dir) => {
     for (const child of sortedDir(dir)) {
-      if (child.isDirectory()) collectProject(join(dir, child.name));
-    }
-  };
-  if (!existsSync(exDir)) return entries;
-  for (const topic of sortedDir(exDir)) {
-    if (!topic.isDirectory() || topic.name.startsWith(".") || topic.name === "expected") continue;
-    const topicPath = join(exDir, topic.name);
-    for (const child of sortedDir(topicPath)) {
-      const path = join(topicPath, child.name);
-      if (
-        child.isFile()
-        && child.name.endsWith(`.${EXT}`)
-        && child.name !== `package.${EXT}`
-        && child.name !== WORKSPACE_FILE
-        && !child.name.startsWith(".")
-      ) {
+      if (child.name.startsWith(".")) continue;
+      const path = join(dir, child.name);
+      if (child.isDirectory()) {
+        if (existsSync(join(path, `run.${EXT}`))) {
+          const stem = relative(exDir, path).replaceAll("\\", "/");
+          entries.push({ path: join(path, `run.${EXT}`), stem, shown: `Examples/${stem}/run.${EXT}` });
+        } else if (!existsSync(join(path, `package.${EXT}`)) && !existsSync(join(path, WORKSPACE_FILE))) {
+          visit(path);
+        }
+      } else if (child.isFile() && child.name.endsWith(`.${EXT}`) && child.name !== `package.${EXT}` && child.name !== WORKSPACE_FILE) {
         const stem = relative(exDir, path).replaceAll("\\", "/").slice(0, -(EXT.length + 1));
-        push(path, stem, `Examples/features/${stem}.${EXT}`);
-      } else if (child.isDirectory()) {
-        collectProject(path);
+        entries.push({ path, stem, shown: `Examples/${stem}.${EXT}` });
       }
     }
-  }
+  };
+  if (existsSync(exDir)) visit(exDir);
   return entries.sort((a, b) => (a.stem < b.stem ? -1 : a.stem > b.stem ? 1 : 0));
 }
 
 // The interactive-example answers live in one place: the `<stem>.stdin`
-// goldens under Examples/features/expected, the same files the native testkit
+// goldens under Examples, the same files the native testkit
 // pipes. Read them instead of restating them.
 export function loadExampleStdin(directory = EXAMPLE_STDIN_DIR) {
   const table = new Map();

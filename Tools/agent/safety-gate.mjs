@@ -110,10 +110,10 @@ export function runGate({ out, artifacts, seed = 4, count = 50, prepareOnly = fa
     add(fixture, check.status === 1 && diagnostics.length === expectedDiagnostics ? "pass" : "fail", `exit ${check.status ?? check.signal ?? check.error?.code}; ${diagnostics.length}/${expectedDiagnostics} jet.UnsafeCallOutsideUnsafe; ${fixture}.log`);
   }
 
-  const goldenCases = collectGoldenEntries().filter((entry) => /^(memory|collections|strings|lowlevel|safety|concurrency)\//u.test(entry.stem)).flatMap((entry) => {
-    const expected = join(repo, "Examples/features/expected", `${entry.stem}.out`);
+  const goldenCases = collectGoldenEntries().filter((entry) => /^(Memory|Collections|Text|LowLevel|Concurrency)\//u.test(entry.stem)).flatMap((entry) => {
+    const expected = join(repo, "Examples", `${entry.stem}.out`);
     if (!existsSync(expected)) return [];
-    const stderr = join(repo, "Examples/features/expected", `${entry.stem}.stderr.out`);
+    const stderr = join(repo, "Examples", `${entry.stem}.stderr.out`);
     return [{ stem: entry.stem, stdout: readFileSync(expected, "utf8"), stderr: existsSync(stderr) ? readFileSync(stderr, "utf8") : "", source: readFileSync(entry.path, "utf8") }];
   });
   const goldenHash = hash(JSON.stringify(goldenCases));

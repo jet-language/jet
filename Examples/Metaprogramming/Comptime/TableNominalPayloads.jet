@@ -1,0 +1,55 @@
+// A literal `@` table may hold enum payloads that are
+// themselves user enums, structs, lists or optionals. The compile-time
+// evaluator gives each payload the same nominal identity as its row type.
+Inner: enum {
+    A
+    B(float: Bool)
+}
+
+Size: struct { n: Int }
+
+Op: enum {
+    Wrap(op: Inner)
+    Sized(size: Size)
+    Many(items: [Inner])
+    Maybe(item: Inner?)
+    Plain
+}
+
+Row: struct {
+    name: String
+    op: Op
+}
+
+row: fn(name: String, op: Op) -> Row Never! {
+    Row{name: name, op: op}
+}
+
+ROWS: comptime { [Row]{
+    row("wrap", Op.Wrap{op: Inner.B{float: true}}),
+    row("sized", Op.Sized{size: Size{n: 3}}),
+    row("many", Op.Many{items: [Inner]{Inner.A, Inner.A}}),
+    row("maybe", Op.Maybe{item: None}),
+    row("plain", Op.Plain)
+} }
+
+inner_name: fn(inner: Inner) -> String {
+    if inner == {
+        .A -> "A"
+        .B(_) -> "B"
+    }
+}
+
+describe: fn(op: Op) -> String {
+    if op == {
+        .Wrap(inner) -> "wrap {inner_name(inner)}"
+        .Sized(size) -> "sized {size.n}"
+        .Many(items) -> "many {items.len()}"
+        .Maybe(item) -> if item == None -> "maybe none" else -> "maybe some"
+        .Plain -> "plain"
+    }
+}
+
+run: fn() {
+    loop value in ROWS -> print("{value.name}: {describe(value.op)}")
+}

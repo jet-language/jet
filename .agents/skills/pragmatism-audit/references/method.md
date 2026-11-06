@@ -25,7 +25,7 @@ For a broad run, the root's six-workload default is mandatory. A named narrower 
 Re-verify these against the tree. They are pressure points, not settled law:
 
 1. **Auto derives (S55 family).** Ask whether every useful trait derives by default, whether a user can reject derivation for a type or package, and whether a user can override it selectively.
-2. **Dimensional or unit printing** (`Examples/features/types/dimensional_quantities.jet`). Algebra and dimension checks exist, but `print(recovered)` may still omit useful units such as `12 meter`, `4 meter/second`, or `766 px`. Ask whether the last mile finishes the scientist's or UI author's job.
+2. **Dimensional or unit printing** (`Examples/Types/Units/DimensionalQuantities.jet`). Algebra and dimension checks exist, but `print(recovered)` may still omit useful units such as `12 meter`, `4 meter/second`, or `766 px`. Ask whether the last mile finishes the scientist's or UI author's job.
 
 ## Required report sections
 

@@ -8,7 +8,7 @@ Critical-area probe: build the program end to end; every part matters; write bat
 
 ## Build this
 
-A data-analysis session as one Jet package plus a notebook: load a 100k-row CSV and a Parquet file into the core table type; filter, group, join, pivot, window; descriptive statistics and a linear regression with a typed result; a labeled 2-D array with coordinates; a plot exported to SVG and PNG; a notebook (`jet notebook`) with reactive cells that re-run on change; and a receipt for the run. Compare timing against pandas/polars on the same CSV for one group-by. Start from Examples/features/collections/**, Examples/features/io/db*.jet and stream.jet, Examples/features/math/**, Examples/features/serde/**, and `jet inspect facts` for core.data.
+A data-analysis session as one Jet package plus a notebook: load a 100k-row CSV and a Parquet file into the core table type; filter, group, join, pivot, window; descriptive statistics and a linear regression with a typed result; a labeled 2-D array with coordinates; a plot exported to SVG and PNG; a notebook (`jet notebook`) with reactive cells that re-run on change; and a receipt for the run. Compare timing against pandas/polars on the same CSV for one group-by. Start from Examples/Collections/**, Examples/Data/Database/DB*.jet and stream.jet, Examples/Math/**, Examples/Data/**, and `jet inspect facts` for core.data.
 
 ## Answer these
 

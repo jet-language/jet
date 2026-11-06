@@ -1,0 +1,29 @@
+// Operation bundles on nominal `distinct` types.
+// A `distinct` type starts inert (no inherited operators). Tagging it with
+// one of the four fixed operation bundles — `#Numeric`, `#Comparable`,
+// `#Printable`, `#CodableAsBase` — re-exposes a curated slice of the base
+// type's operations while preserving nominal identity (`Usd + Usd` is a
+// `Usd`; `Usd + Eur` is still a type error even though both grant `+`).
+// Bundles stack: `#[Numeric, Printable]` on one type grants both.
+#[Numeric, Printable]
+Usd: distinct Int
+
+#Comparable
+CustomerID: distinct Int
+
+run: fn() {
+    price: Usd.from_int(20)
+    tax: Usd.from_int(5)
+    total: price + tax
+    print("total: {total}")
+    a: CustomerID.from_int(1)
+    b: CustomerID.from_int(1)
+    print("{(a == b)}")
+}
+// `CustomerId` has no `#Numeric`, so arithmetic on it is still rejected
+// at compile time (E0138/E0127) — see tests/ui/distinct_arith_on_id.jet
+// and tests/ui/capbundle_operation_not_granted.jet for the sibling
+// negative cases (a bare `CustomerId.from_int(1) * 2` here would not compile).
+// --- expected output --------------------------------------------------
+// total: 25
+// true

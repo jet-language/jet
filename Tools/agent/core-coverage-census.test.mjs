@@ -144,8 +144,8 @@ function fixture(t) {
     example_only: fn() {}
     test_only: fn() {}
   `);
-  put("Examples/features/basics/demo.jet", "use d: core.demo\nrun: fn() { d.example_only(); d.example_only() }");
-  put("Examples/features/expected/fake.jet", "run: fn() { core.demo.unused() }");
+  put("Examples/Basics/demo.jet", "use d: core.demo\nrun: fn() { d.example_only(); d.example_only() }");
+  put("Examples/expected/fake.jet", "run: fn() { core.demo.unused() }");
   put("tests/demo.rs", 'let program = r#"run: fn() { core.demo.test_only() }"#;');
   return { root, put };
 }

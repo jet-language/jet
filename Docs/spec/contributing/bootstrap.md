@@ -51,7 +51,7 @@ cd ../jet && SEED=$(realpath ../seed)
 "$SEED/jet" run Tools/packaging/ReuseSeedRuntime.jet -- "$SEED" Compiler/JetCli/.jet/build/jet
 export PATH=$PWD/Compiler/JetCli/.jet/build:$PATH
 jet test Compiler --profile ui tests/ui/list_expected_type_mismatch.jet
-jet run Examples/features/basics/hello.jet
+jet run Examples/Basics/Hello.jet
 git config user.name "$NAME" && git config user.email "$EMAIL"
 jet Tools/agent/Land.jet land --scratch-copy ../dev-copy "$PATCH" "$MSG"
 jet Tools/agent/ballots/Validate.jet "$BALLOT"

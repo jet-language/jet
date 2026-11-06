@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-Learn the shipped receipt (jet-receipt-v2, `jet prove`, `--record`, .measure, Examples/performance/receipts). Then, as a library author, add a domain field group (a regression fit's residuals and tolerances) to a receipt, query it, replay it, and diff two runs. Record what a library can attach, what only core can, and what a user must type.
+Learn the shipped receipt (jet-receipt-v2, `jet prove`, `--record`, .measure, Examples/Tooling/Performance). Then, as a library author, add a domain field group (a regression fit's residuals and tolerances) to a receipt, query it, replay it, and diff two runs. Record what a library can attach, what only core can, and what a user must type.
 
 ## Answer these
 

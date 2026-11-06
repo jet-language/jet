@@ -9,7 +9,7 @@ the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/). The
 [Core surface ledger test](../../tests/core_surface_ledger.rs) and its
 [checker](../../Tools/agent/check-core-surface-ledger.mjs) provide focused
 machine checks; runnable examples live under
-[`Examples/features/`](../../Examples/features/). API names follow the
+[`Examples/`](../../Examples/). API names follow the
 [Jet vocabulary](vocabulary.md) for streams, readers, and events.
 
 These are review laws, not a second API catalog. A new declaration must pass
@@ -173,7 +173,7 @@ diagnostic.
 
 ## Law 7 — Examples
 
-Give every new type a runnable example under `Examples/features/` with
+Give every new type a runnable example under `Examples/` with
 golden-tested expected output (I5). Use plausible domain names rather than
 `foo`, `bar`, or opaque placeholders. Show the successful path first and
 failure handling second.
@@ -249,7 +249,7 @@ receipts.
 | L4 | All access markers and effects are declared. |
 | L5 | Non-obvious allocation is budgeted and the streaming form is present. |
 | L6 | Every error path has the required diagnostic copy and UI snapshot. |
-| L7 | A golden-tested example exists under `Examples/features/`. |
+| L7 | A golden-tested example exists under `Examples/`. |
 | L8 | No duplicate API or overload family remains. |
 | L9 | Same-subject variants with the same result and safety shape use one root method with a safe default and a label-only option enum. Keep a sibling only when the parameter list, result shape, fallibility, or safety differs; name that distinct job plainly. |
 | Weakest-guarantee parameters | The declaration asks for the weakest sufficient guarantee. |

@@ -1,0 +1,38 @@
+package: {
+    name: "tooling_compute_ndarray"
+    version: "0.1.0"
+    authority: { allow: [GPU, IO, Mem.Alloc] }
+}
+
+// Ndarray broadcast, ufuncs, and axis reduction on Tensor.
+use compute: core.compute
+
+run: fn() {
+    row: compute.vec(3, 2.0) ?? panic("vec")
+    wide: compute.broadcast_to(row, [2, 3]) ?? panic("broadcast")
+    print("broadcast:{compute.to_list(wide)}")
+
+    a: compute.full([2, 3], 3.0) ?? panic("full")
+    b: compute.full([2, 3], 1.0) ?? panic("full2")
+    diff: compute.sub(a, b) ?? panic("sub")
+    print("sub:{compute.to_list(diff)}")
+
+    fused: compute.add(wide, row) ?? panic("fused add")
+    print("fused_broadcast:{compute.to_list(fused)}")
+
+    values: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("values")
+    t: compute.reshape(values, [2, 3]) ?? panic("reshape")
+    tt: compute.transpose(t) ?? panic("transpose")
+    print("transpose_shape:{compute.shape(tt)}")
+    summed: compute.sum_axis(tt, 0) ?? panic("sum_axis")
+    print("sum_axis:{compute.to_list(summed)}")
+
+    // Bracket slices take first-axis windows. A bare slice copies; `&` makes
+    // a mutable write-through view.
+    tensor := compute.from_list([Float]{1.0, 2.0, 3.0, 4.0}) ?? panic("tensor")
+    copied: tensor[1..2].copy()
+    print("copied:{compute.to_list(copied)}")
+    edit: &tensor[1..2]
+    edit[0] = Float{9.0}
+    print("edited:{compute.to_list(tensor)}")
+}

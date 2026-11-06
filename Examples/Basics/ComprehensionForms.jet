@@ -1,0 +1,58 @@
+User: struct {
+    active: Bool
+    name: String
+}
+
+run: fn() {
+    users: [User]{
+        {active: true, name: "Ada"},
+        {active: false, name: "Grace"},
+        {active: true, name: "Lin"},
+    }
+
+    named: loop user in users if user.active -> user.name
+    subject: loop users if .active -> .name
+    chained: users.filter(.active).map(.name)
+
+    print(named)
+    print(subject)
+    print(chained)
+    loop_values_lesson()
+}
+
+first_over: fn(limit: Int, values: [Int]) -> Int {
+    found: loop {
+        loop value in values {
+            if value > limit {
+                break(found, value)
+            }
+        }
+        break -1
+    }
+    found
+}
+
+loop_values_lesson: fn() {
+    values: [Int]{1, 2, 3, 4}
+    doubled: loop value in values -> value * 2
+    even: loop value in values if value % 2 == 0 -> value
+    prefix: loop value in values -> {
+        if value > 3 -> break
+        value
+    }
+    nested: loop left in [1, 2] -> loop right in [10, 20] -> left + right
+
+    by_value := [Int:Int]{}
+    loop value in values -> by_value.add(value, value * 10).drop("keys are unique")
+    unique: Set.from(loop value in [1, 2, 2, 3] -> value)
+    lazy: values.lazy().map(value -> value + 10)
+
+    print(doubled)
+    print(even)
+    print(prefix)
+    print(nested)
+    print(by_value[3])
+    print(unique.len())
+    print(lazy.to_list())
+    print(first_over(2, values))
+}

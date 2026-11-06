@@ -44,7 +44,7 @@ A fallible library function uses `!Err` and `??`; `jet run pkg/probe_checked_res
 ## Defects
 
 - **Native build ICE:** the exact isolated command and output are recorded in Gap 1. Front-end checking and default execution pass; the failure is in generated-Rust compilation after split-crate rejection. Adding the missing `Panic` authority does not change the failure.
-- **Stale example fixture, not counted as a unit primitive gap:** `jet run Examples/features/types/affine_unit_types.jet` fails at its own `run()` body with E0405 (`?? return can't return a value here`); the unit syntax is not the reported cause.
+- **Stale example fixture, not counted as a unit primitive gap:** `jet run Examples/Types/Units/AffineUnitTypes.jet` fails at its own `run()` body with E0405 (`?? return can't return a value here`); the unit syntax is not the reported cause.
 
 ## Battery notes
 

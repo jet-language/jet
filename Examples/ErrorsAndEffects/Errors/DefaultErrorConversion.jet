@@ -1,0 +1,19 @@
+// One declared conversion rail can target the default Err.
+User: struct {
+    name: String
+}
+
+#Error
+StoreErr: enum {
+    Missing
+}
+
+impl StoreErr -> Err {
+    return Err("store unavailable: missing user")
+}
+
+read_store: fn() -> User StoreErr! { Err(StoreErr.Missing) }
+
+get_user: fn() -> User { Ok(read_store()) }
+
+run: fn() { _: get_user() }

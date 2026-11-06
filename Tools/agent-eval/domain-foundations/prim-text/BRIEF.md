@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-Build, as library Jet: a BPE tokenizer over a 1 MB corpus; grapheme, word, and sentence segmentation for mixed scripts; a regex-driven log scanner over 100 MB; and a text-shaping call (HarfBuzz through a bridge, or report why not) that positions glyphs for Arabic and Devanagari. Time the tokenizer and the scanner against Python/Rust equivalents. Use Examples/features/strings/**, text/**, io/grep_scan.jet.
+Build, as library Jet: a BPE tokenizer over a 1 MB corpus; grapheme, word, and sentence segmentation for mixed scripts; a regex-driven log scanner over 100 MB; and a text-shaping call (HarfBuzz through a bridge, or report why not) that positions glyphs for Arabic and Devanagari. Time the tokenizer and the scanner against Python/Rust equivalents. Use Examples/Text/**, text/**, io/grep_scan.jet.
 
 ## Answer these
 

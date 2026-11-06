@@ -26,7 +26,7 @@ function fixture(t) {
     const perf = put(join(root, 'Tools/perf/nested/workload.mjs'));
     const jet = put(join(home, 'tools/jet'));
     const tools = Object.fromEntries(['cargo', 'rustc', 'rustup', 'ld.lld', 'clang', 'clang++', 'opt', 'llc', 'bwrap'].map(name => [name, put(join(home, 'tools', name))]));
-    const name = 'Examples/features/lowlevel/ffi.jet', zero = 'Examples/zero.jet';
+    const name = 'Examples/Interop/FFI/FFI.jet', zero = 'Examples/zero.jet';
     put(join(root, name), 'extern rust "base64@0.22" { encode: fn(s: String) -> String = "base64::encode" }\n');
     put(join(root, zero), 'run: fn() { print("zero") }\n');
     const allowlistText = allowRow(name);

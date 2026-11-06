@@ -107,7 +107,7 @@ function walk(directory, extension) {
 function discover(directory, suite) {
     if (!existsSync(join(work, directory))) return [];
     return readdirSync(join(work, directory), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(entry => {
-        if (entry.name.startsWith('.') || entry.name === 'expected') return [];
+        if (entry.name.startsWith('.')) return [];
         const path = join(directory, entry.name);
         if (entry.isDirectory()) {
             if (['run.jet', 'package.jet', 'workspace.jet'].some(name => existsSync(join(work, path, name)))) {
@@ -218,7 +218,7 @@ async function main() {
     const listed = await invoke(corpora('--list'), work, options.registryTimeout, pool);
     if (!problem(listed)) entries = readFileSync(listed.stdoutLog, 'utf8').split('\n').filter(line => /^(golden|ui|cases)\t/.test(line)).map(line => { const [suite, path] = line.split('\t'); return { suite, path }; });
     if (!entries.length) {
-        entries = [...discover('Examples/features', 'golden'), ...discover('tests/run', 'golden'), ...discover('tests/ui', 'ui'), ...discover('tests/ui_lint', 'ui'), ...walk(join(work, 'tests/cases'), '.case').map(file => ({ suite: 'cases', path: relative(work, file) }))];
+        entries = [...discover('Examples', 'golden'), ...discover('tests/run', 'golden'), ...discover('tests/ui', 'ui'), ...discover('tests/ui_lint', 'ui'), ...walk(join(work, 'tests/cases'), '.case').map(file => ({ suite: 'cases', path: relative(work, file) }))];
         for (const entry of entries) record({ test: entry.path, kind: entry.suite, rawStatus: 'BLOCKED', detail: 'the corpora listing failed; not exercised\n' + problem(listed) + '\n' + first(listed.stderr), run: listed });
     } else {
         json(join(scratch, 'testkit-inventory.json'), entries);
@@ -245,14 +245,6 @@ async function main() {
             for (const entry of selected.filter(entry => !actual.has(entry.path))) record({ test: entry.path, kind: entry.suite, rawStatus: 'BLOCKED', detail: `corpora shard published no verdict: ${problem(run)}\n${first(run.stderr)}`, run });
         });
     }
-    for (const file of walk(join(work, 'Examples/suites'), '.jet').filter(file => !file.endsWith('/package.jet'))) tasks.push(async () => {
-        const id = relative(work, file), expected = join(dirname(file), 'expected', file.split('/').at(-1).replace(/\.jet$/, '.out'));
-        planned.push({ test: id, kind: 'suite' });
-        if (!existsSync(expected)) return record({ test: id, kind: 'suite', rawStatus: 'BLOCKED', detail: 'missing suite golden; no invented oracle' });
-        const run = await invoke([jet, 'run', file], work, options.timeout), actual = readFileSync(run.stdoutLog, 'utf8'), wanted = readFileSync(expected, 'utf8');
-        const failure = problem(run) || (actual !== wanted ? 'stdout mismatch\n- ' + first(wanted) + '\n+ ' + first(actual) : '');
-        record({ test: id, kind: 'suite', rawStatus: failure ? 'FAIL' : 'PASS', detail: failure + (failure && run.stderr ? '\n' + first(run.stderr) : ''), run });
-    });
     for (const file of walk(join(work, 'Core'), '.jet')) {
         const text = readFileSync(file, 'utf8'), names = [...text.matchAll(/^\s*#Test\s*\(\s*("(?:\\.|[^"\\])*")/gm)].map(match => JSON.parse(match[1]));
         if (!names.length) continue;

@@ -21,7 +21,7 @@ acquire ambient `FS` authority; native file constructors retain their existing
 Use the vocabulary in [Jet vocabulary](vocabulary.md). Conformance evidence
 lives in [`tests/encoding_corpus.rs`](../../tests/encoding_corpus.rs),
 [`tests/encoding_parity.rs`](../../tests/encoding_parity.rs), and the
-encoding examples under [`Examples/features/serde`](../../Examples/features/serde/).
+encoding examples under [`Examples/Data`](../../Examples/Data/).
 
 The rules below describe durable contracts and their reasons. Decision IDs are
 citations; a narrower decision controls the public surface where it says so.
@@ -1326,9 +1326,9 @@ and their `MANIFEST.tsv` rows for URL, license, and SHA-256 metadata.
 manifest before use. Label local hostile oracles `local`; they are not
 independent RFC corpora. Checked examples cover whole-value breadth, base
 allowances, reader/writer lifecycle, and shared types; their goldens are under
-[`Examples/features/expected/serde`](../../Examples/features/expected/serde/).
+[`Examples/Data`](../../Examples/Data/).
 The matched Python fixture is
-[`encoding_json_stream.py`](../../Examples/features/serde/encoding_json_stream.py).
+[`encoding_json_stream.py`](../../Examples/Data/JSON/encoding_json_stream.py).
 It uses `json.dump(..., sort_keys=True, separators=(",", ":"))` and
 `json.load` for the same canonical file round trip. The parity test must
 exercise the Jet fixture on AOT, resident JIT, and the forced interpreter;

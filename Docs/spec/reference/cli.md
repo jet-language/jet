@@ -1063,8 +1063,8 @@ an out-of-range line selects the end of the source. Their source prerequisite
 is the authorized load-only query, not a full semantic check: an undefined
 function in an otherwise parseable file does not prevent a policy essay.
 
-`jet self devtools new-example <topic>/<name>` writes the feature example and
-its expected output using the golden harness's existing directory layout.
+`jet self devtools new-example <area>/<name>` writes `Examples/<area>/<name>.jet`
+and its expected output `Examples/<area>/<name>.out` beside it.
 Existing example source is an error; existing expected output is replaced.
 The two writes are sequential.
 Its write confirmations are emitted even under `--json` or `--quiet`.

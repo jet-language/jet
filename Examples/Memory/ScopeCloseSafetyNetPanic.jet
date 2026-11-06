@@ -1,0 +1,19 @@
+//! A panic still runs the automatic scope-end close for
+//! every live `Close` local of the stopping function before the process stops,
+//! in reverse declaration order.
+Resource: struct {
+    name: String
+}
+
+impl Resource.Close {
+    close: fn(&&self) { print("close {self.name}") }
+}
+
+fail: fn() {
+    first: Resource{name: "first"}
+    second: Resource{name: "second"}
+    print("body {first.name} {second.name}")
+    panic("stop")
+}
+
+run: fn() { fail() }

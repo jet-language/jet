@@ -1,0 +1,17 @@
+// 160 — M2: M:N scheduler — spawn pool + channel wake-on-send.
+package: {
+    name: "scheduler_spawn"
+    authority: { allow: [IO, Time.Wait] }
+}
+
+run: fn() {
+    { sender, receiver: ch }: channel<Int>(capacity: 8)
+    loop i in 1..1000 {
+        dup: sender.copy()
+        dup2: sender.copy()
+        task dup.send(1)
+    }
+    total := 0
+    loop i in 1..1000 -> total += ch.receive() ?? panic("channel closed")
+    print(total)
+}

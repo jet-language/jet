@@ -1,0 +1,55 @@
+// S47/M2: a lambda that writes a captured `:=` local borrows it, so the write
+// lands on the owner. An escaping lambda owns a copy taken at creation.
+twice: fn(f: fn(Int)) {
+    f(2)
+    f(3)
+}
+
+run: fn() {
+    count := 0
+    bump: (n: Int) -> {
+        count += n
+    }
+    bump(2)
+    bump(3)
+    print("bound {count}")
+
+    total := 0
+    twice((n: Int) -> { total += n })
+    print("argument {total}")
+
+    base := 10
+    snapshot: () -> base
+    kept: [snapshot]
+    base = 20
+    print("escaping copy {kept[0].call()}, source {base}")
+    closure_capture_snapshot_lesson()
+}
+
+Box: struct {
+    value: Int
+}
+
+closure_capture_snapshot_lesson: fn() {
+    count := 10
+    next: () -> {
+        count += 1
+        count
+    }
+    print(next())
+    print(next())
+    print(count)
+
+    boxed := Box{value: 11}
+    read: () -> boxed.value
+    boxed.value = 22
+    print(read())
+    print(boxed.value)
+
+    x := 2
+    outer: (y: Int) -> {
+        inner: (z: Int) -> x + y + z
+        inner(4)
+    }
+    print(outer(3))
+}

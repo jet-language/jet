@@ -11,7 +11,7 @@ are under [`Core/`](../../Core/). Generated call and module views are derived
 from those inputs by the [Core table generator](../../Tools/agent/gen-core-tables.mjs).
 The [surface ledger](../../tests/core_surface_ledger.rs) checks selected
 identity rows; runnable provider examples live under
-[`Examples/features/`](../../Examples/features/).
+[`Examples/`](../../Examples/).
 
 The compiler under `Compiler/` is written in Jet and is the compiler the CLI
 runs. No Core contract is defined as permanently owned by a particular compiler

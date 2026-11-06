@@ -2,7 +2,7 @@
 //
 // Tracks the canonical syntax registry in Compiler/JetFoundation/Data/Syntax/
 // (keyword/sigil/marker constants, each with a decision ID — invariant I7) plus the real code in
-// Examples/features/*.jet. This grammar exists for editor syntax highlighting
+// Examples/*.jet. This grammar exists for editor syntax highlighting
 // (Zed), not full compilation: it is permissive where the real parser is
 // strict, but every keyword/sigil/marker it names is a *current* one. Retired
 // spellings (`val`/`var`, `mut`/`take`/`view`, `when`/`switch`/`while`/

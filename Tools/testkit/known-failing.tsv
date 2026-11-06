@@ -412,7 +412,7 @@ tests/cases/cli_compiler_speed/release_build_timing_runs_inner_cache_and_invalid
 tests/cases/cli_compiler_speed/second_identical_build_replays_receipt.case	#5454	stderr predicate `up to date:` absent: second identical debug build exits 0 with empty stderr
 tests/cases/cli_compiler_speed/compiler_speed_named_job_dev_matches_run.case	#5454	run/dev named-job parity holds (both print `hello from job\nseeded`), but `jet dev run.jet --watch=off --quiet -- missing_job` exits 0 and runs `fn run` (prints `use jet run <this-file> -- greet`) instead of rejecting the unknown job with E1294
 tests/cases/cli_compiler_speed/production_build_reports_missing_explicit_linker_as_tool_error.case	#5454	exit 0; expected 1: build with RUSTC_LINKER={work}/missing-linker succeeds instead of reporting L2101
-tests/cases/web_examples_doc/web_examples_are_documented_and_have_expected_outputs.case	#4599	state_surface.jet has no golden under Examples/features/expected/web/ (no .out, .web.out, .harness.out or .case)
+tests/cases/web_examples_doc/web_examples_are_documented_and_have_expected_outputs.case	#4599	state_surface.jet has no golden under Examples/Apps/Web/ (no .out, .web.out, .harness.out or .case)
 tests/cases/jetpack_hangar_store_v2/hangar_repair_uses_jet_dispatch_and_restores_or_preserves_the_object.case	#5454	the unsigned repair archive came from the Rust API Store::export_unsigned_archive (rs:1135-1140), which has no jetpack CLI; the case's `jetpack hangar export --yes` archive is signed, so `jetpack hangar repair --from` succeeds (exit 0, expected 2)
 tests/cases/jetpack_hangar_store_v2/hangar_verify_reports_corrupt_store_instead_of_empty_success.case	#5454	jetpack hangar verify --json over a corrupt closure journal exits 2 with E1340 but `what` is "Hangar verify failed"; the Rust contract (rs:1573) is "could not read the Hangar"
 tests/cases/authority/authority_plan_refuses_before_spawn_on_all_hosted_tiers.case	#5454	jet run main.jet: Error [E1004]: `core.process` has no item `workspace` (exit 1, expected 0; stdout is "", expected "spawned ")
@@ -573,7 +573,7 @@ tests/cases/repl/repl_raw_f3_search_recalls_and_submits_persistent_history.case	
 tests/cases/repl/repl_stream_break_runs_deferred_close.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_use_repl_incompatible_module_hard_rejected.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/review/comment_only_change_has_no_semantic_operation.case	#6418	stream predicate ~ failed; loose before.jet/after.jet entries get file-named identities (module:before::run vs module:after::run), so `jet review` reports added/removed/effect_changed instead of no semantic_ops
-tests/cases/structure_liveness/liveness_web_compile_keeps_the_same_front_end_result.case	#5201	stale example: Examples/features/tooling/structure_liveness.jet declares `unused_private` and `package_export` as unmarked fns, public by default (spec.md:2163-2166), so no target can report L0104 or L0105; the example needs them in a `priv module` and a package-private module
+tests/cases/structure_liveness/liveness_web_compile_keeps_the_same_front_end_result.case	#5201	stale example: Examples/Tooling/StructureLiveness.jet declares `unused_private` and `package_export` as unmarked fns, public by default (spec.md:2163-2166), so no target can report L0104 or L0105; the example needs them in a `priv module` and a package-private module
 tests/cases/target_machines/browser_wasm_target_witness.case	#5201	`jet build --target=wasm.browser` is not built yet (E2104)
 tests/cases/target_machines/heap_free_core_target_witness.case	#5201	`jet build --target=wasm.no-os` is not built yet (E2104)
 tests/cases/target_machines/hosted_default_target_witness.case	#6418	`jet build --target=hosted` is not built yet (E2104)
@@ -644,11 +644,28 @@ tests/cases/web_build/web_wasm_map_string_int_export_hostile_roundtrip.case	#520
 tests/cases/web_build/web_wasm_range_loop_bridge_roundtrip.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
 tests/cases/web_build/web_wasm_string_export_hostile_roundtrip.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
 tests/cases/web_build/web_wasm_string_param_export_hostile_roundtrip.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
-Examples/features/net/backend_battery	#3173	ir.build unlowered: `jet run` is an internal compiler error (exit 101): the `HTTPRouterRegister` handle method and the `jet_http_router_dispatch`/`jet_openapi_router_inputs` runtime routes have no IR lowering, and the runtime exports no `jet_http_router_new`; no expected stream exists yet (the load line prints measured p50/p95/p99)
-Examples/features/packages/mod_load_errors	#4599	`mod.load` is not built yet (E2104)
-Examples/features/lowlevel/polyglot_go	#6418	`jet inspect bind` reports E2104 not built yet; `use go.handles` reports E1002 (foreign root `go` reserved)
-Examples/features/tooling/compute_autodiff	#4599	ir.build unlowered: `jet check` is clean, but `jet run` is an internal compiler error (exit 101) with 7 faults "generic Core call core.compute.gradient/jvp/vjp/value_and_gradient": the autodiff entry points have no IR lowering
-Examples/features/serde/field_metadata_edges	#3236	unbuilt: owner ruling on None-field encoding pending
+tests/run/Net/BackendBattery	#3173	ir.build unlowered: `jet run` is an internal compiler error (exit 101): the `HTTPRouterRegister` handle method and the `jet_http_router_dispatch`/`jet_openapi_router_inputs` runtime routes have no IR lowering, and the runtime exports no `jet_http_router_new`; no expected stream exists yet (the load line prints measured p50/p95/p99)
+tests/run/Packages/ModLoadErrors	#4599	`mod.load` is not built yet (E2104)
+Examples/Interop/Polyglot/PolyglotGo	#6418	`jet inspect bind` reports E2104 not built yet; `use go.handles` reports E1002 (foreign root `go` reserved)
+Examples/Interop/Languages/Cobol	#6418	`use cobol.payroll` reports E1002 (foreign root `cobol` reserved); the foreign binding route is not built
+Examples/Interop/Languages/Lua	#6418	`use lua.ops` reports E1002 (foreign root `lua` reserved); the foreign binding route is not built
+Examples/Interop/Languages/Octave	#6418	`jet inspect bind` reports E2104 not built yet; `use octave.scale` reports E1002 (foreign root `octave` reserved)
+Examples/Interop/Languages/Perl	#6418	`use perl.ops` reports E1002 (foreign root `perl` reserved); the foreign binding route is not built
+Examples/Interop/Languages/Php	#6418	`use php.ops` reports E0603 (module not in the package source snapshot); the foreign binding route is not built
+Examples/Interop/Languages/PowerShell	#6418	`jet inspect bind` reports E2104 not built yet; `use pwsh.ops` reports E1002 (foreign root `pwsh` reserved)
+Examples/Interop/Languages/Python	#6418	`jet inspect bind` reports E2104 not built yet
+Examples/Interop/Languages/R	#6418	`use r.ops` reports E1002 (foreign root `r` reserved); the foreign binding route is not built
+Examples/Interop/Languages/Ruby	#6418	`use ruby.ops` reports E0603 (module not in the package source snapshot); the foreign binding route is not built
+Examples/ErrorsAndEffects/Effects/FileScope	#4599	ir.build unlowered: `core.files.scope` (FileScope struct literal, runtime route jet_files_scope_roots_raw) and the missing jet_rt_handle_drop_jet_file_scope symbol make `jet run` exit 101; FileScope.out is hand-derived
+Examples/Interop/FFI/Callbacks	#6418	`jet inspect bind` reports E2104 not built yet, so `source.on_data` is E0102; Callbacks.out is the run.sh oracle
+Examples/LowLevel/Embedded/AllocatorFirmware	#4599	the hosted run stops with E3001 `firmware allocator unavailable`: `mem.Fixed.new(size: 32).try_alloc(7)` fails
+Examples/LowLevel/Embedded/Battery	#4599	the embedded provider battery is rejected by E0358 (`GpioRegisters`/`UartRegisters` acronym casing in Jetpack/Provider/Batteries/embedded/embedded.jet); no expected stream exists yet
+Examples/Modules/Jetpack/Epoch5	#4599	E0105: the `app` and `check` outputs select different entry functions, so `jet build run.jet` has no single entry
+tests/run/Foundations/Capabilities	#4599	E0102: `Plugin` has no method `greet` (the plugin export surface changed); no expected stream exists yet
+tests/run/Foundations/Exact	#4599	E0360: `pair_add<T: Add>` has no `+` hook for a generic `T` (exact.jet:384); no expected stream exists yet
+tests/run/Foundations/Units	#4599	E0113: `distance / elapsed / elapsed` is not accepted as `MeterPerSecondSquared` (units.jet:6); no expected stream exists yet
+Examples/Math/Compute/ComputeAutoDiff	#4599	ir.build unlowered: `jet check` is clean, but `jet run` is an internal compiler error (exit 101) with 7 faults "generic Core call core.compute.gradient/jvp/vjp/value_and_gradient": the autodiff entry points have no IR lowering
+tests/run/Encoding/FieldMetadataEdges	#3236	unbuilt: owner ruling on None-field encoding pending
 tests/cases/authority_manifest/default_run_records_source_linked_authority_delegation.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)
 tests/cases/build_entry/action_generated_jet_reenters_frontend_before_runtime_codegen.case	#6418	unbuilt: E2101/E2102 command or flag not built (E2102)
 tests/cases/build_entry/body_edit_rechecks_only_the_edited_item.case	#6418	unbuilt: E2104 command form not built (E2104)

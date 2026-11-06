@@ -21,7 +21,7 @@ editorial link, or generated artifact. Name streams, readers, and events as the
    jet run --release path/to/example.jet
    ```
 
-   Update only the matching file under `Examples/features/expected/` after the
+   Update only the matching file under `Examples/` after the
    output agrees on both paths.
 4. Do not hide a floor. If a topic has a directory such as `math/` or
    `lowlevel/`, put a beginner flagship there instead of leaving the only proof
@@ -51,12 +51,12 @@ running `jet` as the compiler under test:
 
 ```sh
 jet test Compiler                                           # quick: every member's #Tests (defaults: { test: quick })
-jet test Compiler --profile golden                          # Examples/features and tests/run
+jet test Compiler --profile golden                          # Examples and tests/run
 jet test Compiler --profile ui                              # tests/ui and tests/ui_lint
 jet test Compiler --profile cases                           # tests/cases
 jet test Compiler --profile full                            # the #Tests and all three corpora
 jet test Compiler --profile corpora                         # all three corpora, no #Tests
-jet test Compiler --profile golden basics/fizzbuzz          # rows whose ID contains the filter
+jet test Compiler --profile golden Basics/FizzBuzz          # rows whose ID contains the filter
 JET_CI_EVIDENCE_DIR=/disk/scratch jet test Compiler --profile golden  # writes golden.json
 jet test Compiler --profile ui --shard=2/4 --results=ui-2.json        # one slice, one verdict document
 ```
@@ -83,7 +83,7 @@ diagnostic report (`Error [jet.…]`) expects exit 1 there too.
 A PASS/FAIL disagreement is reported as `tier-split`, not blessed separately.
 An E2104 build refusal is `UNSUPPORTED` only on a native tier.
 
-Discovery covers `Examples/features` and `tests/run`. A package or workspace
+Discovery covers `Examples` and `tests/run`. A package or workspace
 root stops descent; its `run.jet` is the entry, not its support modules.
 `.out` expects successful stdout, `.err.out` expects stderr and exit 1 or 70,
 and `.stderr.out` pins successful stderr. `.stdin` contains exact piped input.
@@ -201,7 +201,7 @@ Expected files are read-only unless explicitly selected for blessing. `-u`
 blesses every row the profile and filter select:
 
 ```sh
-jet test Compiler --profile golden Examples/features/basics/fizzbuzz.jet -u
+jet test Compiler --profile golden Examples/Basics/FizzBuzz.jet -u
 ```
 
 A sharded profile refuses `-u`. Only the first selected tier writes. `-u`
@@ -237,8 +237,8 @@ The command exports that source commit into private disk-backed scratch. Tests
 and examples run from a separate mutable copy, never from the supplied checkout.
 It builds the native testkit once, runs its complete golden/UI/CLI-case corpus
 with deterministic shards and all three tiers, runs the compiler registries
-with independently sealed shard receipts, and runs Core's named `#Test` suites
-and `Examples/suites` goldens. The compiler itself is never rebuilt.
+with independently sealed shard receipts, and runs Core's named `#Test`
+suites. The compiler itself is never rebuilt.
 
 All children share **one total memory scope**, not one allowance per shard.
 The default is 4 GiB; `JET_CENSUS_MEMORY=8G` selects 8 GiB when the coordinator

@@ -14,9 +14,9 @@ the `budget` command is registered in
 measurement manifests are [`Tools/gauntlet/matrix.json`](../../Tools/gauntlet/matrix.json)
 and [`Tools/gauntlet/measurement-manifest.json`](../../Tools/gauntlet/measurement-manifest.json).
 The checked-in declaration examples are
-[`Examples/performance/receipts/hello/src/run.jet`](../../Examples/performance/receipts/hello/src/run.jet)
+[`Examples/Tooling/Performance/Hello/src/run.jet`](../../Examples/Tooling/Performance/Hello/src/run.jet)
 and
-[`Examples/performance/receipts/http_ready/src/run.jet`](../../Examples/performance/receipts/http_ready/src/run.jet).
+[`Examples/Tooling/Performance/HTTPReady/src/run.jet`](../../Examples/Tooling/Performance/HTTPReady/src/run.jet).
 
 Provider protocol coverage is exercised in
 [`tests/performance_budget_providers.rs`](../../tests/performance_budget_providers.rs).

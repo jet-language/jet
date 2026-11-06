@@ -8,7 +8,7 @@ Critical-area probe: build the program end to end; every part matters; write bat
 
 ## Build this
 
-A JSON API service as one Jet package: HTTP routes with typed request/response bodies and an exported OpenAPI document; SQLite or Postgres access through a bounded connection pool; a background queue with at-least-once delivery and a worker; JWT or session auth with roles; structured logs, metrics, and a trace id per request; graceful shutdown; a load test at 1,000 virtual users with p99 asserted; a contract test against the OpenAPI document; and a container-ready release build. Start from Examples/features/net/http_*.jet (service, middleware, tasks, lifecycle, limits), Examples/features/io/db*.jet and log_*.jet, Examples/features/concurrency/**, Examples/features/effects/**.
+A JSON API service as one Jet package: HTTP routes with typed request/response bodies and an exported OpenAPI document; SQLite or Postgres access through a bounded connection pool; a background queue with at-least-once delivery and a worker; JWT or session auth with roles; structured logs, metrics, and a trace id per request; graceful shutdown; a load test at 1,000 virtual users with p99 asserted; a contract test against the OpenAPI document; and a container-ready release build. Start from Examples/Network/HTTP/** (service, middleware, tasks, lifecycle, limits), Examples/Data/Database/DB*.jet and log_*.jet, Examples/Concurrency/**, Examples/ErrorsAndEffects/Effects/**.
 
 ## Answer these
 

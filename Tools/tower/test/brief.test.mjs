@@ -148,7 +148,7 @@ test('an open decision carries its full options text verbatim (owner decides fro
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-2', title: 'Pick a syntax', ...ballot({
     story: 'Priya wants a terse literal.',
-    inWild: 'x := [1,2,3] in Examples/features/lists.jet',
+    inWild: 'x := [1,2,3] in Examples/lists.jet',
   }) }));
   const p = buildBrief(st.load(), '#1');
   const d = p.decisions.find(x => x.id === 'D-2');
@@ -196,7 +196,7 @@ test('refs merges the explicit refs[] field with paths harvested from body + pla
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, {
     title: 'A',
-    body: 'See Docs/spec/architecture.md for R1-R12, and Examples/features/basics/hello.jet for the golden case.',
+    body: 'See Docs/spec/architecture.md for R1-R12, and Examples/Basics/Hello.jet for the golden case.',
     plan: '1. read crates/jet-sema/src/lib.rs. 2. update Docs/spec/architecture.md (already read).',
     refs: ['Tools/tower/AGENTS.md', 'Docs/spec/architecture.md'],
   }, cfg));
@@ -204,7 +204,7 @@ test('refs merges the explicit refs[] field with paths harvested from body + pla
   assert.deepEqual(new Set(p.refs), new Set([
     'Tools/tower/AGENTS.md',
     'Docs/spec/architecture.md',
-    'Examples/features/basics/hello.jet',
+    'Examples/Basics/Hello.jet',
     'crates/jet-sema/src/lib.rs',
   ]));
   // deduped, not doubled, even though architecture.md appears 3 times total

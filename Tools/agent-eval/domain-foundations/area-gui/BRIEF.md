@@ -8,7 +8,7 @@ Critical-area probe: build the program end to end; every part matters; write bat
 
 ## Build this
 
-A desktop note-taking app as one Jet package: a native window with a menu, a sidebar list, a text editor with proper Unicode text shaping and a system font, keyboard shortcuts, a file-open dialog, undo/redo, dark/light theme, a settings pane bound to reactive state, accessibility labels, and a packaged build for the host OS; then report what a mobile (Android/iOS) build would need. Start from Examples/features/ui/** (native_linux, reactive, layout, a11y, component_kit, typed_style, view_tree), Examples/features/io/app_config.jet.
+A desktop note-taking app as one Jet package: a native window with a menu, a sidebar list, a text editor with proper Unicode text shaping and a system font, keyboard shortcuts, a file-open dialog, undo/redo, dark/light theme, a settings pane bound to reactive state, accessibility labels, and a packaged build for the host OS; then report what a mobile (Android/iOS) build would need. Start from Examples/Apps/UI/** (native_linux, reactive, layout, a11y, component_kit, typed_style, view_tree), Examples/Systems/CLI/AppConfig.jet.
 
 ## Answer these
 

@@ -1,0 +1,16 @@
+// `#Static` gives a compile-time constant a stable address.
+// Without the marker the constant folds into its use sites and no symbol is
+// emitted; with it, the constant becomes one `static` a pointer can name.
+#Static LIMIT: comptime { 10 }
+
+WINDOW: comptime { 4 }
+
+show: fn(label: String, n: Int) { print("{label}: {n}") }
+
+run: fn() {
+    // Both constants read the same way at the use site. The difference is
+    // storage: `@limit` has an address, `@window` is folded.
+    show("limit", LIMIT)
+    show("window", WINDOW)
+    show("sum", LIMIT + WINDOW)
+}

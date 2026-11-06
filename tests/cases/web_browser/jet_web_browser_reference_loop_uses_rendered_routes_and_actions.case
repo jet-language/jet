@@ -26,10 +26,10 @@ stdout+stderr: !~ "source bytes 0..0" # original excludes old lowering ICE
 stdout+stderr: !~ "selected entry is not a top-level function" # original excludes old lowering ICE
 when probe {env:JET_WEB_CHROMIUM|env:CHROMIUM|chromium} --version stdout+stderr: ~any "Chromium" "Chrome"
 when probe {env:JET_WEB_NODE|env:NODE|node} --version stdout: ^= "v0" | ^= "v1" | ^= "v2" | ^= "v3" | ^= "v4" | ^= "v5" | ^= "v6" | ^= "v7" | ^= "v8" | ^= "v9"
-copy: {root}/Examples/features/web/jet_web/run.jet {work}/run.jet
-copy: {root}/Examples/features/web/jet_web/package.jet {work}/package.jet
-copy: {root}/Examples/features/web/jet_web/public/index.html {work}/public/index.html
-copy: {root}/Examples/features/web/jet_web/public/app.css {work}/public/app.css
+copy: {root}/Examples/Apps/Web/JetWeb/run.jet {work}/run.jet
+copy: {root}/Examples/Apps/Web/JetWeb/package.jet {work}/package.jet
+copy: {root}/Examples/Apps/Web/JetWeb/public/index.html {work}/public/index.html
+copy: {root}/Examples/Apps/Web/JetWeb/public/app.css {work}/public/app.css
 step: {env:JET_WEB_NODE|env:NODE|node} {root}/Tools/web-dev-test/reference_app.mjs --metric first_run --manifest {root}/Tools/agent-eval/dx/manifest.json --exercise --app jet-web-orders --jet-env {root}/Tools/agent/jet-env
 env: CHROMIUM={env:JET_WEB_CHROMIUM|env:CHROMIUM|chromium}
 exit: 0

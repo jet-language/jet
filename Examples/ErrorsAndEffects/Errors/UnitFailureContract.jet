@@ -1,0 +1,43 @@
+#Error MyError: enum { X }
+f: fn(bad: Bool) MyError! {
+    if bad -> return Err(MyError.X)
+    Ok(())
+}
+
+run: fn() {
+    if f(false) == {
+        .Ok(_) -> print("ok")
+        .Err(error) -> print(error)
+    }
+    if f(true) == {
+        .Ok(_) -> print("unexpected")
+        .Err(error) -> print(error)
+    }
+    unit_validation_lesson()
+}
+
+// Fallible Unit checks run directly as statements: failure still propagates.
+#Error
+ValidationError: enum {
+    Invalid
+}
+
+validate: fn(value: Int) ValidationError! {
+    if value < 0 -> return Err(ValidationError.Invalid)
+}
+
+checked_next: fn(value: Int) -> Int ValidationError! {
+    validate(value)
+    Ok(value + 1)
+}
+
+unit_validation_lesson: fn() {
+    if checked_next(2) == {
+        .Ok(value) -> { print(value) }
+        .Err(error) -> print(error)
+    }
+    if checked_next(-1) == {
+        .Ok(value) -> print(value)
+        .Err(error) -> print(error)
+    }
+}

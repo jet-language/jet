@@ -1,0 +1,78 @@
+// Module-scope `:` constants can hold struct, enum, and list literal data.
+// Jet folds each value once while building; every read is an ordinary copy.
+RGB: struct {
+    r: U8
+    g: U8
+    b: U8
+}
+
+Swatch: struct {
+    name: String
+    color: RGB
+}
+
+Finish: enum {
+    Matte
+    Gloss
+}
+
+BLACK: RGB{r: U8{0}, g: U8{0}, b: U8{0}}
+// Fields may be written in any order.
+TEAL: RGB{b: U8{128}, r: U8{0}, g: U8{128}}
+NIGHT: Swatch{name: "night", color: RGB{r: U8{15}, g: U8{56}, b: U8{15}}}
+RAMP: [RGB]{
+    RGB{r: U8{155}, g: U8{188}, b: U8{15}},
+    RGB{r: U8{139}, g: U8{172}, b: U8{15}},
+}
+FINISH: Finish.Gloss
+OFFSET: -4
+
+show: fn(color: RGB) -> String { "{color.r},{color.g},{color.b}" }
+
+finish_name: fn(finish: Finish) -> String {
+    if finish == {
+        .Matte -> "matte"
+        .Gloss -> "gloss"
+    }
+}
+
+pick: fn(palette: [U8:RGB], glyph: U8, width: Int, x: Int) -> RGB {
+    if x < width -> palette.get(glyph) ?? BLACK else -> BLACK
+}
+
+run: fn() {
+    palette := [U8:RGB]{}
+    palette[U8{0x61}] = RGB{r: U8{1}, g: U8{2}, b: U8{3}}
+
+    print(show(palette.get(U8{0x7A}) ?? BLACK))
+    print(show(palette.get(U8{0x61}) ?? BLACK))
+    print(show(pick(palette, U8{0x61}, 2, 0)))
+    print(show(pick(palette, U8{0x7A}, 2, 0)))
+    print(show(pick(palette, U8{0x61}, 2, 5)))
+
+    print(BLACK.r)
+    print(show(TEAL))
+    print(NIGHT.name)
+    print(show(NIGHT.color))
+    loop color in RAMP -> print(show(color))
+    print(RAMP.len())
+    print(finish_name(FINISH))
+    print(OFFSET + 10)
+
+    tinted := BLACK
+    tinted.r = U8{200}
+    print(show(tinted))
+    print(show(BLACK))
+    module_integer_array_constants_lesson()
+}
+
+// Module-scope `:` bindings are immutable and available inside functions.
+WORDS: [Int]{17, 18446744073709551615}
+BYTES: [U8]{0, 127, 255}
+
+module_integer_array_constants_lesson: fn() {
+    print(WORDS[0])
+    print(WORDS[1])
+    print(Int.from_u8(BYTES[1]))
+    print(Int.from_u8(BYTES[2]))
+}
