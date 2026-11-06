@@ -14,10 +14,12 @@
 # Never edit this file in place while it runs (bash reads scripts incrementally): write a new file and mv.
 set -uo pipefail
 # Its own lock: precommit censuses must never queue behind lanes' long checks (which hold census.lock).
+# The lock sits beside the one shared snapshot it guards, not under JET_RUN_ROOT: lanes have different run
+# roots, and two censuses sharing the snapshot would delete each other's tree mid-run.
 M=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$M/../roots.sh"
-mkdir -p "$JET_RUN_ROOT"
-exec 9>"$JET_RUN_ROOT/precommit-census.lock"; flock 9
+mkdir -p "$JET_SCRATCH_ROOT/discovery/r14"
+exec 9>"$JET_SCRATCH_ROOT/discovery/r14/census-snap.lock"; flock 9
 W=$JET_DEV_WORKTREE
 S=$JET_SCRATCH_ROOT/discovery/r14/snap
 OUT=$JET_SCRATCH_ROOT/discovery/r14/census
