@@ -152,7 +152,7 @@ fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -
         return None
     }
     if owner == "MappedFile" {
-        if method == "window" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindow, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "window" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindow, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("start", Type.Int, AccessConvention.Read), sema_stream_handle_param("end", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "window_len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindowLen, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "lines" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLines, result_type: Type.Apply{name: "ViewIter", args: [Type]{Type.Apply{name: "View", args: [Type]{u8}}}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLen, result_type: Type.Int, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
@@ -451,7 +451,30 @@ fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, met
     checked_args :: sema_stream_handle_checked_args("{owner}.{method}", spec.params, args, Val(receiver), receiver_value, spec.receiver_convention, shift_argument, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if sema_stream_handle_reports_no_receiver_convention(owner) -> sema_receiver_mark_forget(&state, receiver)
     typed_args :: checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_stream_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
+    result :: sema_stream_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
+    if result.value != None && sema_stream_handle_yields_view(spec.result_type) -> sema_stream_handle_publish_receiver_view(receiver, span, scopes, &state, &context)
+    result
+}
+
+// `MappedFile.window`/`window_len` return a `View<U8>` into the mapping the
+// receiver owns: the call publishes the receiver as the view's owner, the
+// same fact a view-returning function call publishes, so a binding of it is
+// a local window on that receiver. A receiver that names no place is a
+// temporary owner the statement drops.
+fn sema_stream_handle_yields_view(result_type: Type) -> Bool Never! {
+    if result_type == {
+        .Result(value, _) -> sema_stmt_view_access(value) != None
+        else -> sema_stmt_view_access(result_type) != None
+    }
+}
+
+fn sema_stream_handle_publish_receiver_view(receiver: Expr, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) Never! {
+    places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
+    temporaries := [Span]{}
+    if places.len() == 0 -> &temporaries.push(expr_span(receiver))
+    facts :: [SemaCallReturnViewFact]{SemaCallReturnViewFact{slot: [String]{}, access: AccessConvention.Read, places: places, sources: [ViewSourcePath]{}, temporaries: temporaries}}
+    sema_ownership_note_call_views(&state, span, facts)
+    &context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
 }
 
 fn sema_stream_handle_static_owner_is_canonical(owner: String, scopes: &SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {

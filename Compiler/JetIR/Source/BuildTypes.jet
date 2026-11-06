@@ -3560,11 +3560,12 @@ fn ir_view_element(ty: Type) -> Type? Never! {
     None
 }
 
-// The element of an `Iter<T>`, or of a `Stream<T>`, a generator's native
-// iterator (BuildGenerator.jet).
+// The element of an `Iter<T>`, of a `ViewIter<T>` (the same native iterator
+// over borrowed views, as `MappedFile.lines()` yields), or of a `Stream<T>`,
+// a generator's native iterator (BuildGenerator.jet).
 fn ir_iter_element(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Apply(name, args) {
-        if (name == "Iter" || name == "Stream") && args.len() == 1 -> return Val(args[0].copy())
+        if (name == "Iter" || name == "ViewIter" || name == "Stream") && args.len() == 1 -> return Val(args[0].copy())
     }
     None
 }
