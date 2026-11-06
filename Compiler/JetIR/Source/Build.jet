@@ -623,7 +623,8 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     owner_methods := [String:Int]{}
     render_impls := [String:Int]{}
     loop (index, function) in owned {
-        if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" -> next
+        operator_hook: function.name == "add" || function.name == "sub" || function.name == "mul" || function.name == "div"
+        if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" && !operator_hook -> next
         if function.kind == {
             .TopLevel -> {}
             .Method(_, owner_type) -> {
@@ -639,6 +640,13 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
                 if selected {
                     render_key: "{trait_short}|{owner_key}"
                     if render_impls.get(render_key) == None -> render_impls[render_key] = index
+                }
+                // A generic `T: Add` body's `+` (ir_operator_impl) runs the
+                // instantiation's hook for its own right-hand type.
+                operator_trait: (trait_short == "Add" && function.name == "add") || (trait_short == "Sub" && function.name == "sub") || (trait_short == "Mul" && function.name == "mul") || (trait_short == "Div" && function.name == "div")
+                if operator_trait && function.params.len() == 1 {
+                    operator_key: "{trait_short}|{owner_key}|{ir_render_type_key(p.type_rows, p.types, function.params[0].ty)}"
+                    if render_impls.get(operator_key) == None -> render_impls[operator_key] = index
                 }
             }
         }

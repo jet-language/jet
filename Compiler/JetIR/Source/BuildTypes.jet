@@ -2228,7 +2228,40 @@ ir_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
             if ir_word_record(m, p, b.f.slot_type[right]) == .Val(right_record) -> return ir_time_binary(m, p, b, op, site, left, left_record, right, right_record, span)
         }
     }
+    if op == .Add || op == .Sub || op == .Mul || op == .Div {
+        left_slot_ty: m.types[b.f.slot_type[left]].ty.copy()
+        right_slot_ty: m.types[b.f.slot_type[right]].ty.copy()
+        hooked: ir_operator_impl(m, p, b, op, left_slot_ty, left, right_slot_ty, right, span)
+        if ir_failed(b) || hooked >= 0 -> return hooked
+    }
     ir_fail_slot(b, span, "operator {op} on {ir_type_name(left_ty)}")
+}
+
+// The result of a generic `T: Add` body's `+` (sema
+// sema_expr_generic_bound_operator) on an instantiation whose type
+// implements the operator trait for `right_ty`: that implementation's hook
+// (`add`, `sub`, `mul`, `div`), or -1 when none is selected.
+ir_operator_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, left_ty: Type, left: Int, right_ty: Type, right: Int, span: Span) -> Int Never! {
+    trait_short: if op == {
+        .Add -> "Add"
+        .Sub -> "Sub"
+        .Mul -> "Mul"
+        .Div -> "Div"
+        else -> { return -1 }
+    }
+    if p.render_impls.len() == 0 -> return -1
+    index: p.render_impls.get("{trait_short}|{ir_render_type_key(p.type_rows, p.types, left_ty)}|{ir_render_type_key(p.type_rows, p.types, right_ty)}") ?? return -1
+    function: p.functions[index]
+    if function.generic_params.len() > 0 -> return ir_fail_slot(b, span, "generic {trait_short} implementation {function.name}")
+    if function.params[0].convention == .Write -> return ir_fail_slot(b, span, "{trait_short} hook {function.key} that writes its argument")
+    returned: ir_executable_return(function) ?? return ir_fail_slot(b, span, "{trait_short} implementation {function.name} without a result")
+    result_row: ir_value_type(m, p, returned) ?? return ir_type_fail(b, span, returned)
+    dst: ir_temp(m, b, result_row)
+    start: ir_args(b.f, [Int]{left, right})
+    at: ir_emit(b.f, IROp.Call, dst, -1, start, 2, b.line)
+    b.deferred.push(IRDeferredCall{at: at, key: function.key})
+    ir_stop_check(m, b)
+    dst
 }
 
 // Fixed-width `a.pow(n)` (Rust Prelude jet_pow, the trapping mode): both

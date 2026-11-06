@@ -1164,6 +1164,7 @@ sema_expr_expected_owned: fn(value: &&TExpr, expected: Type?, environment: SemaS
         diagnostics.push(sema_error("E0771", owned.span, "this needs {sema_type_show(required)}, but the function value is {sema_type_show(offered)}", "public labels and parameter zones are part of a function's callable type", "use `{type_name(required)}` here"))
         return None
     }
+    if sema_expr_unit_coherent_value(owned, required, environment, program) == .Val(coherent) -> return Val(coherent.move())
     compatible: sema_expr_expected_assignable(required, offered, environment, program) ?? return None
     if !compatible {
         diagnostics.push(sema_expr_mismatch_diagnostic(required, offered, owned.span))
@@ -1901,6 +1902,31 @@ sema_expr_unit_implicit_conversion: fn(value: TExpr, required: Type, environment
     if !sema_expr_unit_conversion_gate(value, source, destination, span, environment, program, scopes, context, diagnostics) -> return None
     line: sema_source_line_at(environment.source_segments, span) ?? 0
     Val(sema_expr_unit_conversion(value, source, destination, span, line, environment, program))
+}
+
+// D-DERIVED-DIMENSION-CLAIM1: a structural quantity (`distance / elapsed`) is
+// the value of its dimension's coherent unit, the scale-one member a family
+// claims for that dimension, so it fills that unit's slot. A scaled, affine
+// or provenance-bearing member keeps the explicit conversion.
+sema_expr_unit_coherent_value: fn(value: TExpr, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
+    dimension: if value.ty == {
+        .Quantity(base, quantity_dimension) -> {
+            if base != Type.Float -> return None
+            quantity_dimension.copy()
+        }
+        else -> { return None }
+    }
+    fact: sema_expr_unit_fact(required, environment, program) ?? return None
+    // Time's base member is the nanosecond, while quantity arithmetic reads a
+    // Duration in seconds (IR jet_duration_seconds_value): no coherent member.
+    if fact.kind == QuantityKind.Point || sema_expr_unit_is_time(fact) || sema_expr_unit_is_measured(fact) || sema_expr_unit_is_symbolic(fact) -> return None
+    if !sema_expr_unit_ratio_equal(fact.scale, UnitRatio{numerator: 1, denominator: 1}) || !sema_expr_unit_ratio_equal(fact.offset, UnitRatio{numerator: 0, denominator: 1}) -> return None
+    if !sema_expr_unit_dimensions_equal(Val(dimension), fact.dimension) -> return None
+    span: value.span
+    line: sema_source_line_at(environment.source_segments, span) ?? 0
+    raw := value.copy()
+    tree_expr_retype(raw, Type.Float)
+    Val(sema_expr_unit_wrap_raw(raw, fact, span, line, environment, program))
 }
 
 sema_expr_unit_ratio_is_finite: fn(value: UnitRatio) -> Bool {
@@ -4555,6 +4581,23 @@ sema_expr_missing_operator_hook: fn(op: BinOp, owner: Type, span: Span) -> Diagn
     sema_error("E0360", span, "no `{sema_expr_binary_name(op)}` operator is defined for `{name}`", "user arithmetic dispatches only through one `impl {name}.{trait_name}` hook", "implement `{name}.{trait_name}`, or call a named method")
 }
 
+// A generic parameter with the bare operator bound (`T: Add`, whose `Rhs`
+// and `Output` are `T`) gives that operator on two `T` values; each
+// instantiation lowers it through its own hook (IR ir_operator_impl).
+sema_expr_generic_bound_operator: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, line: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
+    if op != BinOp.Add && op != BinOp.Sub && op != BinOp.Mul && op != BinOp.Div -> return None
+    name: if lhs.ty == {
+        .Named(value) -> value.copy()
+        else -> { return None }
+    }
+    if !sema_type_name_is_generic(environment.generic_params, name) || !type_identity_equal(lhs.ty, rhs.ty) -> return None
+    trait_name: sema_expr_operator_trait(op) ?? return None
+    graph: program.registration_graph ?? return None
+    bound: sema_type_bound_satisfied_at(graph, lhs.ty, trait_name, sema_scope_caller_row(environment, graph), environment.generic_params) ?? return None
+    if !bound -> return None
+    Val(sema_tree_node(lhs.ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
+}
+
 // E2511: a lane or linalg operator outside its fixed operand shapes.
 sema_expr_math_shape_mismatch: fn(op: BinOp, left: Type, right: Type, span: Span) -> Diagnostic Never! {
     left_name: sema_expr_math_leaf_name(left) ?? type_name(left)
@@ -5134,6 +5177,8 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
         diagnostics.push(sema_expr_math_shape_mismatch(op, lhs.ty, rhs.ty, span))
         return None
     }
+    bound_operator := sema_expr_generic_bound_operator(op, lhs, rhs, span, line, environment, program)
+    if bound_operator != None -> return sema_expr_expected(bound_operator ?? lhs, expected, environment, program, diagnostics)
     if sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty) {
         before: diagnostics.len()
         operator_value := sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, program, scopes, state, tail_store, context, diagnostics, line)

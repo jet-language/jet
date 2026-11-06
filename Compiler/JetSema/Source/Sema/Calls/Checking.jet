@@ -594,6 +594,12 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             compatible = true
         }
         if !compatible {
+            if sema_expr_unit_coherent_value(value, required, environment, program) == .Val(coherent) {
+                value = coherent
+                compatible = true
+            }
+        }
+        if !compatible {
             // (Rust `check_variadic_bound_tail`,
             // E1313): a trait-bounded variadic argument is checked against
             // each bound trait it fails to implement; one that implements
