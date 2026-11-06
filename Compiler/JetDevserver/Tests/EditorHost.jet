@@ -73,7 +73,11 @@ editor_test_envelope: fn() -> String Never! {
     }
     assert_eq(transport.event_count(), 256)
     assert_eq(transport.latest_cursor(), Val(U64{258}))
-    assert(if transport.stream_after(Val(U64{1})) == .Err(.CursorExpired(requested, oldest)) && requested == U64{1} && oldest == U64{3} -> true else -> false)
+    expired: if transport.stream_after(Val(U64{1})) == {
+        .Err(.CursorExpired(requested, oldest)) -> requested == (U64{1}) && oldest == (U64{3})
+        else -> false
+    }
+    assert(expired)
     retained: transport.stream_after(Val(U64{2})) ?? panic("oldest predecessor")
     assert_eq(retained.events[0].sequence, U64{3})
     assert_eq(retained.events[255].sequence, U64{258})
