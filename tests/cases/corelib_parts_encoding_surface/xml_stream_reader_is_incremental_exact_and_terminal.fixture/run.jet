@@ -10,14 +10,14 @@ run: fn() {
     passed := 0
     loop path in paths {
         input: files.open(path) ?? panic("open boundary")
-        reader: xml.reader(input) ?? panic("reader defaults")
+        reader := xml.reader(input) ?? panic("reader defaults")
         document_start := false
         root_start := false
         document_end := false
         loop true {
-            maybe: reader.next() ?? panic("boundary next")
-            if maybe == {
-                Val(event) -> {
+            if reader.next() == {
+                .Ok(next) -> {
+                    event: next ?? break
                     event_kind := (event.field("$xml_event") ?? panic("event tag")).text() ?? ""
                     if event_kind == "document_start" {
                         wire_encoding := (event.field("encoding") ?? panic("encoding")).text() ?? ""
@@ -31,22 +31,22 @@ run: fn() {
                     }
                     if event_kind == "document_end" { document_end = true }
                 }
-                None -> { break }
+                .Err(_) -> panic("boundary next")
             }
         }
-        eof_again: reader.next() ?? panic("fused eof")
-        if eof_again == {
-            Val(_) -> {}
-            None -> { if document_start && root_start && document_end { passed++ } }
+        if reader.next() == {
+            .Ok(next) -> {
+                if next == None && document_start && root_start && document_end { passed += 1 }
+            }
+            .Err(_) -> panic("fused eof")
         }
     }
     print(passed)
 
     malformed_input: files.open("malformed.xml") ?? panic("open malformed")
-    malformed_reader: xml.reader(malformed_input) ?? panic("malformed reader")
+    malformed_reader := xml.reader(malformed_input) ?? panic("malformed reader")
     loop true {
-        result: malformed_reader.next()
-        if result == {
+        if malformed_reader.next() == {
             .Ok(maybe) -> {
                 if maybe == {
                     Val(_) -> {}
@@ -57,8 +57,7 @@ run: fn() {
                 }
             }
             .Err(first) -> {
-                again: malformed_reader.next()
-                if again == {
+                if malformed_reader.next() == {
                     .Ok(_) -> { print("terminal-missed") }
                     .Err(second) -> { print(first.byte_offset == second.byte_offset && first.reason == second.reason) }
                 }
@@ -68,10 +67,9 @@ run: fn() {
     }
 
     invalid_char_input: files.open("invalid-char.xml") ?? panic("open invalid character")
-    invalid_char_reader: xml.reader(invalid_char_input) ?? panic("invalid character reader")
+    invalid_char_reader := xml.reader(invalid_char_input) ?? panic("invalid character reader")
     loop true {
-        result: invalid_char_reader.next()
-        if result == {
+        if invalid_char_reader.next() == {
             .Ok(maybe) -> {
                 if maybe == {
                     Val(_) -> {}
@@ -88,8 +86,7 @@ run: fn() {
                 print(first.column ?? -1)
                 print(first.path)
                 print(first.reason)
-                again: invalid_char_reader.next()
-                if again == {
+                if invalid_char_reader.next() == {
                     .Ok(_) -> { print("invalid-character-terminal-missed") }
                     .Err(second) -> { print(first.reason == second.reason) }
                 }
@@ -101,10 +98,9 @@ run: fn() {
     total_limits := encoding.EncodingLimits.safe()
     total_limits.max_total_bytes = Val(6)
     total_input: files.open("limited.xml") ?? panic("open total")
-    total_reader: xml.reader(total_input, total_limits, xml.XMLParseOptions.safe()) ?? panic("total reader")
+    total_reader := xml.reader(total_input, total_limits, xml.XMLParseOptions.safe()) ?? panic("total reader")
     loop true {
-        result: total_reader.next()
-        if result == {
+        if total_reader.next() == {
             .Ok(maybe) -> {
                 if maybe == {
                     Val(_) -> {}
@@ -115,8 +111,7 @@ run: fn() {
                 }
             }
             .Err(first) -> {
-                again: total_reader.next()
-                if again == {
+                if total_reader.next() == {
                     .Ok(_) -> { print("total-terminal-missed") }
                     .Err(second) -> {
                         print(first.byte_offset)
@@ -129,11 +124,14 @@ run: fn() {
     }
 
     conflict_input: files.open("encoding-conflict.xml") ?? panic("open encoding conflict")
-    conflict_reader: xml.reader(conflict_input) ?? panic("encoding conflict reader")
-    conflict_start: conflict_reader.next() ?? panic("encoding conflict document start")
-    if conflict_start == None { panic("missing document start") }
-    conflict: conflict_reader.next()
-    if conflict == {
+    conflict_reader := xml.reader(conflict_input) ?? panic("encoding conflict reader")
+    if conflict_reader.next() == {
+        .Ok(start) -> {
+            if start == None { panic("missing document start") }
+        }
+        .Err(_) -> panic("encoding conflict document start")
+    }
+    if conflict_reader.next() == {
         .Ok(_) -> { print("encoding-conflict-missed") }
         .Err(error) -> {
             print(error.kind == encoding.EncodingErrorKind.Syntax)

@@ -126,11 +126,10 @@ tests/cases/math_display_parity/measured_unit_scale_produces_measured_conversion
 tests/cases/typed_error_carriers/exact_radix_receiver_uses_the_owned_int_argument_abi.case	#5454	verify-intent: ref build failed: E2417 Explicit failure domain `String (text)` is not an Error type
 tests/cases/typed_error_carriers/generic_collection_kernels_adapt_jet_callable_carriers.case	#5454	ref build failed: E2104 The Jet backend can't build `tests/run/mir_typed_error_carriers/generic_collection_kernels_adapt_jet_callable_carriers.jet` yet:\nrun
 tests/cases/ownership/aggregate_view_slot_composes_through_parameter_projection.case	#5454	assert not satisfied: original assert! not satisfied: [false]
-tests/cases/ownership/builtin_and_composite_receivers_use_the_call_access_frame.case	#5454	assert not satisfied: original assert! not satisfied: [false]
-tests/cases/ownership/builtin_mut_receiver_uses_two_phase_reservation.case	#5454	ref build failed: ICE: semantic body rechecking did not return a complete resolved package graph
+tests/cases/ownership/builtin_and_composite_receivers_use_the_call_access_frame.case	#5454	o2 `both(value, [value].len())` checks clean: sema reports no UseWhileWriteActive when an argument reads the place the `&Int` parameter writes
+tests/cases/ownership/builtin_mut_receiver_uses_two_phase_reservation.case	#5454	o4 `clock.advance(clock.now())` checks clean: sema reports no UseWhileWriteActive when a mutating builtin receiver is read in its own argument
 tests/cases/ownership/edit_disjoint_callback_views_reject_every_retaining_boundary.case	#5454	assert not satisfied: original assert! not satisfied: [false]
 tests/cases/ownership/enum_pattern_payload_keeps_its_original_owner_live.case	#5454	assert not satisfied: original expect_err not satisfied
-tests/cases/ownership/evaluated_statement_accesses_are_scoped_and_mode_aware.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/ownership/move_non_clonable_is_hard_error.case	#5454	assert not satisfied: original assert! not satisfied: [false]
 tests/cases/ownership/mutable_view_extraction_retires_the_source_aggregate.case	#5454	assert not satisfied: original assert! not satisfied: [false]
 tests/cases/ownership/named_write_window_calls_keep_alias_and_read_view_checks.case	#5454	assert not satisfied: original assert! not satisfied: [false]
@@ -163,7 +162,6 @@ tests/cases/corelib_parts_encoding_surface/nondeterministic_core_matrix_matches_
 tests/cases/corelib_parts_encoding_surface/encoding_breadth_codecs_share_dyn.case	#5454	Jet rejects the original source: E0108 json.events(..).contains needs a DataEvent, not a String
 tests/cases/corelib_parts_encoding_surface/xml_whole_byte_verbs_match_comptime_aot_and_dev.case	#5454	Jet rejects the original source: E-SUBJECT-CALL at `xml.parse_bytes(plain)` (XMLParseOptions argument)
 tests/cases/corelib_parts_encoding_surface/base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity.case	#5454	jet build: E0956 ambient route is unavailable to the canonical host adapter (the `prep` decoder constants)
-tests/cases/corelib_parts_encoding_surface/xml_stream_reader_is_incremental_exact_and_terminal.case	#5454	Jet rejects the original source: E0003 `passed++` computes a value that is never used
 tests/cases/collections_and_methods/card_2254_map_hoist_rejects_unknown_calls.case	#5454	Jet rejects the original source: E0433 the result of `observe` is thrown away
 tests/cases/collections_and_methods/card_2872_exact_int_division_family_uses_hot_kernels.case	#5454	`probe(9223372036854775808)` prints 26132887437755198126; the original expects 26132887437755198128
 tests/cases/comptime_core_pure_parity/registered_shared_kernel_edges_match_all_execution_tiers.case	#5454	ref build failed: E0003 A nested comptime-reachable function has no unique registered module owner
@@ -176,7 +174,6 @@ tests/cases/comptime_core_pure_parity/rustc_backed_sequential_inline_hofs_match_
 tests/cases/comptime_core_pure_parity/rustc_backed_set_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	ICE comptime.build unlowered: set builtin HashSet::clear
 tests/cases/comptime_core_pure_parity/time_plane_comptime_matches_aot_and_dev_tiers.case	#5454	ref build failed: E0003 A nested comptime-reachable function has no unique registered module owner
 tests/cases/corelib_parts_runtime/core_default_time_literal_ignores_caller_unit_of_same_name.case	#5454	assert not satisfied: original unwrap_or_else not satisfied
-tests/cases/effects/callback_pure_bound_pure_arg_ok.case	#5454	assert not satisfied: original assert! not satisfied: [false]
 tests/cases/effects/retired_effect_marker_is_e0066.case	#5454	assert not satisfied: original assert_eq! not satisfied: [["E0081","E0003"],["E0066"]]
 tests/cases/taskgroup_params/taskgroup_cannot_escape_in_a_closure.case	#5454	assert not satisfied: original assert_eq! not satisfied: [["E0403"],["E1110","E0403"]]
 tests/cases/comptime_core_pure_parity/public_transcript_covers_bag_methods_exactly.case	#5454	E0506 `Tally<TallyToken>` is not valid — `TallyToken` is not hashable
@@ -187,7 +184,7 @@ tests/cases/comptime_core_pure_parity/public_transcript_covers_rank_methods_exac
 tests/cases/comptime_core_pure_parity/public_transcript_covers_remaining_core_pure_families.case	#5454	E2404 `saturating_sub_ns` fails with `Err`, which can't propagate into `time.TimeError` here
 tests/cases/comptime_core_pure_parity/public_transcript_covers_set_methods_exactly.case	#5454	E0956 The comptime evaluator can't build this item's code yet: set_view [function:main.set_view]: set builtin std::collections::HashSet::clear
 tests/cases/comptime_core_pure_parity/public_transcript_evaluates_pure_add_arguments_once.case	#5454	internal compiler error: comptime function checking did not return a complete body or dependency wait set
-tests/cases/comptime_core_pure_parity/public_transcript_preserves_sequential_inline_hof_mutations_exactly.case	#5454	E0118 The name `partition_shadow` is already taken here
+tests/cases/comptime_core_pure_parity/public_transcript_preserves_sequential_inline_hof_mutations_exactly.case	#5454	ICE comptime.build unlowered: closure method Partition
 tests/cases/compiler_stack/public_compile_accepts_depth_256_and_reports_depth_257.case	#5454	E0003 This expression is nested too deeply, already at 254 parentheses (the original limit accepts 254 and reports E1403 "257 levels deep; limit is 256" at 255)
 tests/cases/task_state_tiers/repl_matches_canonical_task_output.case	#5454	jet repl exits 2 with E2104 `jet repl` is not built yet
 tests/cases/jetpack_tasks/jet_top_job_runs_by_name_and_unknown_suggests_jobs.case	#5454	jet greet exits 2 with E2101 `greet` isn't a jet command; the Jet CLI does not dispatch #Job fns as top-level words
