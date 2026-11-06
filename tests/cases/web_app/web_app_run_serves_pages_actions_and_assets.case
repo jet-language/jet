@@ -3,6 +3,10 @@
 mkdir: client
 copy: {root}/tests/cases/web_app/fixtures/request.jet client/request.jet
 copy: {root}/Examples/features/expected/web/web_app.harness.out expected-harness.out
+# The app's assets root is relative to the server's working directory; the
+# original ran from the repository root.
+mkdir: Examples/features/web/public
+copy: {root}/Examples/features/web/public/app.css Examples/features/web/public/app.css
 capture: expectedPage = text file.split("\n\n--- facts_json ---\n", 0) expected-harness.out
 capture: expectedFacts = text file.split("\n\n--- facts_json ---\n", 1) expected-harness.out
 spawn server: jet run {root}/Examples/features/web/web_app.jet
