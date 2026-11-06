@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6610,
-    "rev": 93250,
+    "rev": 93275,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26538,13 +26538,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nImplement ratified D-IFHOLE1=A (2026-09-11). Every dispatch table header holds exactly one statically typed `_` hole that each non-else arm fills. Guards keep ordinary `&&`/`||`.\n\n```jet\nfn label(n: Int) -> String {\n    return if n % _ == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        5 -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}\n```\n\n## Ratified terms (keep all)\n- `2 && ready` needs both checks. `2 && ready || emergency` accepts emergency alone. `2 && (ready || emergency)` always tests the candidate.\n- Boolean candidates are grouped in parentheses. Arm-level `|` separates candidates, not bits.\n- Value tables normally need `else`. Omitting `else` requires plain equality, one immutable bound subject and complete unguarded pattern coverage.\n- Owner choices: one candidate per non-else arm; a candidate behind a false `&&` is left uncalled; the header is evaluated once per attempted arm (bind first for a single read).\n- Amends D-IFDIST1, D-IF3, D-MATCHARM1/2 and S68, and preserves D-ARMHEAD-PAREN1.\n\n## Current state\n- `Examples/features/basics/fizzbuzz.jet:5-11` uses a subjectless table. The hole form sits commented out at `:14-21`, in retired `String ->` spelling.\n- The distributed header `if subject OP { atoms -> }` is parsed by `parser_expression_form_parse_dispatch_table` in `Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet:340`. It lowers to nested ifs through `parser_expression_form_nest_arms` (`:284`), with atom/`&&`/`||` handling at `:135-213` and E0386 at `:188`. There is no hole parsing anywhere in JetParser.\n- D-IFHOLE1 is not recorded in syntax-decisions.md or Syntax.rs.\n- Migration size: about 6,050 tracked `.jet` lines open an `if <expr> OP {` table, most of them `if x == {` pattern tables. The migration must be mechanical.\n\n## Changes\n1. JetParser DecisionTables.jet: parse `if H[_] { candidate [&& guard] -> body }`. Reject a missing, repeated or ambiguous hole with registered errors. A holeless distributed header becomes one teaching diagnostic with a Safe edit that inserts `_` at the subject slot. No compatibility parse path.\n2. JetAst: carry the hole position, or desugar at parse time by substituting each candidate into the header, so each candidate is evaluated at its substituted position at most once.\n3. JetSema (`Expressions/Control.jet`, `Patterns.jet`):\n   - a single hole type across arms, and a Bool header result;\n   - pattern-slot filling that keeps range matching, payload wildcards and safe bindings;\n   - OR groups that cannot leak missing bindings;\n   - no exhaustiveness credit unless the subject is immutable.\n4. Reuse the existing guard/pattern TIR, so Compiler/JetCodegen needs no new mechanism.\n5. Register the new diagnostics in DiagnosticRows.jet and Prelude/Diagnostics.jet, with UI fixtures `tests/ui/ifhole_{missing,repeated,wrong_type,non_bool}.jet`.\n6. Apply the Safe edit repo-wide (`jet fix`) across Examples, Core, Compiler, Jetpack, Tools and tests. Bind effectful subjects first where a one-time read was relied on. Update fizzbuzz.jet.\n7. Add the syntax registry row and syntax-decisions entry, update the crates/jet-parser formatter, run `jet devtools grammars`, and re-bless snapshots.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `JET_GOLDEN_FILTER=basics/fizzbuzz Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes. The full output, including the countdown, is unchanged on `jet run`, `jet run --interpret` and `jet build`.\n- A new `Examples/features/basics/dispatch_hole.jet` golden covers guard precedence, per-attempt header effects (counter), skipped candidates, error propagation and a pattern slot, and matches the explicit reference forms.\n- `JET_UI_FILTER=tests/ui/ifhole_ ... cargo test --test diagnostic_snapshots ui_snapshots` passes.\n- A census of holeless `if <expr> OP {` headers finds zero.\n\n## Batch\nbatch-jetc-front: parser-led syntax cutover. The sema checks ride the same build.\n\n## Dependencies\nNone. Land after #3727 so the census and grammar regenerations do not collide.",
+      "plan": "## Goal\nImplement ratified D-IFHOLE1=A (2026-09-11). Every dispatch table header holds exactly one statically typed `_` hole that each non-else arm fills. Guards keep ordinary `&&`/`||`.\n\n```jet\nfn label(n: Int) -> String {\n    return if n % _ == 0 {\n        15 -> \"FizzBuzz\"\n        3 -> \"Fizz\"\n        5 -> \"Buzz\"\n        else -> \"{n}\"\n    }\n}\n```\n\n## Ratified terms (keep all)\n- `2 && ready` needs both checks. `2 && ready || emergency` accepts emergency alone. `2 && (ready || emergency)` always tests the candidate.\n- Boolean candidates are grouped in parentheses. Arm-level `|` separates candidates, not bits.\n- Value tables normally need `else`. Omitting `else` requires plain equality, one immutable bound subject and complete unguarded pattern coverage.\n- Owner choices: one candidate per non-else arm; a candidate behind a false `&&` is left uncalled; the header is evaluated once per attempted arm (bind first for a single read).\n- Amends D-IFDIST1, D-IF3, D-MATCHARM1/2 and S68, and preserves D-ARMHEAD-PAREN1.\n\n## Current state\n- `Examples/features/basics/fizzbuzz.jet:5-11` uses a subjectless table. The hole form sits commented out at `:14-21`, in retired `String ->` spelling.\n- The distributed header `if subject OP { atoms -> }` is parsed by `parser_expression_form_parse_dispatch_table` in `Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet:340`. It lowers to nested ifs through `parser_expression_form_nest_arms` (`:284`), with atom/`&&`/`||` handling at `:135-213` and E0386 at `:188`. There is no hole parsing anywhere in JetParser.\n- D-IFHOLE1 is not recorded in syntax-decisions.md or Syntax.rs.\n- Migration size: about 6,050 tracked `.jet` lines open an `if <expr> OP {` table, most of them `if x == {` pattern tables. The migration must be mechanical.\n\n## Changes\n1. JetParser DecisionTables.jet: parse `if H[_] { candidate [&& guard] -> body }`. Reject a missing, repeated or ambiguous hole with registered errors. A holeless distributed header is not Jet syntax: it gets an ordinary parse error, with no teaching diagnostic or Safe edit (owner order). No compatibility parse path.\n2. JetAst: carry the hole position, or desugar at parse time by substituting each candidate into the header, so each candidate is evaluated at its substituted position at most once.\n3. JetSema (`Expressions/Control.jet`, `Patterns.jet`):\n   - a single hole type across arms, and a Bool header result;\n   - pattern-slot filling that keeps range matching, payload wildcards and safe bindings;\n   - OR groups that cannot leak missing bindings;\n   - no exhaustiveness credit unless the subject is immutable.\n4. Reuse the existing guard/pattern TIR, so Compiler/JetCodegen needs no new mechanism.\n5. Register the new diagnostics in DiagnosticRows.jet and Prelude/Diagnostics.jet, with UI fixtures `tests/ui/ifhole_{missing,repeated,wrong_type,non_bool}.jet`.\n6. Apply the Safe edit repo-wide (`jet fix`) across Examples, Core, Compiler, Jetpack, Tools and tests. Bind effectful subjects first where a one-time read was relied on. Update fizzbuzz.jet.\n7. Add the syntax registry row and syntax-decisions entry, update the crates/jet-parser formatter, run `jet devtools grammars`, and re-bless snapshots.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `JET_GOLDEN_FILTER=basics/fizzbuzz Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes. The full output, including the countdown, is unchanged on `jet run`, `jet run --interpret` and `jet build`.\n- A new `Examples/features/basics/dispatch_hole.jet` golden covers guard precedence, per-attempt header effects (counter), skipped candidates, error propagation and a pattern slot, and matches the explicit reference forms.\n- `JET_UI_FILTER=tests/ui/ifhole_ ... cargo test --test diagnostic_snapshots ui_snapshots` passes.\n- A census of holeless `if <expr> OP {` headers finds zero.\n\n## Batch\nbatch-jetc-front: parser-led syntax cutover. The sema checks ride the same build.\n\n## Dependencies\nNone. Land after #3727 so the census and grammar regenerations do not collide.",
       "checkSteps": "All commands run through scripts/agent/jet-env with CARGO_INCREMENTAL=0 and disk-backed scratch. These are future proof commands, not completed evidence.\n\nRebuild with cargo build --bin jet before compiler smoke tests. Run target/debug/jet run --trace-tiers examples/features/basics/fizzbuzz.jet, target/debug/jet run --trace-tiers --interpret examples/features/basics/fizzbuzz.jet, and target/debug/jet run --release examples/features/basics/fizzbuzz.jet. All must retain the complete expected output, including the countdown. The traces must identify default native and forced interpreter execution honestly.\n\nSet JET_GOLDEN_FILTER=basics/fizzbuzz and run cargo test --test golden examples_compile_and_run -- --exact --nocapture. Repeat with the exact path selector for each affected example; never run the unfiltered census for this card.\n\nMigrate and run cargo test --test same_subject_dispatch rewrite_compiles_formats_and_preserves_parser_dispatch_behavior -- --exact --nocapture. Keep its observable original/rewrite execution comparison. Remove source-substring assertions rather than repinning implementation details.\n\nExtend the existing web arm/pattern checks to execute generated JavaScript and Wasm. Use the existing web_build runner and run its exact changed test names with cargo test --test web_build NAME -- --exact --nocapture. The current web_value_and_range_arm_tables_emit_on_js_and_wasm case pins generated text; replace those assertions with observable value/range outcomes. Require real execution, not source-shape evidence or skipped tools.\n\nUse JET_UI_FILTER=tests/ui/NAME.jet with cargo test --test diagnostic_snapshots ui_snapshots -- --exact --nocapture for each changed diagnostic fixture. Use the corresponding tests/ui_lint selector and lint_snapshots filter when a generated repair changes. Bless only the exact reviewed fixture, never UPDATE_EXPECT=1.\n\nAdd focused regression cases for Boolean precedence, header and candidate effect order, alternative guard failure, missing pattern bindings under OR, ownership after a false guard, and changing-subject exhaustiveness. Their names and exact commands must be recorded before the implementation receipt. Execute the same witness meanings through AOT, default native run, forced interpreter/deopt, web, and compile-time evaluation. An unimplemented or skipped applicable mode blocks closure.\n\nCheck formatter roundtrips for the changed headers and repairs. A lint or formatter fix must preserve the existing program meaning, inserting an explicit binding where a prior one-time read must remain one-time. No performance result is claimed.",
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": "Main",
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: the old holeless header gets no teaching diagnostic (owner order)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -26805,9 +26810,9 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-11T12:59:34.979Z",
-      "updated": "2026-11-04T23:49:16.541Z",
+      "updated": "2026-11-06T17:56:36.950Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-04T23:49:16.541Z",
+      "claimedAt": "2026-11-06T17:56:36.950Z",
       "goals": []
     },
     {
@@ -27039,6 +27044,11 @@
       "assignee": "Main",
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: respelled for D-MOVE-SIGIL1=A and D-CALLSITE-MARK2=A."
+        },
+        {
           "at": "2026-10-23",
           "by": "agent",
           "text": "Board burndown 2026-10-22: Implementation homes named in this card (Rust crates and host files, TIR/MIR/LIR, the JIT, generated Rust) are retired. The work lands in Compiler/ and Core/ on the JetIR path (#5073) with Rust removed (#4717); the rest of the card stands."
@@ -27156,7 +27166,7 @@
         },
         {
           "n": 7,
-          "text": "[#3072] Public `close(^plugin)` gives exactly-once release. Use-after-close is rejected under checked ownership, and stale host handles fail before store access. Golden packages/sandbox_mathkit covers load/call/close/reload/close-after-failure.",
+          "text": "[#3072] Public `close(plugin)` (close takes `&&`) gives exactly-once release. Use-after-close is rejected under checked ownership, and stale host handles fail before store access. Golden packages/sandbox_mathkit covers load/call/close/reload/close-after-failure.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -27266,10 +27276,10 @@
       "parentId": "c0969ekj",
       "needsAcceptance": false,
       "created": "2026-09-12T12:54:04.168Z",
-      "updated": "2026-11-04T18:38:04.790Z",
+      "updated": "2026-11-06T17:56:42.085Z",
       "updatedBy": "Main",
       "workOrder": 103,
-      "claimedAt": "2026-10-28T11:30:29.913Z",
+      "claimedAt": "2026-11-06T17:56:42.085Z",
       "goals": []
     },
     {
@@ -32990,6 +33000,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: respelled for D-MOVE-SIGIL1=A and D-DECL-COLON1=A."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 13 criteria from archived #1204, #3359: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -33213,7 +33228,7 @@
         },
         {
           "n": 20,
-          "text": "(was #3359 c4) [retarget] Jet compiler proof (Rust freeze 2026-10-01): golden collections/map_owned_items, Examples/features/collections/map_owned_items.jet pass when compiled by the Jet compiler (Compiler/ pipeline, for example the #670 compiler-diff candidate run or jetc0): goldens print their expected output on AOT and default run, UI fixtures match their snapshots; no Rust compiler change (a Core-library-only change may also be shown on the frozen Rust compiler as interim evidence). Replaces the Rust-compiler proof: \"Examples/features/collections/map_owned_items.jet matches Examples/features/expected/collections/map_owned_items.out on AOT (`JET_GOLDEN_FILTER=collections/map_owned_items Tools/agent/jet-env cargo test --test golden examples_compile_and_run`), `jet run` and `jet run --interpret`: an owned `Iter<Record>` mapped with `fn id_of(^r: Record) -> Int` moves each record once and runs each record's close exactly once.\" [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #3359 c4) [retarget] Jet compiler proof (Rust freeze 2026-10-01): golden collections/map_owned_items, Examples/features/collections/map_owned_items.jet pass when compiled by the Jet compiler (Compiler/ pipeline, for example the #670 compiler-diff candidate run or jetc0): goldens print their expected output on AOT and default run, UI fixtures match their snapshots; no Rust compiler change (a Core-library-only change may also be shown on the frozen Rust compiler as interim evidence). Replaces the Rust-compiler proof: \"Examples/features/collections/map_owned_items.jet matches Examples/features/expected/collections/map_owned_items.out on AOT (`JET_GOLDEN_FILTER=collections/map_owned_items Tools/agent/jet-env cargo test --test golden examples_compile_and_run`), `jet run` and `jet run --interpret`: an owned `Iter<Record>` mapped with `id_of: fn(r: &&Record) -> Int` moves each record once and runs each record's close exactly once.\" [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -33222,7 +33237,7 @@
         },
         {
           "n": 21,
-          "text": "(was #3359 c5) [retarget] Jet compiler proof (Rust freeze 2026-10-01): UI fixture tests/ui/map_move_from_shared_view.jet, tests/ui/map_move_from_shared_view.jet pass when compiled by the Jet compiler (Compiler/ pipeline, for example the #670 compiler-diff candidate run or jetc0): goldens print their expected output on AOT and default run, UI fixtures match their snapshots; no Rust compiler change (a Core-library-only change may also be shown on the frozen Rust compiler as interim evidence). Replaces the Rust-compiler proof: \"tests/ui/map_move_from_shared_view.jet snapshots the rejection of a `^item` callback over a borrowed List/View receiver (`JET_UI_FILTER=tests/ui/map_move_from_shared_view.jet Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots`).\" [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #3359 c5) [retarget] Jet compiler proof (Rust freeze 2026-10-01): UI fixture tests/ui/map_move_from_shared_view.jet, tests/ui/map_move_from_shared_view.jet pass when compiled by the Jet compiler (Compiler/ pipeline, for example the #670 compiler-diff candidate run or jetc0): goldens print their expected output on AOT and default run, UI fixtures match their snapshots; no Rust compiler change (a Core-library-only change may also be shown on the frozen Rust compiler as interim evidence). Replaces the Rust-compiler proof: \"tests/ui/map_move_from_shared_view.jet snapshots the rejection of a callback that takes `&&item` over a borrowed List/View receiver (`JET_UI_FILTER=tests/ui/map_move_from_shared_view.jet Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots`).\" [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -33256,7 +33271,7 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:29.180Z",
-      "updated": "2026-11-04T23:45:16.111Z",
+      "updated": "2026-11-06T17:56:44.666Z",
       "updatedBy": "Main",
       "workOrder": 48,
       "goals": []
@@ -40659,7 +40674,7 @@
         },
         {
           "n": 5,
-          "text": "F1 regression: `JET_UI_FILTER=tests/ui/generic_task_sendability cargo test --test diagnostic_snapshots ui_snapshots` passes with E1102 on the generic `spawn_with(^c)` program, `~/.cache/jet-luna/safe-jet.sh run` on it exits with the same diagnostic (no output `1`), and `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.",
+          "text": "F1 regression: `JET_UI_FILTER=tests/ui/generic_task_sendability cargo test --test diagnostic_snapshots ui_snapshots` passes with E1102 on the generic `spawn_with(c)` (spawn_with takes `&&`) program, `~/.cache/jet-luna/safe-jet.sh run` on it exits with the same diagnostic (no output `1`), and `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -40693,7 +40708,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-28T00:46:54.243Z",
-      "updated": "2026-11-05T14:23:20.496Z",
+      "updated": "2026-11-06T17:56:46.405Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -41814,6 +41829,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: respelled for D-DECL-COLON1=A."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 23 criteria from archived #1928, #2176, #2206, #2207, #2215, #2226, #2326, #3197: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -42080,7 +42100,7 @@
         },
         {
           "n": 18,
-          "text": "No Fix line tells the user to edit a Core type or declare a built-in name: `BigInt.parse(...)`, `conn.execute(...)` on DBConnection, `x :: null` and `println(\"hi\")` point to the real API (`None`, `print`).",
+          "text": "No Fix line tells the user to edit a Core type or declare a built-in name: `BigInt.parse(...)`, `conn.execute(...)` on DBConnection, `x: null` and `println(\"hi\")` point to the real API (`None`, `print`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -42278,7 +42298,7 @@
         },
         {
           "n": 40,
-          "text": "(was #6406) Assigning to a `::` binding keeps today's E0111 text. Existing snapshots are unchanged.",
+          "text": "(was #6406) Assigning to a `name: value` binding keeps today's E0111 text. Existing snapshots are unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -42643,7 +42663,7 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-04T23:42:33.885Z",
+      "updated": "2026-11-06T17:56:21.103Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -42652,7 +42672,7 @@
     {
       "id": "c0jxsy7l",
       "num": 3836,
-      "title": "Last use moves everywhere; kept parameters inferred; ^ and ~ stay optional exact pins",
+      "title": "Last use moves everywhere; kept parameters inferred; x.move() and x.copy() are the exact pins",
       "body": "D-COPY-DEFAULT1=A (ratified; owner comment: 'Compiler chooses if unmarked, programmer can manually put sigils where desired for exact. full control'). Parent #3741. Evidence: probe p34/p35 — storing a read parameter deep-copies even at the caller's last use (~20% slower builder).",
       "kind": "feature",
       "track": "sidequest",
@@ -42660,13 +42680,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "1. Last use of a name moves in every position (bindings, fields, args, collection elements, captures) with no mark.\n2. Infer per parameter whether the body keeps it (stores/returns/sends); keeping params lower by value; callers at last use move.\n3. Exported functions: formatter writes `^T` on kept params (pin; body edit cannot silently change API).\n4. Written `^x` / `~x` are exact pins: `^x` must move (error if x used after), `~x` always copies now. Unmarked = compiler choice.\n5. Hover/jet doc show inferred keep; `jet audit copies` lists every remaining copy.\n6. Paired perf cell: builder via kept param vs inline vs Rust.",
+      "plan": "1. Last use of a name moves in every position (bindings, fields, args, collection elements, captures) with no mark.\n2. Infer per parameter whether the body keeps it (stores/returns/sends); keeping params lower by value; callers at last use move.\n3. Exported functions: formatter writes `&&T` on kept params (D-MOVE-SIGIL1=A) (pin; body edit cannot silently change API).\n4. Written `x.move()` / `x.copy()` are exact pins (D-COPY-MOVE-SPELL1=A, D-CALLSITE-MARK2=A): `x.move()` must move (error if x used after), `x.copy()` always copies now. Unmarked = compiler choice.\n5. Hover/jet doc show inferred keep; `jet audit copies` lists every remaining copy.\n6. Paired perf cell: builder via kept param vs inline vs Rust.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: the ^x and ~x value pins are superseded by x.move() and x.copy() (D-COPY-MOVE-SPELL1=A; D-CALLSITE-MARK2=A retires ^x), and kept parameters are written &&T (D-MOVE-SIGIL1=A)."
+        },
         {
           "at": "2026-11-03",
           "by": "Main",
@@ -42733,7 +42758,7 @@
         },
         {
           "n": 4,
-          "text": "[#3738] `jet audit copies` on p31 and p33 reports exactly the real sites (p31 7:16 and 16:37; p33 9:21) from JetSema copy events and never a struct name. `jet fmt --explicit-copies` writes parseable `~` at exactly those sites, and the result checks clean under `#Policy(copies: .Explicit)`. Every audited site is a registered diagnostic with a Safe `~` edit under that policy. A formatter parse failure is a compiler-defect diagnostic.",
+          "text": "[#3738] `jet audit copies` on p31 and p33 reports exactly the real sites (p31 7:16 and 16:37; p33 9:21) from JetSema copy events and never a struct name. `jet fmt --explicit-copies` writes parseable `.copy()` at exactly those sites, and the result checks clean under `#Policy(copies: .Explicit)`. Every audited site is a registered diagnostic with a Safe `.copy()` edit under that policy. A formatter parse failure is a compiler-defect diagnostic.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -42806,7 +42831,7 @@
       "parentId": "c00e9u2p",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:08.223Z",
-      "updated": "2026-11-03T02:28:16.575Z",
+      "updated": "2026-11-06T17:56:26.470Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -42821,13 +42846,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P0",
-      "plan": "1. Patterns on `T? E!` accept `.Val(x)`, `.None`, `.Err(e)` directly; exhaustiveness over the three.\n2. Nested `.Ok(...)` form: greenfield cutover — migrate all sources, teaching diagnostic + jet fix.\n3. Failures keep automatic pass-up; None never leaves a function unless written (`?` on the optional) or `.or_err(\"why\")`.\n4. `??` resolves either state.\n5. Optional internal single-tag layout only with a paired perf cell.",
+      "plan": "1. Patterns on `T? E!` accept `.Val(x)`, `.None`, `.Err(e)` directly; exhaustiveness over the three.\n2. Nested `.Ok(...)` form: greenfield cutover — migrate all sources; the old form gets no teaching diagnostic or jet fix (owner order).\n3. Failures keep automatic pass-up; None never leaves a function unless written (`?` on the optional) or `.or_err(\"why\")`.\n4. `??` resolves either state.\n5. Optional internal single-tag layout only with a paired perf cell.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: the nested .Ok(...) form gets no teaching diagnostic (owner order)."
+        },
         {
           "at": "2026-11-03",
           "by": "Main",
@@ -42952,7 +42982,7 @@
       "parentId": "c08s0ppt",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:10.138Z",
-      "updated": "2026-11-05T14:36:18.662Z",
+      "updated": "2026-11-06T17:56:39.516Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -77078,7 +77108,7 @@
       "id": "c0frcmcx",
       "num": 6201,
       "title": "Value passing is physically optimal: named-tuple returns in registers, last-use moves are true moves, and large read-only values pass by address",
-      "body": "Owner direction (2026-10-29): multiple returns (Jet named tuples) and value passing must be maximally performant, optimal and efficient. Last-use moves are ratified (D-COPY-DEFAULT1=A, D-CALLSITE-MARK1=A; spec.md ~1103-1150), with exceptions that still need `^`: fields, values with cleanup, type parameters and lambda captures. Nobody has verified that the generated code actually achieves this. The nbody profile (#3039 C6) already showed hidden heap boxes and copy/drop helpers on hot paths.",
+      "body": "Owner direction (2026-10-29): multiple returns (Jet named tuples) and value passing must be maximally performant, optimal and efficient. Last-use moves are ratified (D-COPY-DEFAULT1=A, D-CALLSITE-MARK2=A; spec.md ~1103-1150). Calls carry no marks; a take is declared && in the signature (D-MOVE-SIGIL1=A) and an early move is written x.move(), including for fields, values with cleanup, type parameters and lambda captures. Nobody has verified that the generated code actually achieves this. The nbody profile (#3039 C6) already showed hidden heap boxes and copy/drop helpers on hot paths.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e4",
@@ -77092,6 +77122,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: D-CALLSITE-MARK2=A supersedes D-CALLSITE-MARK1=A's ^ exceptions."
+        },
         {
           "at": "2026-11-03",
           "by": "Main",
@@ -77167,7 +77202,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T18:52:25.097Z",
-      "updated": "2026-11-03T02:43:11.326Z",
+      "updated": "2026-11-06T17:56:34.336Z",
       "updatedBy": "Main"
     },
     {
@@ -90508,8 +90543,8 @@
     {
       "id": "c0rodlty",
       "num": 6542,
-      "title": "Imports: Go-style `use { … }` blocks with `alias :: path` rows; retire `as` and member lists",
-      "body": "Owner instruction 2026-11-01 07:40 EST (chat): imports use Go-style blocks; aliasing uses `name ::`, not `as`; more than one use block per file is allowed (single-file multi-module setups, `comptime use` for custom linking logic). Owner answers the same morning: a single import may stay on one line (like Go); member lists (`use math.{double}`) are retired in favor of alias rows.\n\nCanonical form:\n\n```jet\nuse core.term\n\nuse {\n    jetfoundation\n    unicode :: core.text\n    double :: math.double\n    \"./lib\"\n}\n```\n\nRows: a module path, `alias :: path`, a string file path, or `alias :: \"path\"`. One row per line. `use alias :: path` is the single-line alias. `as` in imports and the `.{…}` member list are removed (teaching diagnostics point to the new form).\n\nBootstrap order: (1) the parser, formatter, registry and LSP accept the block and the `::` alias beside the old forms; a seed is cut from that commit. (2) One cutover migrates every in-repository `use` (Compiler, Core, Prelude, Jetpack, Tools, Examples, tests, .case sources, docs, editor grammars, snapshots) and deletes the old forms.",
+      "title": "Imports: Go-style `use { … }` blocks with `alias: path` rows; retire `as` and member lists",
+      "body": "Owner instruction 2026-11-01 07:40 EST (chat): imports use Go-style blocks; aliasing uses `name:` (D-DECL-COLON1=A), not `as`; more than one use block per file is allowed (single-file multi-module setups, `comptime use` for custom linking logic). Owner answers the same morning: a single import may stay on one line (like Go); member lists (`use math.{double}`) are retired in favor of alias rows.\n\nCanonical form:\n\n```jet\nuse core.term\n\nuse {\n    jetfoundation\n    unicode: core.text\n    double: math.double\n    \"./lib\"\n}\n```\n\nRows: a module path, `alias: path`, a string file path, or `alias: \"path\"`. One row per line. `use alias: path` is the single-line alias. `as` in imports and the `.{…}` member list are removed (they are no longer Jet syntax and get no teaching diagnostic).\n\nBootstrap order: (1) the parser, formatter, registry and LSP accept the block and the `::` alias beside the old forms; a seed is cut from that commit. (2) One cutover migrates every in-repository `use` (Compiler, Core, Prelude, Jetpack, Tools, Examples, tests, .case sources, docs, editor grammars, snapshots) and deletes the old forms.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -90523,6 +90558,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: alias rows are written alias: path under D-DECL-COLON1=A; the bootstrap seed step is done (c2 met) so c1 keeps only the surface; the retired-form teaching is removed per the owner's order."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -90567,7 +90607,7 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Step 1: parser, formatter (jet fmt emits a block for two or more imports), syntax registry, LSP and editor grammars accept use { … } rows (path, alias :: path, string path, alias :: string) and use alias :: path; several use blocks per file and comptime use work; examples golden on o0/o1/o2; a seed is cut from that commit.",
+          "text": "Step 1: parser, formatter (jet fmt emits a block for two or more imports), syntax registry, LSP and editor grammars accept use { … } rows (path, alias: path, string path, alias: \"path\") and use alias: path (D-DECL-COLON1=A); several use blocks per file and comptime use work; examples golden on o0/o1/o2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -90618,6 +90658,15 @@
           "verifiedBy": null,
           "evidence": "Landed on dev in f2898ba8d5 (step 2 cutover; step 1 parser in 1620f05362). The evidence recorded on this criterion on 2026-11-02 stands, and the use-block forms have been on dev since then; the met flag was never set.",
           "at": "2026-11-06T10:25:14.946Z"
+        },
+        {
+          "n": 7,
+          "text": "The teaching diagnostic and UI snapshot for the retired `use … as` and `.{…}` member list (c2) are removed: retired spellings are not Jet syntax (owner order; the removal is tracked with every other teaching row on #4148 c4).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T17:56:22.889Z"
         }
       ],
       "refs": [],
@@ -90626,7 +90675,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T12:40:05.857Z",
-      "updated": "2026-11-06T10:25:37.957Z",
+      "updated": "2026-11-06T17:56:23.788Z",
       "updatedBy": "Main"
     },
     {
@@ -92569,7 +92618,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: respelled for D-DECL-COLON1=A."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -92582,7 +92637,7 @@
         },
         {
           "n": 2,
-          "text": "After D-PIPE1 is ratified: the ratified spelling is registered in the syntax registry, parses, and lowers each stage to a hidden :: binding before type checking. A paired IR test proves the pipe and the hand-named form give identical IR at O0, O1 and O2.",
+          "text": "After D-PIPE1 is ratified: the ratified spelling is registered in the syntax registry, parses, and lowers each stage to a hidden name: value binding before type checking. A paired IR test proves the pipe and the hand-named form give identical IR at O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -92646,8 +92701,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T19:36:01.124Z",
-      "updated": "2026-11-05T02:21:49.314Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-06T17:56:18.415Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0gelll3",
@@ -92667,6 +92722,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: c5 follows the owner's no-teaching order."
+        },
         {
           "at": "2026-11-05",
           "by": "Main",
@@ -92712,7 +92772,7 @@
         },
         {
           "n": 5,
-          "text": "The //! form (53 lines, e.g. Examples/features/basics/digits.jet:1-3) is not in the registry or S49: it is either registered and ratified, or migrated to /// in one cutover with a teaching error. Found by Research3, 2026-11-04 (comment-sigil study, probes c01-c14 under Docs/research/assets/2026-11-04-comment-sigil/, compiler 1f70b8d4bd).",
+          "text": "The //! form (53 lines, e.g. Examples/features/basics/digits.jet:1-3) is not in the registry or S49: it is either registered and ratified, or migrated to /// in one cutover with no teaching error. Found by Research3, 2026-11-04 (comment-sigil study, probes c01-c14 under Docs/research/assets/2026-11-04-comment-sigil/, compiler 1f70b8d4bd).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -92726,8 +92786,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "D-COMMENT-SIGIL1 ratified A as amended by the owner (2026-11-04, 'keep // no warn on python'): // stays and there is no Python // warning, so this criterion has no work.",
-          "at": "2026-11-05T00:02:50.338Z",
-          "closure": "obsolete"
+          "at": "2026-11-05T00:02:50.338Z"
         },
         {
           "n": 7,
@@ -92785,7 +92844,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T21:02:54.914Z",
-      "updated": "2026-11-05T00:02:51.015Z",
+      "updated": "2026-11-06T17:56:15.731Z",
       "updatedBy": "Main"
     },
     {
@@ -93066,8 +93125,8 @@
     {
       "id": "c0iuwxty",
       "num": 6569,
-      "title": "sema: Pool.remove through a read-only Pool parameter is accepted (must be E0202)",
-      "body": "Probe review61_edges (BallotLead, D-POOL-HAS1 review) removes an entry through a read-only Pool<T> parameter and compiles. spec.md:1574-1576 says add, remove and pool[id] = v need a writable pool (a := binding or & parameter). Fix in Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet:378-429 so remove/add/index-write on a read-only Pool is E0202, with a UI snapshot.",
+      "title": "sema: Pool.remove through a read-only Pool parameter is accepted (must be a write error)",
+      "body": "Probe review61_edges (BallotLead, D-POOL-HAS1 review) removes an entry through a read-only Pool<T> parameter and compiles. spec.md:1574-1576 says add, remove and pool[id] = v need a writable pool (a := binding or & parameter). Fix in Compiler/JetSema/Source/Sema/Calls/SharedOwner.jet:378-429 so remove/add/index-write on a read-only Pool is the registered write error (E0202 today; under D-CALLSITE-MARK2=A the changeability error quotes the parameter), with a UI snapshot.",
       "kind": "bug",
       "track": "sidequest",
       "epoch": null,
@@ -93080,7 +93139,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: E0202 retires under D-CALLSITE-MARK2=A; the bug stands as a missing changeability error."
+        }
+      ],
       "criteria": [],
       "refs": [
         "D-POOL-HAS1"
@@ -93090,7 +93155,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T21:12:10.986Z",
-      "updated": "2026-11-05T21:12:10.986Z",
+      "updated": "2026-11-06T17:56:29.075Z",
       "updatedBy": "Main"
     },
     {
@@ -93177,7 +93242,7 @@
     {
       "id": "c0qowqlz",
       "num": 6572,
-      "title": "codegen: a consuming method fn m(^self) does not drop self (a struct's [TCPListener] stays bound)",
+      "title": "codegen: a consuming method fn m(&&self) does not drop self (a struct's [TCPListener] stays open)",
       "body": "Reported by JetpackStore 2026-11-05. On a struct with a [TCPListener] field, calling a consuming method fn release(^self) Never! {} leaves the listener open: after ^r.release() the port can't be rebound. A free fn f(^r: S) {} or the struct leaving scope drops it correctly. Repro (jet run -A; expected every line 'rebind ok', got 'consume empty: rebind FAILED' and 'consume field: rebind FAILED'):\n\nuse net :: core.net\nstruct Res {\n    ports: [Int]\n    listeners: [TCPListener]\n    fn release_empty(^self) Never! {}\n    fn release_field(^self) Never! { held :: self.listeners }\n}\nfn make() -[Net]> Res NetError! {\n    held := [TCPListener]{}\n    listener :: net.tcp_listen(\"127.0.0.1:0\")\n    address :: net.listener_local_socket_addr(listener)\n    &held.push(^listener)\n    Ok(Res{ports: [Int]{net.socket_port(address)}, listeners: held})\n}\nfn release_free(^r: Res) Never! {}\nfn try_bind(label: String, port: Int) Never! -[Net, IO]> {\n    if net.tcp_listen(\"127.0.0.1:{port}\") == { .Ok(_) -> print(\"{label}: rebind ok\") .Err(e) -> print(\"{label}: rebind FAILED {e}\") }\n}\nfn run() Never! -[Net, IO]> {\n    b :: make() ?? panic(\"b\"); pb :: b.ports[0]; ^b.release_empty(); try_bind(\"consume empty\", pb)\n    c :: make() ?? panic(\"c\"); pc :: c.ports[0]; ^c.release_field(); try_bind(\"consume field\", pc)\n    d :: make() ?? panic(\"d\"); pd :: d.ports[0]; release_free(^d); try_bind(\"free fn\", pd)\n}\n\nWorkaround in Jetpack Services: free fn services_release_ports(^reservation); remove it when fixed.",
       "kind": "bug",
       "track": "sidequest",
@@ -93191,7 +93256,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: under D-MOVE-SIGIL1=A and D-CALLSITE-MARK2=A the repro reads fn release(&&self) and the call is r.release(); the defect is unchanged."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [],
@@ -93201,7 +93272,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T21:32:45.696Z",
-      "updated": "2026-11-05T21:32:45.696Z",
+      "updated": "2026-11-06T17:56:31.734Z",
       "updatedBy": "Main"
     },
     {
@@ -182544,6 +182615,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T17:56:46.405Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tgtjtu",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T17:56:44.666Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02vmcbl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:56:43.862Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02vmcbl",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T17:56:42.085Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0c4k3fw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:56:41.275Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0c4k3fw",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T17:56:39.516Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0flvd7x",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:56:38.727Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0flvd7x",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-06T17:56:36.950Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0p39lw2",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:56:36.162Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0p39lw2",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-06T17:56:34.336Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0frcmcx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:56:33.517Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0frcmcx",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-06T17:56:31.734Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qowqlz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:56:30.940Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qowqlz",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-06T17:56:29.076Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0iuwxty",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:56:28.261Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0iuwxty",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-11-06T17:56:26.471Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jxsy7l",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:56:25.676Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jxsy7l",
+      "note": "criteria,title,plan"
+    },
+    {
+      "at": "2026-11-06T17:56:23.788Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rodlty",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:56:22.889Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rodlty",
+      "note": "criteria,title,body"
+    },
+    {
+      "at": "2026-11-06T17:56:21.103Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0o8f1p4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:56:20.325Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0o8f1p4",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T17:56:18.416Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09umw0r",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:56:17.600Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09umw0r",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T17:56:15.731Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gelll3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:56:14.946Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gelll3",
+      "note": "criteria"
+    },
     {
       "at": "2026-11-06T17:56:12.776Z",
       "by": "Main",
