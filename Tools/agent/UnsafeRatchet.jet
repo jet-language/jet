@@ -3,7 +3,9 @@
 //
 // Every user-written `#Unsafe` region in the checkout is one row of the
 // generated baseline in Docs/spec/safety.md. Growth fails; a shrink that only
-// removes exact rows rewrites the baseline; `--update` approves any change.
+// removes exact rows rewrites the baseline; `--update` approves any change;
+// `--check` never writes and fails on any difference, shrink included (the
+// lane gate: Tools/agent/LaneCheck.jet runs it before every check).
 // The CoreLib audit (#4619) then requires every raw operation in `Core/**` to
 // sit inside an audited gate, and every safe abstraction (a plain fn that
 // opens an `#Unsafe` block) to carry a reviewer's proof in the safety.md
@@ -14,7 +16,7 @@
 // text: a column counts Unicode scalars, as the baseline rows always have.
 //
 // Usage (from the repository root):
-//   jet Tools/agent/UnsafeRatchet.jet [--update] [--root PATH] [--baseline PATH]
+//   jet Tools/agent/UnsafeRatchet.jet [--update | --check] [--root PATH] [--baseline PATH]
 use {
     json: core.encoding.json
     files: core.files
@@ -80,6 +82,7 @@ Options: struct {
     root: String
     baseline: String
     update: Bool
+    check: Bool
     help: Bool
 }
 
@@ -182,10 +185,11 @@ CountChange: struct {
 
 usage: fn() -> String {
     [String]{
-        "usage: {COMMAND} [--update] [--root PATH] [--baseline PATH]",
+        "usage: {COMMAND} [--update | --check] [--root PATH] [--baseline PATH]",
         "",
         "Scan user-written Jet unsafe regions and compare them with the committed baseline.",
         "A lower count updates the baseline only for exact-row removals. Use --update to approve changes.",
+        "--check never writes: any difference from the baseline, a shrink included, fails.",
     }.join("\n")
 }
 
@@ -1329,6 +1333,10 @@ ratchet: fn(options: Options) -[FS, IO]> Bool RatchetError! {
             term.eprint(format_stale(changes) ?? return Err(err))
             return Ok(false)
         }
+        if options.check {
+            term.eprint("{format_stale(changes) ?? return Err(err)}\nunsafe ratchet: --check never writes; run {COMMAND} to record the shrink")
+            return Ok(false)
+        }
         write_text(options.baseline, baseline_document(baseline.text, current) ?? return Err(err)) ?? return Err(err)
         print("unsafe ratchet: baseline decreased to {current.total} regions")
         return Ok(true)
@@ -1349,12 +1357,14 @@ resolved: fn(path: String) -[FS, Env]> String RatchetError! {
 
 parse_args: fn(args: [String]) -[FS, Env]> Options RatchetError! {
     root: resolved(".") ?? return Err(err)
-    options := Options{root: root.copy(), baseline: files.join(root, "Docs/spec/safety.md"), update: false, help: false}
+    options := Options{root: root.copy(), baseline: files.join(root, "Docs/spec/safety.md"), update: false, check: false, help: false}
     index := 0
     loop index < args.len() {
         arg: args[index]
         if arg == "--update" {
             options.update = true
+        } else if arg == "--check" {
+            options.check = true
         } else if arg == "--root" || arg == "--baseline" {
             index += 1
             value: if index < args.len() -> args[index].copy() else -> ""
@@ -1373,6 +1383,7 @@ parse_args: fn(args: [String]) -[FS, Env]> Options RatchetError! {
         }
         index += 1
     }
+    if options.update && options.check -> return Err(ratchet_fail("--update and --check exclude each other\n\n{usage()}"))
     Ok(options)
 }
 
@@ -1510,4 +1521,13 @@ audited: fn(text: String) -> CoreLibScan {
     }
     missing: read_abstractions("no registry") ?? panic("none: {err.message}")
     assert_eq(missing.len(), 0)
+}
+
+#Test("--check compares without writing and excludes --update") {
+    checked: parse_args([String]{"--check"}) ?? panic("--check: {err.message}")
+    assert(checked.check && !checked.update)
+    if parse_args([String]{"--check", "--update"}) == {
+        .Ok(_) -> panic("--check with --update was accepted")
+        .Err(error) -> assert(error.message.starts_with("--update and --check exclude each other"))
+    }
 }
