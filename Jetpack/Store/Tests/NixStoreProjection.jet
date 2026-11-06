@@ -143,11 +143,14 @@ fn store_test_admit_signed_closure(verification: &StoreVerification, roots: Hang
     entry :: store_test_find_entry(entries, root_path)
     lease :: store_snapshot_lease(&verification, roots, entry) ?? panic("lease")
     projected := [String: String]{}
-    loop pair in lease.nix_store_projection() {
-        resolved :: files.read_link(pair.source) ?? pair.source
-        assert(!store_path_starts_with(resolved, "/nix/store"))
-        projected[pair.logical] = resolved
+    loop item in store_nix_store_projection_for_entry(&verification, roots, entry, lease.snapshot_root) ?? panic("projection") {
+        assert(!store_path_starts_with(item.source, "/nix/store"))
+        projected[item.logical] = item.source
     }
+    // The lease hands the child exactly those objects, by held descriptor.
+    leased := [String]{}
+    loop pair in lease.nix_store_projection() -> &leased.push(pair.logical)
+    assert_eq(store_sorted_unique(leased), store_sorted_unique(projected.keys().to_list()))
     expected := [String]{}
     loop object in admitted.objects -> &expected.push(object.key.removeprefix("/nix/store/"))
     actual := [String]{}

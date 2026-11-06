@@ -225,17 +225,17 @@ fn store_test_register_entry_locked(verification: &StoreVerification, roots: Han
     store_make_tree_writable_for_removal(dir) ?? panic("chmod")
     files.remove_all(dir) ?? panic("remove dir")
     files.remove_all(files.join(roots.hangar_dir(), STORE_CLOSURE_DB_DIR)) ?? panic("remove db")
-    disappeared := false
+    // The hook owns copies of what it captures, so the removal is observed
+    // through the filesystem.
     disappear :: () -> {
         store_make_tree_writable_for_removal(object) ?? panic("chmod object")
         files.remove_all(object) ?? panic("remove object")
-        disappeared = true
     }
     refused :: if store_test_register_with_hook(&verification, roots, ingested.entry, disappear) == {
         .Ok(_) -> panic("a disappearing output must fail registration")
         .Err(error) -> error.message().contains("does not exist")
     }
-    assert(disappeared)
+    assert(!files.exists(object))
     assert(refused)
     assert_eq((store_journal_transaction_paths(store_journal_dir(roots)) ?? panic("paths")).len(), 0)
     assert_eq((store_list_checked(&verification, roots) ?? panic("listing")).len(), 0)

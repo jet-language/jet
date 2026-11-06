@@ -23,6 +23,13 @@ fn env_shell_push_unique(seen: &[String: Bool], parts: &[String], dir: String) N
     &parts.push(dir)
 }
 
+// The leased variable names in sorted order.
+fn env_shell_lease_var_names(vars: [String: LeaseText]) -> [String] Never! {
+    names := vars.keys().to_list()
+    &names.sort()
+    names
+}
+
 // How one command run treats the host environment, stdout, and the process.
 struct ShellRunOptions {
     // Start from an empty environment: only declared facts enter the child.
@@ -47,16 +54,33 @@ struct ShellEnv {
     prompt_strip: PromptStripMode
     // Cache verification leases stay live through child process handoff.
     cache_leases: [CacheLease]
+    // Variables naming paths inside leased outputs. Only `apply_to_base`
+    // renders them, for a child its leases were passed to.
+    lease_vars: [String: LeaseText]{[String: LeaseText]{}}
 
-    // Prepend our bin dirs to `base_path`, deduping while preserving order.
-    fn composed_path(self, base_path: String) -[Env]> String Never! {
+    // Leased bin dirs, then our bin dirs, then `base_path`, deduped in
+    // first-seen order.
+    fn composed_path(self, base_path: String) -[Env]> LeaseText Never! {
+        separator :: env_shell_path_separator()
+        parts := [LeaseText]{}
+        loop lease in self.cache_leases {
+            bin :: lease.child_bin_dir() ?? next
+            &parts.push(bin)
+        }
+        loop dir in self.bin_dirs -> &parts.push(LeaseText.plain(dir))
+        loop dir in base_path.split(separator) {
+            if dir == "" -> next
+            &parts.push(LeaseText.plain(dir))
+        }
+        LeaseText.join_unique(parts, separator)
+    }
+
+    // Our bin dirs over `base_path`: the host search this process may use
+    // itself, without any leased directory.
+    fn host_path(self, base_path: String) -[Env]> String Never! {
         separator :: env_shell_path_separator()
         seen := [String: Bool]{}
         parts := [String]{}
-        loop lease in self.cache_leases {
-            wrapper :: lease.wrapper_dir() ?? next
-            env_shell_push_unique(&seen, &parts, wrapper)
-        }
         loop dir in self.bin_dirs -> env_shell_push_unique(&seen, &parts, dir)
         loop dir in base_path.split(separator) {
             if dir == "" -> next
@@ -65,27 +89,27 @@ struct ShellEnv {
         parts.join(separator)
     }
 
+    // Whether a lease provides executable `name`.
+    fn leases_executable(self, name: String) -> Bool Never! {
+        loop lease in self.cache_leases {
+            if lease.executable_for(name) != None -> return true
+        }
+        false
+    }
+
     // Compose a PATH a parent shell can evaluate after this process exits.
     // Lease descriptors and private wrappers are process-local, so they are
     // replaced by sealed canonical Hangar bin directories; a lease without
     // one makes the whole PATH unavailable.
     fn composed_path_for_parent(self, base_path: String) -[FS, Env, Rand]> String? Never! {
         seen := [String: Bool]{}
-        lease_paths := [String: Bool]{}
-        lease_bin_dirs := [String]{}
-        loop lease in self.cache_leases {
-            if lease.projected_bin_dir() == .Val(path) {
-                lease_paths[path] = true
-                parent_bin :: lease.parent_shell_bin_dir() ?? return None
-                &lease_bin_dirs.push(parent_bin)
-            }
-            if lease.wrapper_dir() == .Val(wrapper) -> lease_paths[wrapper] = true
-        }
         parts := [String]{}
-        loop dir in lease_bin_dirs -> env_shell_push_unique(&seen, &parts, dir)
-        loop dir in self.bin_dirs {
-            if !lease_paths.has_key(dir) -> env_shell_push_unique(&seen, &parts, dir)
+        loop lease in self.cache_leases {
+            if lease.child_bin_dir() == None -> next
+            parent_bin :: lease.parent_shell_bin_dir() ?? return None
+            env_shell_push_unique(&seen, &parts, parent_bin)
         }
+        loop dir in self.bin_dirs -> env_shell_push_unique(&seen, &parts, dir)
         separator :: env_shell_path_separator()
         loop dir in base_path.split(separator) {
             if dir == "" -> next
@@ -94,35 +118,66 @@ struct ShellEnv {
         Val(parts.join(separator))
     }
 
+    // The declared and leased variables a parent shell exports, each leased
+    // directory named by its sealed canonical Hangar object; None when a
+    // leased variable has no durable root.
+    fn parent_vars(self) -[FS, Env, Rand]> [String: String]? Never! {
+        out := self.vars
+        if self.lease_vars.len() == 0 -> return Val(out)
+        roots := [Int: String]{}
+        loop lease in self.cache_leases {
+            durable :: lease.durable_roots() ?? return None
+            loop fd in durable.keys().to_list() -> roots[fd] = durable[fd]
+        }
+        loop name in env_shell_lease_var_names(self.lease_vars) -> out[name] = self.lease_vars[name].render_durable(roots) ?? return None
+        Val(out)
+    }
+
     // The composed environment over the caller's inherited PATH.
-    fn apply_to(&self, spec: ProcessSpec) -[Env]> ProcessSpec StoreError! {
+    fn apply_to(&self, spec: ProcessSpec) -[FS, Exec, Env]> ProcessSpec StoreError! {
         base :: sys.get("PATH") ?? ""
         &self.apply_to_base(spec, base)
     }
 
     // Only the declared environment and realized PATH. Callers clear the
     // child environment first for clean-shell checks and task probes.
-    fn apply_clean_to(&self, spec: ProcessSpec) -[Env]> ProcessSpec StoreError! {
+    fn apply_clean_to(&self, spec: ProcessSpec) -[FS, Exec, Env]> ProcessSpec StoreError! {
         &self.apply_to_base(spec, env_shell_clean_path())
     }
 
     // `apply_clean_to` over a cleared child environment when `clean`, else
     // `apply_to`.
-    fn apply_in_mode(&self, spec: ProcessSpec, clean: Bool) -[Env]> ProcessSpec StoreError! {
+    fn apply_in_mode(&self, spec: ProcessSpec, clean: Bool) -[FS, Exec, Env]> ProcessSpec StoreError! {
         if clean -> return &self.apply_clean_to(spec.env_clear())
         &self.apply_to(spec)
     }
 
-    // Lease handles travel into the child at their pinned slots, which also
-    // records the process handoff; a lease whose handles cannot travel
-    // refuses the child.
-    fn apply_to_base(&self, spec: ProcessSpec, base_path: String) -[Env]> ProcessSpec StoreError! {
+    // The descriptors `apply_to_base` passes, so a leased program path can
+    // be rendered before its spec exists. The spec still binds each one
+    // itself; a lease that lost a handle fails there.
+    fn planned_binding(self) -> LeaseBinding Never! {
+        binding := LeaseBinding.empty()
+        loop lease in self.cache_leases -> lease.plan_binding(&binding)
+        binding
+    }
+
+    // Pass every lease's held directories into the child at their reserved
+    // descriptors (recording the process handoff), then render PATH and the
+    // leased variables for exactly the descriptors this spec carries. The
+    // only place leased text becomes a child's environment.
+    fn apply_to_base(&self, spec: ProcessSpec, base_path: String) -[FS, Exec, Env]> ProcessSpec StoreError! {
         out := spec
+        binding := LeaseBinding.empty()
         loop index in 0..<self.cache_leases.len() {
-            out = &self.cache_leases[index].keep_open_for(out)
+            out = &self.cache_leases[index].keep_open_for(out, &binding) ?? return Err(StoreError.Other(err.message()))
         }
-        out = out.env("PATH", self.composed_path(base_path))
+        path :: self.composed_path(base_path).render(binding) ?? return Err(StoreError.Other(err.message()))
+        out = out.env("PATH", path)
         loop name in envmodel_sorted_keys(self.vars) -> out = out.env(name, self.vars[name])
+        loop name in env_shell_lease_var_names(self.lease_vars) {
+            value :: self.lease_vars[name].render(binding) ?? return Err(StoreError.Other(err.message()))
+            out = out.env(name, value)
+        }
         loop name in self.unset_vars -> out = out.env_remove(name)
         out = out.env(JETPACK_ENV_MARKER, "1").env(JETPACK_REF_VAR, self.refs.join(" "))
         if self.vars.get("JET_ROOT") == .Val(root) -> out = out.env(ENV_HOOK_ACTIVE_DIR_VAR, root)
@@ -184,7 +239,7 @@ struct ShellEnv {
         program :: cmd_args[0]
         rest :: cmd_args[1..<cmd_args.len()]
         caller_dir :: env_shell_command_lookup_directory(cwd)
-        stable_program := String?{None}
+        stable_program := LeaseText?{None}
         loop lease in self.cache_leases {
             if lease.executable_for_command_at(program, caller_dir) == {
                 .Ok(found) -> {
@@ -197,7 +252,15 @@ struct ShellEnv {
             }
         }
         launch :: if stable_program == {
-            .Val(path) -> ShellLaunch.plain(process.cmd([String]{path}).args_extend(rest))
+            .Val(leased) -> {
+                // The child holds the leased bin root at the descriptor this
+                // path names: `apply_in_mode` below passes it into the spec.
+                path :: leased.render(self.planned_binding()) ?? {
+                    Theme.resolve_choice(ColorChoice.Auto).error_coded("E1340", "could not run `{program}`", err.message(), "re-realize the package so its lease holds the executable's output")
+                    return 126
+                }
+                ShellLaunch.plain(process.cmd([String]{path}).args_extend(rest))
+            }
             .None -> {
                 if env_shell_nix_projection_command(self, program, rest) == {
                     .Ok(projected) -> projected ?? ShellLaunch.plain(process.cmd([String]{program}).args_extend(rest))
@@ -215,7 +278,7 @@ struct ShellEnv {
         spec = if &self.apply_in_mode(spec, options.clean) == {
             .Ok(ready) -> ready
             .Err(error) -> {
-                Theme.resolve_choice(ColorChoice.Auto).error("could not run `{program}`", error.message(), "run the command outside the leased environment until Core can pass descriptors to a child")
+                Theme.resolve_choice(ColorChoice.Auto).error("could not run `{program}`", error.message(), "re-realize the package so its lease holds every output, then run the command again")
                 return 126
             }
         }
@@ -272,7 +335,7 @@ struct ShellEnv {
         spec = if &self.apply_in_mode(spec, clean) == {
             .Ok(ready) -> ready
             .Err(error) -> {
-                theme.error("could not start `{kind.binary()}`", error.message(), "enter the shell without leased packages until Core can pass descriptors to a child")
+                theme.error("could not start `{kind.binary()}`", error.message(), "re-realize the leased packages, then enter the shell again")
                 close(^scratch)
                 return 126
             }

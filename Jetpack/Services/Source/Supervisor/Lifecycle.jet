@@ -193,9 +193,11 @@ fn services_service_spec(env: &ShellEnv, plan: DevServicePlan, resolved: &Servic
     _ :: files.create(services_stdout_path(resolved.dir)) ?? return Err(ServicesError.new("{err}"))
     _ :: files.create(services_stderr_path(resolved.dir)) ?? return Err(ServicesError.new("{err}"))
     if resolved.run.len() == 0 -> return Err(ServicesError.new("service `{plan.name}` has an empty `run:` command"))
+    // PATH and leased variables reach the child only through `apply_to`,
+    // which passes the lease descriptors they name; a `systemd-run --scope`
+    // wrapper executes the service in place and inherits both.
     service_env := env.vars
     loop name in env.unset_vars -> &service_env.remove(name).drop("an unset variable may be absent")
-    service_env["PATH"] = env.composed_path(sys.get("PATH") ?? "")
     service_env[JETPACK_ENV_MARKER] = "1"
     service_env[JETPACK_REF_VAR] = env.refs.join(" ")
     &service_env.remove(SERVICES_SUPERVISOR_ENV).drop("the supervisor marker may be absent")

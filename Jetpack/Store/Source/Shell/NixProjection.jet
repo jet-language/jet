@@ -3,9 +3,9 @@
 // private user and mount namespace (`unshare`) where an empty tmpfs `/nix`
 // receives exact read-only binds of the leased closure objects, so the
 // program never sees the host store. The tools that build the namespace are
-// opened first and must reach the child by descriptor so a path swap after
-// verification cannot redirect them; Core cannot pass an open descriptor to
-// a child process yet, so the projection fails closed once it is resolved.
+// regular files that must reach the child by descriptor so a path swap after
+// verification cannot redirect them; Core passes held directories to a child
+// but not open files, so the projection fails closed once it is resolved.
 //
 // Failures use two EnvironmentError kinds: `Unsupported` (the host cannot
 // build the namespace, reported as E1351) and `InvalidData` (the leased
@@ -61,26 +61,8 @@ ENV_SHELL_NIX_STORE :: "/nix/store"
 ENV_SHELL_UNSHARE_CANDIDATES :: [String]{"/run/current-system/sw/bin/unshare", "/usr/bin/unshare", "/bin/unshare"}
 ENV_SHELL_MOUNT_CANDIDATES :: [String]{"/run/current-system/sw/bin/mount", "/usr/bin/mount", "/bin/mount"}
 ENV_SHELL_SH_CANDIDATES :: [String]{"/run/current-system/sw/bin/sh", "/usr/bin/sh", "/bin/sh"}
-ENV_SHELL_SYSTEM_TOOL_DIRS :: [String]{"/run/current-system/sw/bin", "/usr/bin", "/bin"}
 ENV_SHELL_NAMESPACE_FLAGS :: [String]{"--user", "--map-root-user", "--mount", "--propagation", "private"}
-ENV_SHELL_PROJECTION_HANDOFF_UNSUPPORTED :: "running a leased Nix closure in its rootless `/nix/store` projection is not supported yet: Core cannot pass the namespace tools' open descriptors to a child process"
-
-// One tool opened before the namespace exists. The child reaches it through
-// its pinned descriptor path; `coreutils_mode` names the multicall program
-// when the handle is the coreutils binary.
-struct ShellInheritedTool {
-    path: String
-    handle: FileReader
-    slot: Int
-    coreutils_mode: String?
-}
-
-// The resolved program the namespace script finally runs.
-struct ShellProjectedBinary {
-    path: String
-    mode: String?
-    tool: ShellInheritedTool?
-}
+ENV_SHELL_PROJECTION_HANDOFF_UNSUPPORTED :: "running a leased Nix closure in its rootless `/nix/store` projection is not supported yet: Core cannot pass the namespace tools' open files to a child process"
 
 // Build the namespace command for `program`, or None when no leased Nix
 // closure is involved. Linux only: elsewhere a projection request fails.
@@ -93,11 +75,11 @@ fn env_shell_nix_projection_command(env: ShellEnv, program: String, rest: [Strin
         }
         return Ok(None)
     }
-    projections := [String: String]{}
+    projections := [String: LeaseText]{}
     loop lease in env.cache_leases {
         loop path in lease.nix_store_projection() {
             if projections.get(path.logical) == .Val(existing) {
-                if !env_shell_same_projection_source(existing, path.source) {
+                if !existing.same(path.source) {
                     return Err(EnvironmentError.InvalidData("conflicting `/nix/store` projection for `{path.logical}`"))
                 }
                 next
@@ -106,68 +88,22 @@ fn env_shell_nix_projection_command(env: ShellEnv, program: String, rest: [Strin
         }
     }
     if projections.len() == 0 -> return Ok(None)
-    leased_program := false
-    loop lease in env.cache_leases {
-        if lease.executable_for(program) != None -> leased_program = true
-    }
-    if !leased_program && env_shell_strip_path_prefix(program, ENV_SHELL_NIX_STORE) == None -> return Ok(None)
+    if !env.leases_executable(program) && env_shell_strip_path_prefix(program, ENV_SHELL_NIX_STORE) == None -> return Ok(None)
     if !files.is_dir("/proc/self/fd") {
         return Err(EnvironmentError.Unsupported("`/proc/self/fd` is unavailable for stable projection handles"))
     }
     unshare :: env_shell_first_file(ENV_SHELL_UNSHARE_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `unshare`"))
-    mount :: env_shell_first_file(ENV_SHELL_MOUNT_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `mount`"))
+    _ :: env_shell_first_file(ENV_SHELL_MOUNT_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `mount`"))
     shell :: env_shell_first_file(ENV_SHELL_SH_CANDIDATES) ?? return Err(EnvironmentError.Unsupported("rootless `/nix/store` projection needs `sh`"))
     // Probe with an absolute shell rather than a bare `true`: the projection
     // may itself run inside a sandbox with an empty PATH, where a PATH lookup
     // fails with exit 127 and looks like a refused namespace.
     env_shell_check_rootless_namespace(unshare, shell)
-    unshare_tool :: env_shell_inherited_tool(unshare, None) ?? return Err(EnvironmentError.Unsupported("{err}"))
-    shell_tool :: env_shell_inherited_tool(shell, None) ?? return Err(EnvironmentError.Unsupported("{err}"))
-    mount_tool :: env_shell_inherited_tool(mount, None) ?? return Err(EnvironmentError.Unsupported("{err}"))
-    binary :: env_shell_projected_binary(env, projections, program)
-    scratch := ShellScratch.empty()
-    if env_shell_projection_fstab(projections, &scratch) == {
-        .Ok(_) -> {
-            // Rust hands the unshare, shell, mount, and binary descriptors to
-            // the namespace at their slots so a path swap after verification
-            // cannot redirect it. Core cannot pass an open descriptor to a
-            // child process, so the projection fails closed here, after every
-            // tool and the binary resolved.
-            close(^scratch)
-            Err(EnvironmentError.Unsupported(ENV_SHELL_PROJECTION_HANDOFF_UNSUPPORTED))
-        }
-        .Err(error) -> {
-            close(^scratch)
-            Err(error)
-        }
-    }
-}
-
-// Execute through the projected store name when the binary lives in the
-// closure: this preserves the ELF identity for `$ORIGIN` and makes
-// PT_INTERP/DT_NEEDED resolve only after the exact closure is mounted. Any
-// other existing file is passed by descriptor.
-fn env_shell_projected_binary(env: ShellEnv, projections: [String: String], program: String) -[FS, Env]> ShellProjectedBinary EnvironmentError! {
-    resolved := program
-    loop lease in env.cache_leases {
-        found :: lease.projected_executable(program) ?? next
-        resolved = found
-        break
-    }
-    if env_shell_logical_executable_path(projections, resolved) == .Val(logical) {
-        return Ok(ShellProjectedBinary{path: logical, mode: None, tool: None})
-    }
-    if files.is_file(resolved) {
-        tool :: env_shell_inherited_tool(resolved, Val(program)) ?? return Err(EnvironmentError.InvalidData("{err}"))
-        return Ok(ShellProjectedBinary{path: tool.path, mode: tool.coreutils_mode, tool: Val(tool)})
-    }
-    if !files.is_absolute(resolved) {
-        if env_shell_find_system_tool(program) == .Val(fallback) {
-            tool :: env_shell_inherited_tool(fallback, Val(program)) ?? return Err(EnvironmentError.InvalidData("{err}"))
-            return Ok(ShellProjectedBinary{path: tool.path, mode: tool.coreutils_mode, tool: Val(tool)})
-        }
-    }
-    Ok(ShellProjectedBinary{path: resolved, mode: None, tool: None})
+    // Rust hands the unshare, shell, mount, and binary descriptors to the
+    // namespace so a path swap after verification cannot redirect it. Those
+    // are open files, which Core cannot pass to a child, so the projection
+    // fails closed here, after the host proved it can build the namespace.
+    Err(EnvironmentError.Unsupported(ENV_SHELL_PROJECTION_HANDOFF_UNSUPPORTED))
 }
 
 // The fstab for one namespace and the logicals it bind-mounts.
@@ -224,13 +160,6 @@ fn env_shell_projection_fstab(projections: [String: String], scratch: &ShellScra
     Ok(ShellProjectionMounts{fstab_path: fstab_path, bound_logicals: bound_logicals})
 }
 
-fn env_shell_same_projection_source(left: String, right: String) -[FS, Env]> Bool Never! {
-    if left == right -> return true
-    left_real :: files.canonicalize(left) ?? return false
-    right_real :: files.canonicalize(right) ?? return false
-    left_real == right_real
-}
-
 // The logical `/nix/store` name of `binary` when it lies inside a projected
 // closure object, by logical path or by the object's canonical source.
 fn env_shell_logical_executable_path(projections: [String: String], binary: String) -[FS, Env]> String? Never! {
@@ -280,28 +209,9 @@ fn env_shell_fstab_field(value: String) -> String Never! {
     value.replace("\\", "\\\\").replace(" ", "\\040").replace("\t", "\\011").replace("\n", "\\012").replace("#", "\\043")
 }
 
-// Open `path` for the child at a process-unique descriptor slot.
-fn env_shell_inherited_tool(path: String, coreutils_program: String?) -[FS, Env]> ShellInheritedTool IOError! {
-    handle :: files.open(path)
-    slot :: store_lease_allocate_slot()
-    canonical :: files.canonicalize(path) ?? ""
-    is_coreutils :: canonical != "" && files.basename(canonical) == "coreutils"
-    mode :: if is_coreutils -> coreutils_program else -> None
-    Ok(ShellInheritedTool{path: store_lease_descriptor_path(slot), handle: handle, slot: slot, coreutils_mode: mode})
-}
-
 fn env_shell_first_file(candidates: [String]) -[FS]> String? Never! {
     loop candidate in candidates {
         if files.is_file(candidate) -> return Val(candidate)
-    }
-    None
-}
-
-// A required system tool from the fixed system directories.
-fn env_shell_find_system_tool(name: String) -[FS]> String? Never! {
-    loop dir in ENV_SHELL_SYSTEM_TOOL_DIRS {
-        path :: files.join(dir, name)
-        if files.is_file(path) -> return Val(path)
     }
     None
 }

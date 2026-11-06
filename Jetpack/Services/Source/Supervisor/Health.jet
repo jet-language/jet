@@ -40,7 +40,7 @@ fn services_health_one(project_dir: String, env: &ShellEnv, plan: DevServicePlan
 
 // The shell spelling of a readiness command, in the project directory with
 // the service's environment.
-fn services_probe_shell(command: String, resolved: ServiceResolved, env: &ShellEnv) -[Env, Exec, Time, Time.Wait]> Bool Never! {
+fn services_probe_shell(command: String, resolved: ServiceResolved, env: &ShellEnv) -[FS, Env, Exec, Time, Time.Wait]> Bool Never! {
     spec :: &env.apply_to(process.shell(command).cwd(resolved.project_dir).stdout(.Capture).stderr(.Capture)) ?? return false
     services_run_bounded_probe(spec, SERVICES_MAX_READY_PROBE_MS)
 }

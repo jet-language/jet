@@ -38,8 +38,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     prepared :: protocol.prepare_snapshot(lease_id, scope, snapshot.path, "demo", "1", "demo@core#1", snapshot.digest, [LeaseMember]{store_lease_test_member(bytes)}) ?? panic("prepare")
     frame :: protocol.encode_request(prepared.request) ?? panic("encode")
     receipt :: protocol.accept_snapshot(frame, snapshot.digest, snapshot.path) ?? panic("accept")
-    owner :: prepared.owner_lock
-    close(^owner)
+    close(^prepared.owner_lock)
     (lease_id: lease_id, scope: scope, snapshot: snapshot.path, digest: snapshot.digest, receipt: receipt)
 }
 
@@ -90,8 +89,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     reopened.validate_snapshot(lease_id, receipt.generation, scope, snapshot.path, snapshot.digest) ?? panic("validate")
     other_digest :: "sha256-{pkg_sha256_hex("different output".bytes())}"
     assert(reopened.validate_snapshot(lease_id, receipt.generation, scope, snapshot.path, other_digest) == .Err(_))
-    owner :: prepared.owner_lock
-    close(^owner)
+    close(^prepared.owner_lock)
     files.remove_all(root).drop("test cleanup")
 }
 
@@ -113,8 +111,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     loop at < tampered.len() && tampered[at] != (U8{49}) -> at += 1
     tampered[at] = U8{50}
     assert(store_lease_test_is_err(protocol.accept_snapshot(tampered, digest, snapshot)))
-    owner :: prepared.owner_lock
-    close(^owner)
+    close(^prepared.owner_lock)
     files.remove_all(root).drop("test cleanup")
 }
 
@@ -132,8 +129,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     wrong_key := prepared.request
     wrong_key.key_id = "0000000000000000"
     assert(protocol.encode_request(wrong_key) == .Err(_))
-    owner :: prepared.owner_lock
-    close(^owner)
+    close(^prepared.owner_lock)
     close(^global)
     files.remove_all(root).drop("test cleanup")
 }
@@ -152,8 +148,7 @@ fn store_lease_test_publish(protocol: ExecutableLeaseProtocol, root: String, con
     files.write(files.join(incomplete, LEASE_RECEIPT_FILE), "partial") ?? panic("partial receipt")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
     assert(files.exists(incomplete))
-    owner :: prepared.owner_lock
-    close(^owner)
+    close(^prepared.owner_lock)
     close(^live)
     assert_eq(protocol.recover_stale_leases() ?? panic("recover after release"), 1)
     assert(!files.exists(snapshot.path))

@@ -34,11 +34,11 @@ fn cli_sha256_hex(bytes: [U8]) -> String Never! {
     crypto.sha256(bytes).hex()
 }
 
-// The strict job cache key (`jet-job-cache-v2`).
-fn cli_task_cache_key(project_dir: String, entry: String, job: String, compiler_path: String, metadata: JobMetadata, task_args: [String], refs: [RefSpec], table: SourceTable, environment_hash: String) -[FS, Env]> String CLIError! {
+// The strict job cache key (`jet-job-cache-v2`). `compiler_build` is the
+// hex SHA-256 of the compiler the job runs (`cli_resolve_job_compiler`).
+fn cli_task_cache_key(project_dir: String, entry: String, job: String, compiler_build: String, metadata: JobMetadata, task_args: [String], refs: [RefSpec], table: SourceTable, environment_hash: String) -[FS, Env]> String CLIError! {
     identity := "jet-job-cache-v2\n{job}\n"
     identity = "{identity}compiler={COMPILER_VERSION}\n"
-    compiler_build :: foundation_sha256_file_hex(compiler_path) ?? return Err(CLIError.Other("couldn't hash compiler `{compiler_path}`: {err}"))
     identity = "{identity}compiler-build={compiler_build}\n"
     identity = "{identity}platform={pkg_host_platform()}\n"
     entry_hash :: foundation_sha256_file_hex(entry) ?? return Err(CLIError.Other("couldn't hash job entry: {err}"))

@@ -17,9 +17,12 @@ fn cli_task_access_trace_path(cache_key: String) -[Env]> String Never! {
 // Run `argv` in `env` under the file-access tracer, writing `trace_path`.
 fn cli_run_job_with_access_trace(env: &ShellEnv, argv: [String], project_dir: String, clean: Bool, silent: Bool, trace_path: String) -[IO, FS, Env, Exec, Time, Time.Wait, Rand]> Int CLIError! {
     if !sys.is_linux() -> return Err(CLIError.Other("strict cached job access tracing is currently supported only on Linux"))
-    base_path :: if clean -> env_shell_clean_path() else -> sys.get("PATH") ?? ""
-    composed_path :: env.composed_path(base_path)
-    tracer :: cli_resolve_executable_path_in("strace", composed_path)
+    // A leased `strace` stays a bare name the run resolves through its
+    // lease; a host one is found along our bin dirs and the base PATH.
+    tracer :: if env.leases_executable("strace") -> "strace" else -> {
+        base_path :: if clean -> env_shell_clean_path() else -> sys.get("PATH") ?? ""
+        cli_resolve_executable_path_in("strace", env.host_path(base_path))
+    }
     files.remove(trace_path).drop("a stale trace from an earlier run is replaced")
     traced := [String]{tracer, "-f", "-qq", "-e", "trace=%file", "-o", trace_path}
     loop arg in argv -> &traced.push(arg)

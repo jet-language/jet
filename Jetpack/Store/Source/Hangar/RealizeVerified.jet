@@ -784,20 +784,23 @@ fn store_realize_adapter_tools(verification: &StoreVerification, roots: HangarRo
         dependency_roots :: if uses_nix -> ctx.nix_roots ?? roots else -> roots
         realized :: store_realize_verified(&verification, dependency_roots, ctx, RealizeRequest.Package{spec: spec, table: table})
         parts :: ^realized.into_parts()
+        bin_dir :: parts.entry.bin
         lease := ^parts.lease
         receipt :: lease.profile_install_receipt() ?? return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{dependency.name}` has no verified executable output: {err}")))
+        lease.validate() ?? return Err(RealizeError.Store(StoreError.IO(err)))
         loop member in receipt.executable_members {
-            path :: if lease.executable_for_command(member) == {
-                .Ok(found) -> found ?? return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{dependency.name}` lost executable `{member}` from its verified lease")))
+            if lease.executable_for_command(member) == {
+                .Ok(found) -> { if found == None -> return Err(RealizeError.Provider(ProviderError.Adapter("build dependency `{dependency.name}` lost executable `{member}` from its verified lease"))) }
                 .Err(error) -> { return Err(RealizeError.Store(StoreError.IO(error))) }
             }
             if tools.has_key(member) -> return Err(RealizeError.Provider(ProviderError.Adapter("build dependencies provide the same executable `{member}`")))
-            tools[member] = path
+            // The recipe names the durable member the revalidated lease
+            // keeps alive for the whole adapter build.
+            tools[member] = files.join(bin_dir, member)
         }
-        // The recipe launches the adapter's child process directly from
-        // these leased executable paths. Mark the handoff before the lease
-        // leaves this function so it is retained only while an inherited
-        // descendant lock proves it is still in use.
+        // Mark the handoff before the lease leaves this function so it is
+        // retained only while an inherited descendant lock proves it is
+        // still in use.
         &lease.mark_process_handoff()
         &dependency_leases.push(lease)
     }

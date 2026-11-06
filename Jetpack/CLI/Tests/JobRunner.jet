@@ -26,7 +26,8 @@ fn cli_test_write(path: String, text: String) {
 }
 
 fn cli_test_cache_key(root: String, entry: String, compiler: String, metadata: JobMetadata, args: [String], environment_hash: String) -> String {
-    cli_task_cache_key(root, entry, "build", compiler, metadata, args, [RefSpec]{}, SourceTable.empty(), environment_hash) ?? panic("cache key")
+    build :: foundation_sha256_file_hex(compiler) ?? panic("hash compiler")
+    cli_task_cache_key(root, entry, "build", build, metadata, args, [RefSpec]{}, SourceTable.empty(), environment_hash) ?? panic("cache key")
 }
 
 fn cli_test_metadata_error(root: String, metadata: JobMetadata) -> String {

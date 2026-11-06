@@ -127,9 +127,9 @@ fn env_lock_acquire_opened(opened: ^RuntimeLockScope, wait: Duration) -[FS, Env,
     }
 }
 
-// Rust `acquire_lease_lock`. Rust passes the lock to the launched process
-// tree; Core cannot pass an open descriptor to a child, so a lease that
-// holds it refuses the handoff (`CacheLease.keep_open_for`).
+// Rust `acquire_lease_lock`. The lock is this process's own descriptor; a
+// lease that holds it keeps it until the launched process tree exits
+// (`RuntimeLock.release` with `keep_for_descendant`).
 fn env_acquire_lease_lock(root: String, scope: String) -[FS, Env, Time]> RuntimeLock IOError! {
     env_acquire_lock(root, scope)
 }
@@ -224,8 +224,11 @@ fn env_lock_state(path: String) -[FS, Env]> RuntimeLockState IOError! {
     }
     env_lock_validate_marker(marker_parent, marker, name, path)
     opened :: RuntimeLockScope{authority: authority, marker_parent: marker_parent, marker: marker, name: name, path: path}
+    // The probe's claim is released before the state is reported, so a
+    // recovery claim that follows in this process is not refused by it.
     probe :: env_lock_try_owner(opened)
-    if probe == None -> return Ok(RuntimeLockState.Held)
+    owner :: probe ?? return Ok(RuntimeLockState.Held)
+    close(^owner)
     Ok(RuntimeLockState.Idle)
 }
 

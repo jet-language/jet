@@ -3,20 +3,30 @@
 // claims belong to the dead workspace build path that moves into `jet`
 // (Tower #3664) and are not ported with it.
 
+// Plain lease text as a child sees it; no lease descriptor is involved.
+fn cli_test_plain(text: LeaseText?) -> String? {
+    if text == .Val(value) -> return Val(value.render(LeaseBinding.empty()) ?? panic("plain text renders unbound"))
+    None
+}
+
+fn cli_test_provider_paths(file: String, value: String) -> String? {
+    cli_test_plain(cli_resolve_provider_paths(LeaseText.plain("/hangar/objects/sha256-output"), file, value))
+}
+
 #Test("cli lua metadata paths resolve inside the realized output") {
-    assert_eq(cli_resolve_provider_paths("/hangar/objects/sha256-output", "lua-path", "share/lua/5.4/?.lua;share/lua/5.4/?/init.lua"), Val("/hangar/objects/sha256-output/share/lua/5.4/?.lua;/hangar/objects/sha256-output/share/lua/5.4/?/init.lua"))
+    assert_eq(cli_test_provider_paths("lua-path", "share/lua/5.4/?.lua;share/lua/5.4/?/init.lua"), Val("/hangar/objects/sha256-output/share/lua/5.4/?.lua;/hangar/objects/sha256-output/share/lua/5.4/?/init.lua"))
 }
 
 #Test("cli relative provider metadata rejects a parent escape") {
-    assert_eq(cli_resolve_provider_paths("/hangar/objects/sha256-output", "lua-path", "../outside"), None)
+    assert_eq(cli_test_provider_paths("lua-path", "../outside"), None)
 }
 
 #Test("cli current directory provider metadata resolves inside the realized output") {
-    assert_eq(cli_resolve_provider_paths("/hangar/objects/sha256-output", "gem-home", "."), Val("/hangar/objects/sha256-output/."))
+    assert_eq(cli_test_provider_paths("gem-home", "."), Val("/hangar/objects/sha256-output/."))
 }
 
 #Test("cli absolute legacy provider metadata is preserved") {
-    assert_eq(cli_resolve_provider_paths("/hangar/objects/sha256-output", "lua-path", "/legacy/a/?.lua;/legacy/b/?/init.lua"), Val("/legacy/a/?.lua;/legacy/b/?/init.lua"))
+    assert_eq(cli_test_provider_paths("lua-path", "/legacy/a/?.lua;/legacy/b/?/init.lua"), Val("/legacy/a/?.lua;/legacy/b/?/init.lua"))
 }
 
 #Test("cli activation denies a task secret missing from the declared list") {
@@ -63,10 +73,10 @@
 }
 
 #Test("cli native projection derives root timezone and loader paths") {
-    projection :: cli_native_environment_projection("/workspace/jet", [(name: String, output: String)]{
-        (name: "tzdata", output: "/hangar/tzdata-1"),
-        (name: "raylib", output: "/hangar/raylib-1"),
-        (name: "vulkan-loader", output: "/hangar/vulkan-1")
+    projection :: cli_native_environment_projection("/workspace/jet", [(name: String, output: LeaseText)]{
+        (name: "tzdata", output: LeaseText.plain("/hangar/tzdata-1")),
+        (name: "raylib", output: LeaseText.plain("/hangar/raylib-1")),
+        (name: "vulkan-loader", output: LeaseText.plain("/hangar/vulkan-1"))
     }, [(command: String, binary: String)]{
         (command: "jet", binary: "/opt/jet/bin/jet"),
         (command: "jetpack", binary: "/opt/jet/bin/jetpack")
@@ -76,8 +86,9 @@
     assert_eq(vars.get("JET_ROOT"), Val("/workspace/jet"))
     assert_eq(vars.get("JET_ENV_DISABLE"), Val("1"))
     assert_eq(vars.get("JET_NIX_TMP_CLEANED"), Val("1"))
-    assert_eq(vars.get("TZDIR"), Val("/hangar/tzdata-1/share/zoneinfo"))
-    if sys.name() == "linux" -> assert_eq(vars.get("LD_LIBRARY_PATH"), Val("/hangar/vulkan-1/lib:/hangar/raylib-1/lib:/host/lib"))
+    leased :: projection.lease_vars()
+    assert_eq(cli_test_plain(leased.get("TZDIR")), Val("/hangar/tzdata-1/share/zoneinfo"))
+    if sys.name() == "linux" -> assert_eq(cli_test_plain(leased.get("LD_LIBRARY_PATH")), Val("/hangar/vulkan-1/lib:/hangar/raylib-1/lib:/host/lib"))
     assert_eq(projection.activation, NativeActivation.Disabled)
     assert_eq(projection.nix_shell_scratch, NixShellScratch.NotCreated)
 }

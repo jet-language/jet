@@ -40,7 +40,6 @@ struct PackageOutputNode {
     kind: PackageOutputNodeKind
     // `sha256-…` of a file's bytes or a symlink's target; empty for a directory.
     digest: String
-    source: String
     link_target: String?
 }
 
@@ -172,8 +171,7 @@ fn cli_build_package_generation_body(verification: &StoreVerification, cache: &W
         index :: realized.len() - 1
         realized[index].lease.validate()
         if !cli_is_canonical_digest(realized[index].entry.envelope.output_hash) -> return Err(CLIError.ProviderFacts("realized `{package.raw}` has no canonical output digest"))
-        leased_output :: realized[index].lease.stable_path(realized[index].entry.out)
-        realized[index].nodes = cli_collect_output_nodes(leased_output, package.raw)
+        realized[index].nodes = cli_collect_output_nodes(&realized[index].lease, package.raw)
     }
     groups := [String: [PackageOutputNode]]{}
     loop package in realized {
@@ -185,7 +183,7 @@ fn cli_build_package_generation_body(verification: &StoreVerification, cache: &W
     }
     selected :: cli_choose_output_nodes(plan, groups, previous)
     files.create_dir(rootfs)
-    cli_copy_package_projection(rootfs, selected)
+    cli_copy_package_projection(rootfs, selected, &realized)
     loop package in realized -> package.lease.validate()
     metadata :: cli_format_package_generation_metadata(generation, plan, realized, groups, roots, rootfs)
     target_hashes := [String]{}
@@ -376,36 +374,45 @@ fn cli_format_package_generation_metadata(generation: Int, plan: PackageProfileP
     Ok("{{\"schema\":{cli_json_quote(PACKAGE_PROFILE_SCHEMA)},\"profile\":{cli_json_quote(plan.name)},\"generation\":{generation},\"fingerprint\":{cli_json_quote(plan.fingerprint)},\"root_hash\":{cli_json_quote(root_hash)},\"selected_profiles\":[{cli_json_quote_list(plan.selected_profiles)}],\"applied\":[{cli_json_quote_list(plan.applied)}],\"sources\":[{cli_json_quote_list(plan.sources)}],\"collisions\":{{{collisions.join(",")}}},\"packages\":[{packages.join(",")}]}}\n")
 }
 
-// Every node below a realized output root, depth-first in name order.
-fn cli_collect_output_nodes(root: String, package: String) -[FS]> [PackageOutputNode] CLIError! {
-    info :: files.stat(root)
+// Every node below a realized output root, depth-first in name order, read
+// through the directory the lease holds.
+fn cli_collect_output_nodes(lease: &CacheLease, package: String) -[FS]> [PackageOutputNode] CLIError! {
+    info :: lease.output_entry("")
     if !info.is_dir || info.is_symlink -> return Err(CLIError.ProviderFacts("realized `{package}` output is not a real directory"))
     nodes := [PackageOutputNode]{}
-    cli_collect_output_nodes_inner(root, "", package, &nodes)
+    cli_collect_output_nodes_inner(&lease, "", package, &nodes)
     Ok(nodes)
 }
 
-fn cli_collect_output_nodes_inner(current: String, prefix: String, package: String, nodes: &[PackageOutputNode]) CLIError! -[FS]> {
-    loop entry in files.list_dir(current) {
+fn cli_collect_output_nodes_inner(lease: &CacheLease, prefix: String, package: String, nodes: &[PackageOutputNode]) CLIError! -[FS]> {
+    names := [String]{}
+    loop entry in lease.list_output(prefix) -> &names.push(entry.name)
+    &names.sort()
+    loop name in names {
         if nodes.len() >= PACKAGE_PROFILE_MAX_NODES -> return Err(CLIError.Other("profile output contains too many filesystem nodes"))
-        path :: if prefix == "" -> entry.name else -> "{prefix}/{entry.name}"
+        path :: if prefix == "" -> name else -> "{prefix}/{name}"
         parts :: path.split("/").to_list()
         if path == "" || parts.contains("..") || parts.contains("") -> return Err(CLIError.Other("profile output contains an unsafe relative path"))
-        child :: entry.path
-        info :: files.stat(child)
+        info :: lease.output_entry(path)
         if {
             info.is_symlink -> {
-                target :: files.read_link(child)
+                target :: lease.read_output_link(path)
                 digest :: "sha256-{pkg_sha256_hex("symlink:{target}".bytes())}"
-                &nodes.push(PackageOutputNode{package: package, path: path, kind: PackageOutputNodeKind.Symlink, digest: digest, source: child, link_target: Val(target)})
+                &nodes.push(PackageOutputNode{package: package, path: path, kind: PackageOutputNodeKind.Symlink, digest: digest, link_target: Val(target)})
             }
             info.is_dir -> {
-                &nodes.push(PackageOutputNode{package: package, path: path, kind: PackageOutputNodeKind.Directory, digest: "", source: child, link_target: None})
-                cli_collect_output_nodes_inner(child, path, package, &nodes)
+                &nodes.push(PackageOutputNode{package: package, path: path, kind: PackageOutputNodeKind.Directory, digest: "", link_target: None})
+                cli_collect_output_nodes_inner(&lease, path, package, &nodes)
             }
             info.is_file -> {
-                digest :: "sha256-{foundation_sha256_file_hex(child)}"
-                &nodes.push(PackageOutputNode{package: package, path: path, kind: PackageOutputNodeKind.File, digest: digest, source: child, link_target: None})
+                input := lease.open_output(path)
+                hasher := StreamingSHA256.new()
+                loop {
+                    chunk :: input.read(65536)
+                    if chunk.len() == 0 -> break
+                    &hasher.update(chunk)
+                }
+                &nodes.push(PackageOutputNode{package: package, path: path, kind: PackageOutputNodeKind.File, digest: "sha256-{hasher.finalize_hex()}", link_target: None})
             }
             else -> {
                 return Err(CLIError.ProviderFacts("profile output contains unsupported node `{path}`"))
@@ -415,7 +422,8 @@ fn cli_collect_output_nodes_inner(current: String, prefix: String, package: Stri
 }
 
 // Materialize the selected nodes under the generation root, in path order.
-fn cli_copy_package_projection(root: String, selected: [String: PackageOutputNode]) CLIError! -[FS, Env]> {
+// File bytes stream from the handle each package's lease holds.
+fn cli_copy_package_projection(root: String, selected: [String: PackageOutputNode], realized: &[RealizedProfilePackage]) CLIError! -[FS, Env]> {
     paths := selected.keys().to_list()
     &paths.sort()
     loop relative in paths {
@@ -431,7 +439,12 @@ fn cli_copy_package_projection(root: String, selected: [String: PackageOutputNod
             }
             .File -> {
                 cli_ensure_projection_parent(destination)
-                cli_copy_projection_file(node.source, destination, node.digest)
+                owner := Int?{None}
+                loop index in 0..<realized.len() {
+                    if owner == None && realized[index].fact.raw == node.package -> owner = Val(index)
+                }
+                at :: owner ?? return Err(CLIError.Other("profile projection node `{relative}` lost its package lease"))
+                cli_copy_projection_file(&realized[at].lease, node.path, destination, node.digest)
             }
             .Symlink -> {
                 cli_ensure_projection_parent(destination)
@@ -455,15 +468,14 @@ fn cli_ensure_projection_parent(path: String) CLIError! -[FS]> {
     files.create_dir_all(parent)
 }
 
-// Copy one regular file, keep its permission bits, and prove the copy still
-// has the digest the node recorded.
-fn cli_copy_projection_file(source: String, destination: String, expected: String) CLIError! -[FS, Env]> {
-    info :: files.stat(source)
+// Copy one regular file from its lease, keep its permission bits, and prove
+// the copy still has the digest the node recorded.
+fn cli_copy_projection_file(lease: &CacheLease, relative: String, destination: String, expected: String) CLIError! -[FS, Env]> {
+    info :: lease.output_entry(relative)
     if info.is_symlink || !info.is_file -> return Err(CLIError.Other("profile projection source is not a regular file"))
-    files.copy2(source, destination)
-    if sys.is_unix() -> files.set_mode(destination, (info.mode).bit_and(TOOL_PROFILE_PERMISSION_BITS))
-    actual :: "sha256-{foundation_sha256_file_hex(destination)}"
-    if actual != expected -> return Err(CLIError.Other("profile projection source changed while copying"))
+    input := lease.open_output(relative)
+    proof :: store_reuse_copy_open_profile_file(&input, destination)
+    if proof.digest != expected -> return Err(CLIError.Other("profile projection source changed while copying"))
 }
 
 // Remove every abandoned `.generation-<n>.partial` stage.

@@ -326,20 +326,13 @@ fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots
             cli_stop_spinner(^spinner)
             parts :: realized.into_parts()
             entry := parts.entry
-            if style == RowStyle.Ready {
-                if entry.bin != "" {
-                    entry.bin = parts.lease.stable_path(entry.bin) ?? {
-                        cli_clear_live_region(&live)
-                        store_report_integrity(theme, parts.lease.consumption_failure(err))
-                        return RefOutcome.Failed
-                    }
-                }
-                if entry.rlib != "" {
-                    entry.rlib = parts.lease.stable_path(entry.rlib) ?? {
-                        cli_clear_live_region(&live)
-                        store_report_integrity(theme, parts.lease.consumption_failure(err))
-                        return RefOutcome.Failed
-                    }
+            // The entry keeps its durable paths; a child reaches them only
+            // through the lease the env passes. Revalidate before use.
+            if style == RowStyle.Ready && (entry.bin != "" || entry.rlib != "") {
+                parts.lease.validate() ?? {
+                    cli_clear_live_region(&live)
+                    store_report_integrity(theme, parts.lease.consumption_failure(err))
+                    return RefOutcome.Failed
                 }
             }
             // T4 one ledger row per package — how it was
@@ -474,7 +467,7 @@ fn cli_realize_adapter(verification: &StoreVerification, theme: Theme, roots: Ha
             parts :: realized.into_parts()
             entry := parts.entry
             if consume && entry.bin != "" {
-                entry.bin = parts.lease.stable_path(entry.bin) ?? {
+                parts.lease.validate() ?? {
                     store_report_integrity(theme, parts.lease.consumption_failure(err))
                     return None
                 }

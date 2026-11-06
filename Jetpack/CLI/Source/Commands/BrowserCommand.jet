@@ -118,10 +118,13 @@ fn cli_browser_provision(verification: &StoreVerification, cache: &WorkspaceDecl
         theme.error("`{spec.raw}` realized with no output to lock", "browser provision needs a package output that contains an engine binary.", "pick chromium, firefox, or webkit from a realizable source.")
         return EXIT_USAGE
     }
-    output :: lease.stable_path(lease.original_output()) ?? {
+    // The lock pins a durable binary for later processes, so it names the
+    // sealed output itself once the lease revalidates it.
+    lease.validate() ?? {
         store_report_integrity(theme, lease.consumption_failure(err))
         return EXIT_USAGE
     }
+    output :: lease.original_output()
     binary :: env_browser_find_engine_binary(output, engine) ?? {
         theme.error("could not find the browser binary in the realized package", err.message(), "the package must ship an executable under bin/.")
         return EXIT_USAGE

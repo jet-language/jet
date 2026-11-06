@@ -274,14 +274,16 @@ struct OpenedNixProjection {
     bindings: [NixProjectionBinding]
 }
 
-// Rust `open_nix_projection_sources` (Linux): pin each source no-follow and
-// hand out its descriptor path; a symlink root projects as itself and its
-// target is the witness. Other hosts project the verified sources directly.
+// Rust `open_nix_projection_sources` (Linux): pin each source no-follow. A
+// held directory reaches the child at its reserved descriptor; a single-file
+// object, whose identity validation re-checks, and a symlink root, whose
+// target is the witness, project as their canonical source. Other hosts
+// project the verified sources directly.
 fn store_reuse_open_nix_projection_sources(projections: [NixStoreProjection]) -> OpenedNixProjection StoreError! {
     stable := [NixProjectionPath]{}
     bindings := [NixProjectionBinding]{}
     if sys.name() != "linux" {
-        loop projection in projections -> &stable.push(NixProjectionPath{logical: projection.logical, source: projection.source})
+        loop projection in projections -> &stable.push(NixProjectionPath{logical: projection.logical, source: LeaseText.plain(projection.source)})
         return Ok(OpenedNixProjection{stable: stable, bindings: bindings})
     }
     loop projection in projections {
@@ -289,16 +291,19 @@ fn store_reuse_open_nix_projection_sources(projections: [NixStoreProjection]) ->
         if !info.is_symlink && !info.is_dir && !info.is_file -> return Err(StoreError.Other("Nix projection source `{projection.source}` is not a regular node"))
         if info.is_symlink {
             target :: files.read_link(projection.source) ?? return Err(StoreError.Other("Nix output `{projection.logical}` Hangar object `{projection.digest}` is unavailable: {err}"))
-            &stable.push(NixProjectionPath{logical: projection.logical, source: projection.source})
-            &bindings.push(NixProjectionBinding{logical: projection.logical, digest: projection.digest, primary: projection.primary, source: projection.source, handle: None, pinned_id: None, pinned_dir: false, slot: 0, symlink_target: Val(target)})
+            &stable.push(NixProjectionPath{logical: projection.logical, source: LeaseText.plain(projection.source)})
+            &bindings.push(NixProjectionBinding{logical: projection.logical, digest: projection.digest, primary: projection.primary, source: projection.source, handle: None, pinned_id: None, pinned_dir: false, symlink_target: Val(target)})
             next
         }
         handle :: store_reuse_open_projection_handle(projection, info.is_dir)
         opened :: store_reuse_projection_handle_stat(handle)
         if opened.id != info.id -> return Err(StoreError.Other("Nix projection source `{projection.source}` changed while opening"))
-        slot :: store_lease_allocate_slot()
-        &stable.push(NixProjectionPath{logical: projection.logical, source: store_lease_descriptor_path(slot)})
-        &bindings.push(NixProjectionBinding{logical: projection.logical, digest: projection.digest, primary: projection.primary, source: projection.source, handle: Val(handle), pinned_id: Val(opened.id), pinned_dir: info.is_dir, slot: slot, symlink_target: None})
+        source :: if handle == {
+            .Directory(held) -> held.child_text("")
+            .File(_) -> LeaseText.plain(projection.source)
+        }
+        &stable.push(NixProjectionPath{logical: projection.logical, source: source})
+        &bindings.push(NixProjectionBinding{logical: projection.logical, digest: projection.digest, primary: projection.primary, source: projection.source, handle: Val(handle), pinned_id: Val(opened.id), pinned_dir: info.is_dir, symlink_target: None})
     }
     Ok(OpenedNixProjection{stable: stable, bindings: bindings})
 }
@@ -307,8 +312,8 @@ fn store_reuse_open_nix_projection_sources(projections: [NixStoreProjection]) ->
 fn store_reuse_open_projection_handle(projection: NixStoreProjection, directory: Bool) -> ProjectionHandle StoreError! {
     unavailable :: "Nix output `{projection.logical}` Hangar object `{projection.digest}` is unavailable"
     if directory {
-        opened :: files.open_directory(projection.source) ?? return Err(StoreError.Other("{unavailable}: {err}"))
-        return Ok(ProjectionHandle.Directory(opened))
+        held :: store_reuse_hold_directory(projection.source) ?? return Err(StoreError.Other("{unavailable}: {err.message()}"))
+        return Ok(ProjectionHandle.Directory(held))
     }
     reader :: files.open(projection.source, links: .Refuse) ?? return Err(StoreError.Other("{unavailable}: {err}"))
     Ok(ProjectionHandle.File(reader))
@@ -316,7 +321,7 @@ fn store_reuse_open_projection_handle(projection: NixStoreProjection, directory:
 
 fn store_reuse_projection_handle_stat(handle: ProjectionHandle) -> Stat StoreError! {
     if handle == {
-        .Directory(directory) -> Ok(directory.stat())
+        .Directory(held) -> Ok(held.stat_entry(""))
         .File(reader) -> Ok(reader.stat())
     }
 }
