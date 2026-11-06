@@ -1,0 +1,121 @@
+# #6600: `jet registry publish` uploads sema's public API snapshot beside the
+# artifact (apis/<pkg>/<version>.api) and holds each release to the snapshot of
+# the highest published version below it: a breaking change under a minor bump
+# is E1218 and mutates nothing, an additive change under a minor bump passes,
+# and the same breaking change under a major bump passes.
+fixture: cli_publish_semver_gate_e1218.fixture
+requires: tool:git
+mkdir: store
+step: git init --bare {work}/registry.git
+exit: 0
+step: git init -b main
+cwd: {work}/proj
+exit: 0
+step: git config user.email test@jet.test
+cwd: {work}/proj
+exit: 0
+step: git config user.name "Jet Test"
+cwd: {work}/proj
+exit: 0
+step: git add .
+cwd: {work}/proj
+exit: 0
+step: git commit -m init
+cwd: {work}/proj
+exit: 0
+step: git --git-dir {work}/registry.git symbolic-ref HEAD refs/heads/main
+exit: 0
+step: git clone file://{work}/registry.git {work}/review
+exit: 0
+mkdir: review/reviews/semkit
+copy: reviews/semkit/1.0.0.review review/reviews/semkit/1.0.0.review
+copy: reviews/semkit/1.1.0.review review/reviews/semkit/1.1.0.review
+copy: reviews/semkit/2.0.0.review review/reviews/semkit/2.0.0.review
+step: git config user.email test@jet.test
+cwd: {work}/review
+exit: 0
+step: git config user.name "Jet Test"
+cwd: {work}/review
+exit: 0
+step: git add .
+cwd: {work}/review
+exit: 0
+step: git commit -m "approve core package"
+cwd: {work}/review
+exit: 0
+step: git push origin HEAD:main
+cwd: {work}/review
+exit: 0
+remove: review
+step: jet registry publish --no-sign
+cwd: {work}/proj
+env: JET_REGISTRY_URL=file://{work}/registry.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JET_KEYS_DIR={work}/keys
+exit: 0
+stdout: ~ "semver: first release" # the gate's progress line; the rest is the publish log
+step: git --git-dir {work}/registry.git show HEAD:apis/semkit/1.0.0.api
+exit: 0
+stdout: = "api_version = 4\npackage = semkit\npublished_version = 1.0.0\nfn greet(name: String) String Never! -[]>\nfn run() Never! -[IO]>\nfn shout(name: String) String Never! -[]>\n"
+file: proj/.jet/cache/api/semkit.api is-file
+step: git add .
+cwd: {work}/proj
+exit: 0
+step: git commit -m "snapshot api"
+cwd: {work}/proj
+exit: 0
+# A changed `shout` under a minor bump: E1218, and the registry is untouched.
+copy: run-break.jet proj/run.jet
+copy: package-1.1.0.jet proj/package.jet
+step: git commit -am "break shout"
+cwd: {work}/proj
+exit: 0
+step: jet registry publish --no-sign
+cwd: {work}/proj
+env: JET_REGISTRY_URL=file://{work}/registry.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JET_KEYS_DIR={work}/keys
+exit: 1
+stderr: = ../../fixtures/jetpack-diagnostics/publish_semver_e1218.stderr
+step: git --git-dir {work}/registry.git cat-file -e HEAD:apis/semkit/1.1.0.api
+exit: nonzero
+# The same minor release with `shout` kept and `wave` added passes.
+copy: run-add.jet proj/run.jet
+step: git add .
+cwd: {work}/proj
+exit: 0
+step: git commit -m "add wave"
+cwd: {work}/proj
+exit: 0
+step: jet registry publish --no-sign
+cwd: {work}/proj
+env: JET_REGISTRY_URL=file://{work}/registry.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JET_KEYS_DIR={work}/keys
+exit: 0
+stdout: ~ "semver: ok — public API compatible with v1.0.0" # the gate's progress line; the rest is the publish log
+step: git --git-dir {work}/registry.git cat-file -e HEAD:apis/semkit/1.1.0.api
+exit: 0
+step: git add .
+cwd: {work}/proj
+exit: 0
+step: git commit -m "snapshot api"
+cwd: {work}/proj
+exit: 0
+# The breaking change under a major bump is a breaking release.
+copy: run-break.jet proj/run.jet
+copy: package-2.0.0.jet proj/package.jet
+step: git commit -am "break shout in 2.0.0"
+cwd: {work}/proj
+exit: 0
+step: jet registry publish --no-sign
+cwd: {work}/proj
+env: JET_REGISTRY_URL=file://{work}/registry.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JET_KEYS_DIR={work}/keys
+exit: 0
+stdout: ~ "breaking release after v1.1.0" # the gate's progress line; the rest is the publish log
