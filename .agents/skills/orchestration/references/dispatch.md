@@ -19,12 +19,12 @@ the fields that the worker and artifact need:
 | Recovery or long wave | The last integrated state, explicit timeout, resource/liveness boundary, salvage point, and rebrief condition. Load [`resources.md`](resources.md) or [`recovery.md`](recovery.md) rather than copying their controls. |
 
 All source workers are told that workers do not write Tower, close cards, or
-spawn workers. They do not run broad tests, release builds, generators,
-blessing, full formatting, or milestone proof. A type-check is never evidence
-for runtime, I9 tier, diagnostic, snapshot, golden, or generated-artifact
-claims. If the owner explicitly orders implementation-before-validation, state
-that it overrides the ordinary validation sequence; do not activate that order
-without the owner's direct request.
+spawn workers. Under the standing work order in [`../SKILL.md`](../SKILL.md),
+they implement to the spec, run only the touched files' source checks, commit,
+report, and move on. They do not run suites, A/B comparisons, chains, release
+builds, censuses, blessing, or full formatting: the orchestrator verifies in
+batches and returns every failure at once. A type-check is never evidence for
+runtime, I9 tier, diagnostic, snapshot, golden, or generated-artifact claims.
 
 ## Dispatch and style reads
 

@@ -35,13 +35,23 @@ matches the work:
   The exact focused criterion proof, linked-card token, composed sweep, and
   fresh-context review are defined only in `references/closeout.md`.
 
-## Conditional owner order
+## Standing work order: implement, then batch-verify
 
-Implementation-before-validation is not the default. Activate it only when the
-owner explicitly requests that phase order; while active, continue through all
-requested implementation cards before validation. Never call an unrun runtime,
-tier, diagnostic, snapshot, or golden criterion green. Do not activate this
-mode merely because a worker or prompt mentions it.
+This is the owner's durable order and the default for every wave:
+
+- **Workers implement.** A worker takes the card's unmet criteria directly,
+  writes the code to the spec, runs only the cheap source checks for the files
+  it touched (`jet check`, `jet fmt --check`, and a generator's `--check` when
+  it changed that generator's source), commits on `dev`, reports the commit and
+  the criteria it addresses, and moves on to the next criterion. Workers never
+  run suites, A/B comparisons, chains, release builds, or censuses.
+- **The orchestrator verifies, in batches.** It collects the reported commits,
+  builds once, and runs one collect-all verification covering every reported
+  criterion's proof and the affected suites. It groups every failure by root
+  and sends each owner its complete fix list in one message. Each criterion
+  proven there is recorded as evidence, and its card is closed.
+- Never call an unrun runtime, tier, diagnostic, snapshot, or golden criterion
+  green.
 
 Successful completion requires every requested path integrated and evidenced,
 with Tower reflecting the real state. If no agent-actionable work remains,

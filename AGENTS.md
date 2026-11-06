@@ -290,8 +290,12 @@ may call a design better only where a passing review backs that exact claim.
 Use the most specific agent available for each role. Workers do not spawn
 workers. Every code worker returns the exact `CHECK OK` receipt from
 `Tools/agent/LaneCheck.jet`; prose-only or static-data-only work returns
-`DOCS ONLY`. The orchestration skill defines briefs, liveness, integration,
-proof cadence, recovery, and closure.
+`DOCS ONLY`. Workers address the card's criteria directly: write the code to
+the spec, run only the touched files' source checks, commit, report, and move
+on. Workers never run suites, A/B comparisons, chains, or releases; the
+orchestrator verifies reported commits in batches and returns every failure
+to its owner at once. The orchestration skill defines briefs, liveness,
+integration, proof cadence, recovery, and closure.
 
 This repository carries no harness-specific configuration. Agent tools use
 their own global settings; Jet contributes only this contract and the skills
