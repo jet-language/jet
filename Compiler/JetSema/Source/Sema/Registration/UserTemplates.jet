@@ -206,9 +206,17 @@ sema_derive_expand_template_loops: fn(items: &[Item], diagnostics: &[Diagnostic]
 // Registration of generated items: roots first, then impls, exactly like a
 // prepared module, so a generated impl may extend a generated type.
 
-sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int, generated: [Item], diagnostics: [Diagnostic]) {
+sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int, written: [Item], diagnostics: [Diagnostic]) {
     problems := diagnostics
-    if generated.len() > 0 {
+    if written.len() > 0 {
+        // Generated items take the written items' capability passes
+        // (Items.jet module registration): selected Prelude derives and
+        // codecs, then `Self` in impl signatures, so a generated `#Codable`
+        // struct registers with its `impl T.Decode` like a written one.
+        generated := written
+        sema_derive_expand_builtin_items(generated, problems)
+        sema_serde_expand_builtin_items(generated)
+        sema_registration_expand_impl_self(generated)
         module_row := graph.modules[module_index]
         first_nominal: module_row.nominals.len()
         source_file: module_row.source_file.copy()

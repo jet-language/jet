@@ -1316,6 +1316,37 @@ sema_derive_expand_trait_blocks: fn(expansion: &SemaDeriveExpansion, blocks: [Tr
     expanded
 }
 
+// A generated #Test's name as fixed text: a `comptime loop` template's
+// interpolated label (`#Test("case {case.n}")`) once expansion made each
+// interpolated part a literal. Every later pass reads the resolved `name`:
+// the duplicate-name check, the runnable-test gate and the test plan.
+sema_derive_test_static_name: fn(name_expr: Expr?) -> String? Never! {
+    expression: name_expr ?? return None
+    if expression == .Str(parts, _, _) {
+        text := ""
+        loop part in parts {
+            if part == {
+                .Lit(piece) -> text = "{text}{piece}"
+                .Interp(value, format) -> {
+                    if format == {
+                        .Display -> {}
+                        else -> return None
+                    }
+                    if value == {
+                        .Int(number, _, _, _, _) -> text = "{text}{number}"
+                        .Bool(flag, _, _) -> text = "{text}{flag}"
+                        .Char(character, _, _) -> text = "{text}{character}"
+                        else -> return None
+                    }
+                }
+                else -> return None
+            }
+        }
+        return Val(text)
+    }
+    None
+}
+
 sema_derive_expand_item: fn(expansion: &SemaDeriveExpansion, item: Item) -> Item Never! {
     if item == {
         .Func(function) -> Item.Func{value: sema_derive_expand_func(expansion, function)}
@@ -1343,6 +1374,7 @@ sema_derive_expand_item: fn(expansion: &SemaDeriveExpansion, item: Item) -> Item
             updated.params = sema_derive_expand_params(expansion, definition.params)
             updated.pre = sema_derive_expand_clauses(expansion, definition.pre)
             updated.body = sema_derive_expand_stmts(expansion, definition.body)
+            if updated.name == None -> updated.name = sema_derive_test_static_name(updated.name_expr)
             Item.Test{value: updated}
         }
         .Struct(definition) -> {
