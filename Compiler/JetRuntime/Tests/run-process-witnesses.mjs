@@ -2,6 +2,7 @@
 // Fresh admitted-pack C consumers; --test instead lowers a canonical runtime
 // plus the selected Jet fixture and makes its C witness call the actual export.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
+import { faultReportObject } from '../../../Tools/packaging/fault-report-object.mjs';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import {dirname,join,resolve} from 'node:path';
@@ -51,14 +52,17 @@ if(test){
  objectHandle=fileObject(pack);
  if(objectHandle.split(':')[0]!==admitted.provenance.objectSha256)throw Error('admitted Jet object snapshot differs');
 }
+// The pack imports jet_rt_fault_report, which Jet's linker writes into each
+// image; this platform link takes the same report from report.S.
+const faultReport=faultReportObject(out),faultReportHandle=fileObject(faultReport);
 const crt=['crt1.o','crti.o','crtn.o'].map(name=>{
  const path=join(musl,name);return {path,handle:fileObject(path)};
 });
 function unchanged(rows){
  for(const row of rows)if(fileObject(row.path)!==row.handle)throw Error(`proof input changed: ${row.path}`);
 }
-const sharedInputs=[...platformInputs,...crt,{path:pack,handle:objectHandle},{path:nativeJet,handle:compilerHandle}];
-writeFileSync(join(out,'admission.json'),JSON.stringify({runtimeKey:admitted.key,publishedObject,linkedObject:pack,object:objectHandle,fixture:test,compiler:{path:nativeJet,handle:compilerHandle},platform:platformInputs,crt},null,2)+'\n',{flag:'wx'});
+const sharedInputs=[...platformInputs,...crt,{path:pack,handle:objectHandle},{path:faultReport,handle:faultReportHandle},{path:nativeJet,handle:compilerHandle}];
+writeFileSync(join(out,'admission.json'),JSON.stringify({runtimeKey:admitted.key,publishedObject,linkedObject:pack,object:objectHandle,faultReport:{path:faultReport,handle:faultReportHandle},fixture:test,compiler:{path:nativeJet,handle:compilerHandle},platform:platformInputs,crt},null,2)+'\n',{flag:'wx'});
 function command(bin,args,label,options={}){
  const r=spawnSync(bin,args,{cwd:out,encoding:'utf8',maxBuffer:1<<27,timeout:120000,...options});
  writeFileSync(join(out,label+'.receipt.json'),JSON.stringify({bin,args,cwd:options.cwd??out,status:r.status,signal:r.signal,error:r.error?.message??null,stdout:r.stdout,stderr:r.stderr},null,2)+'\n',{flag:'wx'});
@@ -75,7 +79,7 @@ for(const [name,expected,wrap]of fixtures.filter(row=>!test||row[0]===test+'Witn
  command(join(root,'Tools/agent/jet-env'),[nativeCCompiler,'-std=c11','-O1','-fno-stack-protector','-fno-PIE','-fno-builtin','-Wall','-Wextra','-Werror',...(test?['-DJET_PROCESS_JET_FIXTURES=1']:[]),'-c',source,'-o',object],name+'-compile');
  const cObjectHandle=fileObject(object);
  unchanged([...sharedInputs,{path:source,handle:sourceHandle}]);
- command(join(root,'Tools/agent/jet-env'),[nativeCCompiler,'-nostdlib','-static','-no-pie',crt[0].path,crt[1].path,object,...(wrap?['-Wl,--wrap=jet_rt_free']:[]),'-Wl,--start-group',pack,...platform,'-Wl,--end-group',crt[2].path,'-o',binary],name+'-link');
+ command(join(root,'Tools/agent/jet-env'),[nativeCCompiler,'-nostdlib','-static','-no-pie',crt[0].path,crt[1].path,object,...(wrap?['-Wl,--wrap=jet_rt_free']:[]),'-Wl,--start-group',pack,faultReport,...platform,'-Wl,--end-group',crt[2].path,'-o',binary],name+'-link');
  const executableHandle=fileObject(binary);
  unchanged([...sharedInputs,{path:source,handle:sourceHandle},{path:object,handle:cObjectHandle}]);
  const r=command(binary,[],name+'-execute');
