@@ -1,0 +1,14 @@
+# A `break` inside a marker block (`#Shield {}`, `#Impure(..) {}`) in a loop
+# body still leaves the loop: the code after the loop is reachable, runs,
+# and supplies the function's value on every tier.
+fixture: break_inside_marker_block_keeps_code_after_loop.fixture
+step: jet run run.jet
+exit: 0
+stdout: = break_inside_marker_block_keeps_code_after_loop.out
+stderr: empty
+step: jet build --release run.jet
+exit: 0
+step: built
+exit: 0
+stdout: = break_inside_marker_block_keeps_code_after_loop.out
+stderr: empty

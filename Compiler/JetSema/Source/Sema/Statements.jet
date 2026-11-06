@@ -147,7 +147,14 @@ fn sema_stmt_tree_loop_body_has_break(statements: [TStmt], label: String?, allow
                 }
                 if else_body == .Val(else_statements) && sema_stmt_tree_loop_body_has_break(else_statements, label, allow_unlabeled) -> return true
             }
-            .Loop(_, _, _) | .While(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) -> {}
+            // A nested loop owns its unlabeled breaks; a labeled one can
+            // still leave this loop.
+            .Loop(_, body, _) | .While(_, _, body, _) | .CountedLoop(_, _, _, _, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) -> {
+                if label != None && sema_stmt_tree_loop_body_has_break(body, label, false) -> return true
+            }
+            .RefutableBind(_, _, fallback, _) -> {
+                if sema_stmt_tree_loop_body_has_break(fallback, label, allow_unlabeled) -> return true
+            }
             .Inline(body, _) | .DebugOnly(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .ScopeMember(_, body, _) -> {
                 if sema_stmt_tree_loop_body_has_break(body, label, allow_unlabeled) -> return true
             }
@@ -3870,7 +3877,7 @@ fn sema_stmt_refutable_loop_body_can_break_inner(statements: [Stmt], nested_labe
             .Expr(expr) -> sema_stmt_refutable_expr_can_break(expr, nested_labels, allow_unlabelled)
             .Assign(_, _, _, value) -> sema_stmt_refutable_expr_can_break(value, nested_labels, allow_unlabelled)
             .Val(binding) -> sema_stmt_refutable_binding_can_break(binding, nested_labels, allow_unlabelled)
-            .Switch(_, arms, else_body, _) -> {
+            .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
                 found := false
                 loop arm in arms {
                     if sema_stmt_refutable_loop_body_can_break_inner(arm.body, nested_labels, allow_unlabelled) -> found = true
@@ -3881,6 +3888,10 @@ fn sema_stmt_refutable_loop_body_can_break_inner(statements: [Stmt], nested_labe
                 }
             }
             .Loop(body, _, _, label) | .While(_, body, _, _, label) | .For(_, _, _, _, body, _, _, label, _) | .CountedLoop(_, _, _, body, _, _, label) -> sema_stmt_refutable_loop_body_can_break_inner(body, sema_stmt_refutable_loop_labels(nested_labels, label), false)
+            // A marker block runs its body in line, so a `break` inside it
+            // leaves the enclosing loop as one written beside it does.
+            .ComptimeIf(_, _, then_body, else_body, _, _) -> sema_stmt_refutable_loop_body_can_break_inner(then_body, nested_labels, allow_unlabelled) || (else_body != None && sema_stmt_refutable_loop_body_can_break_inner(else_body ?? [Stmt]{}, nested_labels, allow_unlabelled))
+            .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> sema_stmt_refutable_loop_body_can_break_inner(body, nested_labels, allow_unlabelled)
             else -> false
         }
         if can_break -> return true
