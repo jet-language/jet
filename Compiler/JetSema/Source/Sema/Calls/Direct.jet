@@ -158,11 +158,11 @@ fn sema_call_debug_traceable(ty: Type, environment: SemaScopeEnvironment, progra
             // A Clock's Debug form is its Show form, `Clock { now: N }`.
             if sema_call_is_clock_type(ty) -> return true
             if program.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None -> return true
-            sema_call_debug_implemented(ty, environment, program)
+            sema_comparability_implements(environment, program, ty, "Debug")
         }
         .Apply(name, args) -> {
             if sema_call_reflection_leaf_name(name) == "KeyRef" -> return true
-            if !sema_call_debug_implemented(ty, environment, program) -> return false
+            if !sema_comparability_implements(environment, program, ty, "Debug") -> return false
             loop argument in args {
                 if !sema_call_debug_traceable(argument, environment, program) -> return false
             }
@@ -181,28 +181,6 @@ fn sema_call_debug_traceable(ty: Type, environment: SemaScopeEnvironment, progra
             true
         }
         .TraitObject(_) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Measure(_) -> false
-    }
-}
-
-// A registered `Debug` implementation or bound, or the auto-derived one.
-// `Debug` is a compiler-owned trait no module declares, so an authored impl
-// is matched by name: a top-level `impl T.Debug` and a `impl Debug` block in
-// the type's body mean the same thing.
-fn sema_call_debug_implemented(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if sema_comparability_implements(environment, program, ty, "Debug") -> return true
-    if program.registration_graph == .Val(graph) {
-        name :: sema_type_graph_base_name(ty) ?? return false
-        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
-        if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
-        module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
-        row :: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
-        // Passed and matched in place: binding the nominal copies the whole item.
-        if sema_type_builtin_bound_satisfied_nominal(graph, graph.modules[row.module_index].nominals[row.row], "Debug") == (Val(true)) -> return true
-        nominal :: graph.modules[row.module_index].nominals[row.row]
-        if nominal.source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).debug
-        return false
-    } else {
-        return false
     }
 }
 

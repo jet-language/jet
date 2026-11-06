@@ -1,12 +1,17 @@
 // Card #6602: an `impl Debug` block in a type's body and a top-level
 // `impl T.Debug` mean the same thing, so `{x:Debug}` renders the authored
 // `debug()` for both spellings, on a struct, an enum, a generic type, and
-// inside a list, on every tier.
+// inside a list, on every tier. A `T: Debug` or `T: Display` bound carries
+// the trait into a generic body, where `{value:Debug}`, `{value:Pretty}` and
+// `{value}` render the argument's own text, authored or derived.
 struct NestedPoint {
     x: Int
     y: Int
     impl Debug {
         fn debug(^self) -> String { "NestedPoint<{self.x},{self.y}>" }
+    }
+    impl Display {
+        fn display(self) -> String { "nested {self.x},{self.y}" }
     }
 }
 
@@ -17,6 +22,10 @@ struct TopPoint {
 
 impl TopPoint.Debug {
     fn debug(^self) -> String { "TopPoint<{self.x},{self.y}>" }
+}
+
+impl TopPoint.Display {
+    fn display(self) -> String { "top {self.x},{self.y}" }
 }
 
 enum Signal {
@@ -39,6 +48,14 @@ struct Labeled<T> {
     }
 }
 
+struct Plain {
+    value: Int
+}
+
+fn debug_text<T: Debug>(value: T) -> String { "{value:Debug}" }
+fn pretty_text<T: Debug>(value: T) -> String { "{value:Pretty}" }
+fn display_text<T: Display>(value: T) -> String { "{value}" }
+
 fn run() {
     nested :: NestedPoint{x: 1, y: 2}
     top :: TopPoint{x: 3, y: 4}
@@ -48,4 +65,8 @@ fn run() {
     print("{labeled:Debug}")
     points :: [NestedPoint]{NestedPoint{x: 5, y: 6}, NestedPoint{x: 7, y: 8}}
     print("{points:Debug}")
+    print("{debug_text(NestedPoint{x: 1, y: 2})} {debug_text(TopPoint{x: 3, y: 4})} {debug_text(Signal.Go)}")
+    print("{pretty_text(NestedPoint{x: 1, y: 2})} {debug_text(Plain{value: 9})} {debug_text(7)}")
+    print("{display_text(NestedPoint{x: 1, y: 2})} | {display_text(TopPoint{x: 3, y: 4})} | {display_text(8)}")
+    print("{debug_text([NestedPoint{x: 1, y: 2}])} {debug_text([1, 2])} {display_text([8, 9])}")
 }

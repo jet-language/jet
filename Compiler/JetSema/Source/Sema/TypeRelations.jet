@@ -1542,6 +1542,12 @@ fn sema_type_builtin_bound_satisfied_nominal(graph: SemaRegistrationGraph, nomin
             }
             else -> {}
         }
+        // An eligible type with no authored `Debug` has the derived one.
+        if bound_name == "Debug" {
+            if sema_registration_module_index(graph, nominal.symbol.module_name) == .Val(module_index) {
+                if sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).debug -> return Val(true)
+            }
+        }
     }
     if unresolved_impl || !graph.complete -> return None
     Val(false)
