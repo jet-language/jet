@@ -15,13 +15,14 @@
 //             row the current release showed (recorded when it was cut, else rerun on its own
 //             tree), and must finish if the release's census did; `check.sh --hosted` builds
 //             the jetpack engine that ships beside jet.
-//   suites    testkit golden, ui and cases, run with the current release and with s2 on
-//             COMMIT's fixtures and compared per (suite, case, tier). A row the release
+//   suites    the golden, ui and cases test profiles (`jet test Compiler --profile <suite>`,
+//             run by s2 with `--compiler` naming the current release, then s2) on COMMIT's
+//             fixtures, compared per (suite, case, tier). A row the release
 //             passes and s2 fails twice is lost; a lost row needs a disposition line
 //             `suite<TAB>case<TAB>tier|*<TAB>#card<TAB>reason` in --dispositions.
 //   gains     rows s2 passes that the release fails, plus Jetpack rows s2 no longer shows;
 //             at least --min-gains (default 10) of them.
-// The suites start only once the cheap checks (chain, pack, jetpack, testkit build) are
+// The suites start only once the cheap checks (chain, pack, jetpack) are
 // clean: they are the expensive part (AGENTS.md, expensive launches are gated).
 //
 // Pass: writes SEEDS/a0_NNN (the next number) with jet, jet-runtime/, jetpack, toolchain/,
@@ -33,10 +34,10 @@
 // in the work directory. The tool never repoints `current`, merges, tags, pushes or
 // publishes. One release run at a time (a lock in the work root); the run takes one
 // build-slot.sh slot, and every suite process runs inside that slot's memory cap. Each
-// testkit shard gets --jobs entries at once (default: the slot's SLOT_MEMORY_MAX, 16G when
-// unset, split at 1 GiB per entry across the shards), because a kit left to size itself
-// reads the host's MemAvailable and every shard would claim all of it; with --jobs N a kit
-// claims N GiB for its memory-weighted pool. --filter narrows
+// shard's `jet test` gets `--memory` (the slot's SLOT_MEMORY_MAX, 16G when unset, split
+// across the shards), because a pool left to size itself reads the host's MemAvailable
+// and every shard would claim all of it; --jobs N caps each pool at N entries at once.
+// --filter narrows
 // the suites for dry runs of the tool itself: such a
 // run is never a release (RELEASE.json scope `filtered`, which jet-use refuses).
 //
@@ -63,13 +64,13 @@ const MUSL_DEFAULT = '/nix/store/wrng0xbxmz3m7slj6k14vip516wvkjdi-musl-static-x8
 // norust.sh, inline: drop every PATH directory holding cargo, rustc or rustup, refuse if one stays reachable.
 const NORUST = 'kept=; IFS=: read -r -a dirs <<< "$PATH"; for d in "${dirs[@]}"; do s=; for b in cargo rustc rustup; do [ -x "$d/$b" ] && s=1; done; [ -n "$s" ] || kept="$kept${kept:+:}$d"; done; export PATH="$kept"; for b in cargo rustc rustup; do if command -v "$b" >/dev/null 2>&1; then echo "norust: REFUSE $b still on PATH" >&2; exit 2; fi; done; exec "$@"';
 const USAGE = 'usage: release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]';
-// The pool flags of each of `shards` kits sharing one slot: the slot's memory cap split across them (each kit
-// alone would size its budget from the whole cgroup room), and --jobs only when given; the kit's default is
-// one entry per core while their claims fit the budget.
+// The pool settings of each of `shards` `jet test` runs sharing one slot: the slot's memory cap split across
+// them (each pool alone would size its budget from the whole cgroup room), and `--jobs` only when given; the
+// pool's default is one entry per core while their claims fit the budget.
 export function shardPool(options, shards, slotMemory = process.env.SLOT_MEMORY_MAX) {
     const gib = Number.parseInt(slotMemory ?? '', 10) > 0 ? Number.parseInt(slotMemory, 10) : 16;
-    const pool = ['--memory', `${Math.max(1, Math.floor(gib / shards))}G`];
-    if (options.jobs > 0) pool.push('--jobs', String(options.jobs));
+    const pool = [`--memory=${Math.max(1, Math.floor(gib / shards))}G`];
+    if (options.jobs > 0) pool.push(`--jobs=${options.jobs}`);
     return pool;
 }
 
@@ -475,36 +476,27 @@ async function hostedStage(ctx, gate) {
     else gate.row('jetpack-engine', 'NOTE', `no jetpack engine (${ctx.release.name} ships none either): ${why}`);
 }
 
-async function testkitStage(ctx, gate) {
-    const { candidate, tree, work } = ctx;
-    const env = { ...ctx.env, JET_COMPILER_IDENTITY: candidate.identity, JET_TOOLCHAIN_ROOT: tree, JET: candidate.jet };
-    const result = await run([...STACK, candidate.jet, 'build', 'Tools/testkit/run.jet'], { cwd: tree, env, out: join(work, 'logs/testkit-build.log'), timeout: 3600 });
-    const kit = join(tree, 'Tools/testkit/.jet/build/run');
-    if (result.rc !== 0 || !existsSync(kit)) return gate.row('testkit', 'FAIL', `s2 could not build the testkit rc=${result.rc}: ${tail(join(work, 'logs/testkit-build.log'))}`);
-    ctx.kit = kit;
-    gate.row('testkit', 'PASS', `built by s2 (${result.wall}s)`);
-}
-
-// One side's run of one suite: --shards processes, merged. Resolves {rows} or {error}.
+// One side's run of one suite: --shards `jet test Compiler --profile <suite>` processes, merged. s2 runs
+// every one, and `--compiler` names the side's jet that builds and runs the rows; the jetpack beside that
+// jet serves them. Resolves {rows} or {error}.
 async function suiteRun(ctx, side, suite, extra = []) {
     const compiler = side === 'release'
-        ? { jet: ctx.release.jet, identity: ctx.release.identity, root: ctx.releaseTree, jetpack: ctx.release.jetpack }
-        : { jet: ctx.candidate.jet, identity: ctx.candidate.identity, root: ctx.tree, jetpack: ctx.candidate.jetpack };
+        ? { jet: ctx.release.jet, identity: ctx.release.identity, root: ctx.releaseTree }
+        : { jet: ctx.candidate.jet, identity: ctx.candidate.identity, root: ctx.tree };
     const retry = extra.length > 0;
     const shards = retry ? 1 : ctx.options.shards;
-    const env = { ...ctx.env, JET_COMPILER_IDENTITY: compiler.identity, JET_TOOLCHAIN_ROOT: compiler.root, JET: compiler.jet };
     const runs = [];
     for (let index = 1; index <= shards; index++) {
         const tag = `${side}-${suite}${retry ? '-retry' : ''}-${index}`;
         const scratch = join(ctx.work, 'kit', `scratch-${tag}`);
         mkdirSync(scratch, { recursive: true });
+        const env = { ...ctx.env, JET_COMPILER_IDENTITY: compiler.identity, JET_TOOLCHAIN_ROOT: compiler.root, JET: compiler.jet, JET_TEST_SCRATCH_DIR: scratch };
         // Suite rows run host tools (C compilers, rustc, interpreters) that only jet-env supplies until jet does.
-        const argv = [...STACK, join(ctx.tree, 'Tools/agent/jet-env'), ctx.kit, suite, '--jet', compiler.jet, '--scratch', scratch, '--results', join(ctx.work, 'kit', `${tag}.json`)];
-        if (!retry) argv.push('--shard', `${index}/${shards}`);
+        const argv = [...STACK, join(ctx.tree, 'Tools/agent/jet-env'), ctx.candidate.jet, 'test', join(ctx.tree, 'Compiler'), '--profile', suite, `--compiler=${compiler.jet}`, `--results=${join(ctx.work, 'kit', `${tag}.json`)}`];
+        if (!retry) argv.push(`--shard=${index}/${shards}`);
         argv.push(...shardPool(ctx.options, shards));
-        if (ctx.options.filter && !retry) argv.push('--filter', ctx.options.filter);
-        if (ctx.options.timeout) argv.push('--timeout', String(ctx.options.timeout));
-        if (compiler.jetpack) argv.push('--jetpack', compiler.jetpack);
+        if (ctx.options.filter && !retry) argv.push(`--filter=${ctx.options.filter}`);
+        if (ctx.options.timeout) argv.push(`--time-limit=${ctx.options.timeout}s`);
         argv.push(...extra);
         runs.push(run(argv, { cwd: ctx.tree, env, out: join(ctx.work, 'kit', `${tag}.log`), timeout: 12 * 3600 }).then(result => ({ tag, result })));
     }
@@ -541,7 +533,7 @@ async function suitesStage(ctx, gate) {
         if (compared.lost.length) {
             const ids = join(ctx.work, 'kit', `retry-${suite}.txt`);
             writeFileSync(ids, [...new Set(compared.lost.map(row => row.case))].map(id => `${id}\n`).join(''));
-            const again = await suiteRun(ctx, 'candidate', suite, ['--cases', ids]);
+            const again = await suiteRun(ctx, 'candidate', suite, [`--cases=${ids}`]);
             retried = again.rows;
             compared = compareSuites(release.rows, candidate.rows, retried, ctx.dispositions);
         }
@@ -696,8 +688,7 @@ async function release(options, pre) {
         await packStage(ctx, gate);
         await jetpackStage(ctx, gate);
         await hostedStage(ctx, gate);
-        await testkitStage(ctx, gate);
-    } else for (const check of ['pack', 'jetpack', 'jetpack-engine', 'testkit']) gate.row(check, 'BLOCKED', 'no s2: the chain failed');
+    } else for (const check of ['pack', 'jetpack', 'jetpack-engine']) gate.row(check, 'BLOCKED', 'no s2: the chain failed');
     writeFileSync(join(work, 'preflight.json'), `${JSON.stringify({ commit: sha, rows: gate.rows }, null, 2)}\n`);
     if (gate.failed().length === 0) await suitesStage(ctx, gate);
     else for (const suite of SUITES) gate.row(`suite:${suite}`, 'BLOCKED', 'not launched: the cheap checks above are not clean (preflight.json)');

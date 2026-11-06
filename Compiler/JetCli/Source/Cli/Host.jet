@@ -108,6 +108,13 @@ use {
         TConstantDef,
         TImplDef,
         TTypeDef,
+        TEST_SETTINGS_PLAN_ENV,
+        TestSetting,
+        test_settings_get,
+        test_settings_on,
+        test_settings_shard_count,
+        test_settings_shard_index,
+        test_settings_time_limit_ms,
     ]
     jet_ir.[
         IRFunction,
@@ -238,22 +245,27 @@ struct JetCLITestMemberRun {
     errors: String
 }
 
-// `jet test` of a workspace root: each member's `jet test <member>` runs as a
-// child of this jet, as many at once as jet_cli_native_test_width allows (one
-// per core, fewer while free memory can't hold JET_NATIVE_TEST_CHILD_MEMORY
-// for each). The exit status is the most severe member's.
-fn jet_cli_test_workspace(names: [String], member_args: [[String]], quiet: Bool) -> JetDriverVerbOutput {
-    executable :: cli_sys.executable()
+// `jet test` in children (JetCLIPlan.TestWorkspace): each of `member_args`
+// runs as a child `executable` ("" for this jet) with its `envs` row (none
+// when `envs` is empty). A workspace root's members run as many at once as
+// jet_cli_native_test_width allows (one per core, fewer while free memory
+// can't hold JET_NATIVE_TEST_CHILD_MEMORY for each); the runs of one package
+// (each optimize level, another compiler) run one at a time, as each is a
+// whole parallel test run. The exit status is the most severe child's.
+fn jet_cli_test_workspace(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, quiet: Bool) -> JetDriverVerbOutput {
+    // copy: the plan keeps its executable; each argv owns its program word.
+    program :: if executable == "" -> cli_sys.executable() else -> executable.copy()
     argvs := [[String]]{}
     loop args in member_args {
-        argv := [String]{executable.copy()}
-        loop argument in args -> &argv.push(argument.copy())
+        argv := [String]{program.copy()} // copy: one program word per argv.
+        loop argument in args -> &argv.push(argument.copy()) // copy: the plan keeps its words.
         &argvs.push(^argv)
     }
-    no_env := [[String]]{}
-    loop _ in argvs -> &no_env.push([String]{})
+    child_envs := [[String]]{}
+    loop index in 0..<argvs.len() -> &child_envs.push(if index < envs.len() -> envs[index].copy() else -> [String]{}) // copy: each child task owns its environment row.
+    width :: if heading == "member" -> jet_cli_native_test_width(cli_sys.cpu_count(), jet_cli_memory_available()) else -> 1
     exit_code := JET_DRIVER_EXIT_OK
-    loop run in jet_cli_test_members_run("member", names, argvs, no_env, jet_cli_native_test_width(cli_sys.cpu_count(), jet_cli_memory_available()), quiet) {
+    loop run in jet_cli_test_members_run(heading, names, argvs, child_envs, width, quiet) {
         if run.code > exit_code -> exit_code = run.code
     }
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
@@ -1700,7 +1712,16 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     // alone: no #Test and no output check.
     code_suite :: cli_sys.get(JET_CLI_TEST_SUITE_ENV) != None
     documented :: if code_suite -> [JetNativeTestCase]{} else if options.docs -> jet_cli_doctest_claims(selected, doctests) else -> selected
-    native_tests :: if measure == .Val(measured) -> jet_cli_measure_claims(documented, measured) else -> documented
+    measured_tests :: if measure == .Val(measured) -> jet_cli_measure_claims(documented, measured) else -> documented
+    // `cases` keeps the tests its file names, then `shard` I/N runs its
+    // slice of them (jet_cli_test_shard).
+    listed_tests :: if test_settings_get(options.settings, "cases") == .Val(list) -> jet_cli_test_listed(measured_tests, cli_files.read(list) ?? "") else -> measured_tests
+    native_tests :: if test_settings_shard_count(options.settings) > 1 -> jet_cli_test_shard(listed_tests, options.settings) else -> listed_tests
+    // `list` names the tests the run selects, and runs none.
+    if test_settings_on(options.settings, "list") {
+        listed :: (loop test in native_tests -> "{test.name}\n").join("")
+        return JetDriverVerbOutput{stdout: listed, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
     claims := jet_cli_test_claims(native_tests, plan.tests, doctests, file)
     check_names := [String]{}
     checks := [IROutputCheck]{}
@@ -1728,6 +1749,17 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
         }
     }
     if result.trace_sink == .Val(sink) -> sink.end("native.build", -1)
+    // `jet test`'s plan step (TestSettingLayers.jet jet_cli_test_code_layer):
+    // the harness calls `fn test`, whose setting calls write the plan file,
+    // and exits before any test runs.
+    if cli_sys.get(TEST_SETTINGS_PLAN_ENV) != None {
+        planned :: cli_process.cmd([String]{binary}).stdout(.Capture).stderr(.Capture).run() ?? {
+            cli_files.remove(binary).drop("the plan step already failed")
+            return jet_cli_ice("couldn't run the plan step of `{file}`: {err}")
+        }
+        cli_files.remove(binary).drop("the plan step is one-shot; a leftover binary is harmless")
+        return JetDriverVerbOutput{stdout: planned.output, stderr: planned.errors, exit_code: planned.code}
+    }
     spec := cli_process.cmd([String]{binary})
     if options.project_root == .Val(project_root) -> spec = spec.env("JET_PROJECT_ROOT", project_root)
     if options.update_snapshots -> spec = spec.env("JET_UPDATE_SNAPSHOTS", "1")
@@ -1741,7 +1773,8 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     // terminal, and the runtime journals every stdin read.
     if cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) != None -> spec = spec.stdin(.Inherit)
     time_limit := Duration?{None}
-    if options.time_limit_ms == .Val(limit_ms) -> time_limit = Val(Duration.milliseconds(limit_ms) ?? return jet_cli_ice("the test time limit of {limit_ms} ms is out of range"))
+    limit_setting :: test_settings_time_limit_ms(options.settings)
+    if limit_setting == .Val(limit_ms) -> time_limit = Val(Duration.milliseconds(limit_ms) ?? return jet_cli_ice("the test time limit of {limit_ms} ms is out of range"))
     // The children's outcome records stay in memory: no test writes the disk.
     records_path :: "{jet_cli_native_test_records_dir(build_dir)}/{stem}.records"
     // A plain run goes through the test-result store (TestReuse.jet): a
@@ -1750,7 +1783,7 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     reuse := JetCLITestReuse?{None}
     if !options.update_snapshots && measure == None && !code_suite && cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) == None {
         names :: (loop test in native_tests -> test.key).join(",")
-        settings :: "{options.filter ?? "-"}\n{options.shuffle_seed ?? "-"}\n{options.serial}\n{options.trace_tiers}\n{options.capture}\n{options.project_root ?? "-"}\n{options.docs}\n{options.time_limit_ms ?? -1}\n{names}\n{check_names.join(",")}"
+        settings :: "{options.filter ?? "-"}\n{options.shuffle_seed ?? "-"}\n{options.serial}\n{options.trace_tiers}\n{options.capture}\n{options.project_root ?? "-"}\n{options.docs}\n{limit_setting ?? -1}\n{names}\n{check_names.join(",")}"
         reuse = jet_cli_test_reuse_at(root, binary, settings, records_path)
     }
     how := JetCLITestReuseHow.Plain
@@ -1804,6 +1837,11 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     if measure == None {
         outcome :: jet_cli_test_outcome(file, source, options.build, wires, claims, run.contracts, passed, floor) ?? return jet_cli_ice(err.message)
         persisted :: jet_cli_test_persist(outcome.report)
+        // `results`: the run's verdicts as one document (TestSettingLayers.jet).
+        if test_settings_get(options.settings, "results") == .Val(results_path) {
+            written :: jet_cli_test_results_write(results_path, jet_cli_test_record_results(outcome.report.records, "tests", "tests"), [String]{"tests"})
+            if written == .Val(problem) -> return jet_cli_build_failed(problem, jet_cli_why("E2105"), "name a writable `results` file", color)
+        }
         plural :: if wires.len() == 1 -> "" else -> "s"
         notice :: if how == .Reused && !options.json -> "jet test: reused {wires.len()} stored result{plural} (every read they recorded is unchanged; --fresh runs them)\n{persisted}" else -> persisted
         below := ""
@@ -1818,6 +1856,40 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     // Under `--json` the record lines are the whole stdout; the report moves to stderr.
     if options.json -> return JetDriverVerbOutput{stdout: rendered, stderr: "{stdout}{stderr}", exit_code: exit_code}
     JetDriverVerbOutput{stdout: "{stdout}{rendered}", stderr: stderr, exit_code: exit_code}
+}
+
+// The tests of shard I of N (the `shard` setting): from the I-th of them in
+// key order, every N-th, in selection order; so one shard holds the same
+// tests whatever order the run picks.
+fn jet_cli_test_shard(tests: [JetNativeTestCase], settings: [TestSetting]) -> [JetNativeTestCase] Never! {
+    count :: test_settings_shard_count(settings)
+    index :: test_settings_shard_index(settings)
+    keys := loop test in tests -> test.key
+    &keys.sort()
+    picked := [String]{}
+    loop (at, key) in keys {
+        if at % count == index - 1 -> &picked.push(key)
+    }
+    kept := [JetNativeTestCase]{}
+    loop test in tests {
+        if picked.contains(test.key) -> &kept.push(test.copy()) // copy: the selection keeps every test.
+    }
+    kept
+}
+
+// The tests a `cases` file names, one name per line (a blank line or a `#`
+// line names none), in selection order.
+fn jet_cli_test_listed(tests: [JetNativeTestCase], text: String) -> [JetNativeTestCase] Never! {
+    names := [String]{}
+    loop line in text.split("\n").to_list() {
+        name :: line.trim()
+        if name != "" && !name.starts_with("#") -> &names.push(name.copy())
+    }
+    kept := [JetNativeTestCase]{}
+    loop test in tests {
+        if names.contains(test.name) -> &kept.push(test.copy()) // copy: the selection keeps every test.
+    }
+    kept
 }
 
 // Why `jet test`'s harness build stopped (jet_cli_native_executable).
@@ -2910,8 +2982,8 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
             output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink))
         }
         .Test(file, source, color, verbose, threads, options) -> output = jet_cli_compile_test(file, source, color, verbose, threads, options, trace_sink)
-        .TestWorkspace(names, member_args, quiet) -> output = jet_cli_test_workspace(names, member_args, quiet)
-        .TestProfile(profile, root, time_limit_ms, runs, filter, update, quiet) -> output = jet_cli_test_profile(profile, root, time_limit_ms, runs, filter, update, quiet)
+        .TestWorkspace(names, member_args, envs, executable, heading, quiet) -> output = jet_cli_test_workspace(names, member_args, envs, executable, heading, quiet)
+        .TestProfile(profile, root, settings, runs, update, quiet) -> output = jet_cli_test_profile(profile, root, settings, runs, update, quiet)
         .New(name, template, annotated, quiet, json, color) -> output = jet_cli_new_project(name, template, annotated, quiet, json, color)
 
         .Doc(file, source, color, json, check) -> output = jet_cli_compile_doc(file, source, color, json, check)

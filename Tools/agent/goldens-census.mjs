@@ -209,26 +209,24 @@ async function main() {
             });
         }
     }
-    const kitProject = join(work, 'Tools/testkit');
-    const built = await invoke([jet, 'build', join(kitProject, 'run.jet'), '--color=never'], work, options.registryTimeout);
-    const kit = [join(kitProject, '.jet/build/run'), join(work, '.jet/build/run')].find(file => existsSync(file));
-    let entries = [], listed;
-    if (!problem(built) && kit) {
-        listed = await invoke([kit, 'all', '--list', '--opt-in', '--tier', options.tiers, '--timeout', String(options.timeout)], work, options.registryTimeout);
-        if (!problem(listed)) entries = readFileSync(listed.stdoutLog, 'utf8').split('\n').filter(line => /^(golden|ui|cases)\t/.test(line)).map(line => { const [suite, path] = line.split('\t'); return { suite, path }; });
-    }
+    // The corpus pass: `jet test Compiler --profile corpora` (every corpus suite, no #Tests), opt-in rows too.
+    const levels = options.tiers.split(',').map(tier => ({ o0: 'none', o1: 'basic', o2: 'full' })[tier]).join(',');
+    const corpora = (...settings) => [jet, 'test', 'Compiler', '--profile', 'corpora', '--opt-in', `--optimize=${levels}`, `--time-limit=${options.timeout}s`, ...settings];
+    // The corpora's jetpack is the one beside jet, else the first on PATH.
+    const pool = process.env.JETPACK ? { PATH: `${dirname(realpathSync(process.env.JETPACK))}:${process.env.PATH ?? ''}` } : {};
+    let entries = [];
+    const listed = await invoke(corpora('--list'), work, options.registryTimeout, pool);
+    if (!problem(listed)) entries = readFileSync(listed.stdoutLog, 'utf8').split('\n').filter(line => /^(golden|ui|cases)\t/.test(line)).map(line => { const [suite, path] = line.split('\t'); return { suite, path }; });
     if (!entries.length) {
         entries = [...discover('Examples/features', 'golden'), ...discover('tests/run', 'golden'), ...discover('tests/ui', 'ui'), ...discover('tests/ui_lint', 'ui'), ...walk(join(work, 'tests/cases'), '.case').map(file => ({ suite: 'cases', path: relative(work, file) }))];
-        for (const entry of entries) record({ test: entry.path, kind: entry.suite, rawStatus: 'BLOCKED', detail: 'native testkit prerequisite failed; not exercised\n' + problem(listed ?? built) + '\n' + first((listed ?? built).stderr), run: listed ?? built });
+        for (const entry of entries) record({ test: entry.path, kind: entry.suite, rawStatus: 'BLOCKED', detail: 'the corpora listing failed; not exercised\n' + problem(listed) + '\n' + first(listed.stderr), run: listed });
     } else {
         json(join(scratch, 'testkit-inventory.json'), entries);
         planned.push(...entries.map(entry => ({ test: entry.path, kind: entry.suite })));
         const count = Math.min(options.jobs, entries.length);
         for (let index = 1; index <= count; index++) tasks.push(async () => {
             const receipt = join(scratch, `testkit-${index}.json`), shard = `${index}/${count}`;
-            const argv = [kit, 'all', '--jet', jet, '--opt-in', '--tier', options.tiers, '--timeout', String(options.timeout), '--shard', shard, '--scratch', scratch, '--results', receipt];
-            if (process.env.JETPACK) argv.push('--jetpack', realpathSync(process.env.JETPACK));
-            const run = await invoke(argv, work, 0), report = readJSON(receipt);
+            const run = await invoke(corpora(`--shard=${shard}`, `--results=${receipt}`), work, 0, pool), report = readJSON(receipt);
             const selected = [...entries].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0).filter((_, offset) => offset % count === index - 1);
             const actual = new Set();
             const seen = new Set();
@@ -238,13 +236,13 @@ async function main() {
                 seen.add(key);
                 return false;
             })) {
-                record({ test: `testkit/receipt-integrity-${shard}`, kind: 'harness', rawStatus: 'FAIL', detail: 'testkit receipt is absent, inconsistent, or contains unexpected/duplicate verdicts', run });
+                record({ test: `corpora/receipt-integrity-${shard}`, kind: 'harness', rawStatus: 'FAIL', detail: 'corpora receipt is absent, inconsistent, or contains unexpected/duplicate verdicts', run });
             }
             for (const result of report?.results ?? []) {
                 actual.add(result.case);
-                record({ test: result.case, kind: result.suite, tier: result.tier, rawStatus: result.status, detail: result.detail + (result.diff ? '\n' + first(result.diff) : ''), repro: [kit, result.suite, '--jet', jet, '--filter', result.case, '--tier', result.tier === '-' ? options.tiers : result.tier, '--opt-in', '--timeout', String(options.timeout), '--scratch', scratch], run });
+                record({ test: result.case, kind: result.suite, tier: result.tier, rawStatus: result.status, detail: result.detail + (result.diff ? '\n' + first(result.diff) : ''), repro: [jet, 'test', 'Compiler', '--profile', 'corpora', '--opt-in', `--filter=${result.case}`, `--optimize=${result.tier === '-' ? levels : ({ o0: 'none', o1: 'basic', o2: 'full' })[result.tier]}`, `--time-limit=${options.timeout}s`], run });
             }
-            for (const entry of selected.filter(entry => !actual.has(entry.path))) record({ test: entry.path, kind: entry.suite, rawStatus: 'BLOCKED', detail: `testkit shard published no verdict: ${problem(run)}\n${first(run.stderr)}`, run });
+            for (const entry of selected.filter(entry => !actual.has(entry.path))) record({ test: entry.path, kind: entry.suite, rawStatus: 'BLOCKED', detail: `corpora shard published no verdict: ${problem(run)}\n${first(run.stderr)}`, run });
         });
     }
     for (const file of walk(join(work, 'Examples/suites'), '.jet').filter(file => !file.endsWith('/package.jet'))) tasks.push(async () => {

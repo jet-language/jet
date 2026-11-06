@@ -20,7 +20,9 @@
 // The entry `main`:
 //   JET_NATIVE_TEST_REPORT_PATH set: report the outcome file and exit
 //   (jet_rt_test_read, jet_rt_test_finish_wire; exit 1 when a test failed).
-//   Otherwise: call the package's `fn test(t: Test)` with a fresh suite, read
+//   Otherwise: call the package's `fn test(t: Test)` with a fresh suite; with
+//   TEST_SETTINGS_PLAN_ENV set that is `jet test`'s plan step (the calls
+//   have written their settings) and it exits 0. Then read
 //   JET_NATIVE_TEST_RECORDS_PATH (exit 103 without it), open it for the
 //   contract records (jet_rt_test_contracts_open), spawn each selected
 //   test (only `JET_NATIVE_TEST_ID`'s when set) and append its record
@@ -31,7 +33,7 @@
 //   happen (JetRuntime TestContracts.jet).
 
 use {
-    jet_foundation.[BodyScopeMemberKind, DeclTable, Span, TConstantDef, FnBody, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set]
+    jet_foundation.[BodyScopeMemberKind, DeclTable, Span, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -558,7 +560,15 @@ fn ir_test_main(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [Int
     ir_test_report(&m, &b, report_path)
     ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
     ir_end(&b.f, b.line)
-    if override >= 0 -> ir_test_call_override(&m, &b, override)
+    if override >= 0 {
+        ir_test_call_override(&m, &b, override)
+        plan :: ir_test_env(&m, &b, TEST_SETTINGS_PLAN_ENV)
+        planning :: ir_test_present(&m, &b, plan)
+        ir_test_drop(&m, &b, plan)
+        ir_open_if(&b.f, planning, b.line)
+        ir_test_exit(&m, &b, 0)
+        ir_end(&b.f, b.line)
+    }
     records_path :: ir_test_env(&m, &b, "JET_NATIVE_TEST_RECORDS_PATH")
     present :: ir_test_present(&m, &b, records_path)
     missing :: ir_temp(&m, &b, bool_row)

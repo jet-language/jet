@@ -43,10 +43,12 @@ stderr: ~ "run `tests at optimize full`" # one run per optimize level
 file: app/.jet/test/levels/tests-none.rows exists
 file: app/.jet/test/levels/tests-full.rows exists
 file: app/.jet/test/levels/tests.rows absent # a fan-out profile has no unsuffixed run
-step: jet test --profile levels --optimize=basic
+step: jet test --profile levels --optimize=basic --capture=all
 cwd: {work}/app
-exit: 2
-stderr: ~ "`--optimize` and test profile `levels` both choose the optimize level" # the flag can't override the fan-out
+exit: 0
+stderr: ~ "run `tests at optimize basic`" # the flag overrides the profile's levels
+stderr: !~ "run `tests at optimize none`" # the profile's levels don't run beside it
+file: app/.jet/test/levels/tests-basic.rows exists
 step: jet test --profile full --capture=all
 cwd: {work}/app
 exit: 0

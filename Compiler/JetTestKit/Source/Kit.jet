@@ -721,10 +721,12 @@ fn kit_suite_run(suite: String, entry: KitEntry, context: KitCtx) -> [KitOutcome
 }
 
 // A run's exit code (kit_report_exit_code) and the report row of every case or selection
-// problem that makes it nonzero, so a caller can name every failure at once.
+// problem that makes it nonzero, so a caller can name every failure at once, and every
+// row's verdict, for a caller that writes one document of its own rows beside them.
 struct KitExecution {
     code: Int
     failures: [KitFailure]
+    results: [KitCaseResult]{[KitCaseResult]{}}
 }
 
 // One blocking report row and the suite it belongs to; a selection, report or cleanup row
@@ -851,11 +853,11 @@ fn kit_execute_finish(jet: String, results: [KitCaseResult], ran_suites: [String
             if suite_code != 0 && !failures.any(failure -> failure.suite == failed_suite) -> &failures.push(KitFailure{suite: suite, row: "ERROR\tresults\t\tthe {suite} report could not be written to {path}"})
             if suite_code > code -> code = suite_code
         }
-        return KitExecution{code: code, failures: failures}
+        return KitExecution{code: code, failures: failures, results: results}
     }
     code :: kit_report_finish(jet, results, results_path, ran_suites)
     if code != 0 && failures.len() == 0 -> &failures.push(KitFailure{suite: "", row: "ERROR\tresults\t\tthe {suites.join(",")} report could not be written to {results_path}"})
-    KitExecution{code: code, failures: failures}
+    KitExecution{code: code, failures: failures, results: results}
 }
 
 // Creates `path` and returns it canonical, refusing RAM-backed /tmp and the checkout.

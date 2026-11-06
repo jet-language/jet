@@ -52,17 +52,21 @@ fn kit_report_exit_code(results: [KitCaseResult]) -> Int {
     0
 }
 
+// One verdict document: the compiler, the counts and every row's record, as
+// `--results` and `jet test`'s `results` setting write it.
+fn kit_report_document(jet: String, results: [KitCaseResult], suites: [String]) -> String {
+    records :: results.map(result -> json.to_string(kit_report_record(result)) ?? panic("testkit case report encode: {err}")).join(",")
+    compiler :: json.to_string(Dyn.Text(jet.copy())) ?? panic("testkit compiler report encode: {err}")
+    "{{\"jet\":{compiler},\"counts\":{kit_report_counts(results, suites)},\"results\":[{records}]}}\n"
+}
+
 fn kit_report_finish(jet: String, results: [KitCaseResult], path: String, suites: [String]) -> Int {
-    summary :: kit_report_counts(results, suites)
     if path != "" {
-        records :: results.map(result -> json.to_string(kit_report_record(result)) ?? panic("testkit case report encode: {err}")).join(",")
-        compiler :: json.to_string(Dyn.Text(jet.copy())) ?? panic("testkit compiler report encode: {err}")
-        document :: "{{\"jet\":{compiler},\"counts\":{summary},\"results\":[{records}]}}\n"
-        files.write(path, document) ?? {
+        files.write(path, kit_report_document(jet, results, suites)) ?? {
             print("ERROR\tresults\t\t{err}")
             return 2
         }
     }
-    print(summary)
+    print(kit_report_counts(results, suites))
     kit_report_exit_code(results)
 }

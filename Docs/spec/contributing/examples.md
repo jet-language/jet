@@ -55,17 +55,22 @@ jet test Compiler --profile golden                          # Examples/features 
 jet test Compiler --profile ui                              # tests/ui and tests/ui_lint
 jet test Compiler --profile cases                           # tests/cases
 jet test Compiler --profile full                            # the #Tests and all three corpora
+jet test Compiler --profile corpora                         # all three corpora, no #Tests
 jet test Compiler --profile golden basics/fizzbuzz          # rows whose ID contains the filter
 JET_CI_EVIDENCE_DIR=/disk/scratch jet test Compiler --profile golden  # writes golden.json
+jet test Compiler --profile ui --shard=2/4 --results=ui-2.json        # one slice, one verdict document
 ```
 
 The selected suites share one pool sized by cores and free memory. Rows print
 as cases finish; the reports and the failing rows keep suite-then-path order.
-A profile's `jobs:`, `memory:`, `filter:`, `shard:`, `opt_in:`, `optimize:`
-(none is o0, basic o1, full o2) and `baseline:` (the known-failing ledger)
-shape the run. Census and release tooling that shards, lists or reports
-across processes builds the kit CLI, `Tools/testkit/run.jet`, over the same
-engine; its flags are the ones named below.
+A profile's `jobs:`, `memory:`, `filter:`, `cases:`, `shard:`, `opt_in:`,
+`optimize:` (none is o0, basic o1, full o2) and `baseline:` (the known-failing
+ledger) shape the run; each is also a `jet test` flag (`--jobs=8`,
+`--memory=16G`, `--cases=ids.txt`, `--shard=2/4`, `--opt-in`,
+`--optimize=none,full`, `--time-limit=90s`) that overrides the profile. Census
+and release tooling that shards, lists or reports across processes passes
+`--shard`, `--list`, `--results` and `--compiler=<jet under test>` to the
+same command.
 
 `o0` runs through `jet run`; `o1` builds an ordinary artifact; `o2`
 builds with `--release`. Every tier compares against the same expected bytes,
@@ -193,11 +198,12 @@ blesses every row the profile and filter select:
 jet test Compiler --profile golden Examples/features/basics/fizzbuzz.jet -u
 ```
 
-A sharded profile refuses `-u`. Only the first selected tier writes. The kit
-CLI's `--bless ID` selects only named cases, and `--bless-all` requires a
-nonempty `--reason`. UI/lint blessings also refuse fewer rendered diagnostics
-without an explicit `--allow-shrink ID`. The kit prints selected IDs and the
-reason for the commit message. Blessing never weakens a `one-of` contract.
+A sharded profile refuses `-u`. Only the first selected tier writes. `-u`
+blesses what the profile and its filter, `--cases` list or positional filter
+select. UI/lint blessings also refuse fewer rendered diagnostics unless
+`--allow-shrink=ID[,ID…]` names the row. The kit prints the blessed selection
+and the reason for the commit message. Blessing never weakens a `one-of`
+contract.
 
 Crypto UI fixtures inherit the standard library's declared `CryptoError -> Err`
 and `FileCryptoError -> Err` conversions (D-FAIL-CONV2=A, D-CRYPTO-ERRFAM1=A).

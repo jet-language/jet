@@ -3,13 +3,15 @@
 // and `golden: TestSuite{ golden_corpus: "tests/golden" }`. `tests`, every
 // #Test of the package, is the built-in suite; a stock suite is a golden, ui
 // or cases corpus (`golden_corpus`, `ui_corpus`, `cases_corpus`). A profile
-// also carries how its corpus suites run: `jobs`, `memory`, `filter`,
-// `shard: I/N`, `opt_in` and `baseline`, the `ID<TAB>card<TAB>reason` ledger of
-// rows accepted as failing. Test and build profile names share one namespace,
-// and `defaults: { test: <profile> }` picks the profile a bare `jet test` runs.
+// carries `baseline`, the `ID<TAB>card<TAB>reason` ledger of rows accepted as
+// failing, and any `jet test` setting by its row name (jet_foundation
+// Registry/TestSettings.jet: `shard: 2/4`, `optimize: [none, full]`,
+// `filter: "E01"`, `jobs: 8`, `memory: 16gib`, …), its lowest layer. Test and
+// build profile names share one namespace, and `defaults: { test: <profile> }`
+// picks the profile a bare `jet test` runs.
 use {
-    jetpack_foundation.[BUILD_OPTIMIZE_BASIC, BUILD_OPTIMIZE_FULL, BUILD_OPTIMIZE_NONE]
-    jet_lexer.[TOKEN_DOT, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_STRING, lex]
+    jet_foundation.[JET_TEST_SETTINGS, TestSetting, TestSettingKind, test_setting_hint, test_setting_row, test_setting_value, test_settings_get]
+    jet_lexer.[TOKEN_COLON, TOKEN_DOT, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_STRING, lex]
 }
 
 TEST_PROFILE_CTOR :: "TestProfile"
@@ -26,26 +28,10 @@ struct TestProfileDef {
     name: String
     // The suites it runs, in order.
     suites: [String]
-    // The wall time each test may take, if bounded.
-    time_limit_ms: Int?
-    // The optimize levels the `tests` suite runs at, in order, and the golden
-    // tiers (none o0, basic o1, full o2); empty runs `tests` once at the
-    // command's stock level and the goldens on every tier.
-    optimize: [BuildOptimize]
-    // Corpus entries run at once; 0 sizes the pool from the scheduler.
-    jobs: Int{0}
-    // Bytes the running corpus entries may claim together; 0 is the room
-    // the host and its cgroup leave.
-    memory: Int{0}
-    // Only the corpus entries whose IDs contain it; "" is every entry.
-    filter: String{""}
-    // Run shard `shard_index` of `shard_count` (both 1 when unsharded).
-    shard_index: Int{1}
-    shard_count: Int{1}
-    // Run the corpus entries that are opt-in only.
-    opt_in: Bool{false}
     // The accepted-failing ledger, relative to package.jet; None is none.
     baseline: String?{None}
+    // The `jet test` settings it writes, each from `profile `<name>``.
+    settings: [TestSetting]{[TestSetting]{}}
 }
 
 // What a stock suite's corpus holds.
@@ -95,64 +81,39 @@ fn pkg_parse_test_profiles(body: String) -> [TestProfileDef] PackageParseError! 
 
 fn pkg_parse_test_profile(name: String, value: String) -> TestProfileDef PackageParseError! {
     site :: "test profile `{name}`"
-    profile := TestProfileDef{name: name, suites: [String]{}, time_limit_ms: None, optimize: [BuildOptimize]{}}
+    source :: "profile `{name}`"
+    profile := TestProfileDef{name: name, suites: [String]{}}
     seen := [String]{}
     loop field in pkg_key_value_entries(pkg_test_record(value, TEST_PROFILE_CTOR, site)) {
         if seen.contains(field.key) -> return Err(PackageParseError.Composition("{site} declares `{field.key}` more than once"))
         &seen.push(field.key)
         if field.key == {
             "suites" -> profile.suites = pkg_test_names(field.value, "{site} field `suites`")
-            "time_limit" -> profile.time_limit_ms = Val(pkg_parse_test_time_limit(field.value, site))
-            "optimize" -> {
-                loop level in pkg_test_names(field.value, "{site} field `optimize`") {
-                    if {
-                        level == BUILD_OPTIMIZE_NONE -> &profile.optimize.push(BuildOptimize.Off)
-                        level == BUILD_OPTIMIZE_BASIC -> &profile.optimize.push(BuildOptimize.Basic)
-                        level == BUILD_OPTIMIZE_FULL -> &profile.optimize.push(BuildOptimize.Full)
-                        else -> return Err(PackageParseError.Composition("{site} has an unknown `optimize:` level `{level}` — use none, basic or full"))
-                    }
-                }
-            }
-            "jobs" -> {
-                jobs :: pkg_parse_u64(field.value.trim()) ?? 0
-                if jobs == 0 || jobs > 4096 -> return Err(PackageParseError.Composition("{site} needs `jobs:` as a count from 1 to 4096"))
-                profile.jobs = jobs
-            }
-            "memory" -> {
-                profile.memory = pkg_parse_dev_record_bytes(field.value) ?? return Err(PackageParseError.Composition("{site} needs `memory:` as a positive size such as `8gib` or `512mib`"))
-            }
-            "filter" -> {
-                filter :: pkg_unquote(field.value)
-                if filter == "" -> return Err(PackageParseError.Composition("{site} needs `filter:` as a nonempty quoted ID substring"))
-                profile.filter = filter
-            }
-            "shard" -> {
-                parts :: field.value.trim().split("/").to_list()
-                refusal :: PackageParseError.Composition("{site} needs `shard:` as I/N with 1 <= I <= N, such as `2/4`")
-                if parts.len() != 2 -> return Err(refusal)
-                index :: pkg_parse_u64(parts[0].trim()) ?? return Err(refusal)
-                count :: pkg_parse_u64(parts[1].trim()) ?? return Err(refusal)
-                if index == 0 || index > count || count > 4096 -> return Err(refusal)
-                profile.shard_index = index
-                profile.shard_count = count
-            }
-            "opt_in" -> {
-                if field.value.trim() == {
-                    "true" -> profile.opt_in = true
-                    "false" -> profile.opt_in = false
-                    else -> return Err(PackageParseError.Composition("{site} needs `opt_in:` as true or false"))
-                }
-            }
             "baseline" -> {
                 path :: pkg_unquote(field.value)
                 if path == "" -> return Err(PackageParseError.Composition("{site} needs `baseline:` as a quoted ledger path"))
                 profile.baseline = Val(path)
             }
-            else -> return Err(PackageParseError.Composition("{site} has an unknown field `{field.key}` (allowed: suites, time_limit, optimize, jobs, memory, filter, shard, opt_in, baseline)"))
+            else -> {
+                row :: test_setting_row(field.key) ?? return Err(PackageParseError.Composition("{site} has an unknown field `{field.key}` (allowed: {pkg_test_profile_fields()})"))
+                if !row.ported -> return Err(PackageParseError.Composition("{site} field `{field.key}` is not ported to the Jet test runner yet"))
+                raw :: if row.kind == TestSettingKind.Text || row.kind == TestSettingKind.Path -> pkg_unquote(field.value) else -> field.value.trim()
+                setting :: test_setting_value(row, raw) ?? return Err(PackageParseError.Composition("{site} needs `{field.key}:` as {test_setting_hint(row)}"))
+                &profile.settings.push(TestSetting{name: row.name.copy(), value: setting, source: source.copy()})
+            }
         }
     }
     if profile.suites.len() == 0 -> return Err(PackageParseError.Composition("{site} needs `suites: [ … ]` naming at least one suite"))
     Ok(profile)
+}
+
+// The fields a `TestProfile{ … }` takes: its own, then each ported setting row.
+fn pkg_test_profile_fields() -> String Never! {
+    names := [String]{"suites", "baseline"}
+    loop row in JET_TEST_SETTINGS {
+        if row.ported -> &names.push(row.name.copy())
+    }
+    names.join(", ")
 }
 
 // The bare names of a `[a, b]` list, each at most once; at least one.
@@ -166,31 +127,6 @@ fn pkg_test_names(value: String, site: String) -> [String] PackageParseError! {
     }
     if names.len() == 0 -> return Err(PackageParseError.Composition("{site} needs a list such as `[tests]`"))
     Ok(names)
-}
-
-// A positive duration of whole `ms`, `s` or `m`: `60s`, `1500ms`, `2m`.
-fn pkg_parse_test_time_limit(value: String, site: String) -> Int PackageParseError! {
-    text :: value.trim()
-    refusal :: PackageParseError.Composition("{site} needs `time_limit:` as a positive duration such as `60s`, `1500ms` or `2m`")
-    unit := 1000
-    digits := text
-    if text.ends_with("ms") {
-        unit = 1
-        digits = text.removesuffix("ms")
-    } else if text.ends_with("s") {
-        digits = text.removesuffix("s")
-    } else if text.ends_with("m") {
-        unit = 60000
-        digits = text.removesuffix("m")
-    } else {
-        return Err(refusal)
-    }
-    plain :: digits.replace("_", "")
-    // At most nine digits, so the product stays far inside Int.
-    if plain.bytes().len() > 9 -> return Err(refusal)
-    count :: pkg_parse_u64(plain) ?? return Err(refusal)
-    if count == 0 -> return Err(refusal)
-    Ok(count * unit)
 }
 
 // Every suite of a `suites: { … }` body, in declaration order.
@@ -295,6 +231,29 @@ fn pkg_test_code_suites(source: String) -> [String] Never! {
     names
 }
 
+// Whether a test.jet sets a `jet test` setting: a `<t>.<setting>(` call on
+// a `<t>: Test` parameter, whose name is a setting row. Only such a test.jet
+// runs `jet test`'s plan step (JetCli TestSettingLayers.jet).
+fn pkg_test_sets_settings(source: String) -> Bool Never! {
+    lexed :: lex(source.bytes())
+    tokens :: lexed.tokens
+    params := [String]{}
+    loop index in 0..<tokens.len() {
+        if index + 2 >= tokens.len() -> break
+        if tokens[index].kind != TOKEN_IDENT || tokens[index + 1].kind != TOKEN_COLON || tokens[index + 2].kind != TOKEN_IDENT -> next
+        if pkg_test_source_bytes(source, tokens[index + 2].span.start, tokens[index + 2].span.end) != "Test" -> next
+        &params.push(pkg_test_source_bytes(source, tokens[index].span.start, tokens[index].span.end))
+    }
+    if params.len() == 0 -> return false
+    loop index in 0..<tokens.len() {
+        if index + 3 >= tokens.len() -> break
+        if tokens[index].kind != TOKEN_IDENT || tokens[index + 1].kind != TOKEN_DOT || tokens[index + 2].kind != TOKEN_IDENT || tokens[index + 3].kind != TOKEN_LPAREN -> next
+        if !params.contains(pkg_test_source_bytes(source, tokens[index].span.start, tokens[index].span.end)) -> next
+        if test_setting_row(pkg_test_source_bytes(source, tokens[index + 2].span.start, tokens[index + 2].span.end)) != None -> return true
+    }
+    false
+}
+
 fn pkg_test_source_bytes(source: String, start: Int, end: Int) -> String Never! {
     if start < 0 || end < start || end > source.count_bytes() -> return ""
     String.from_bytes(source.bytes().slice(start, end)) ?? ""
@@ -316,47 +275,44 @@ fn pkg_test_suites_refusal(body: String) -> String Never! {
     }
 }
 
-#Test("test profiles parse suites, a time limit and optimize levels in order") {
+#Test("test profiles parse suites and their settings in order") {
     profiles :: pkg_parse_test_profiles(`quick: TestProfile{ suites: [tests], time_limit: 60s }, full: TestProfile{ suites: [tests, golden], optimize: [none, full] }`) ?? panic(err.message())
     assert_eq(profiles.len(), 2)
     assert_eq(profiles[0].name, "quick")
     assert_eq(profiles[0].suites, [String]{"tests"})
-    assert_eq(profiles[0].time_limit_ms ?? 0, 60000)
-    assert_eq(profiles[0].optimize.len(), 0)
+    assert_eq(test_settings_get(profiles[0].settings, "time_limit") ?? "", "60000ms")
+    assert_eq(profiles[0].settings[0].source, "profile `quick`")
+    assert(test_settings_get(profiles[0].settings, "optimize") == None)
     assert_eq(profiles[1].suites, [String]{"tests", "golden"})
-    assert(profiles[1].time_limit_ms == None)
-    assert_eq(profiles[1].optimize.len(), 2)
-    assert_eq(profiles[1].optimize[0].as_str(), "none")
-    assert_eq(profiles[1].optimize[1].as_str(), "full")
+    assert_eq(test_settings_get(profiles[1].settings, "optimize") ?? "", "none,full")
 }
 
-#Test("test profile fields refuse unknown fields, bad levels, bad limits and empty suites") {
-    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], workers: 4 }`), "test profile `quick` has an unknown field `workers` (allowed: suites, time_limit, optimize, jobs, memory, filter, shard, opt_in, baseline)")
-    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], jobs: 0 }`), "test profile `quick` needs `jobs:` as a count from 1 to 4096")
-    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], memory: lots }`), "test profile `quick` needs `memory:` as a positive size such as `8gib` or `512mib`")
+#Test("test profile fields refuse unknown fields, bad values and empty suites") {
+    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], workers: 4 }`), "test profile `quick` has an unknown field `workers` (allowed: suites, baseline, fresh, docs, filter, capture, update_snapshots, shuffle, serial, measure, trace_tiers, optimize, time_limit, opt_in, shard, list, cases, jobs, memory, allow_shrink, diagnostic_coverage, results, compiler)")
+    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], coverage: true }`), "test profile `quick` field `coverage` is not ported to the Jet test runner yet")
+    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], jobs: 0 }`), "test profile `quick` needs `jobs:` as a whole number of at least 1")
+    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], memory: lots }`), "test profile `quick` needs `memory:` as a positive size such as `16G`, `8gib` or `512mib`")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], shard: 3/2 }`), "test profile `quick` needs `shard:` as I/N with 1 <= I <= N, such as `2/4`")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], opt_in: yes }`), "test profile `quick` needs `opt_in:` as true or false")
-    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], optimize: [fast] }`), "test profile `quick` has an unknown `optimize:` level `fast` — use none, basic or full")
+    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], optimize: [fast] }`), "test profile `quick` needs `optimize:` as optimize levels from none, basic and full, each at most once")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], time_limit: 0s }`), "test profile `quick` needs `time_limit:` as a positive duration such as `60s`, `1500ms` or `2m`")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ time_limit: 60s }`), "test profile `quick` needs `suites: [ … ]` naming at least one suite")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: tests }`), "test profile `quick` field `suites` needs a list such as `[tests]`")
-    assert_eq(pkg_parse_test_time_limit("1500ms", "t") ?? 0, 1500)
-    assert_eq(pkg_parse_test_time_limit("2m", "t") ?? 0, 120000)
 }
 
-#Test("test profiles carry the corpus run: jobs, memory, filter, shard, opt-in and baseline") {
-    profiles :: pkg_parse_test_profiles(`ui: TestProfile{ suites: [ui], jobs: 8, memory: 12gib, filter: "tests/ui/E01", shard: 2/4, opt_in: true, baseline: "baseline.tsv" }`) ?? panic(err.message())
+#Test("test profiles carry a baseline and any setting row") {
+    profiles :: pkg_parse_test_profiles(`ui: TestProfile{ suites: [ui], jobs: 8, memory: 12gib, filter: "tests/ui/E01", shard: 2/4, opt_in: true, results: "ui.json", list: true, baseline: "baseline.tsv" }`) ?? panic(err.message())
     profile :: profiles[0]
-    assert_eq(profile.jobs, 8)
-    assert_eq(profile.memory, 12 * 1073741824)
-    assert_eq(profile.filter, "tests/ui/E01")
-    assert_eq(profile.shard_index, 2)
-    assert_eq(profile.shard_count, 4)
-    assert(profile.opt_in)
+    assert_eq(test_settings_get(profile.settings, "jobs") ?? "", "8")
+    assert_eq(test_settings_get(profile.settings, "memory") ?? "", "{12 * 1073741824}")
+    assert_eq(test_settings_get(profile.settings, "filter") ?? "", "tests/ui/E01")
+    assert_eq(test_settings_get(profile.settings, "shard") ?? "", "2/4")
+    assert_eq(test_settings_get(profile.settings, "opt_in") ?? "", "true")
+    assert_eq(test_settings_get(profile.settings, "results") ?? "", "ui.json")
+    assert_eq(test_settings_get(profile.settings, "list") ?? "", "true")
     assert_eq(profile.baseline ?? "", "baseline.tsv")
     plain :: (pkg_parse_test_profiles(`quick: TestProfile{ suites: [tests] }`) ?? panic(err.message()))[0]
-    assert_eq(plain.jobs, 0)
-    assert_eq(plain.shard_count, 1)
+    assert_eq(plain.settings.len(), 0)
     assert(plain.baseline == None)
 }
 
@@ -387,4 +343,11 @@ fn pkg_test_suites_refusal(body: String) -> String Never! {
     source :: "fn test(t: Test) -> Int {{\n    t.suite(\"perf\", perf_rows)\n    t.suite(\"selfhost\", rows -> rows.pass(\"x\"))\n    suite(\"no\")\n    t.run()\n}}\n"
     assert_eq(pkg_test_code_suites(source), [String]{"perf", "selfhost"})
     assert_eq(pkg_test_code_suites(""), [String]{})
+}
+
+#Test("test.jet sets settings only through calls on its Test parameter") {
+    assert(pkg_test_sets_settings("fn test(t: Test) -> Int {{\n    t.shard(3, 8)\n    t.run()\n}}\n"))
+    assert(pkg_test_sets_settings("fn test(suite: Test) -> Int {{\n    suite.results(\"r.json\")\n    suite.run()\n}}\n"))
+    assert(!pkg_test_sets_settings("fn test(t: Test) -> Int {{\n    xs.filter(x -> x > 1)\n    t.suite(\"perf\", rows)\n    t.run()\n}}\n"))
+    assert(!pkg_test_sets_settings(""))
 }

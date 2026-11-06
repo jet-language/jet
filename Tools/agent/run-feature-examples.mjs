@@ -234,7 +234,7 @@ export function caseHostPort(caseText) {
   return null;
 }
 
-// testkit run.jet `kit_steps_host_port_path`: one host-wide flock per port.
+// testkit Kit.jet `kit_steps_host_port_path`: one host-wide flock per port.
 export function hostPortLockPath(port) {
   return `/tmp/jet-host-port-${port}.lock`;
 }

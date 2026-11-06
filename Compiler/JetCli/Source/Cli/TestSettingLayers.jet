@@ -1,0 +1,268 @@
+// `jet test`'s settings (D-TEST-INVOKE1=A, jet_foundation
+// Registry/TestSettings.jet): the selected test profile's, then those of
+// test.jet's `fn test`, then the flags, each later layer replacing the
+// earlier. A run decides them once; each child it starts (a profile run, an
+// optimize level, another compiler) gets them whole in TEST_SETTINGS_ENV and
+// decides nothing again.
+use {
+    cli_files :: core.files
+    cli_process :: core.process
+    cli_sys :: core.sys
+    jet_driver.[JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[
+        EvidenceExpectation,
+        EvidenceOutcome,
+        EvidenceRecord,
+        TEST_SETTINGS_ENV,
+        TEST_SETTINGS_PLAN_ENV,
+        TestSetting,
+        TestSettingError,
+        test_settings_get,
+        test_settings_levels,
+        test_settings_lines,
+        test_settings_on,
+        test_settings_parse_lines,
+        test_settings_shard_count,
+    ]
+    jet_pkg_model.[TEST_CODE_SUITES_FILE, pkg_test_sets_settings]
+    jet_testkit.[KitCaseResult, kit_report_document]
+}
+
+// The layer a flag writes.
+JET_CLI_TEST_FLAG_LAYER :: "flag"
+// The settings a parent run keeps for itself: it picks the compiler and the
+// optimize level of each child, and writes the one `results` document.
+JET_CLI_TEST_PARENT_SETTINGS :: [String]{"compiler", "optimize", "results"}
+
+// The `fn test` layer of the package at `root`: the settings its
+// `t.<setting>(…)` calls write in `jet test`'s plan step, a child
+// `jet test <root>` run with TEST_SETTINGS_PLAN_ENV naming a scratch file,
+// whose harness calls `fn test` and exits before any test runs (JetIR
+// BuildTests.jet). Empty, with no child, when test.jet makes no such call
+// (pkg_test_sets_settings). Err is why the layer can't be read.
+fn jet_cli_test_code_layer(root: String) -[FS, Env, Exec]> [TestSetting] TestSettingError! {
+    source :: cli_files.read(jet_cli_rooted_join(root, TEST_CODE_SUITES_FILE)) ?? return Ok([TestSetting]{})
+    if !pkg_test_sets_settings(source) -> return Ok([TestSetting]{})
+    scratch :: cli_files.temp_dir("jet-test-plan") ?? return Err(TestSettingError{message: "couldn't create a scratch directory for the plan step: {err}"})
+    plan :: jet_cli_rooted_join(scratch.path, "settings")
+    ran :: cli_process.cmd([String]{cli_sys.executable(), "test", root.copy()}).env(TEST_SETTINGS_PLAN_ENV, plan).stdout(.Capture).stderr(.Capture).run() ?? return Err(TestSettingError{message: "couldn't run the plan step `jet test {root}`: {err}"})
+    if !ran.success -> return Err(TestSettingError{message: "the plan step that runs test.jet's `fn test` stopped (exit code {ran.code}):\n{ran.errors.trim_end()}"})
+    text :: cli_files.read(plan) ?? ""
+    test_settings_parse_lines(text, "fn test")
+}
+
+// A `fn test` layer that can't be read, as its refusal.
+fn jet_cli_test_code_refusal(what: String, color: Bool) -> JetCLIPlan Never! {
+    jet_cli_fail("E2104", what, jet_cli_why("E2104"), "correct the `t.<setting>(…)` call in test.jet's `fn test`, or the test it names", color, JET_DRIVER_EXIT_USAGE)
+}
+
+// The settings this run inherits from the run that started it
+// (TEST_SETTINGS_ENV), none in a run nothing started.
+fn jet_cli_test_inherited_settings() -[Env]> [TestSetting] TestSettingError! {
+    lines :: cli_sys.get(TEST_SETTINGS_ENV) ?? return Ok([TestSetting]{})
+    test_settings_parse_lines(lines, JET_CLI_TEST_FLAG_LAYER)
+}
+
+// The layer that wrote row `name`, "" when none did.
+fn jet_cli_test_setting_source(settings: [TestSetting], name: String) -> String Never! {
+    loop setting in settings {
+        if setting.name == name -> return setting.source.copy()
+    }
+    ""
+}
+
+// The combinations no run can carry out, refused before anything builds:
+// `list` runs nothing and a slice blesses only part of the rows, so neither
+// takes `update_snapshots`; a `cases` file must be readable and a `results`
+// file writable before any test runs.
+fn jet_cli_test_settings_refusal(settings: [TestSetting], color: Bool) -[FS]> JetCLIPlan? Never! {
+    update :: test_settings_on(settings, "update_snapshots")
+    blessing :: "`update_snapshots` ({jet_cli_test_setting_source(settings, "update_snapshots")})"
+    if update && test_settings_on(settings, "list") {
+        return Val(jet_cli_fail("E2104", "`list` ({jet_cli_test_setting_source(settings, "list")}) and {blessing} don't combine", jet_cli_why("E2104"), "drop one of them: `list` runs no test, so it blesses nothing", color, JET_DRIVER_EXIT_USAGE))
+    }
+    if update && test_settings_shard_count(settings) > 1 {
+        shard :: test_settings_get(settings, "shard") ?? ""
+        return Val(jet_cli_fail("E2104", "`shard` {shard} ({jet_cli_test_setting_source(settings, "shard")}) and {blessing} don't combine", jet_cli_why("E2104"), "run `-u` without `shard`, so every selected row is blessed at once", color, JET_DRIVER_EXIT_USAGE))
+    }
+    if test_settings_get(settings, "cases") == .Val(list) {
+        _ :: cli_files.read(list) ?? return Val(jet_cli_fail("E2104", "the `cases` file `{list}` ({jet_cli_test_setting_source(settings, "cases")}) can't be read: {err}", jet_cli_why("E2104"), "name a file that lists one test name or corpus row id per line", color, JET_DRIVER_EXIT_USER_ERROR))
+    }
+    if !test_settings_on(settings, "list") && test_settings_get(settings, "results") == .Val(path) {
+        existed :: cli_files.exists(path)
+        cli_files.write(path, "") ?? return Val(jet_cli_fail("E2104", "the `results` file `{path}` ({jet_cli_test_setting_source(settings, "results")}) can't be written: {err}", jet_cli_why("E2104"), "name a file in a writable directory", color, JET_DRIVER_EXIT_USER_ERROR))
+        if !existed -> cli_files.remove(path).drop("the probe only shows the file can be written; the run writes it")
+    }
+    None
+}
+
+// The settings line a run prints when a profile or `fn test` wrote any of
+// them: each setting and the layer it came from. "" otherwise.
+fn jet_cli_test_settings_notice(settings: [TestSetting]) -> String Never! {
+    if !settings.any(setting -> setting.source != JET_CLI_TEST_FLAG_LAYER) -> return ""
+    shown :: (loop setting in settings -> "{setting.name} {setting.value} ({setting.source})").join(", ")
+    "jet test: settings {shown}\n"
+}
+
+// Whether `argument` writes a setting the parent keeps (`--optimize=…`,
+// `--compiler=…`, `--results=…`), so a child's words leave it out.
+fn jet_cli_test_parent_word(argument: String) -> Bool Never! {
+    loop name in JET_CLI_TEST_PARENT_SETTINGS {
+        flag :: "--{name}"
+        if argument == flag || argument.starts_with("{flag}=") -> return true
+    }
+    false
+}
+
+// `jet_argv`'s words for a child `jet test`, without the `--profile` choice
+// and the settings the parent keeps; words after `--` stay as written.
+fn jet_cli_test_child_words(jet_argv: [String]) -> [String] Never! {
+    words := [String]{"test"}
+    index := 1
+    loop index < jet_argv.len() {
+        argument :: jet_argv[index]
+        if argument == "--" {
+            loop rest in index..<jet_argv.len() -> &words.push(jet_argv[rest].copy())
+            break
+        }
+        if argument == "--profile" {
+            index += 2
+            next
+        }
+        if !argument.starts_with("--profile=") && !jet_cli_test_parent_word(argument) -> &words.push(argument.copy())
+        index += 1
+    }
+    words
+}
+
+// The settings a child inherits: all but those the parent keeps.
+fn jet_cli_test_child_settings(settings: [TestSetting]) -> [TestSetting] Never! {
+    kept := [TestSetting]{}
+    loop setting in settings {
+        if !JET_CLI_TEST_PARENT_SETTINGS.contains(setting.name) -> &kept.push(setting.copy()) // copy: the decided list stays whole for the parent.
+    }
+    kept
+}
+
+// `jet_argv` as the build options read it: the `--optimize` words, a test
+// setting here (several levels run once each), replaced by `level`'s
+// `--optimize=<level>` ("" adds none).
+fn jet_cli_test_build_argv(jet_argv: [String], level: String) -> [String] Never! {
+    argv := [String]{}
+    passthrough := false
+    loop argument in jet_argv {
+        if argument == "--" && !passthrough {
+            passthrough = true
+            // Before the `--`, so the build options read it.
+            if level != "" -> &argv.push("--optimize={level}")
+        }
+        if !passthrough && (argument == "--optimize" || argument.starts_with("--optimize=")) -> next
+        &argv.push(argument.copy())
+    }
+    if !passthrough && level != "" -> &argv.push("--optimize={level}")
+    argv
+}
+
+// `compiler` and more than one `optimize` level run the tests in children
+// (Host.jet jet_cli_test_workspace): one per level, each `jet test` of the
+// named compiler (else this jet) with the decided settings in
+// TEST_SETTINGS_ENV and its level as `--optimize`. With several levels each
+// child's `results` file gains the level (`r.json` is `r.none.json`, …).
+// None runs the tests in this process.
+fn jet_cli_test_settings_fan_out(jet_argv: [String], settings: [TestSetting], quiet: Bool) -> JetCLIPlan? Never! {
+    levels :: test_settings_levels(settings)
+    compiler :: test_settings_get(settings, "compiler") ?? ""
+    if compiler == "" && levels.len() < 2 -> return None
+    words :: jet_cli_test_child_words(jet_argv)
+    inherited :: jet_cli_test_child_settings(settings)
+    picked :: if levels.len() == 0 -> [String]{""} else -> levels
+    names := [String]{}
+    member_args := [[String]]{}
+    envs := [[String]]{}
+    loop level in picked {
+        args := words.copy()
+        if level != "" -> &args.push("--optimize={level}")
+        child := inherited.copy()
+        if test_settings_get(settings, "results") == .Val(path) {
+            written :: if levels.len() > 1 -> jet_cli_test_level_path(path, level) else -> path.copy()
+            &child.push(TestSetting{name: "results", value: written, source: jet_cli_test_setting_source(settings, "results")})
+        }
+        &names.push(if levels.len() > 1 -> "optimize {level}" else -> "compiler {compiler}")
+        &member_args.push(^args)
+        &envs.push([String]{TEST_SETTINGS_ENV, test_settings_lines(child)})
+    }
+    Val(JetCLIPlan.TestWorkspace{names: names, member_args: member_args, envs: envs, executable: compiler, heading: "run", quiet: quiet})
+}
+
+// `path` with `.<level>` before its extension (`r.json` is `r.none.json`).
+fn jet_cli_test_level_path(path: String, level: String) -> String Never! {
+    slash :: path.rfind("/")
+    dot :: path.rfind(".")
+    if dot <= slash + 1 -> return "{path}.{level}"
+    "{path.slice(0..<dot)}.{level}{path.slice(dot..<path.len())}"
+}
+
+// Carries the decided settings out on `options`: what the harness reads,
+// and the settings themselves for the rest of the run (Host.jet
+// jet_cli_test_result). Measured samples never share the machine with
+// another claim, so `measure` runs serially.
+fn jet_cli_test_settings_apply(options: &JetCLITestOptions, settings: [TestSetting]) Never! {
+    options.fresh = test_settings_on(settings, "fresh")
+    options.docs = test_settings_on(settings, "docs")
+    options.filter = test_settings_get(settings, "filter")
+    options.capture = test_settings_get(settings, "capture") ?? "failed"
+    options.update_snapshots = test_settings_on(settings, "update_snapshots")
+    options.shuffle_seed = test_settings_get(settings, "shuffle")
+    options.measure = test_settings_on(settings, "measure")
+    options.serial = test_settings_on(settings, "serial") || options.measure
+    options.trace_tiers = test_settings_on(settings, "trace_tiers")
+    options.settings = settings.copy() // copy: the caller's decided list stays its own.
+}
+
+// The verdict row of one claim outcome: PASS or FAIL, KNOWN-FAILING and
+// UNEXPECTED-PASS for an expected failure, UNSUPPORTED for a claim that
+// didn't run and ERROR for one that couldn't (jet_testkit's statuses).
+fn jet_cli_test_record_status(outcome: EvidenceOutcome, expected: Bool) -> String Never! {
+    if outcome == {
+        .Passed | .Proved | .Checked | .Generated -> if expected -> "UNEXPECTED-PASS" else -> "PASS"
+        .Failed -> if expected -> "KNOWN-FAILING" else -> "FAIL"
+        .Skipped | .NotObserved | .Unchecked -> "UNSUPPORTED"
+        .Unavailable | .Incomplete | .Error -> "ERROR"
+    }
+}
+
+// A run's evidence records as `results` rows of `suite`, each claim's row at
+// `tier` (the run that made it).
+fn jet_cli_test_record_results(records: [EvidenceRecord], suite: String, tier: String) -> [KitCaseResult] Never! {
+    results := [KitCaseResult]{}
+    loop record in records {
+        status :: jet_cli_test_record_status(record.outcome, record.expectation == EvidenceExpectation.ExpectedFailure)
+        // copy: the rows outlive the records and the caller's names.
+        &results.push(KitCaseResult{suite: suite.copy(), case: record.identity.claim_id.copy(), tier: tier.copy(), status: status, detail: record.detail.replace("\n", " "), exit: 0})
+    }
+    results
+}
+
+// Writes the one `results` document (jet_testkit kit_report_document) of
+// `results`, whose rows come from `suites`; the problem when it can't.
+fn jet_cli_test_results_write(path: String, results: [KitCaseResult], suites: [String]) -[FS, Env]> String? Never! {
+    document :: kit_report_document(cli_sys.executable(), results, suites) ?? return Val("couldn't encode the `results` document: {err}")
+    cli_files.write(path, document) ?? return Val("couldn't write the `results` file `{path}`: {err}")
+    None
+}
+
+#Test("child words drop the profile choice and the settings the parent keeps") {
+    argv :: [String]{"test", "pkg", "--profile", "ui", "--optimize=none,full", "--shard=2/4", "--compiler=base/jet", "--results=r.json", "--", "--optimize=x"}
+    assert_eq(jet_cli_test_child_words(argv), [String]{"test", "pkg", "--shard=2/4", "--", "--optimize=x"})
+    assert_eq(jet_cli_test_build_argv(argv, "full"), [String]{"test", "pkg", "--profile", "ui", "--shard=2/4", "--compiler=base/jet", "--results=r.json", "--optimize=full", "--", "--optimize=x"})
+    assert_eq(jet_cli_test_level_path("out/r.json", "none"), "out/r.none.json")
+    assert_eq(jet_cli_test_level_path("out.d/r", "full"), "out.d/r.full")
+}
+
+#Test("the settings notice shows only runs a profile or fn test wrote") {
+    flags :: [TestSetting]{TestSetting{name: "list", value: "true", source: "flag"}}
+    assert_eq(jet_cli_test_settings_notice(flags), "")
+    mixed :: [TestSetting]{TestSetting{name: "shard", value: "3/8", source: "fn test"}, TestSetting{name: "list", value: "true", source: "flag"}}
+    assert_eq(jet_cli_test_settings_notice(mixed), "jet test: settings shard 3/8 (fn test), list true (flag)\n")
+    assert_eq(jet_cli_test_child_settings([TestSetting]{TestSetting{name: "compiler", value: "j", source: "flag"}, TestSetting{name: "shard", value: "1/2", source: "flag"}}).len(), 1)
+}

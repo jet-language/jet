@@ -723,11 +723,35 @@ Output checks run after joins in the same batch process. If that process
 traps, each unrun check fails with E3015 rather than running against fresh
 state in the final reporter. Its
 captured output is shown under `--capture=all`, or for a failed run under the
-default `--capture=failed`; the exit is 0 when the harness passed, else 1. It
-honors `--capture`, `--filter`, `--shuffle=<seed>`, `--serial`,
-`--trace-tiers`, `-u`/`--update-snapshots`, `--fresh`, `--show-default`,
-`--release`, `--profile`, `--verbose`, `--quiet`, `--color`, `--threads`,
-`--measure`, and `--json`.
+default `--capture=failed`; the exit is 0 when the harness passed, else 1.
+Each test setting (D-TEST-INVOKE1=A, the `JET_TEST_SETTINGS` table in
+`Compiler/JetFoundation/Source/Registry/TestSettings.jet`) has three
+spellings from one row: the flag `--shard=3/8`, the TestProfile field
+`shard: 3/8` and the call `t.shard(3, 8)` on the `Test` value of test.jet's
+`fn test`. The layers are the selected test profile, then `fn test`, then the
+flags, each replacing the earlier; `jet test` runs `fn test` once in a plan
+step (the harness runs no test while `JET_TEST_PLAN` names the plan file)
+before any test runs, and prints the settings it used and the layer each came
+from whenever a profile or `fn test` wrote one. The settings are `fresh`,
+`docs`, `filter`, `capture`, `update_snapshots` (`-u`), `shuffle=<seed>`,
+`serial`, `measure`, `trace_tiers`, `optimize=<levels>` (one run per level
+when it lists more than one), `time_limit=<duration>`, `opt_in`,
+`shard=<i/n>` (the tests and corpus rows sorted, then every n-th from the
+i-th), `list` (prints the selected tests and corpus rows, runs nothing, exits
+0), `cases=<file>` (only the tests and corpus rows the file names, one name
+or ID per line; blank and `#` lines skipped), `jobs=<n>` and `memory=<size>`
+(the corpus pool's width and its memory bound, such as `16G`),
+`allow_shrink=<ids>` (ui rows `-u` may bless with fewer diagnostics,
+comma-separated), `diagnostic_coverage` (the ui suite's coverage entry instead
+of its rows), `results=<file>` (one JSON document of every verdict, the
+testkit's results shape) and `compiler=<jet>` (the jet that builds and runs the
+tests). `list` beside `-u`, a shard beside `-u`, a shard outside
+`1 <= i <= n`, a `cases` file that can't be read and a `results` file that
+can't be written are refused with E2104 before any test runs. A child run
+gets the decided settings in `JET_TEST_SETTINGS` and decides nothing again.
+It also honors
+`--show-default`, `--release`, `--profile`, `--verbose`, `--quiet`,
+`--color`, `--threads` and `--json`.
 Doctests (fenced ```` ```jet ```` blocks in `///` comments) run as claims of
 the same harness, named `doctest at <file>:<line>`, and `--docs` runs them alone; a wrong `// =>` value
 fails with E2901, and `-u` rewrites it instead (D-TEST4). `--measure` runs only
@@ -748,8 +772,8 @@ profiles run. `--profile <name>` naming a test profile of the package's
 or a bare package `jet test` when `defaults: { test: <name> }` names one, runs
 that profile instead (`--show-default` runs the stock default): each run is a
 child `jet test` with the other flags, the `tests` suite once, or once per
-level `optimize: [none, full]` lists (an `--optimize` flag beside it is refused
-with E2104). `time_limit:` stops each test that runs longer and fails it; each
+level `optimize: [none, full]` lists (an `--optimize` flag or `t.optimize(…)`
+call replaces the profile's levels). `time_limit:` stops each test that runs longer and fails it; each
 test then runs alone, and with output checks the batch runs bounded by the
 limit for each test and check. Each run's output follows a
 `jet test: profile <name>, run <run>` line on stderr (muted by `--quiet`). Its
@@ -778,14 +802,17 @@ suites run in this `jet` through the testkit pool (`Compiler/JetTestKit`),
 which prints one row per case and tier (PASS, FAIL, KNOWN-FAILING,
 UNEXPECTED-PASS, UNSUPPORTED, SKIP-HOST, OPT-IN, REFUSED, ERROR, TIMEOUT) and a
 summary. Row IDs are relative to the deepest directory holding the package and
-every corpus. The profile's `jobs:`, `memory:` (`16G`), `filter:`, `shard: 1/4`
-and `opt_in:` fields steer the pool; `time_limit:` bounds each step; the
-`baseline:` ledger (`ID<TAB>card<TAB>reason` rows) holds the accepted failures.
-`-u` blesses every selected row's snapshots, and is refused with E2104 beside
-`shard:`. `jet test Compiler --profile ui` (also `golden`, `cases`, `full`)
-runs the repository's corpora; a bare `jet test Compiler` runs `quick`. A bare
-`--shuffle` and the other test flags are refused
-with E2104 until they are ported. The evidence report and the package claims
+every corpus. The `jobs`, `memory`, `filter`, `cases`, `shard`, `opt_in`,
+`list`, `optimize` and `diagnostic_coverage` settings steer the pool;
+`time_limit` bounds each step; the `baseline:` ledger
+(`ID<TAB>card<TAB>reason` rows) holds the accepted failures. `-u` blesses
+every selected row's snapshots. A sharded run never writes a baseline and
+compares only the baseline rows its shard holds; code suites run in shard 1.
+`jet test Compiler --profile ui` (also `golden`, `cases`, `corpora`, `full`) runs
+the repository's corpora; a bare `jet test Compiler` runs `quick`. A bare
+`--shuffle` and the settings not ported yet (`where`, `coverage`, `grade`,
+`iterations`, `time`, `seed`, `corpus`, `watch`, `record`, the `browser_*`
+rows) are refused in all three spellings. The evidence report and the package claims
 floor are not ported yet: the outcome is the harness exit (the outcome for a
 package without a claims floor). The test-result cache lives in
 `.jet/test-results/`, keyed by the harness executable's bytes, the run's

@@ -259,7 +259,7 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
         summary: "Run tests",
         frequency_rank: 5,
         exhaustive: false,
-        usage: Val("test [<file.jet|dir>] [<filter>] [--watch] [--fresh] [--docs] [--where=<expr>] [--capture=<failed|all|none>] [--browser=<chromium,firefox,webkit>] [--browser-retries=<n>] [--browser-reporter=<text|json|html>] [--browser-ui] [--browser-visual] [--browser-trace] [--browser-scaffold=<name>] [--grade=generated] [--iterations=<n>] [--time=<s>] [--seed=<n>] [--corpus=<dir>]"),
+        usage: Val("test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [--optimize=<levels>] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--fresh] [--docs] [-u]"),
         actions: [JetCLIActionSpec]{},
     },
     {
@@ -681,17 +681,37 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
 } }
 
 // Every jet flag: the fixed rows, with one row per build option
-// (BuildOptions.jet) after `--profile`.
+// (BuildOptions.jet) after `--profile` and one per `jet test` setting
+// (TestSettings.jet) after `--explain-partition`. A setting whose flag is a
+// fixed row shared with other commands keeps that row.
 JET_CLI_FLAGS :: comptime { jet_cli_flag_rows() }
 
 fn jet_cli_flag_rows() -> [JetCLIFlagSpec] Never! {
     rows := [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FIXED_FLAGS {
         &rows.push(spec.copy())
-        if spec.long != "--profile" -> next
-        loop option in JET_BUILD_OPTIONS -> &rows.push(JetCLIFlagSpec{long: build_option_flag(option.name), help: "With build/run/dev/test: {option.help}"})
+        if spec.long == "--profile" {
+            loop option in JET_BUILD_OPTIONS {
+                scope :: if option.name == "optimize" -> "build/run/dev" else -> "build/run/dev/test"
+                &rows.push(JetCLIFlagSpec{long: build_option_flag(option.name), help: "With {scope}: {option.help}"})
+            }
+        }
+        if spec.long != "--explain-partition" -> next
+        loop setting in JET_TEST_SETTINGS {
+            flag :: test_setting_flag(setting.name)
+            // The lambda takes its own name: a capture moves the name it reads.
+            fixed_flag :: flag.copy()
+            if JET_CLI_FIXED_FLAGS.any(fixed -> fixed.long == fixed_flag) -> next
+            &rows.push(JetCLIFlagSpec{long: flag, help: jet_cli_test_setting_help(setting)})
+        }
     }
     rows
+}
+
+// A setting's help line: what it does and its three spellings.
+fn jet_cli_test_setting_help(setting: TestSettingRow) -> String Never! {
+    ported :: if setting.ported -> "" else -> " (not ported to the Jet test runner yet)"
+    "With test: {setting.help}{ported}; {test_setting_spellings(setting)}"
 }
 
 JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
@@ -898,12 +918,7 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     // `--preset` selects a named environment composition.
     {long: "--preset", help: "With env/run/dev/test: Select one declared environment preset"},
     {long: "--explain-partition", help: "With build --target=web: Show which code becomes JavaScript or WebAssembly"},
-    {long: "--fresh", help: "With test: Bypass only cached test results (default off); the build cache remains reusable"},
-    {long: "--docs", help: "With test: Run checked documentation examples only (default off)"},
-    {long: "--where", help: "With test: Filter recorded package, dependency, path, tag, or status facts (default all) as --where=<expr>"},
-    {long: "--capture", help: "With test: Capture output as failed, all, or none (default failed); watch key o cycles it"},
     {long: "--no-capture", help: "With dev: Disable automatic replay capture for this session"},
-    {long: "--update-snapshots", help: "With test: Replace expected snapshot output"},
     {long: "--update", help: "With import: Merge generated Jet into an existing target"},
     {long: "--coverage", help: "With test/inspect build: Show function or diagnostic coverage"},
     {long: "--verify", help: "With build: Rebuild and compare one indexed receipt artifact"},
@@ -930,27 +945,12 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     {long: "--max", help: "With lint --complexity: Fail when a function exceeds this score"},
     {long: "--scope", help: "With inspect: Choose a ledger or trust scope"},
     {long: "--core", help: "With inspect structure: Show the canonical core module export facts"},
-    // The shared test name-selection flag.
-    {long: "--filter", help: "With test: Only run claims whose name contains --filter=<substr>"},
-    {long: "--grade", help: "With test: Select the generated property-test grade as --grade=generated"},
-    {long: "--shuffle", help: "With test: Run tests in random (or --shuffle=<seed>) order"},
-    {long: "--serial", help: "With test: Run tests one at a time instead of the parallel default"},
     {long: "--show-default", help: "With run/build/dev/test: Use and report the stock default"},
-    {long: "--measure", help: "With test: Measure `.measure` claims"},
     // Native cross-browser test controls.
     {long: "--browser", help: "With test/db: Select browser engines for tests or serve a loopback database inspector"},
-    {long: "--browser-retries", help: "With test: Retry each browser attempt up to five times"},
-    {long: "--browser-reporter", help: "With test: Browser report format: text, json, or html"},
-    {long: "--browser-ui", help: "With test: Write/open the local browser report viewer"},
-    {long: "--browser-visual", help: "With test: Capture screenshots for passing browser attempts"},
-    {long: "--browser-trace", help: "With test: Keep redacted BiDi trace entries for every browser attempt"},
     {long: "--browser-scaffold", help: "With test: Create an isolated browser-test project as --browser-scaffold=<name>"},
     {long: "--record", help: "With run/dev/test/debug: Record a named replay as --record=<name>"},
     {long: "--replay", help: "With inspect/debug: Consume a named replay artifact"},
-    {long: "--iterations", help: "With test: Generated-grade case budget --iterations=<n> (default 1000)"},
-    {long: "--time", help: "With test: Generated-grade wall-clock budget in seconds --time=<n>"},
-    {long: "--seed", help: "With test: Generated-grade base PRNG seed --seed=<n> (default: fixed, reproducible)"},
-    {long: "--corpus", help: "With test: Generated-grade corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)"},
     {long: "--lens", help: "With prove: Project the human report by an exact evidence facet"},
     // #1659 criterion 1 (round 2): see the block above --message for the
     // other 7 formerly usage-string-only flags.

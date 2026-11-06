@@ -1,16 +1,20 @@
 // `jet test --profile <name>`, and a bare `jet test` under `defaults: { test:
 // <name> }`: a test profile package.jet declares (PackageModel
-// TestProfiles.jet). The `tests` suite runs as child `jet test`s of this jet:
-// once, or once per level its `optimize:` lists. A code suite, which test.jet's
-// `fn test` declares with `t.suite("perf", perf_rows)` (D-TEST-SUITE2=A), runs
-// as a child `jet test test.jet` that runs no #Test and hands that suite a
-// TestRows writing to a rows file. Each run's rows are compared
-// with its baseline under `.jet/test/<profile>/`; a test the baseline has
-// passing that now fails or is gone fails the profile, while a failure the
-// baseline already holds does not. A run with no baseline records one and
-// keeps its own exit status, as `-u` does. The corpus suites (golden, ui and
+// TestProfiles.jet). Its settings are the profile's, then those of test.jet's
+// `fn test`, then the flags (TestSettingLayers.jet). The `tests` suite runs
+// as child `jet test`s of this jet (or of its `compiler`): once, or once per
+// level its `optimize` lists. A code suite, which test.jet's `fn test`
+// declares with `t.suite("perf", perf_rows)` (D-TEST-SUITE2=A), runs as a
+// child `jet test test.jet` that runs no #Test and hands that suite a
+// TestRows writing to a rows file. Each run's rows are compared with its
+// baseline under `.jet/test/<profile>/`; a test the baseline has passing that
+// now fails or is gone fails the profile, while a failure the baseline
+// already holds does not. A run with no baseline records one and keeps its
+// own exit status, as `-u` does; a sharded run never records one, and
+// compares only the rows its shard holds. The corpus suites (golden, ui and
 // cases corpora) run in this process through the testkit pool, their
-// accepted failures held in the profile's `baseline` ledger.
+// accepted failures held in the profile's `baseline` ledger. `results`
+// writes every run's rows as one document.
 use {
     cli_files :: core.files
     cli_sys :: core.sys
@@ -20,19 +24,27 @@ use {
         EvidenceExpectation,
         EvidenceKind,
         EvidenceRecord,
-        build_option_flags,
+        TEST_SETTINGS_ENV,
+        TestSetting,
         evidence_outcome_name,
         evidence_report_read,
+        test_settings_get,
+        test_settings_layered,
+        test_settings_levels,
+        test_settings_lines,
+        test_settings_number,
+        test_settings_on,
+        test_settings_shard_count,
+        test_settings_shard_index,
+        test_settings_time_limit_ms,
     ]
     jet_pkg_model.[ComposeError, PackageFacts, TEST_CODE_SUITES_FILE, TEST_SUITE_TESTS, pkg_test_code_suites]
-    jet_testkit.[kit_exec_defaults, kit_execute_suites, kit_expect_bless_error]
+    jet_testkit.[KitCaseResult, kit_exec_defaults, kit_execute_suites, kit_expect_bless_error]
 }
 
 // Set in each child of a profile run to the profile's name: a child never
 // plans a profile of its own.
 JET_CLI_TEST_PROFILE_ENV :: "JET_TEST_PROFILE"
-// The profile's `time_limit` in milliseconds, for the child's harness.
-JET_CLI_TEST_TIME_LIMIT_ENV :: "JET_TEST_TIME_LIMIT_MS"
 // A row's state when its test passed, and when it failed.
 JET_CLI_TEST_ROW_PASSED :: "passed"
 JET_CLI_TEST_ROW_FAILED :: "failed"
@@ -75,8 +87,8 @@ struct JetCLITestRowsDiff {
 // (the build profile path reports it), or a package whose manifest doesn't
 // parse (the compile reports it). A bare run takes `defaults.test` only for
 // a package target, never for a file; a default naming neither a test
-// profile nor an output is refused.
-fn jet_cli_test_profile_plan(jet_argv: [String], positionals: [String], show_default: Bool, update: Bool, color: Bool, quiet: Bool) -[FS, Env]> JetCLIPlan? Never! {
+// profile nor an output is refused. `flags` are the run's flag layer.
+fn jet_cli_test_profile_plan(jet_argv: [String], positionals: [String], show_default: Bool, flags: [TestSetting], color: Bool, quiet: Bool) -[FS, Env, Exec]> JetCLIPlan? Never! {
     if cli_sys.get(JET_CLI_TEST_PROFILE_ENV) != None || show_default -> return None
     named :: jet_cli_profile_name(jet_argv)
     package_target :: positionals.len() == 0 || cli_files.is_dir(positionals[0])
@@ -114,88 +126,74 @@ fn jet_cli_test_profile_plan(jet_argv: [String], positionals: [String], show_def
     if profile.baseline == .Val(ledger) && !cli_files.is_file(jet_cli_rooted_join(root, ledger)) {
         return Val(jet_cli_fail("E2105", "test profile `{chosen}` names the baseline `{ledger}`, which isn't a file", jet_cli_why("E2105"), "create the ledger (one `ID<TAB>card<TAB>reason` row per accepted failure) or correct `baseline:` in package.jet", color, JET_DRIVER_EXIT_USER_ERROR))
     }
-    if update && profile.shard_count > 1 {
-        return Val(jet_cli_fail("E2104", "`-u` and test profile `{chosen}`'s `shard:` don't combine", jet_cli_why("E2104"), "run `-u` with a profile that has no `shard:`, so every selected row is blessed at once", color, JET_DRIVER_EXIT_USAGE))
-    }
-    if profile.optimize.len() > 0 {
-        if build_option_flags(jet_argv) == {
-            .Resolved(given, _) -> {
-                if given.written.any(choice -> choice.name == "optimize") {
-                    return Val(jet_cli_fail("E2104", "`--optimize` and test profile `{chosen}` both choose the optimize level", jet_cli_why("E2104"), "drop `--optimize`: the profile runs its tests at each level its `optimize:` lists", color, JET_DRIVER_EXIT_USAGE))
-                }
-            }
-            .Refused(_, _, _) -> {}
-        }
-    }
-    words := [String]{"test"}
-    index := 1
-    loop index < jet_argv.len() {
-        argument :: jet_argv[index]
-        if argument == "--" {
-            loop rest in index..<jet_argv.len() -> &words.push(jet_argv[rest].copy())
-            break
-        }
-        if argument == "--profile" {
-            index += 2
-            next
-        }
-        if !argument.starts_with("--profile=") -> &words.push(argument.copy())
-        index += 1
-    }
+    code :: jet_cli_test_code_layer(root) ?? return Val(jet_cli_test_code_refusal(err.message, color))
+    settings :: test_settings_layered(test_settings_layered(profile.settings, code), flags)
+    if jet_cli_test_settings_refusal(settings, color) == .Val(refusal) -> return Val(refusal)
+    words := jet_cli_test_child_words(jet_argv)
     // A child's streams are captured, so a colored run asks for color.
     if color && !words.any(argument -> argument == "--color" || argument.starts_with("--color=")) -> &words.push("--color=always")
     runs := [JetCLITestProfileRun]{}
     tests :: profile.suites.contains(TEST_SUITE_TESTS)
-    if tests && profile.optimize.len() == 0 {
-        &runs.push(JetCLITestProfileRun{label: TEST_SUITE_TESTS, rows_file: "{TEST_SUITE_TESTS}.rows", args: words.copy()})
+    levels :: test_settings_levels(settings)
+    if tests && levels.len() == 0 {
+        &runs.push(JetCLITestProfileRun{label: TEST_SUITE_TESTS, rows_file: "{TEST_SUITE_TESTS}.rows", args: words.copy()}) // copy: the level runs start from the same words.
     }
-    loop level in profile.optimize {
+    loop level in levels {
         if !tests -> break
-        args := words.copy()
-        &args.push("--optimize={level.as_str()}")
-        &runs.push(JetCLITestProfileRun{label: "{TEST_SUITE_TESTS} at optimize {level.as_str()}", rows_file: "{TEST_SUITE_TESTS}-{level.as_str()}.rows", args: ^args})
+        args := words.copy() // copy: each level run starts from the same words.
+        &args.push("--optimize={level}")
+        &runs.push(JetCLITestProfileRun{label: "{TEST_SUITE_TESTS} at optimize {level}", rows_file: "{TEST_SUITE_TESTS}-{level}.rows", args: ^args})
     }
-    // Each code suite is one child running test.jet's `fn test`.
-    loop suite in profile.suites {
-        if !code_suites.contains(suite) -> next
-        args := [String]{"test", jet_cli_rooted_join(root, TEST_CODE_SUITES_FILE)}
-        if color -> &args.push("--color=always")
-        &runs.push(JetCLITestProfileRun{label: suite.copy(), rows_file: "{suite}.rows", args: ^args, suite: suite.copy()})
+    // Each code suite is one child running test.jet's `fn test`: in the first
+    // shard of a sharded run, and never in a `list` run, which runs nothing.
+    if test_settings_shard_index(settings) == 1 && !test_settings_on(settings, "list") {
+        loop suite in profile.suites {
+            if !code_suites.contains(suite) -> next
+            args := [String]{"test", jet_cli_rooted_join(root, TEST_CODE_SUITES_FILE)}
+            if color -> &args.push("--color=always")
+            &runs.push(JetCLITestProfileRun{label: suite.copy(), rows_file: "{suite}.rows", args: ^args, suite: suite.copy()})
+        }
     }
-    // A filter argument after the package (`jet test Compiler --profile ui E01`) selects the corpus rows.
-    filter :: if package_target && positionals.len() > 1 -> positionals[1].copy() else -> ""
-    Val(JetCLIPlan.TestProfile{profile: chosen.copy(), root: root.copy(), time_limit_ms: profile.time_limit_ms, runs: runs, filter: filter, update: update, quiet: quiet})
-}
-
-// A profile child's per-test time limit, None outside a profile run.
-fn jet_cli_test_profile_time_limit() -[Env]> Int? Never! {
-    if cli_sys.get(JET_CLI_TEST_PROFILE_ENV) == None -> return None
-    text :: cli_sys.get(JET_CLI_TEST_TIME_LIMIT_ENV) ?? return None
-    limit :: Int.parse(text) ?? return None
-    if limit <= 0 -> return None
-    Val(limit)
+    Val(JetCLIPlan.TestProfile{profile: chosen.copy(), root: root.copy(), settings: settings, runs: runs, update: test_settings_on(settings, "update_snapshots"), quiet: quiet})
 }
 
 // Runs a profile: its `tests` children (jet_cli_test_profile_runs), then its
-// corpus suites in this process (jet_cli_test_profile_corpus).
-fn jet_cli_test_profile(profile: String, root: String, time_limit_ms: Int?, runs: [JetCLITestProfileRun], filter: String, update: Bool, quiet: Bool) -> JetDriverVerbOutput {
-    output := if runs.len() > 0 -> jet_cli_test_profile_runs(profile, root, time_limit_ms, runs, update, quiet) else -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    corpus :: jet_cli_test_profile_corpus(profile, root, time_limit_ms, filter, update)
+// corpus suites in this process (jet_cli_test_profile_corpus), then writes
+// every run's rows as the one `results` document.
+fn jet_cli_test_profile(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool) -> JetDriverVerbOutput {
+    if !quiet -> jet_cli_write_notice(jet_cli_test_settings_notice(settings))
+    results := [KitCaseResult]{}
+    output := if runs.len() > 0 -> jet_cli_test_profile_runs(profile, root, settings, runs, update, quiet, &results) else -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    corpus :: jet_cli_test_profile_corpus(profile, root, settings, update, &results)
     if corpus.exit_code > output.exit_code -> output.exit_code = corpus.exit_code
     output.stderr = "{output.stderr}{corpus.stderr}"
+    if !test_settings_on(settings, "list") && test_settings_get(settings, "results") == .Val(path) {
+        suites := [String]{}
+        loop result in results {
+            if !suites.contains(result.suite) -> &suites.push(result.suite.copy()) // copy: the rows keep their suite names.
+        }
+        if jet_cli_test_results_write(path, results, suites) == .Val(problem) {
+            output.stderr = "{output.stderr}jet test: profile `{profile}`: {problem}\n"
+            if JET_DRIVER_EXIT_USER_ERROR > output.exit_code -> output.exit_code = JET_DRIVER_EXIT_USER_ERROR
+        }
+    }
     output
 }
 
 // A profile's corpus suites through the testkit pool (jet_testkit
-// kit_execute_suites), run by this `jet` against itself. Each suite's corpus
-// is a directory relative to package.jet; row IDs are relative to the nearest
-// directory holding the package and every corpus, so a corpus beside the
-// package (`../tests/ui`) keeps its checkout-relative IDs. The profile's
-// `baseline` ledger holds the rows accepted as failing (KNOWN-FAILING, and
-// UNEXPECTED-PASS once one passes); `-u` blesses every selected row. The
-// kit prints each row and the summary to stdout as the rows finish. A
-// `filter` argument replaces the profile's `filter:`.
-fn jet_cli_test_profile_corpus(profile: String, root: String, time_limit_ms: Int?, filter: String, update: Bool) -> JetDriverVerbOutput {
+// kit_execute_suites), run by this `jet` (or its `compiler`) against itself.
+// Each suite's corpus is a directory relative to package.jet; row IDs are
+// relative to the nearest directory holding the package and every corpus,
+// so a corpus beside the package (`../tests/ui`) keeps its checkout-relative
+// IDs. The profile's `baseline` ledger holds the rows accepted as failing
+// (KNOWN-FAILING, and UNEXPECTED-PASS once one passes); `-u` blesses every
+// selected row, a ui row with fewer diagnostics only when `allow_shrink`
+// lists it. The kit prints each row and the summary to stdout as the
+// rows finish, and `results` gains every row. The settings choose the rows
+// (`filter`, `cases`, `opt_in`, `shard`), the golden tiers (`optimize`), the
+// per-case time limit, the pool (`jobs`, `memory`), `list`, and
+// `diagnostic_coverage` (the ui suite's coverage entry instead of its rows).
+fn jet_cli_test_profile_corpus(profile: String, root: String, settings: [TestSetting], update: Bool, results: &[KitCaseResult]) -> JetDriverVerbOutput {
     done :: JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     site :: "jet test: profile `{profile}`"
     manifest :: jet_cli_rooted_join(root, JET_CLI_PACKAGE_FILE)
@@ -229,31 +227,41 @@ fn jet_cli_test_profile_corpus(profile: String, root: String, time_limit_ms: Int
     if options.ui_corpora.len() > 0 -> &selected.push("ui")
     if options.cases_corpora.len() > 0 -> &selected.push("cases")
     options.suite = selected.join(",")
-    options.jet = cli_sys.executable()
-    options.jetpack = jet_cli_find_engine_binary(JET_CLI_JETPACK_BINARY) ?? ""
-    options.filter = if filter != "" -> filter.copy() else -> chosen.filter.copy()
-    options.jobs = chosen.jobs
-    options.memory = chosen.memory
-    options.opt_in = chosen.opt_in
-    options.shard_index = chosen.shard_index
-    options.shard_count = chosen.shard_count
-    options.sharded = chosen.shard_count > 1
-    if time_limit_ms == .Val(limit) -> options.timeout = (limit + 999) /% 1000
-    // `optimize:` picks the golden tiers: none is o0 (`jet run`), basic o1
+    compiler :: test_settings_get(settings, "compiler") ?? cli_sys.executable()
+    options.jet = cli_files.realpath(compiler) ?? compiler
+    // The corpora's `jetpack` ships beside the jet that runs them.
+    beside :: if jet_cli_parent(options.jet) == .Val(directory) -> jet_cli_authority_path(directory, JET_CLI_JETPACK_BINARY) else -> ""
+    options.jetpack = if beside != "" && cli_files.is_file(beside) -> beside else -> jet_cli_find_engine_binary(JET_CLI_JETPACK_BINARY) ?? ""
+    options.filter = test_settings_get(settings, "filter") ?? ""
+    if test_settings_get(settings, "cases") == .Val(list) -> options.cases = cli_files.realpath(list) ?? list
+    options.jobs = test_settings_number(settings, "jobs")
+    options.memory = test_settings_number(settings, "memory")
+    options.opt_in = test_settings_on(settings, "opt_in")
+    options.shard_index = test_settings_shard_index(settings)
+    options.shard_count = test_settings_shard_count(settings)
+    options.sharded = options.shard_count > 1
+    options.list = test_settings_on(settings, "list")
+    options.coverage = test_settings_on(settings, "diagnostic_coverage")
+    if options.coverage && options.ui_corpora.len() == 0 -> return JetDriverVerbOutput{stdout: "", stderr: "{site}: `diagnostic_coverage` checks the ui suite, and the profile runs none\n", exit_code: JET_DRIVER_EXIT_USAGE}
+    if test_settings_time_limit_ms(settings) == .Val(limit) -> options.timeout = (limit + 999) /% 1000
+    // `optimize` picks the golden tiers: none is o0 (`jet run`), basic o1
     // (`jet build`), full o2 (`jet build --release`); unset runs all three.
-    if chosen.optimize.len() > 0 -> options.tiers = (loop level in chosen.optimize -> if level.as_str() == "none" -> "o0" else if level.as_str() == "basic" -> "o1" else -> "o2")
+    levels :: test_settings_levels(settings)
+    if levels.len() > 0 -> options.tiers = (loop level in levels -> if level == "none" -> "o0" else if level == "basic" -> "o1" else -> "o2")
     if chosen.baseline == .Val(ledger) {
         options.ledger = cli_files.realpath(jet_cli_rooted_join(package, ledger)) ?? return JetDriverVerbOutput{stdout: "", stderr: "{site}: couldn't resolve the baseline `{ledger}`: {jet_cli_io_error_text(err)}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if update {
         options.bless.all = true
         options.bless.reason = "jet test -u --profile {profile}"
+        if test_settings_get(settings, "allow_shrink") == .Val(rows) -> options.bless.allow_shrink = (loop row in rows.split(",").to_list() -> row.trim().copy())
     }
     refusal :: kit_expect_bless_error(options.bless, options.sharded)
     if refusal != "" -> return JetDriverVerbOutput{stdout: "", stderr: "{site}: {refusal}\n", exit_code: JET_DRIVER_EXIT_USAGE}
     // JET_CI_EVIDENCE_DIR receives each suite's case verdicts as <suite>.json.
     reports :: if cli_sys.get("JET_CI_EVIDENCE_DIR") == .Val(evidence) -> Val(jet_cli_test_corpus_reports(evidence, selected)) else -> None
     execution :: kit_execute_suites(options, ancestor, selected, reports)
+    loop result in execution.results -> &results.push(result.copy()) // copy: the execution keeps its rows.
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: execution.code}
 }
 
@@ -277,13 +285,17 @@ fn jet_cli_test_common_dir(a: String, b: String) -> String Never! {
 }
 
 // Runs a profile's `tests` and code-suite children together
-// (jet_cli_test_members_run), one pool slot each. A `tests` child hands its
-// evidence report to a scratch file, a code-suite child its rows; then each
-// run's rows are compared or recorded. The summary goes to stderr after every
-// run's own output.
-fn jet_cli_test_profile_runs(profile: String, root: String, time_limit_ms: Int?, runs: [JetCLITestProfileRun], update: Bool, quiet: Bool) -> JetDriverVerbOutput {
+// (jet_cli_test_members_run), one pool slot each. Each child inherits the
+// profile's settings but those this run keeps (TEST_SETTINGS_ENV). A `tests`
+// child hands its evidence report to a scratch file, a code-suite child its
+// rows; then each run's rows are compared or recorded, and `results` gains
+// them. The summary goes to stderr after every run's own output.
+fn jet_cli_test_profile_runs(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool, results: &[KitCaseResult]) -> JetDriverVerbOutput {
     scratch :: cli_files.temp_dir("jet-test-profile") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: profile `{profile}`: couldn't create a scratch directory: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    executable :: cli_sys.executable()
+    executable :: test_settings_get(settings, "compiler") ?? cli_sys.executable()
+    inherited :: test_settings_lines(jet_cli_test_child_settings(settings))
+    listing :: test_settings_on(settings, "list")
+    sharded :: test_settings_shard_count(settings) > 1
     labels := [String]{}
     argvs := [[String]]{}
     envs := [[String]]{}
@@ -293,15 +305,10 @@ fn jet_cli_test_profile_runs(profile: String, root: String, time_limit_ms: Int?,
         loop argument in run.args -> &argv.push(argument.copy())
         &argvs.push(^argv)
         if run.suite != "" {
-            &envs.push([String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), JET_CLI_TEST_SUITE_ENV, run.suite.copy(), JET_CLI_TEST_SUITE_ROWS_ENV, jet_cli_rooted_join(scratch.path, "{index}.rows"), JET_CLI_TEST_SUITE_ROOT_ENV, root.copy(), JET_CLI_TEST_SUITE_JET_ENV, executable.copy()})
+            &envs.push([String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), TEST_SETTINGS_ENV, inherited.copy(), JET_CLI_TEST_SUITE_ENV, run.suite.copy(), JET_CLI_TEST_SUITE_ROWS_ENV, jet_cli_rooted_join(scratch.path, "{index}.rows"), JET_CLI_TEST_SUITE_ROOT_ENV, root.copy(), JET_CLI_TEST_SUITE_JET_ENV, executable.copy()})
             next
         }
-        env := [String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), EVIDENCE_REPORT_ENV, jet_cli_rooted_join(scratch.path, "{index}.bin")}
-        if time_limit_ms == .Val(limit) {
-            &env.push(JET_CLI_TEST_TIME_LIMIT_ENV)
-            &env.push("{limit}")
-        }
-        &envs.push(^env)
+        &envs.push([String]{JET_CLI_TEST_PROFILE_ENV, profile.copy(), TEST_SETTINGS_ENV, inherited.copy(), EVIDENCE_REPORT_ENV, jet_cli_rooted_join(scratch.path, "{index}.bin")})
     }
     finished :: jet_cli_test_members_run("profile `{profile}`, run", labels, argvs, envs, jet_cli_native_test_width(cli_sys.cpu_count(), jet_cli_memory_available()), quiet)
     exit_code := JET_DRIVER_EXIT_OK
@@ -309,6 +316,11 @@ fn jet_cli_test_profile_runs(profile: String, root: String, time_limit_ms: Int?,
     baselines :: jet_cli_rooted_join(root, ".jet/test/{profile}")
     loop (index, run) in runs {
         child :: finished[index]
+        // A `list` run names its tests in its own output and records nothing.
+        if listing {
+            if child.code > exit_code -> exit_code = child.code
+            next
+        }
         site :: "jet test: profile `{profile}`, `{run.label}`"
         rows := [String]{}
         // The status a recorded run keeps.
@@ -318,11 +330,12 @@ fn jet_cli_test_profile_runs(profile: String, root: String, time_limit_ms: Int?,
             text :: cli_files.read(jet_cli_rooted_join(scratch.path, "{index}.rows")) ?? ""
             stopped :: if child.code == JET_DRIVER_EXIT_OK -> String?{None} else -> Val(jet_cli_test_stop_reason(child.errors, child.code))
             code :: jet_cli_test_code_rows(text, stopped)
-            rows = code.rows.copy()
+            rows = code.rows.copy() // copy: the failure lines stay with `code`.
             status = if code.failures.len() > 0 -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
             if !quiet {
                 loop line in code.failures -> summary = "{summary}{site}: failed {line}\n"
             }
+            loop row in code.rows -> &results.push(KitCaseResult{suite: run.suite.copy(), case: jet_cli_test_row_name(row), tier: "-", status: jet_cli_test_code_status(jet_cli_test_row_state(row)), detail: "", exit: 0}) // copy: each row names its suite.
         } else {
             // An exit that isn't a test verdict (an internal error) stands.
             if child.code != JET_DRIVER_EXIT_OK && child.code != JET_DRIVER_EXIT_USER_ERROR && child.code > exit_code -> exit_code = child.code
@@ -339,11 +352,16 @@ fn jet_cli_test_profile_runs(profile: String, root: String, time_limit_ms: Int?,
                 next
             }
             rows = jet_cli_test_profile_rows(report.records)
+            loop result in jet_cli_test_record_results(report.records, TEST_SUITE_TESTS, run.label) -> &results.push(result)
         }
         shown :: ".jet/test/{profile}/{run.rows_file}"
         stored :: jet_cli_rooted_join(baselines, run.rows_file)
         if update || !cli_files.exists(stored) {
             if status > exit_code -> exit_code = status
+            if sharded {
+                if !quiet -> summary = "{summary}{site}: {rows.len()} rows, not recorded: a sharded run never writes the baseline `{shown}`\n"
+                next
+            }
             cli_files.create_dir_all(baselines) ?? {
                 if JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
                 summary = "{summary}{site}: couldn't create `.jet/test/{profile}`: {err}\n"
@@ -362,7 +380,13 @@ fn jet_cli_test_profile_runs(profile: String, root: String, time_limit_ms: Int?,
             summary = "{summary}{site}: couldn't read `{shown}`: {err}\n"
             next
         }
-        diff :: jet_cli_test_rows_compare(jet_cli_test_rows_parse(text), rows)
+        baseline := jet_cli_test_rows_parse(text)
+        // A shard compares the rows it holds: the others ran in other shards.
+        if sharded {
+            present :: loop row in rows -> jet_cli_test_row_name(row)
+            baseline = baseline.filter(before -> present.contains(jet_cli_test_row_name(before)))
+        }
+        diff :: jet_cli_test_rows_compare(baseline, rows)
         if diff.lost.len() > 0 && JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
         summary = "{summary}{jet_cli_test_rows_report(site, shown, rows.len(), diff, quiet)}"
     }
@@ -449,6 +473,14 @@ fn jet_cli_test_code_rows(text: String, stopped: String?) -> JetCLITestCodeRows 
     }
     &rows.sort()
     JetCLITestCodeRows{rows: rows, failures: failures}
+}
+
+// A code-suite row's state as its `results` verdict: a row that neither
+// passed nor failed (`skipped`, …) is UNSUPPORTED.
+fn jet_cli_test_code_status(state: String) -> String Never! {
+    if state == JET_CLI_TEST_ROW_PASSED -> return "PASS"
+    if state == JET_CLI_TEST_ROW_FAILED -> return "FAIL"
+    "UNSUPPORTED"
 }
 
 fn jet_cli_test_rows_text(rows: [String]) -> String Never! {

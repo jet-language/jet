@@ -11,6 +11,7 @@
 // E2104 instead of guessing its behavior.
 use {
     cli_files :: core.files
+    cli_sys :: core.sys
     jet_driver.[
         JetDriverFailure,
         JetDriverVerbOutput,
@@ -41,10 +42,22 @@ use {
         JET_COMPILER_SERVICE_VERB,
         Diagnostic,
         PolicyKey,
+        TEST_SETTINGS_ENV,
+        TEST_SETTINGS_PLAN_ENV,
+        TestSetting,
+        TestSettingKind,
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_render_all,
         policy_key_parse,
+        test_setting_flag,
+        test_setting_flag_row,
+        test_setting_hint,
+        test_setting_value,
+        test_settings_get,
+        test_settings_layered,
+        test_settings_levels,
+        test_settings_put,
     ]
     jet_pkg_model.[WorkspaceDeclarationCache]
 }
@@ -98,16 +111,20 @@ enum JetCLIPlan {
     // `jet test <file>`: compile the checked test harness and run it under
     // `options` (native O0 unless its build options say otherwise).
     Test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions)
-    // `jet test` of a workspace root with several runnable members:
-    // `member_args` holds each member's `jet test <member>` words, in
-    // member order (Host.jet `jet_cli_test_workspace`).
-    TestWorkspace(names: [String], member_args: [[String]], quiet: Bool)
+    // `jet test` in children: a workspace root's runnable members, or one
+    // run per optimize level or under another compiler. `member_args` holds
+    // each child's words after the executable (`executable`, "" for this
+    // jet), `envs` each child's environment as name/value pairs (empty:
+    // none), and `heading` names a child in the summary (Host.jet
+    // `jet_cli_test_workspace`).
+    TestWorkspace(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, quiet: Bool)
     // `jet test` under the test profile `profile` of the package at `root`:
     // each of `runs` is a child `jet test`, compared with its baseline, and
-    // the corpus suites run in process with `filter` (a `jet test` filter
-    // argument, else "") (TestProfile.jet `jet_cli_test_profile`); `update`
-    // rewrites the baselines and blesses the corpus rows.
-    TestProfile(profile: String, root: String, time_limit_ms: Int?, runs: [JetCLITestProfileRun], filter: String, update: Bool, quiet: Bool)
+    // the corpus suites run in process (TestProfile.jet
+    // `jet_cli_test_profile`), each under the decided `settings`
+    // (TestSettingLayers.jet); `update` rewrites the baselines and blesses
+    // the corpus rows.
+    TestProfile(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool)
     // `jet new <name>`: write the project folder; `template` is "" for the
     // print-only starter. `json` prints the created files as one `new` status
     // line instead of the human recap.
@@ -275,8 +292,9 @@ struct JetCLITestOptions {
     profile: String
     project_root: String?
     status: String
-    // A test profile's `time_limit`: each test's wall-time bound.
-    time_limit_ms: Int?{None}
+    // The decided `jet test` settings (TestSettingLayers.jet), for those
+    // the harness run reads itself: shard, list, results, time_limit.
+    settings: [TestSetting]{[TestSetting]{}}
     // `--fresh`: run the tests even when the test-result store (TestReuse.jet)
     // holds their outcomes.
     fresh: Bool{false}
@@ -1287,11 +1305,8 @@ fn jet_cli_run_entry(jet_argv: [String], args: [String], passthrough: [String]?,
 }
 
 // `jet test` flags whose Jet port has not landed: refused, never ignored.
-JET_CLI_TEST_UNPORTED_FLAGS :: [String]{
-    "--watch", "--where", "--coverage", "--grade", "--iterations", "--time", "--seed",
-    "--corpus", "--record", "--browser", "--browser-retries", "--browser-reporter",
-    "--browser-ui", "--browser-visual", "--browser-trace", "--browser-scaffold", "--set",
-}
+// The setting flags (JET_TEST_SETTINGS) refuse their unported rows themselves.
+JET_CLI_TEST_UNPORTED_FLAGS :: [String]{"--browser-scaffold", "--set"}
 
 fn jet_cli_test_option_error(what: String, color: Bool) -> JetCLIPlan Never! {
     jet_cli_fail("E2104", what, jet_cli_why("E2104"), "use the canonical `jet test` flag spelling", color, JET_DRIVER_EXIT_USAGE)
@@ -1301,12 +1316,14 @@ fn jet_cli_test_option_error(what: String, color: Bool) -> JetCLIPlan Never! {
 // `run_test_target` up to the compile). A package directory (or no target
 // inside a package) tests through its own `fn test(t: Test)` when it declares
 // one, as `jet build` runs its `fn build`. The tested file's doctests run as
-// claims of the same harness (Doctests.jet). The result cache and
-// JET_CLI_TEST_UNPORTED_FLAGS are not ported yet.
+// claims of the same harness (Doctests.jet). Each setting flag writes the
+// flag layer of D-TEST-INVOKE1=A (TestSettingLayers.jet), over a profile's
+// and `fn test`'s; the result cache and JET_CLI_TEST_UNPORTED_FLAGS are not
+// ported yet.
 fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env, Exec]> JetCLIPlan Never! {
-    if jet_cli_option_flags_refusal(jet_argv, color) == .Val(refusal) -> return refusal
+    if jet_cli_option_flags_refusal(jet_cli_test_build_argv(jet_argv, ""), color) == .Val(refusal) -> return refusal
     options := JetCLITestOptions{build: build_options_stock("test"), capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, docs: false, measure: false, json: false, profile: "", project_root: None, status: ""}
-    fresh := false
+    flags := [TestSetting]{}
     show_default := false
     positionals := [String]{}
     // Where the target positional is in jet_argv (-1: none).
@@ -1322,55 +1339,37 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
         name :: argument.split("=").to_list()[0]
         inline := String?{None}
         if name.len() < argument.len() -> inline = Val(argument.slice(name.len() + 1..<argument.len()))
-        value := ""
-        if name == "--capture" || name == "--filter" || name == "--profile" || ((name == "--threads" || name == "--color") && inline == None) {
-            if inline == .Val(text) {
-                value = text
-            } else {
-                if index + 1 >= jet_argv.len() -> return jet_cli_test_option_error("`{name}` needs a value", color)
-                index += 1
-                value = jet_argv[index]
+        if test_setting_flag_row(name) == .Val(row) {
+            if !row.ported -> return jet_cli_not_ported("test {name}", color)
+            // A bare `--shuffle` seeds from the clock, which the Jet host
+            // does not read yet.
+            if name == "--shuffle" && inline == None -> return jet_cli_not_ported("test --shuffle", color)
+            raw := inline ?? ""
+            if inline == None {
+                if row.kind == TestSettingKind.Switch {
+                    raw = "true"
+                } else {
+                    if !JET_CLI_SEPARATE_VALUE_FLAGS.contains(name) || index + 1 >= jet_argv.len() -> return jet_cli_test_option_error("`{name}` needs a value", color)
+                    index += 1
+                    raw = jet_argv[index].copy()
+                }
             }
+            spelled :: test_setting_flag(row.name)
+            hint :: test_setting_hint(row)
+            value :: test_setting_value(row, raw) ?? return jet_cli_fail("E2104", "`{spelled}` needs {hint}, not `{raw}`", jet_cli_why("E2104"), "write `{spelled}=` with {hint}", color, JET_DRIVER_EXIT_USAGE)
+            if row.name == "filter" && test_settings_get(flags, "filter") == .Val(previous) && previous != value -> return jet_cli_test_option_error("conflicting test filters `{previous}` and `{value}`", color)
+            test_settings_put(&flags, TestSetting{name: row.name.copy(), value: value, source: JET_CLI_TEST_FLAG_LAYER})
+            index += 1
+            next
+        }
+        if (name == "--profile" || name == "--threads" || name == "--color") && inline == None {
+            if index + 1 >= jet_argv.len() -> return jet_cli_test_option_error("`{name}` needs a value", color)
+            index += 1
         }
         if {
             JET_CLI_TEST_UNPORTED_FLAGS.contains(name) -> return jet_cli_not_ported("test {name}", color)
             name == "--show-default" -> show_default = true
-            name == "--fresh" -> fresh = true
-            name == "--update-snapshots" || name == "-u" -> options.update_snapshots = true
-            name == "--docs" -> options.docs = true
-            // Measured samples never share the machine with another claim.
-            name == "--measure" -> {
-                options.measure = true
-                options.serial = true
-            }
             name == "--json" -> options.json = true
-            name == "--release" -> {}
-            name == "--trace-tiers" -> options.trace_tiers = true
-            name == "--serial" -> options.serial = true
-            name == "--capture" -> {
-                policy :: jet_cli_ascii_lower(value.trim())
-                if {
-                    policy == "failed" || policy == "failure" || policy == "failures" -> options.capture = "failed"
-                    policy == "all" -> options.capture = "all"
-                    policy == "none" || policy == "off" -> options.capture = "none"
-                    else -> return jet_cli_fail("E2104", "invalid --capture value `{value}` (expected failed, all, or none)", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
-                }
-            }
-            name == "--filter" -> {
-                if options.filter == .Val(previous) {
-                    if previous != value -> return jet_cli_test_option_error("conflicting test filters `{previous}` and `{value}`", color)
-                } else {
-                    options.filter = Val(value)
-                }
-            }
-            name == "--shuffle" -> {
-                // A bare `--shuffle` seeds from the clock, which the Jet host
-                // does not read yet.
-                text :: inline ?? return jet_cli_not_ported("test --shuffle", color)
-                seed :: Int.parse(text) ?? return jet_cli_test_option_error("`--shuffle={text}` isn't a number", color)
-                if seed < 0 -> return jet_cli_test_option_error("`--shuffle={text}` isn't a number", color)
-                options.shuffle_seed = Val("{seed}")
-            }
             argument.starts_with("-") -> {}
             else -> {
                 if positionals.len() == 0 -> target_at = index
@@ -1382,17 +1381,19 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
     if positionals.len() > 2 -> return jet_cli_test_option_error("`jet test` accepts one target and one positional filter, got {positionals.len()} positionals", color)
     if positionals.len() == 2 {
         filter :: positionals[1]
-        if options.filter == .Val(previous) {
+        if test_settings_get(flags, "filter") == .Val(previous) {
             if previous != filter -> return jet_cli_test_option_error("conflicting test filters `{previous}` and `{filter}`", color)
         } else {
-            options.filter = Val(filter)
+            test_settings_put(&flags, TestSetting{name: "filter", value: filter.copy(), source: JET_CLI_TEST_FLAG_LAYER})
         }
     }
     boundary_target :: if positionals.len() > 0 -> positionals[0] else -> "."
     if jet_cli_env_boundary_refusal(boundary_target, jet_argv, color) == .Val(refusal) -> return refusal
-    // `--profile <test profile>`, or a bare package run under `defaults: { test: … }`.
-    if jet_cli_test_profile_plan(jet_argv, positionals, show_default, options.update_snapshots, color, quiet) == .Val(plan) -> return plan
-    options.time_limit_ms = jet_cli_test_profile_time_limit()
+    // `--profile <test profile>`, or a bare package run under `defaults: { test: … }`;
+    // never the plan step of one (TestSettingLayers.jet jet_cli_test_code_layer).
+    if cli_sys.get(TEST_SETTINGS_PLAN_ENV) == None {
+        if jet_cli_test_profile_plan(jet_argv, positionals, show_default, flags, color, quiet) == .Val(plan) -> return plan
+    }
     if show_default && !quiet -> options.status = "jet test: using stock default\n"
     // A bare `jet test` or `jet test <dir>` tests the package: the directory's own
     // `fn test(t: Test)` file when it declares one, otherwise its stock entry. The
@@ -1419,7 +1420,7 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
         }
         if !show_default {
             if jet_cli_command_override(directory, "test", color) == {
-                .Entry(found) -> return jet_cli_test_file(jet_argv, found.path, color, verbose, threads, options, fresh, quiet)
+                .Entry(found) -> return jet_cli_test_file(jet_argv, found.path, color, verbose, threads, options, flags, directory, quiet)
                 .Refused(plan) -> return ^plan
                 .Absent -> {}
             }
@@ -1427,13 +1428,13 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
         if positionals.len() == 0 {
             notices := [String]{}
             if jet_cli_resolve_bare_entry("test", directory, None, !show_default, color, &notices) == {
-                .Entry(entry) -> return jet_cli_test_file(jet_argv, entry.path, color, verbose, threads, options, fresh, quiet)
+                .Entry(entry) -> return jet_cli_test_file(jet_argv, entry.path, color, verbose, threads, options, flags, "", quiet)
                 .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
                 .Absent -> return jet_cli_with_notices(notices, jet_cli_missing_bare_entry("test", directory, color))
             }
         }
         if jet_cli_resolve_directory_target("test", directory, None, !show_default, color) == {
-            .File(path, _, _) -> return jet_cli_test_file(jet_argv, path, color, verbose, threads, options, fresh, quiet)
+            .File(path, _, _) -> return jet_cli_test_file(jet_argv, path, color, verbose, threads, options, flags, "", quiet)
             .Refused(plan) -> return plan
         }
     }
@@ -1441,7 +1442,7 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
     // `resolve_source_path`: the typed spelling, else `<target>.jet`.
     file := target
     if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
-    jet_cli_test_file(jet_argv, file, color, verbose, threads, options, fresh, quiet)
+    jet_cli_test_file(jet_argv, file, color, verbose, threads, options, flags, "", quiet)
 }
 
 // Each member's `jet test` words for a workspace `jet test`: `test`, the
@@ -1461,25 +1462,42 @@ fn jet_cli_test_workspace_plan(jet_argv: [String], target_at: Int, names: [Strin
         loop argument in rest -> &args.push(argument)
         &member_args.push(args)
     }
-    JetCLIPlan.TestWorkspace{names: names, member_args: member_args, quiet: quiet}
+    JetCLIPlan.TestWorkspace{names: names, member_args: member_args, envs: [[String]]{}, executable: "", heading: "member", quiet: quiet}
 }
 
 // One test file (or a package entry file): the harness collects every #Test the file and
-// its package load, and a `fn test(t: Test)` there runs first with the suite.
-fn jet_cli_test_file(jet_argv: [String], file: String, color: Bool, verbose: Bool, threads: Int?, given: JetCLITestOptions, fresh: Bool, quiet: Bool) -[FS, Env]> JetCLIPlan Never! {
+// its package load, and a `fn test(t: Test)` there runs first with the suite. The run's
+// settings are `flags` over those it inherits from the run that started it, else over
+// the `fn test` layer of the package at `code_root` ("": none) (TestSettingLayers.jet).
+fn jet_cli_test_file(jet_argv: [String], file: String, color: Bool, verbose: Bool, threads: Int?, given: JetCLITestOptions, flags: [TestSetting], code_root: String, quiet: Bool) -[FS, Env, Exec]> JetCLIPlan Never! {
     options := given
     if !cli_files.exists(file) {
         return jet_cli_report_done(options.status, "E2105", "can't find `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    if fresh && !quiet -> options.status = "{options.status}jet test: fresh result run (test-result cache bypassed; build cache reusable)\n"
-    options.fresh = fresh
+    // A child of a run takes the settings that run decided (TEST_SETTINGS_ENV).
+    inherited :: cli_sys.get(TEST_SETTINGS_ENV) != None
+    settings := flags.copy() // copy: the caller keeps its flag layer.
+    if inherited {
+        decided :: jet_cli_test_inherited_settings() ?? return jet_cli_test_option_error(err.message, color)
+        settings = test_settings_layered(decided, flags)
+    } else if code_root != "" && cli_sys.get(TEST_SETTINGS_PLAN_ENV) == None {
+        code :: jet_cli_test_code_layer(code_root) ?? return jet_cli_test_code_refusal(err.message, color)
+        settings = test_settings_layered(code, flags)
+    }
+    if jet_cli_test_settings_refusal(settings, color) == .Val(refusal) -> return refusal
+    if jet_cli_test_settings_fan_out(jet_argv, settings, quiet) == .Val(plan) -> return plan
+    jet_cli_test_settings_apply(&options, settings)
+    if !inherited && !quiet -> options.status = "{options.status}{jet_cli_test_settings_notice(settings)}"
+    if options.fresh && !quiet -> options.status = "{options.status}jet test: fresh result run (test-result cache bypassed; build cache reusable)\n"
     source :: cli_files.read(file) ?? {
         return jet_cli_report_done(options.status, "E2105", "couldn't read `{file}`: {err}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    // `--measure` builds under the release profile unless a profile is named.
+    // `--measure` builds under the release profile unless a profile is named;
+    // a decided `optimize` level is the build's `--optimize`.
+    levels :: test_settings_levels(settings)
     argv := [String]{}
     if options.measure && jet_cli_profile_name(jet_argv) == "" -> &argv.push("--release")
-    loop argument in jet_argv -> &argv.push(argument)
+    loop argument in jet_cli_test_build_argv(jet_argv, if levels.len() == 1 -> levels[0] else -> "") -> &argv.push(argument)
     options.profile = jet_cli_profile_name(argv)
     if jet_cli_build_options(argv, "test", file, source, color, quiet) == {
         .Refused(refusal) -> return refusal

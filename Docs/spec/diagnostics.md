@@ -261,11 +261,11 @@ new diagnostic or change compiler semantics.
 From the checkout root, `jet test Compiler --profile ui` compares UI and lint
 snapshots; a positional filter (`jet test Compiler --profile ui <repo-relative-name>`)
 focuses the selection, and `JET_CI_EVIDENCE_DIR=<dir>` writes machine-readable
-verdicts to `<dir>/ui.json`. The kit CLI's coverage mode (`jet build Tools/testkit`,
-then `Tools/testkit/.jet/build/run ui --coverage --jet <compiler>`) checks
+verdicts to `<dir>/ui.json`. `jet test Compiler --profile ui --diagnostic-coverage`
+runs the suite's coverage entry instead of its rows: it checks
 independently derived emitted and rendered code sets against the owned
 exclusions in `tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152).
-Blessing that entry (`--bless tests/diagnostics_coverage_allowlist.tsv`)
+Blessing that entry (the same command with `-u`)
 rewrites the allowlist without its stale rows; it never adds one. The emission
 scan reads the `.jet` sources under `Compiler/`, `Jetpack/` and `Core/`.
 
@@ -288,8 +288,8 @@ jet test Compiler --profile ui tests/ui/example.jet -u
 ```
 
 Blessing creates or updates that fixture's snapshot from actual tool output.
-A lower diagnostic count is refused unless the reviewed kit CLI invocation
-names `--allow-shrink tests/ui/example.jet`. A sharded profile refuses `-u`.
+A lower diagnostic count is refused unless the reviewed invocation names the
+fixture in `--allow-shrink=tests/ui/example.jet`. A sharded profile refuses `-u`.
 Expected files are read-only in ordinary runs.
 
 

@@ -94,6 +94,25 @@ fn test_suite_state_ensure() -> I64 {
     if (state == I64{0}) -> I64{0} else -> trap_word(wrapping(state + I64{8}))
 }
 
+// `t.<setting>(…)` (Registry/TestSettings.jet): in `jet test`'s plan step the
+// environment variable `key` names the plan file, and `line`
+// (`name<TAB>value<NL>`) is appended to it; any other run ignores the call.
+// A plan the parent cannot read whole is a protocol failure (exit 103), as
+// for the harness's own records (TestContracts.jet).
+#Export(c) fn jet_test_setting(_suite: I64, key: I64, line: I64) {
+    path :: rt_env_get(key)
+    if (path == I64{0}) -> return
+    error :: jet_rt_alloc(I64{8}, I64{8})
+    trap_store(error, I64{0})
+    if (jet_files_append_bytes_os(path, rt_text_data(line), rt_text_len(line), error) == I64{0}) {
+        message :: jet_rt_handle_show_io_error(trap_word(error))
+        jet_rt_test_eprint(message)
+        jet_std_process_exit_owned(I64{103})
+    }
+    jet_rt_free(error, I64{8}, I64{8})
+    jet_rt_string_drop(path)
+}
+
 #Export(c) fn jet_rt_test_suite_state_drop(_closure: I64, state: I64) -> I64 {
     // Thread clears the cell before this callback; only its state is owned.
     // The runner's intentional process-lifetime pin is never released here.

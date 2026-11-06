@@ -59,7 +59,7 @@ bind <name> --update --accept <candidate-digest> Resolve and record a checked fo
   jet shared-store <command>           Manage the optional shared package broker
   jet split [args]                     Extract closed Package facts into Configs or members
   jet status [<file.jet|dir>]          Show what the project has proved
-  jet test [<file.jet|dir>] [<filter>] [--watch] [--fresh] [--docs] [--where=<expr>] [--capture=<failed|all|none>] [--browser=<chromium,firefox,webkit>] [--browser-retries=<n>] [--browser-reporter=<text|json|html>] [--browser-ui] [--browser-visual] [--browser-trace] [--browser-scaffold=<name>] [--grade=generated] [--iterations=<n>] [--time=<s>] [--seed=<n>] [--corpus=<dir>] Run tests
+  jet test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [--optimize=<levels>] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--fresh] [--docs] [-u] Run tests
   jet test-compare <corpus.json> [--relation=<name>] [--json] Compare one recorded observation corpus against its relation
   jet trust [args]                     Review or change trusted authority
   jet try <plan.json>                  Speculatively apply a plan and re-check its claims
@@ -199,7 +199,6 @@ Flags:
   --allow-unofficial           With self-update: Explicitly allow a local keyless channel
   --check                      With fmt: Check without changing files (CI gate)
   --lang                       With fmt: Delegate non-Jet files to the environment formatter for this language
-  --restore-role-files         With init: Restore the exact pre-package.jet role files
   --diff                       With fmt --check: Also print unified diffs for each changed file
   --simplify                   With fmt: Rewrite to the simplest canonical spelling
   --changed                    With fmt: Format only VCS-changed .jet files (requires git)
@@ -352,12 +351,39 @@ Flags:
   --env                        With env/run/dev/test: Select one declared env.<name> module
   --preset                     With env/run/dev/test: Select one declared environment preset
   --explain-partition          With build --target=web: Show which code becomes JavaScript or WebAssembly
-  --fresh                      With test: Bypass only cached test results (default off); the build cache remains reusable
-  --docs                       With test: Run checked documentation examples only (default off)
-  --where                      With test: Filter recorded package, dependency, path, tag, or status facts (default all) as --where=<expr>
-  --capture                    With test: Capture output as failed, all, or none (default failed); watch key o cycles it
+  --fresh                      With test: Bypass only cached test results (default off); the build cache remains reusable; --fresh, `fresh: true`, `t.fresh()`
+  --docs                       With test: Run checked documentation examples only (default off); --docs, `docs: true`, `t.docs()`
+  --filter                     With test: Only run tests and corpus rows whose name contains the text; --filter=<text>, `filter: "x"`, `t.filter("x")`
+  --capture                    With test: Show test output for failed, all, or none of the tests (default failed); --capture=all, `capture: all`, `t.capture("all")`
+  --update-snapshots           With test: Replace expected snapshot output and bless every selected corpus row; --update-snapshots, `update_snapshots: true`, `t.update_snapshots()`
+  --shuffle                    With test: Run tests in the order the seed picks; --shuffle=<n>, `shuffle: 7`, `t.shuffle(7)`
+  --serial                     With test: Run tests one at a time instead of the parallel default; --serial, `serial: true`, `t.serial()`
+  --measure                    With test: Measure `.measure` claims; --measure, `measure: true`, `t.measure()`
+  --trace-tiers                With test: Report the tier each test ran at; --trace-tiers, `trace_tiers: true`, `t.trace_tiers()`
+  --optimize                   With test: Run the tests at each listed optimize level: none, basic or full; --optimize=none,full, `optimize: [none, full]`, `t.optimize(["none", "full"])`
+  --time-limit                 With test: Bound each test's wall time, such as 60s; --time-limit=60s, `time_limit: 60s`, `t.time_limit("60s")`
+  --opt-in                     With test: Also run the corpus rows that are opt-in only; --opt-in, `opt_in: true`, `t.opt_in()`
+  --shard                      With test: Run slice I of N of the selected tests and corpus rows, as I/N; --shard=3/8, `shard: 3/8`, `t.shard(3, 8)`
+  --list                       With test: Print the selected tests after filter and shard, run nothing, exit 0; --list, `list: true`, `t.list()`
+  --cases                      With test: Only run the tests and corpus rows the file names, one name or id per line; --cases=<text>, `cases: "x"`, `t.cases("x")`
+  --jobs                       With test: Run at most this many corpus entries at once (default: from the cores); --jobs=<n>, `jobs: 4`, `t.jobs(4)`
+  --memory                     With test: Bound the memory the running corpus entries claim together, such as 16G; --memory=16G, `memory: 16gib`, `t.memory("16G")`
+  --allow-shrink               With test: Let `update_snapshots` bless fewer diagnostics for the listed ui rows, comma-separated; --allow-shrink=<text>, `allow_shrink: "x"`, `t.allow_shrink("x")`
+  --diagnostic-coverage        With test: Check the ui suite's emitted and rendered codes against tests/diagnostics_coverage_allowlist.tsv instead of its rows; --diagnostic-coverage, `diagnostic_coverage: true`, `t.diagnostic_coverage()`
+  --results                    With test: Write every selected test's verdict to the JSON file; --results=<text>, `results: "x"`, `t.results("x")`
+  --compiler                   With test: Build and run the tests with the named jet; --compiler=<text>, `compiler: "x"`, `t.compiler("x")`
+  --where                      With test: Filter recorded package, dependency, path, tag, or status facts (not ported to the Jet test runner yet); --where=<text>, `where: "x"`, `t.where("x")`
+  --grade                      With test: Select the generated property-test grade: generated (not ported to the Jet test runner yet); --grade=<text>, `grade: "x"`, `t.grade("x")`
+  --iterations                 With test: Generated-grade case budget (default 1000) (not ported to the Jet test runner yet); --iterations=<n>, `iterations: 4`, `t.iterations(4)`
+  --time                       With test: Generated-grade wall-clock budget in seconds (not ported to the Jet test runner yet); --time=<n>, `time: 4`, `t.time(4)`
+  --seed                       With test: Generated-grade base PRNG seed (default: fixed, reproducible) (not ported to the Jet test runner yet); --seed=<n>, `seed: 7`, `t.seed(7)`
+  --corpus                     With test: Generated-grade corpus directory (default: .jet/fuzz/<test>) (not ported to the Jet test runner yet); --corpus=<text>, `corpus: "x"`, `t.corpus("x")`
+  --browser-retries            With test: Retry each browser attempt up to five times (not ported to the Jet test runner yet); --browser-retries=<n>, `browser_retries: 4`, `t.browser_retries(4)`
+  --browser-reporter           With test: Browser report format: text, json, or html (not ported to the Jet test runner yet); --browser-reporter=<text>, `browser_reporter: "x"`, `t.browser_reporter("x")`
+  --browser-ui                 With test: Write/open the local browser report viewer (not ported to the Jet test runner yet); --browser-ui, `browser_ui: true`, `t.browser_ui()`
+  --browser-visual             With test: Capture screenshots for passing browser attempts (not ported to the Jet test runner yet); --browser-visual, `browser_visual: true`, `t.browser_visual()`
+  --browser-trace              With test: Keep redacted BiDi trace entries for every browser attempt (not ported to the Jet test runner yet); --browser-trace, `browser_trace: true`, `t.browser_trace()`
   --no-capture                 With dev: Disable automatic replay capture for this session
-  --update-snapshots           With test: Replace expected snapshot output
   --update                     With import: Merge generated Jet into an existing target
   --coverage                   With test/inspect build: Show function or diagnostic coverage
   --verify                     With build: Rebuild and compare one indexed receipt artifact
@@ -367,7 +393,7 @@ Flags:
   -u                           Short form of --update-snapshots
   --release                    With build/run/dev/jobs/test: Optimize for release
   --profile                    With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle
-  --optimize                   With build/run/dev/test: How hard to optimize: none, basic or full
+  --optimize                   With build/run/dev: How hard to optimize: none, basic or full
   --bounds                     With build/run/dev/test: What a failed bounds check does: fatal, report or off
   --debug-info                 With build/run/dev/test: Whether the image carries DWARF debug info: true, false or split
   --small                      With build/run/dev/test: Favor a smaller binary by keeping inlining to the O1 limits: true or false
@@ -391,25 +417,11 @@ Flags:
   --max                        With lint --complexity: Fail when a function exceeds this score
   --scope                      With inspect: Choose a ledger or trust scope
   --core                       With inspect structure: Show the canonical core module export facts
-  --filter                     With test: Only run claims whose name contains --filter=<substr>
-  --grade                      With test: Select the generated property-test grade as --grade=generated
-  --shuffle                    With test: Run tests in random (or --shuffle=<seed>) order
-  --serial                     With test: Run tests one at a time instead of the parallel default
   --show-default               With run/build/dev/test: Use and report the stock default
-  --measure                    With test: Measure `.measure` claims
   --browser                    With test/db: Select browser engines for tests or serve a loopback database inspector
-  --browser-retries            With test: Retry each browser attempt up to five times
-  --browser-reporter           With test: Browser report format: text, json, or html
-  --browser-ui                 With test: Write/open the local browser report viewer
-  --browser-visual             With test: Capture screenshots for passing browser attempts
-  --browser-trace              With test: Keep redacted BiDi trace entries for every browser attempt
   --browser-scaffold           With test: Create an isolated browser-test project as --browser-scaffold=<name>
   --record                     With run/dev/test/debug: Record a named replay as --record=<name>
   --replay                     With inspect/debug: Consume a named replay artifact
-  --iterations                 With test: Generated-grade case budget --iterations=<n> (default 1000)
-  --time                       With test: Generated-grade wall-clock budget in seconds --time=<n>
-  --seed                       With test: Generated-grade base PRNG seed --seed=<n> (default: fixed, reproducible)
-  --corpus                     With test: Generated-grade corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)
   --lens                       With prove: Project the human report by an exact evidence facet
   --facts                      With expand: Project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>
   --annotations                With budget: CI annotations auto, none, or github

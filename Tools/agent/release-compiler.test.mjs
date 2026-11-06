@@ -37,11 +37,11 @@ test('options collect every problem at once', () => {
 });
 
 test('the shards split the slot memory cap instead of each claiming the whole room', () => {
-    assert.deepEqual(shardPool(parseArgs(['abc']), 4, '16G'), ['--memory', '4G']);
-    assert.deepEqual(shardPool(parseArgs(['abc']), 4, undefined), ['--memory', '4G']);
-    assert.deepEqual(shardPool(parseArgs(['abc']), 1, '24G'), ['--memory', '24G']);
-    assert.deepEqual(shardPool(parseArgs(['abc']), 16, '8G'), ['--memory', '1G']);
-    assert.deepEqual(shardPool(parseArgs(['abc', '--jobs', '3']), 4, '64G'), ['--memory', '16G', '--jobs', '3']);
+    assert.deepEqual(shardPool(parseArgs(['abc']), 4, '16G'), ['--memory=4G']);
+    assert.deepEqual(shardPool(parseArgs(['abc']), 4, undefined), ['--memory=4G']);
+    assert.deepEqual(shardPool(parseArgs(['abc']), 1, '24G'), ['--memory=24G']);
+    assert.deepEqual(shardPool(parseArgs(['abc']), 16, '8G'), ['--memory=1G']);
+    assert.deepEqual(shardPool(parseArgs(['abc', '--jobs', '3']), 4, '64G'), ['--memory=16G', '--jobs=3']);
 });
 
 test('a lost row is one the release passes and the candidate fails on both runs', () => {
