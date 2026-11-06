@@ -182,10 +182,6 @@ fn core_call_parameter_contract(module_name: String, member: String) -> [CoreCal
         module_name == "core.files" && core_sig_one_of(member, [String]{"walk", "walk_parallel", "walk_files"}) -> Val([CoreCallParameterContract]{
             core_param_required("root"), core_param_optional("ignore", ParamZone.Either, absent),
         })
-        module_name == "core.game" && member == "run" -> Val([CoreCallParameterContract]{
-            core_param_required("scene"), core_param_optional("replay", ParamZone.Either, absent),
-            core_param_optional("backend", ParamZone.Either, absent), core_param_optional("frames", ParamZone.Either, absent),
-        })
         module_name == "core.http.server" && core_sig_one_of(member, [String]{"bind", "serve"}) -> Val([CoreCallParameterContract]{
             core_param_required("address"), core_param_required("mux"),
             core_param_optional("tls", ParamZone.LabelOnly, absent), core_param_optional("deadline", ParamZone.LabelOnly, absent),
