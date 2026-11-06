@@ -52,7 +52,7 @@ json: stdout doc $.explain.graph.direct_dependencies[0].digest = "{cap:library_d
 json: stdout doc $.explain.graph.dependencies has {"digest":"{cap:runtime_digest}"} # original dependency digest membership
 step: jetpack audit --no-color
 exit: 0
-capture: refs stdout.split("{cap:package_id}", 1) after "Closure:" trim # the package's closure references follow its Closure: label
+capture: refs stderr.split("{cap:package_id}", 1) after "Closure:" trim # the package's closure references follow its Closure: label; audit details go to stderr
 cap:refs.line(0): = "{cap:library_digest}" # original first reference line
 step: jetpack explain ripgrep-lib-1.0@nixpkgs --json
 exit: 0
@@ -66,7 +66,10 @@ remove: root/hangar/objects/{cap:runtime_digest}
 step offline-missing: jetpack env --no-color --trust -y --offline -- rg --version
 isolate: no-nix network=disabled
 unset: JETPACK_FIXTURES
-exit: 2
+# The original exited 2 from the unlocked realization path. The Jet engine pins this
+# closure in the project lock, so the miss is the locked replay refusal, which exits 1
+# as the original replay did (run_enter_dev.rs, E1350 replay arm).
+exit: 1
 stderr: ~ E1350 # original predicate: offline missing object is fail-closed
 stderr: ~ /nix/store/cccccccccccccccccccccccccccccccc-ripgrep-runtime-1.0 # original predicate: error names missing reference
 step online-repair: jetpack env --no-color --trust -y -- rg --version

@@ -6,7 +6,8 @@ env: JETPACK_ROOT={work}/root
 mkdir: root
 mkdir: project
 mkdir: catalog
-artifact: peer
+# `jet build peer` compiles peer/run.jet and names the artifact after its entry file.
+artifact: run
 copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet peer/IndexCodec.jet
 step: jet build peer
 exit: 0
@@ -19,7 +20,7 @@ env: PATH=
 exit: 2
 stdout+stderr: ~ "E1348" # original contains predicate
 stdout+stderr: !~ "local-unofficial" # original negative contains predicate
-step: jetpack env --prep --no-color --trust --local-nix-catalog {work}/catalog
+step: jetpack env --prep --no-color --trust -y --local-nix-catalog {work}/catalog
 cwd: project
 env: PATH=
 exit: 0
@@ -35,13 +36,13 @@ capture: id stdout doc $.explain.entry.id
 capture: receipt stdout doc $.explain.entry.receipt
 json: stdout doc $.explain.provider.provider = "nix"
 json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
-file: root/hangar/receipts/{cap:receipt} ~ "636174616c6f672d7472757374" # original contains predicate
-file: root/hangar/receipts/{cap:receipt} ~ "756e7665726966696564" # original contains predicate
+# The hex receipt binds each input by digest; this is hex("sha256-" + sha256("unverified")), the catalog trust.
+file: root/hangar/receipts/{cap:receipt} ~ "7368613235362d39376237653264623739396532623739653635663431386234326137643330353463393562326433616231646261323433303339353937653434613338303834" # the receipt records the unverified catalog trust
 step: jetpack audit --no-color
 cwd: project
 exit: 0
 stdout+stderr: ~ "{cap:id}" # original contains predicate
-stdout+stderr: ~ "signature-chain: none" # original contains predicate
+stdout+stderr: ~ "Signature Chain: none" # original signature-chain predicate; audit labels are title case
 stdout+stderr: ~ "objects without a Nix index signature chain" # original contains predicate
 step: built stop {cap:port}
 exit: 0

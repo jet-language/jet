@@ -199,7 +199,11 @@ cli_cmd_env_project: fn(verification: &StoreVerification, cache: &WorkspaceDecla
     }
     if code == 0 {
         cli_auto_clean_after_success(&verification, theme, roots)
-        cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) ?? theme.detail("couldn't refresh env entry: {err.message()}")
+        // A warm entry reused its exact receipt; its stats realized nothing,
+        // so a rewrite would record an empty selection set.
+        if !warm_reused {
+            cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) ?? theme.detail("couldn't refresh env entry: {err.message()}")
+        }
     }
     code
 }
