@@ -15,7 +15,7 @@ plan_fields: fn(plan: ProcessPlan) -> Int Never! {
     plan.argv.len() + plan.authority.len() + plan.limits.len() + plan.outputs.len() + plan.backend.len() + plan.executable_identity.len() + plan.input_digest.len() + plan.policy_digest.len() + plan.descendants.len()
 }
 
-main: fn() {
+run: fn() {
     receipt: process.cmd([String]{"/bin/sh", "-c", "printf 'fields'"}).run() ?? panic("plain process run failed")
     assert(receipt_fields(receipt) >= 6)
     assert(receipt.code == 0 && receipt.signal == None && receipt.argv.len() == 3)

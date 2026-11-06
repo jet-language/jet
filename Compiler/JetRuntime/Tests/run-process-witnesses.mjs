@@ -94,7 +94,7 @@ if(test){
 }
 const fieldDirectory=join(out,'fields');mkdirSync(fieldDirectory);
 const fieldSource=join(root,'Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/ProcessReceiptFields.jet'),fieldHandle=fileObject(fieldSource);
-writeFileSync(join(fieldDirectory,'package.jet'),'name: "process_fields_witness"\nversion: "0.0.1"\nedition: "2028"\n',{flag:'wx'});
+writeFileSync(join(fieldDirectory,'package.jet'),'name: "process_fields_witness"\nversion: "0.0.1"\nedition: "2026"\nauthority: { allow: [Exec, IO, Mem.Alloc] }\n',{flag:'wx'});
 const fieldCopy=join(fieldDirectory,'run.jet');
 writeFileSync(fieldCopy,readFileSync(fieldSource),{flag:'wx'});
 const fieldCopyHandle=fileObject(fieldCopy);
