@@ -76,6 +76,14 @@ test('a lost row is one the release passes and the candidate fails on both runs'
     assert.deepEqual(retried.flaky.map(r => r.case), ['b.jet']);
 });
 
+test('an untracked row is a failure no known-failing line or refusal accounts for', () => {
+    const release = [row('a.jet', 'o0', 'FAIL'), row('b.jet', 'o0', 'KNOWN-FAILING')];
+    const candidate = [row('a.jet', 'o0', 'FAIL'), row('b.jet', 'o0', 'KNOWN-FAILING'), row('c.jet', 'o0', 'ERROR'), row('d.jet', 'o0', 'REFUSED'), row('e.jet', 'o0', 'TIMEOUT')];
+    const result = compareSuites(release, candidate);
+    assert.deepEqual(result.untracked.map(r => r.case), ['a.jet', 'c.jet', 'e.jet']);
+    assert.equal(result.releaseUntracked, 1);
+});
+
 test('a disposition names a card and matches a tier or every tier', () => {
     const parsed = parseDispositions('# comment\nui\tb.jet\t*\t#6001\tthe fixture tests a removed form\ncases\tx\to0\t6002\tno hash\n');
     assert.equal(parsed.rows.length, 1);
