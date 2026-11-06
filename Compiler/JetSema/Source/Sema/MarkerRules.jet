@@ -1570,8 +1570,14 @@ fn sema_marker_rules_unknown_error(registry: SemaScopeMembersMarkerRegistry, mar
     if nearest != "" && !ambiguous -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
 }
 
-fn sema_marker_rules_repeated_error(marker: Marker, first: Marker) -> Diagnostic {
-    diagnostic := sema_error("E0999", marker.span, "`#{marker.name}` is already applied to this target", "`#{marker.name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
+// D-MARK-REPEAT1=A: the one repeated-rule diagnostic, named for the target it
+// repeats on (Rust `marker_repeated_error`'s noun).
+fn sema_marker_rules_repeated_error(marker: Marker, first: Marker, site: RuleSite?) -> Diagnostic {
+    noun := "target"
+    if site == .Val(value) {
+        noun = if value == RuleSite.Function || value == RuleSite.Method -> "function" else -> sema_marker_rules_site_name(value).lower()
+    }
+    diagnostic := sema_error("E0999", marker.span, "`#{marker.name}` is already applied to this {noun}", "`#{marker.name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first", "remove the repeated marker")
     diagnostic.detail = Val("second application span: the copy this report points at\nfirst application span: the earlier copy on the same target")
     diagnostic_with_label(^diagnostic, first.span, "first application span")
 }
@@ -1838,7 +1844,7 @@ fn sema_marker_rules_validate_repeatability(registry: SemaScopeMembersMarkerRegi
         if application.target == None -> next
         key :: "{sema_marker_rules_declaration_key(application.marker)}|{sema_marker_rules_span_key(application.target)}"
         if seen.get(key) == .Val(first) {
-            &diagnostics.push(sema_marker_rules_repeated_error(application.marker, first))
+            &diagnostics.push(sema_marker_rules_repeated_error(application.marker, first, application.site))
             next
         }
         seen[key] = application.marker

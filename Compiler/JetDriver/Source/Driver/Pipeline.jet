@@ -78,6 +78,7 @@ use {
         sema_name_build_facts_threads,
         sema_name_facts_empty,
         sema_name_structure_facts,
+        sema_registration_blocking_error,
         sema_registration_lookup_counts,
         sema_registration_module_index,
         sema_registration_original_error_module,
@@ -3597,10 +3598,12 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         )
     }
     // A registration error can leave a name unregistered, so it stops the
-    // check here, as does a module the declaration pass left incomplete. Any
-    // other declaration error goes on with the stage's diagnostics, and the
-    // bodies are checked too (sema_check_registration_module_start).
-    registration_errors :: jet_driver_has_errors(registration_graph.diagnostics)
+    // check here, as does a module the declaration pass left incomplete. A
+    // casing error resolves no name differently and never stops it
+    // (sema_registration_blocking_error). Any other declaration error goes on
+    // with the stage's diagnostics, and the bodies are checked too
+    // (sema_check_registration_module_start).
+    registration_errors :: sema_registration_blocking_error(registration_graph.diagnostics)
     if request.trace_sink == .Val(sink) -> sink.begin("sema.check", "", -1, -1)
     comptime_stage := sema_collect_comptime_declarations(^registration_graph, package_policies, request.compiler_threads, request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("sema.check", comptime_stage.modules.len())

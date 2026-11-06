@@ -230,6 +230,11 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     assert_eq(web.argv, ["build", "tests/ui/web.jet", "--target=web"])
     assert(!web.parent && !web.unlocked_toolchain)
     assert_eq(web.streams, "rendered-both")
+    // A lint fixture's `@a11y_cli` keeps the rendered, nonzero-exit stream.
+    a11y :: kit_ui_invocation("// @a11y_cli\n", "tests/ui_lint/a11y.jet", true)
+    assert_eq(a11y.argv, ["lint", "--a11y", "tests/ui_lint/a11y.jet"])
+    assert_eq(a11y.exit, "nonzero")
+    assert_eq(a11y.streams, "rendered")
     files.remove_all(root) ?? panic("remove public CLI scratch: {err}")
 }
 

@@ -1664,13 +1664,6 @@ fn sema_stmt_for_in_source(expression: Expr, collection: TExpr, method_kind: TFo
     collection.copy()
 }
 
-fn sema_stmt_for_in_layout_type_name(ty: Type) -> String? {
-    if ty == {
-        .Named(name) | .Apply(name, _) -> return Val(name)
-        else -> return None
-    }
-}
-
 fn sema_stmt_for_in_expr_root_ident(expression: Expr) -> String? {
     if expression == {
         .Ident(name, _, _) -> return Val(name)
@@ -2561,10 +2554,14 @@ fn sema_stmt_for_in_item_type(collection_type: Type, method_kind: TForInMethod?,
     None
 }
 
-fn sema_stmt_for_in_columnar(environment: SemaScopeEnvironment, program: SemaProgramTables, item_type: Type) -> Bool Never! {
-    item_name :: sema_stmt_for_in_layout_type_name(item_type) ?? return false
-    loop row in sema_scope_checked_type_name_rows(environment, program, item_name) {
-        if program.checked_types[row].layout == (Val(TStructLayout.Columnar)) -> return true
+// A body pass's tables carry no checked types, so the layout comes from the
+// struct's declaration in the registration graph.
+fn sema_stmt_for_in_columnar(environment: SemaScopeEnvironment, program: SemaProgramTables, item_type: Type) -> Bool {
+    if program.registration_graph == .Val(graph) {
+        nominal_row :: sema_type_resolve_nominal_row(graph, item_type, environment.module_identity) ?? return false
+        nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+        if nominal.kind != SemaRegistrationNominalKind.Struct -> return false
+        if sema_registration_nominal_source_item(nominal.source) == .Val(.Struct(definition)) -> return definition.layout == (Val(StructLayout.Columnar))
     }
     false
 }
@@ -7046,7 +7043,11 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
             if sema_stmt_whole_list_window(ok_value, environment, program, &scopes, &state) == .Val(window) -> return sema_stmt_check_returned_value(window, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
     }
-    checked :: sema_stmt_check_return_value(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    diagnostics_before :: diagnostics.len()
+    checked :: sema_stmt_check_return_value(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+        sema_stmt_report_ownerless_view_return(value, return_type, diagnostics_before, scopes, &state, context, &diagnostics)
+        return None
+    }
     if sema_stmt_returns_module_call(value, environment, scopes) -> sema_stmt_lint_blocked_tail_call(expr_span(value), environment, program, scopes, state, &diagnostics)
     if !sema_stmt_return_is_view_boundary(return_type) && !context.return_view_declared && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
     if return_type != None && sema_contains_expiring_secret_loan(checked.ty) {
@@ -7094,6 +7095,15 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     moved := materialized_string_view || string_view_return || (!view_valid) || sema_stmt_move_direct(value, &state, scopes, "`return`", &diagnostics)
     if !view_valid || !moved -> return None
     Val(checked)
+}
+
+// Rust `check_return` audits a declared `View`/`ViewMut` return before the
+// value's type: a value that reads no place and calls no view-returning
+// function names no owner (E2305), reported ahead of its type error.
+fn sema_stmt_report_ownerless_view_return(value: Expr, return_type: Type?, at: Int, scopes: SemaScopeTable, state: &SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+    if at >= diagnostics.len() || !sema_stmt_return_success_is_view(return_type) -> return
+    if sema_stmt_call_return_views_for_expr(value, context).len() > 0 || sema_ownership_places_from_expr_in_state(value, scopes, &state).len() > 0 -> return
+    &diagnostics.insert(at, sema_ownership_diag_view_return_boundary(expr_span(value)))
 }
 
 // `return value` in a callback expected with no return row (the Rust
