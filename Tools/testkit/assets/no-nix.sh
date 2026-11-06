@@ -147,6 +147,29 @@ bind_subjects() {
     done
 }
 bind_subjects "$@"
+# A host without Nix keeps its system trust store under /etc/ssl/certs. On a
+# Nix host those entries link into /nix/store, which the subject must not see,
+# so the subject gets a directory of real copies of the files they name.
+trust_store=/etc/ssl/certs
+trust_stage=$bootstrap/ssl-certs
+trust_from_nix=
+set +f
+if [ -d "$trust_store" ]; then
+    for entry in "$trust_store"/*; do
+        case $("$readlink" -f "$entry" 2>/dev/null || :) in /nix/store/*) trust_from_nix=x;; esac
+    done
+fi
+if [ -n "$trust_from_nix" ]; then
+    "$mkdir" -p "$trust_stage"
+    for entry in "$trust_store"/*; do
+        resolved=$("$readlink" -f "$entry" 2>/dev/null || :)
+        if [ -f "$resolved" ]; then
+            while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "$line"; done < "$resolved" > "$trust_stage/${entry##*/}"
+        fi
+    done
+    "$mount_real" --bind "$trust_stage" "$trust_store"
+fi
+set -f
 true_real=$("$readlink" -f "$true_binary")
 "$ln" -sf "$(stage_path "$true_real")" "$runtime_stage/usr/bin/true"
 if [ -n "$bootstrap_unshare" ]; then "$ln" -sf "$bootstrap_unshare" "$runtime_stage/usr/bin/unshare"; fi
