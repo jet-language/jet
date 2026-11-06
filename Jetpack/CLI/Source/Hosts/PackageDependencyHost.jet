@@ -1,5 +1,6 @@
 // The hidden package-dependency host `jet` execs for `jet add`, `jet remove`,
-// `jet fetch`, `jet update [<dep>]` and the lock check of `jet build --locked`
+// `jet fetch`, `jet update [<dep>]`, `jet registry vendor [--vendor-dir <dir>]`
+// and the lock check of `jet build --locked`
 // (Compiler/JetCli EngineCommands.jet). The compiler front selects the
 // project root and its Package carrier; this host edits the carrier through
 // the checked source editor and Foundation publisher, then runs the package
@@ -12,7 +13,7 @@
 // the command words as the user typed them, command first. `fetch --lock
 // <script>` locks a loose script and gets no entry.
 PACKAGE_DEPENDENCY_HOST_SUBCOMMAND :: "__package-v1"
-PACKAGE_DEPENDENCY_COMMANDS :: [String]{"add", "remove", "fetch", "update"}
+PACKAGE_DEPENDENCY_COMMANDS :: [String]{"add", "remove", "fetch", "update", "vendor"}
 // jet's output flags, already applied by the front.
 PACKAGE_DEPENDENCY_OUTPUT_FLAGS :: [String]{"--json", "--quiet", "-q", "--verbose", "-v", "--color"}
 PACKAGE_DEPENDENCY_VALUE_FLAGS :: [String]{"--path", "--git", "--tag", "--branch", "--rev"}
@@ -36,7 +37,7 @@ struct PackageDependencyInput {
 
 fn cli_run_package_dependency_host(args: [String]) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Int Never! {
     if args.len() < 5 || !PACKAGE_DEPENDENCY_COMMANDS.contains(args[4]) {
-        eprint("package-dependency host requires `<root> <entry> <color> <json> <add|remove|fetch|update> ...`")
+        eprint("package-dependency host requires `<root> <entry> <color> <json> <add|remove|fetch|update|vendor> ...`")
         return EXIT_USAGE
     }
     output :: cli_package_dependency(args[0], args[1], cli_tail(args, 4), args[2] == "1", args[3] == "1")
@@ -82,17 +83,28 @@ fn cli_package_dependency_words(raw: [String], color: Bool, json: Bool) -[FS, En
             next
         }
         if command == "fetch" && (word == "--locked" || word == "--offline") -> next
+        if command == "vendor" && word == "--vendor-dir" {
+            if index >= raw.len() -> return Err(cli_package_dependency_cli_error("E2104", "`--vendor-dir` needs a directory", Val("write `jet registry vendor --vendor-dir <dir>`"), color, json))
+            index += 1
+            next
+        }
         if command == "fetch" && word == "--lock" {
             if index >= raw.len() -> return Err(cli_package_dependency_cli_error("E2104", "`--lock` needs a script", Val("write `jet fetch --lock <script.jet>`"), color, json))
             index += 1
             next
         }
-        return Err(cli_package_dependency_cli_error("E2102", "`{word}` isn't a `jet {command}` flag", Val("run `jet {command} --help` to see its flags"), color, json))
+        return Err(cli_package_dependency_cli_error("E2102", "`{word}` isn't a `jet {cli_package_dependency_spelling(command)}` flag", Val("run `jet {cli_package_dependency_spelling(command)} --help` to see its flags"), color, json))
     }
-    limit :: if command == "fetch" -> 1 else -> 2
+    limit :: if command == "fetch" || command == "vendor" -> 1 else -> 2
     takes :: if limit == 1 -> "no arguments" else -> "one dependency name"
-    if words.len() > limit -> return Err(cli_package_dependency_cli_error("E2104", "`jet {command}` takes {takes}, not `{words[limit]}`", None, color, json))
+    if words.len() > limit -> return Err(cli_package_dependency_cli_error("E2104", "`jet {cli_package_dependency_spelling(command)}` takes {takes}, not `{words[limit]}`", None, color, json))
     Ok(words)
+}
+
+// The command as the user spells it: vendoring lives under `jet registry`.
+fn cli_package_dependency_spelling(command: String) -> String Never! {
+    if command == "vendor" -> return "registry vendor"
+    command.copy()
 }
 
 // A value flag takes only the separate-token spelling.
@@ -330,6 +342,65 @@ fn cli_package_dependency(root: String, entry: String, raw: [String], color: Boo
         failed :: cli_package_dependency_source_error(input.path, input.raw, err.diagnostic).output
         return PackageDependencyOutput{stdout: prefix, stderr: failed.stderr, exit_code: failed.exit_code}
     }
+    if command == "vendor" -> return cli_package_dependency_vendor(root, raw, fetched, quiet, color, json)
     if quiet -> return PackageDependencyOutput{}
     PackageDependencyOutput{stdout: "{prefix}{cli_package_dependency_success(fetched.lock, options)}"}
+}
+
+// `jet registry vendor`: after the fetch, copy every resolved dependency tree
+// to `<dir>/<name>/` and record each one's locked name, version and
+// fingerprint in `<dir>/manifest.json`, so a committed vendor tree can be
+// checked against the lock offline. `<dir>` is `vendor` unless
+// `--vendor-dir` names it; a relative one is under the project root.
+fn cli_package_dependency_vendor(root: String, raw: [String], fetched: PackageFetchResult, quiet: Bool, color: Bool, json: Bool) -[FS, Env, Time]> PackageDependencyOutput Never! {
+    chosen :: cli_package_dependency_flag(raw, "--vendor-dir") ?? "vendor"
+    target :: if chosen.starts_with("/") -> chosen else -> files.join(root, chosen)
+    files.create_dir_all(target) ?? return cli_package_dependency_cli_error("E2105", "couldn't create the vendor directory {target}: {err}", None, color, json).output
+    names := fetched.directories.keys().to_list()
+    &names.sort()
+    entries := [String]{}
+    loop name in names {
+        source :: fetched.directories.get(name) ?? next
+        cli_package_dependency_vendor_copy(target, name, source) ?? return cli_package_dependency_cli_error("E2105", "couldn't copy `{name}` into {target}: {err}", Val("vendored dependency trees hold only regular files and directories; fix `{name}`'s source, then run `jet registry vendor` again"), color, json).output
+        loop package in fetched.lock.packages {
+            if package.name == name -> &entries.push("    {{ \"name\": {pkg_json_quote(package.name)}, \"version\": {pkg_json_quote(package.version)}, \"fingerprint\": {pkg_json_quote(package.fingerprint)} }}")
+        }
+    }
+    manifest :: "{{\n  \"vendor_format\": 1,\n  \"packages\": [\n{entries.join(",\n")}\n  ]\n}}\n"
+    foundation_write_file_nofollow_at_root(target, "manifest.json", manifest.bytes(), None) ?? return cli_package_dependency_cli_error("E2105", cli_package_dependency_publication_error(files.join(target, "manifest.json"), err), None, color, json).output
+    if quiet -> return PackageDependencyOutput{}
+    if names.len() == 0 -> return PackageDependencyOutput{stdout: "vendor: no dependencies to copy\n"}
+    shown :: if target.starts_with("{root}/") -> target.removeprefix("{root}/") else -> target
+    out := ""
+    loop name in names -> out = "{out}vendored: {name}\n"
+    noun :: if names.len() == 1 -> "dependency" else -> "dependencies"
+    PackageDependencyOutput{stdout: "{out}ok: {names.len()} {noun} copied to {shown}/\ntip: commit {shown}/ and use `jet fetch --locked` for reproducible offline builds.\n"}
+}
+
+// Stage the copy beside its final name and rename it into place once its
+// tree hash matches the source; an identical existing copy is kept and a
+// stale one replaced. A symlink or special file in the source refuses the
+// copy and leaves nothing behind.
+fn cli_package_dependency_vendor_copy(target: String, name: String, source: String) IOError! -[FS, Env, Time]> {
+    vendor :: foundation_open_directory_authority(target)
+    origin :: foundation_open_directory_authority(source)
+    expected :: origin.tree_hash()
+    if vendor.child(name) == .Ok(existing) {
+        if (existing.tree_hash() ?? "") == expected -> return
+        vendor.remove_tree(name)
+    }
+    stage :: vendor.private_child("vendor")
+    stage_name :: files.basename(stage.path())
+    if stage.copy_tree_from(origin, reject_hardlinks: false) == .Err(error) {
+        vendor.remove_tree(stage_name).drop("the copy error is the primary failure")
+        return Err(error)
+    }
+    if (stage.tree_hash() ?? "") != expected {
+        vendor.remove_tree(stage_name).drop("the hash mismatch is the primary failure")
+        return Err(IOError.Other(IOContext{operation: .Write, resource: Val(files.join(target, name)), os_code: None, cause: Val("the staged vendor copy does not match the source tree")}))
+    }
+    if vendor.rename(stage_name, name) == .Err(error) {
+        vendor.remove_tree(stage_name).drop("the rename error is the primary failure")
+        return Err(error)
+    }
 }
