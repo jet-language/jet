@@ -518,12 +518,19 @@ kit_exec_optional: fn(path: String) -> String? {
 // Copy a fixture or source tree. `fixture_state` stages `state/` and
 // `fixture-state/` as `.jet`. `authored_jet` copies `.jet` itself: a case
 // fixture's `.jet` is authored test data (locks, binding caches), while golden
-// and UI source trees may hold local compiler caches, so they skip it.
+// and UI source trees may hold local compiler caches, so they copy only its
+// `bindings/`, the checked-in generated binding caches the compiler reads
+// there.
 kit_exec_copy_tree: fn(source: String, destination: String, fixture_state: Bool, authored_jet: Bool) {
     files.create_dir_all(destination) ?? panic("mkdir {destination}: {err}")
     entries: files.list_dir(source) ?? panic("list {source}: {err}")
     loop entry in entries {
-        if entry.name == ".git" || (entry.name == ".jet" && !authored_jet) -> next
+        if entry.name == ".git" -> next
+        if entry.name == ".jet" && !authored_jet {
+            bindings: files.join(entry.path, "bindings")
+            if entry.is_dir && files.is_dir(bindings) -> kit_exec_copy_tree(bindings, files.join(files.join(destination, ".jet"), "bindings"), false, true)
+            next
+        }
         name: if fixture_state && (entry.name == "state" || entry.name == "fixture-state") -> ".jet" else -> entry.name
         target: files.join(destination, name)
         if entry.is_dir -> kit_exec_copy_tree(entry.path, target, fixture_state, authored_jet)

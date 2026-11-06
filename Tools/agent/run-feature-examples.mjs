@@ -423,10 +423,16 @@ function copyFixtureState(source, destination) {
   }
 }
 
+// A project's `.jet` may hold local compiler state; only its `bindings/`, the
+// checked-in generated binding caches, travel with the sources.
 export function copyFeatureProject(source, destination) {
   mkdirSync(destination, { recursive: true });
   for (const item of readdirSync(source, { withFileTypes: true })) {
-    if (item.isDirectory() && item.name === ".jet") continue;
+    if (item.isDirectory() && item.name === ".jet") {
+      const bindings = join(source, ".jet", "bindings");
+      if (existsSync(bindings)) copyFixtureState(bindings, join(destination, ".jet", "bindings"));
+      continue;
+    }
     const from = join(source, item.name);
     if (item.isDirectory() && item.name === "fixture-state") {
       copyFixtureState(from, join(destination, ".jet"));
