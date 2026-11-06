@@ -1,0 +1,77 @@
+package {
+    name: "parquet_limits"
+    authority: { allow: [FS.Read, IO] }
+}
+
+// #4717: the Parquet reader behind `data.loader` reports every failure as a
+// typed `DataErrorKind`, so a program branches on the kind and never on the
+// message text: too many rows or too many bytes is `Limit`, a page kind the
+// reader does not implement is `Unsupported`, and a corrupt page is `Decode`.
+// An INT96 column (Spark's timestamp) reads as a UTC instant at microsecond
+// resolution. Both files are copies of apache/parquet-testing fixtures; their
+// provenance is tests/fixtures/parquet_reader/provenance.json.
+use {
+    data :: core.data
+    data_loader :: core.data.loader
+}
+
+INT32_PAGES :: comptime { embed_bytes("int32_with_null_pages.parquet") }
+INT96_SPARK :: comptime { embed_bytes("int96_from_spark.parquet") }
+
+fn kind_name(kind: data.DataErrorKind) -> String { "{kind:Debug}" }
+
+// Bind `bytes` as the payload of a pinned URL loader and read its rows.
+fn read(bytes: [U8], limits: data.DataLimits) -> [Dyn] data.DataError! {
+    loader := data.url<[Dyn]>("https://example.invalid/fixture.parquet", "parquet", "network", limits) ?? return Err(err)
+    data_loader.bind(&loader, bytes) ?? return Err(err)
+    snapshot :: data.snapshot<[Dyn]>(&loader) ?? return Err(err)
+    Ok(snapshot.value)
+}
+
+fn report(label: String, result: [Dyn] data.DataError!) {
+    if result == {
+        .Ok(rows) -> print("{label}: {rows.len()} rows")
+        .Err(err) -> print("{label}: {kind_name(err.kind)} from {err.operation}")
+    }
+}
+
+// The fixture with its first page header's page-type byte replaced. A page
+// header opens with Thrift field 1 (0x15) and the zigzag page type: 0 data
+// page, 4 dictionary page, 6 DATA_PAGE_V2, 14 an undefined type 7.
+fn with_page_type(bytes: [U8], zigzag: U8) -> [U8] {
+    out := bytes.copy()
+    out[5] = zigzag
+    out
+}
+
+fn run() {
+    safe :: data.DataLimits.safe()
+
+    stamps :: read(INT96_SPARK, safe) ?? panic("int96")
+    print("int96 rows: {stamps.len()}")
+    loop row in stamps -> print("  {row}")
+
+    report("int32 pages", read(INT32_PAGES, safe))
+
+    few_rows := data.DataLimits.safe()
+    few_rows.max_output_rows = 10
+    report("max_output_rows 10", read(INT32_PAGES, few_rows))
+
+    few_bytes := data.DataLimits.safe()
+    few_bytes.encoding.max_item_bytes = 1024
+    report("max_item_bytes 1024", read(INT32_PAGES, few_bytes))
+
+    report("DATA_PAGE_V2 page", read(with_page_type(INT96_SPARK, U8{6}), safe))
+    report("undefined page type", read(with_page_type(INT96_SPARK, U8{14}), safe))
+    report("truncated file", read(INT96_SPARK[0..<(INT96_SPARK.len() - 9)], safe))
+
+    // The branch a program writes: on the kind, never on the reason text.
+    if read(with_page_type(INT96_SPARK, U8{6}), safe) == {
+        .Ok(_) -> print("handled: read")
+        .Err(err) -> if err.kind == {
+            .Unsupported -> print("handled: unsupported input, ask for a plain v1 file")
+            .Limit -> print("handled: over the limits")
+            else -> print("handled: unreadable file")
+        }
+    }
+}
