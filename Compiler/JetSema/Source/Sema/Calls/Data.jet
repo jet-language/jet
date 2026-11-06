@@ -1413,6 +1413,8 @@ fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg
     target :: sema_data_core_target_type(type_args, member, span, environment, program, &diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
     if !sema_serde_type_is_admissible(environment, program, target, SemaSerdeDirection.Decode) {
         &diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`{module_name}.{member}<T>` can only decode into a type with the registered Decode contract", "derive `Decode` on this type, or write its Decode implementation"))
+        sema_data_check_discarded_arguments(updated_args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return Val(SemaDirectSpecialCheck{handled: true, value: None})
     }
     contract :: sema_data_core_decode_contract(module_name, member, target) ?? return None
     call_member := contract.call_member
