@@ -37,7 +37,7 @@ dc_has: fn(values: [String], value: String) -> Bool {
 }
 
 dc_add: fn(values: &[String], value: String) {
-    if !dc_has(values, value) -> values.push(value.copy())
+    if !dc_has(values, value) -> values.push(value)
 }
 
 dc_slice: fn(text: String, start: Int, end: Int) -> String {
@@ -156,7 +156,7 @@ dc_registered_rows: fn() -> [DcRow] {
         } else if line.starts_with("        code: \"") && line.ends_with("\"") {
             code = dc_slice(line, 15, line.count_bytes() - 1)
         } else if line.starts_with("        status: .") {
-            status = dc_slice(line, 19, line.count_bytes()).lower()
+            status = dc_slice(line, 17, line.count_bytes()).lower()
         } else if line == "    }}" && status != "" {
             assert(code != "", "diagnostic impl without a code before line `{line}`")
             rows.push(DcRow{name: name.copy(), code: code.copy(), status: status.copy()})
@@ -216,7 +216,6 @@ dc_report_codes: fn(text: String) -> [String] {
 
 // tests/diagnostics_coverage.rs:1698 (I4a): every code the compiler sources
 // emit has a typed registry row.
-// Known failing: #6187 (E2231-E2239 emitted by JetDebug without registry rows).
 #Test("every_emitted_code_has_typed_row") {
     registered: dc_registered_codes()
     missing := [String]{}
