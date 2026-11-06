@@ -1,4 +1,5 @@
-// SETUP-PORT of tests/polyglot_systems.rs:381-386/515-528/532-549. No assertions; real tool discovery.
+// SETUP-PORT of tests/polyglot_systems.rs:381-386/515-528/532-549: real tool discovery. A missing tool, or a
+// JAVA_HOME without its embedded runtime (542-547, a path outside the case's work directory), is an error.
 use {
     process: core.process
     files: core.files
@@ -20,6 +21,7 @@ run: fn() MissingTool! {
     }
     home: sys.get("JAVA_HOME") ?? files.dirname(files.dirname(javac))
     runtime: files.join(files.join(home, "lib/server"), if sys.name() == "macos" -> "libjvm.dylib" else -> "libjvm.so")
+    if !files.is_file(runtime) -> return Err(MissingTool{name: runtime})
     strip_flag: if sys.name() == "macos" -> "-S" else -> "--strip-debug"
     fields.push("\"java_home\":{quoted(home)}")
     fields.push("\"libjvm\":{quoted(runtime)}")
