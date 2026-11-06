@@ -1,207 +1,254 @@
 // Typed bridge from a real jet_debug stop to the paused devtools kernel.
 use {
-    jet_foundation.Devtools.[JetDevtoolsSourceIdentityFact]
-    jet_debug.[DebugEvaluation, DebugSnapshot, DebugValue, evaluate_snapshot]
-    jet_devserver.PausedEvaluate.[AggregateKind, AuthorityGrant, AuthorityRequirement, AuthoritySet, EvaluateRequest, EvaluationMode, EvaluationUsage, EvaluatorResult, LexicalScope, PausedEvaluateHost, PausedSession, SessionIdentity, SessionState, SourceLocation, TypedValue, ValueProjection, DEFAULT_EVALUATION_BUDGET, EVALUATE_AUTHORITY, INSPECT_AUTHORITY, MAX_VALUE_BYTES]
-    jet_foundation.SHA256.[sha256_hex]
+    jet_debug.[DebugAggregateKind, DebugEvaluation, DebugSnapshot, DebugValue, evaluate_snapshot]
+    jet_foundation.[sha256_hex]
 }
 
-UNKNOWN_TYPE :: String{"Unknown"}
-MAX_SOURCE_COMPONENT_BYTES :: USize{256}
-struct PausedDebugSessionAdapter {
-    identity: SessionIdentity; source: JetDevtoolsSourceIdentityFact; scope_id: String
-    snapshot: DebugSnapshot; authority: AuthoritySet; state: SessionState
+PAUSED_DEBUG_UNKNOWN_TYPE :: "Unknown"
+PAUSED_DEBUG_MAX_COMPONENT_BYTES :: 256
+
+// The source facts a paused stop is bound to: the source and revision the
+// session debugs, plus the native image and world identities when known.
+struct PausedDebugSource {
+    source_id: String
+    revision: String
+    build_id: String?
+    world_id: String?
 }
+
+struct PausedDebugSessionAdapter {
+    identity: SessionIdentity
+    source: PausedDebugSource
+    scope_id: String
+    snapshot: DebugSnapshot
+    authority: AuthoritySet
+    state: SessionState
+}
+
+fn paused_debug_session_adapter(identity: SessionIdentity, source: PausedDebugSource, scope_id: String, snapshot: DebugSnapshot, authority: AuthoritySet) -> PausedDebugSessionAdapter PausedEvaluateError! {
+    adapter :: PausedDebugSessionAdapter{identity: identity, source: source, scope_id: scope_id, snapshot: snapshot, authority: authority, state: .Paused}
+    adapter.validate()
+    Ok(adapter)
+}
+
+// Read-only inspection and evaluation in the stop's one lexical scope.
+fn paused_debugger_authority(scope_id: String) -> AuthoritySet PausedEvaluateError! {
+    inspect :: AuthorityGrant.new(INSPECT_AUTHORITY, scope_id)
+    evaluate :: AuthorityGrant.new(EVALUATE_AUTHORITY, scope_id)
+    Ok(AuthoritySet.new([AuthorityGrant]{inspect, evaluate}))
+}
+
 impl PausedDebugSessionAdapter {
-    fn new(identity: SessionIdentity, source: JetDevtoolsSourceIdentityFact, scope_id: String, snapshot: DebugSnapshot, authority: AuthoritySet) -> PausedDebugSessionAdapter Err! {
-        adapter := PausedDebugSessionAdapter { identity: identity, source: source, scope_id: scope_id, snapshot: snapshot, authority: authority, state: .Paused }
-        adapter.validate()
-        adapter
-    }
-    fn debugger_authority(scope_id: String) -> AuthoritySet Err! {
-        AuthoritySet.new([AuthorityGrant.new(INSPECT_AUTHORITY, scope_id), AuthorityGrant.new(EVALUATE_AUTHORITY, scope_id)?])
-    }
-    fn identity(&self) -> SessionIdentity { &self.identity }
-    fn is_paused(&self) -> Bool { self.state == .Paused }
-    fn refresh_snapshot(&self, identity: SessionIdentity, snapshot: DebugSnapshot) Err! {
-        if identity.session_id != self.identity.session_id || identity.source_id != self.identity.source_id || identity.source_revision != self.identity.source_revision ->
-            throw "paused debugger refresh changed session or source identity"
+    fn is_paused(self) -> Bool Never! { self.state == .Paused }
+
+    fn refresh_snapshot(&self, identity: SessionIdentity, snapshot: DebugSnapshot) PausedEvaluateError! {
+        if identity.session_id != self.identity.session_id || identity.source_id != self.identity.source_id || identity.source_revision != self.identity.source_revision {
+            return Err(paused_error("paused debugger refresh changed session or source identity"))
+        }
         self.identity = identity
         self.snapshot = snapshot
         self.state = .Paused
         self.validate()
     }
-    fn inject_into(&self, host: &PausedEvaluateHost) Err! {
+
+    fn inject_into(self, host: &PausedEvaluateHost) PausedEvaluateError! {
         if self.state != .Paused {
-            host.clear_session()
-            return
+            &host.clear_session()
+            return Ok()
         }
-        location := self.source_location()
+        location :: self.source_location()
         bindings := [ValueProjection]{}
-        bindings.reserve(self.snapshot.locals.len())
-        loop (index, local) in self.snapshot.locals.iter().enumerate() {
-            id := self.value_id(index, local.name)
-            type_name := normalized_type_name(local.type_name)
-            value := evaluate_snapshot(self.snapshot, local.name).ok()
-                .and_then((evaluation) -> self.projection_value(evaluation, id, location).ok())
-            projection := value.unwrap_or_else(() -> ValueProjection.redacted(id, bounded_name(local.name), type_name, location.clone()))
-            if projection.type_name.is_empty() -> projection.type_name = UNKNOWN_TYPE
-            bindings.push(projection)
+        loop index in 0..<self.snapshot.locals.len() {
+            local :: self.snapshot.locals[index]
+            id :: self.value_id(index, local.name)
+            projection := value_projection_redacted(id, paused_debug_bounded_name(local.name), paused_debug_type_name(local.type_name), location)
+            if evaluate_snapshot(self.snapshot, local.name) == .Ok(evaluation) {
+                if self.projection_value(evaluation, id, location) == .Ok(published) -> projection = published
+            }
+            if projection.type_name == "" -> projection.type_name = PAUSED_DEBUG_UNKNOWN_TYPE
+            &bindings.push(projection)
         }
-        scope := LexicalScope.new(self.scope_id.clone(), bounded_scope_name(self.snapshot.function), .None, location, bindings)
-        session := PausedSession.paused(self.identity.clone(), [scope], self.authority.clone(), DEFAULT_EVALUATION_BUDGET)
-        host.clear_evaluator_result()
-        host.set_session(session)
+        scope :: LexicalScope.new(self.scope_id, paused_debug_bounded_name(self.snapshot.function), None, location, bindings)
+        session :: paused_session(self.identity, SessionState.Paused, [LexicalScope]{scope}, self.authority, DEFAULT_EVALUATION_BUDGET)
+        &host.clear_evaluator_result()
+        &host.set_session(session)
+        Ok()
     }
-    fn evaluate(&self, request: &EvaluateRequest) -> EvaluatorResult {
-        usage := EvaluationUsage.new(0, 0, 0, 0)
-        if request.identity != self.identity || request.scope_id != self.scope_id ->
-            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), "paused debugger request does not match the published stop", usage)
-        if request.cancellation.requested || self.state == .Cancelled ->
-            return EvaluatorResult.cancelled(request.identity.clone(), request.scope_id.clone(), usage)
-        if self.state != .Paused ->
-            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), "paused debugger is no longer stopped", usage)
-        if request.mode == .Mutate ->
-            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), "paused debugger evaluation is read-only; mutation is unsupported", usage)
-        requirement := AuthorityRequirement.new(EVALUATE_AUTHORITY, self.scope_id) ?? {
-            error :: err
-            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), error, usage)
+
+    fn evaluate(self, request: EvaluateRequest) -> EvaluatorResult Never! {
+        usage := EvaluationUsage{depth: 0, nodes: 0, bytes: 0, steps: 0}
+        if request.identity != self.identity || request.scope_id != self.scope_id {
+            return evaluator_failed(request.identity, request.scope_id, "paused debugger request does not match the published stop", usage)
         }
-        if !self.authority.allows(requirement) || request.authority.iter().any((requirement) -> !self.authority.allows(requirement)) ->
-            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), "paused debugger lacks read-only evaluation authority", usage)
-        evaluation := evaluate_snapshot(self.snapshot, request.expression) ?? {
-            error :: err
-            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), error, usage)
+        if request.cancellation.requested || self.state == .Cancelled -> return evaluator_cancelled(request.identity, request.scope_id, usage)
+        if self.state != .Paused -> return evaluator_failed(request.identity, request.scope_id, "paused debugger is no longer stopped", usage)
+        if request.mode == .Mutate {
+            return evaluator_failed(request.identity, request.scope_id, "paused debugger evaluation is read-only; mutation is unsupported", usage)
         }
-        usage = EvaluationUsage.new(evaluation.usage.depth, evaluation.usage.nodes, evaluation.usage.bytes.min(MAX_VALUE_BYTES), evaluation.usage.steps)
-        location := self.source_location() ?? {
-            error :: err
-            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), error, usage)
+        requirement :: AuthorityRequirement.new(EVALUATE_AUTHORITY, self.scope_id) ?? return evaluator_failed(request.identity, request.scope_id, err.message, usage)
+        allowed := self.authority.allows(requirement)
+        loop requested in request.authority {
+            if !self.authority.allows(requested) -> allowed = false
         }
-        index := self.snapshot.locals.iter().position((local) -> local.name == evaluation.name).unwrap_or(0)
-        id := self.value_id(index, evaluation.name)
-        value := self.projection_value(evaluation, id, location) ?? {
-            error :: err
-            return EvaluatorResult.failed(request.identity.clone(), request.scope_id.clone(), error, usage)
+        if !allowed -> return evaluator_failed(request.identity, request.scope_id, "paused debugger lacks read-only evaluation authority", usage)
+        evaluation :: evaluate_snapshot(self.snapshot, request.expression) ?? return evaluator_failed(request.identity, request.scope_id, err.message, usage)
+        bytes :: if evaluation.usage.bytes < MAX_VALUE_BYTES -> evaluation.usage.bytes else -> MAX_VALUE_BYTES
+        usage = EvaluationUsage{depth: evaluation.usage.depth, nodes: evaluation.usage.nodes, bytes: bytes, steps: evaluation.usage.steps}
+        location :: self.source_location() ?? return evaluator_failed(request.identity, request.scope_id, err.message, usage)
+        index := 0
+        loop position in 0..<self.snapshot.locals.len() {
+            if self.snapshot.locals[position].name == evaluation.name {
+                index = position
+                break
+            }
         }
-        EvaluatorResult.completed(request.identity.clone(), request.scope_id.clone(), .Val(value), usage)
+        id :: self.value_id(index, evaluation.name)
+        value :: self.projection_value(evaluation, id, location) ?? return evaluator_failed(request.identity, request.scope_id, err.message, usage)
+        evaluator_completed(request.identity, request.scope_id, Val(value), usage)
     }
-    fn resume(&self, host: &PausedEvaluateHost) -> Unit {
+
+    fn resume(&self, host: &PausedEvaluateHost) Never! {
         self.state = .Running
-        self.clear_if_current(host)
+        self.clear_if_current(&host)
     }
-    fn cancel(&self, host: &PausedEvaluateHost, reason: String) Err! {
+
+    fn cancel(&self, host: &PausedEvaluateHost, reason: String) PausedEvaluateError! {
         self.state = .Cancelled
         if self.host_is_current(host) {
-            host.cancel_session(reason) ?? {
-                error :: err
-                throw error.to_string()
-            }
-            host.clear_evaluator_result()
+            if &host.cancel_session(reason) == .Err(failure) -> return Err(paused_error(failure.display()))
+            &host.clear_evaluator_result()
         }
+        Ok()
     }
-    fn exit(&self, host: &PausedEvaluateHost) -> Unit {
+
+    fn exit(&self, host: &PausedEvaluateHost) Never! {
         self.state = .Finished
-        self.clear_if_current(host)
+        self.clear_if_current(&host)
     }
-    fn stale(&self, host: &PausedEvaluateHost) -> Unit {
+
+    fn stale(&self, host: &PausedEvaluateHost) Never! {
         self.state = .Stale
-        self.clear_if_current(host)
+        self.clear_if_current(&host)
     }
-    fn validate(&self) Err! {
-        if self.source.source_id != .Val(self.identity.source_id) -> throw "paused debugger source identity does not match the session"
-        if self.source.revision != .Val(self.identity.source_revision) -> throw "paused debugger revision identity does not match the session"
-        loop (value, label) in [(_0: self.source.build_id, _1: "build identity"), (_0: self.source.world_id, _1: "world identity")] {
-            if value == .Val(value) {
-                if value.is_empty() || value.len() > MAX_SOURCE_COMPONENT_BYTES || value.chars().any((ch) -> ch.is_control()) ->
-                    throw "{label} is outside the bounded identity contract"
-            }
+
+    fn validate(self) PausedEvaluateError! {
+        if self.source.source_id != self.identity.source_id -> return Err(paused_error("paused debugger source identity does not match the session"))
+        if self.source.revision != self.identity.source_revision -> return Err(paused_error("paused debugger revision identity does not match the session"))
+        if self.source.build_id == .Val(build) {
+            if !paused_debug_bounded_component(build) -> return Err(paused_error("build identity is outside the bounded identity contract"))
         }
-        if self.scope_id.is_empty() || self.scope_id.len() > MAX_SOURCE_COMPONENT_BYTES || self.scope_id.chars().any((ch) -> ch.is_control()) ->
-            throw "paused debugger scope identity is outside the bounded contract"
-        if self.snapshot.function.is_empty() || self.snapshot.line == 0 || self.snapshot.locals.len() > 4_096 || self.snapshot.call_stack.len() > 256 ->
-            throw "paused debugger snapshot is outside the bounded fact contract"
-    }
-    fn source_location(&self) -> SourceLocation Err! {
-        line := U64{self.snapshot.line}
-        SourceLocation.new(self.identity.source_id.clone(), self.identity.source_revision.clone(), line, line)
-    }
-    fn value_id(&self, index: USize, name: String) -> String {
-        candidate := "{self.identity.session_id}-value-{index}-{bounded_name(name)}"
-        if candidate.len() <= MAX_SOURCE_COMPONENT_BYTES && !candidate.chars().any((ch) -> ch.is_control()) -> candidate
-        else {
-            digest := sha256_hex("{self.identity.session_id}:{index}:{name}".as_bytes())
-            prefix := digest[0..<32] // #4303
-            "value-{prefix}"
+        if self.source.world_id == .Val(world) {
+            if !paused_debug_bounded_component(world) -> return Err(paused_error("world identity is outside the bounded identity contract"))
         }
+        if !paused_debug_bounded_component(self.scope_id) -> return Err(paused_error("paused debugger scope identity is outside the bounded contract"))
+        if self.snapshot.function == "" || self.snapshot.line == 0 || self.snapshot.locals.len() > 4096 || self.snapshot.call_stack.len() > 256 {
+            return Err(paused_error("paused debugger snapshot is outside the bounded fact contract"))
+        }
+        Ok()
     }
-    fn projection_value(&self, evaluation: &DebugEvaluation, id: String, location: &SourceLocation) -> ValueProjection Err! {
-        projection := ValueProjection.published(id.to_string(), bounded_name(evaluation.name), normalized_type_name(evaluation.type_name), location.clone(), typed_value(evaluation.value)?)
+
+    fn source_location(self) -> SourceLocation PausedEvaluateError! {
+        SourceLocation.new(self.identity.source_id, self.identity.source_revision, self.snapshot.line, self.snapshot.line)
+    }
+
+    // `<session>-value-<index>-<name>`, or a digest of it when that is not a
+    // bounded identity.
+    fn value_id(self, index: Int, name: String) -> String Never! {
+        candidate :: "{self.identity.session_id}-value-{index}-{paused_debug_bounded_name(name)}"
+        if candidate.len() <= PAUSED_DEBUG_MAX_COMPONENT_BYTES && !paused_has_control(candidate) -> return candidate
+        digest :: sha256_hex("{self.identity.session_id}:{index}:{name}")
+        "value-{digest.slice(0, 32)}"
+    }
+
+    fn projection_value(self, evaluation: DebugEvaluation, id: String, location: SourceLocation) -> ValueProjection PausedEvaluateError! {
+        projection := value_projection_published(id, paused_debug_bounded_name(evaluation.name), paused_debug_type_name(evaluation.type_name), location, paused_debug_typed_value(evaluation.value))
         if projection.value == .Val(.Text(text)) {
-            (bounded, truncated) := bounded_text(text)
-            projection.value = .Val(.Text(bounded))
-            projection.truncated = truncated
+            bounded :: paused_debug_bounded_text(text)
+            projection.value = Val(TypedValue.Text{text: bounded.text})
+            projection.truncated = bounded.truncated
         }
-        projection
+        Ok(projection)
     }
-    fn host_is_current(&self, host: &PausedEvaluateHost) -> Bool {
-        host.session().is_some_and((session) -> session.identity == self.identity)
+
+    fn host_is_current(self, host: PausedEvaluateHost) -> Bool Never! {
+        if host.session == {
+            .Val(session) -> session.identity == self.identity
+            else -> false
+        }
     }
-    fn clear_if_current(&self, host: &PausedEvaluateHost) -> Unit {
-        if self.host_is_current(host) -> host.clear_session()
+
+    fn clear_if_current(self, host: &PausedEvaluateHost) Never! {
+        if self.host_is_current(host) -> &host.clear_session()
     }
 }
-fn normalized_type_name(value: String) -> String {
-    value := value.trim() // #4303
-    if value.is_empty() || value.chars().any((ch) -> ch.is_control()) -> UNKNOWN_TYPE else -> bounded_name(value)
+
+fn paused_debug_bounded_component(value: String) -> Bool Never! {
+    value != "" && value.len() <= PAUSED_DEBUG_MAX_COMPONENT_BYTES && !paused_has_control(value)
 }
-fn bounded_name(value: String) -> String {
-    name := String.new()
-    loop ch in value.chars().filter((ch) -> !ch.is_control()) {
-        if name.len().saturating_add(ch.len_utf8()) > MAX_SOURCE_COMPONENT_BYTES -> break
-        name.push(ch)
-    }
-    if name.is_empty() -> UNKNOWN_TYPE else -> name
+
+fn paused_debug_type_name(value: String) -> String Never! {
+    trimmed :: value.trim()
+    if trimmed == "" || paused_has_control(trimmed) -> return PAUSED_DEBUG_UNKNOWN_TYPE
+    paused_debug_bounded_name(trimmed)
 }
-fn bounded_scope_name(value: String) -> String { bounded_name(value) }
-fn bounded_text(value: String) -> (String, Bool) {
-    result := String.new()
-    truncated := false
+
+// `value` without control scalars, cut at a scalar boundary to the component
+// bound; `Unknown` when nothing is left.
+fn paused_debug_bounded_name(value: String) -> String Never! {
+    name := ""
     loop ch in value.chars() {
-        if ch.is_control() {
-            if ch == {
-                '\n' -> result.push_str("\\n")
-                Char{13} -> result.push_str("\\r")
-                '\t' -> result.push_str("\\t")
-                else -> result.push('�')
-            }
-        } else { result.push(ch) }
-        if result.len() > (USize{MAX_VALUE_BYTES}) {
-            loop result.len() > (USize{MAX_VALUE_BYTES}) -> _ :: result.pop()
-            truncated = true
-            break
-        }
+        text :: "{ch}"
+        if paused_has_control(text) -> next
+        if name.len() + text.len() > PAUSED_DEBUG_MAX_COMPONENT_BYTES -> break
+        name = "{name}{text}"
     }
-    (_0: result, _1: truncated)
+    if name == "" -> PAUSED_DEBUG_UNKNOWN_TYPE else -> name
 }
-fn typed_value(value: DebugValue) -> TypedValue Err! {
-    if value == {
-        .Unit -> .Unit
-        .Bool(value) -> .Bool(value)
-        .Int(value) -> .Int(value)
-        .FloatBits(bits) -> .FloatBits(bits)
-        .Text(value) -> .Text(value.clone())
-        .Bytes { length, sha256 } -> .Bytes { length: length, sha256: sha256.clone() }
-        .Aggregate { kind, length } -> .Aggregate {
-            kind: if kind == {
-                .Record -> .Record
-                .List -> .List
-                .Map -> .Map
-                .Set -> .Set
-                .Tuple -> .Tuple
-                .Variant -> .Variant
-            },
-            length: length
+
+struct PausedDebugBoundedText {
+    text: String
+    truncated: Bool
+}
+
+// Control scalars shown as `\n`, `\r`, `\t` or U+FFFD; at most MAX_VALUE_BYTES.
+fn paused_debug_bounded_text(value: String) -> PausedDebugBoundedText Never! {
+    pieces := [String]{}
+    length := 0
+    loop ch in value.chars() {
+        text :: "{ch}"
+        shown :: if {
+            text == "\n" -> "\\n"
+            text == "\r" -> "\\r"
+            text == "\t" -> "\\t"
+            paused_has_control(text) -> "�"
+            else -> text
         }
+        if length + shown.len() > MAX_VALUE_BYTES -> return PausedDebugBoundedText{text: pieces.join(""), truncated: true}
+        length += shown.len()
+        &pieces.push(shown)
+    }
+    PausedDebugBoundedText{text: pieces.join(""), truncated: false}
+}
+
+fn paused_debug_typed_value(value: DebugValue) -> TypedValue Never! {
+    if value == {
+        .Unit -> TypedValue.Unit
+        .Bool(flag) -> TypedValue.Bool{value: flag}
+        .Int(number) -> TypedValue.Int{value: number}
+        .FloatBits(bits) -> TypedValue.FloatBits{bits: bits}
+        .Text(text) -> TypedValue.Text{text: text}
+        .Bytes(length, sha256) -> TypedValue.Bytes{length: length, sha256: sha256}
+        .Aggregate(kind, length) -> TypedValue.Aggregate{kind: paused_debug_aggregate_kind(kind), length: length}
+    }
+}
+
+fn paused_debug_aggregate_kind(kind: DebugAggregateKind) -> AggregateKind Never! {
+    if kind == {
+        .Record -> AggregateKind.Record
+        .List -> AggregateKind.List
+        .Map -> AggregateKind.Map
+        .Set -> AggregateKind.Set
+        .Tuple -> AggregateKind.Tuple
+        .Variant -> AggregateKind.Variant
     }
 }

@@ -6,11 +6,10 @@
 //    table itself names it. Docs, Markdown and the script census describe
 //    tables; they do not read them.
 // 2. No line of a tracked text file under Compiler/ or Core/ names a `.rs`
-//    file. The Rust sources are gone, so such a name points nowhere. Three
+//    file. The Rust sources are gone, so such a name points nowhere. Two
 //    kinds stay: a path into the pinned upstream Rust library (`library/std/`,
-//    `library/core/`, `library/alloc/`), a real external input; the
-//    foreign-binding code, which writes and reads real Rust crates; and the
-//    debugger tier, whose generated-Rust names card #6576 retires.
+//    `library/core/`, `library/alloc/`), a real external input; and the
+//    foreign-binding code, which writes and reads real Rust crates.
 //
 // Usage (from the repository root): jet Tools/agent/RustEraRatchet.jet
 use {
@@ -30,11 +29,6 @@ FOREIGN_BINDING :: [String]{
     "Compiler/JetDriver/Tests/run-rust-foreign-fixtures.mjs",
     "Compiler/JetIR/Tests/run-inline-foreign-link.mjs",
     "Compiler/JetLSP/Tests/Integration/ZedExtensionSecurityTests.jet",
-}
-// The debugger tier (card #6576); drop each path as that card lands.
-DEBUG_TIER :: [String]{
-    "Compiler/JetDebug",
-    "Compiler/JetDevserver/Source/Canvas/DebugSourceGit.jet",
 }
 
 // git grep -E pattern (POSIX ERE): a line naming `<word>.rs`, line numbers
@@ -100,13 +94,9 @@ fn unread_tables() -[Exec, IO, Time.Wait]> [String] RatchetError! {
     Ok(unread)
 }
 
-// Whether `path` is foreign-binding code or in the debugger tier.
+// Whether `path` is foreign-binding code.
 fn exempt(path: String) -> Bool Never! {
-    if FOREIGN_BINDING.contains(path) -> return true
-    loop root in DEBUG_TIER {
-        if path == root || path.starts_with("{root}/") -> return true
-    }
-    false
+    FOREIGN_BINDING.contains(path)
 }
 
 // `path:line:text` rows of git grep -n whose text names a deleted Rust source.
@@ -168,7 +158,7 @@ fn run() {
     assert(!is_reader("tests/a.tsv", "Tools/script-census.tsv"))
 }
 
-#Test("names of deleted Rust sources are stale; upstream library, foreign binding and the debugger tier are not") {
+#Test("names of deleted Rust sources are stale; upstream library and foreign binding are not") {
     rows :: [String]{
         "Compiler/A.jet:3:// Rust: crates/jet-cli/src/Lock.rs:12",
         "Compiler/B.jet:9:    /// See CmdFlash.rs `identity`.",
@@ -180,5 +170,5 @@ fn run() {
         "Compiler/JetDebug/Source/A.jet:2:    rust_file :: dir.join(\"prog.rs\")",
         "Compiler/JetDebugger/B.jet:2:// Engine.rs:4",
     }
-    assert_eq(stale_citations(rows).join("|"), "Compiler/A.jet:3:// Rust: crates/jet-cli/src/Lock.rs:12|Compiler/B.jet:9:    /// See CmdFlash.rs `identity`.|Compiler/D.jet:7:    seed :: \"crates/x/src/Layout.rs\"|Compiler/F.jet:1:// Layout.rs61-85: native fields.|Compiler/JetDebugger/B.jet:2:// Engine.rs:4")
+    assert_eq(stale_citations(rows).join("|"), "Compiler/A.jet:3:// Rust: crates/jet-cli/src/Lock.rs:12|Compiler/B.jet:9:    /// See CmdFlash.rs `identity`.|Compiler/D.jet:7:    seed :: \"crates/x/src/Layout.rs\"|Compiler/F.jet:1:// Layout.rs61-85: native fields.|Compiler/JetDebug/Source/A.jet:2:    rust_file :: dir.join(\"prog.rs\")|Compiler/JetDebugger/B.jet:2:// Engine.rs:4")
 }

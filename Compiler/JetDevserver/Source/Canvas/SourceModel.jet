@@ -1,219 +1,238 @@
+// Canvas source files, read and replaced through held directories so no path
+// component, and no final name, is ever followed through a symbolic link.
 use {
-    core.files.[OSPath]
-    core.sys.target.[selected_os] // GATE #4483
-    std.io.[Error, ErrorKind] // GATE #4409
-    std.fs.[File, Metadata, OpenOptions, Permissions]
-    std.sync.[Mutex, OnceLock] // GATE #4494
-    std.sync.atomic.[AtomicU64, Ordering] // GATE #4494
-    std.ffi.[CString, OsStr] // GATE #4494 native encoded paths
-    std.path.[Component]
-    core.sys.host.unix_fd.[openat, mkdirat, renameat, unlinkat] // GATE #4494
-    jet_devserver.[MAX_RESPONSE_BODY_BYTES]
-    std.fmt.[format]
+    source_files :: core.files
+    source_sys :: core.sys
+    jet_foundation.[sha256_hex]
 }
 
-SOURCE_TRANSACTION_LOCK :: OnceLock<Mutex<Unit>>.new()
-TEMP_FILE_SEQUENCE :: AtomicU64.new(0)
-fn source_revision(src: String) -> String { "sha256-{SHA256.sha256_hex(src.as_bytes())}" }
- enum ReplaceResult { Applied, Conflict }
-fn read_source_without_symlinks(path: OSPath) -> String Err! {
-    bytes :: read_file_without_symlinks(path)
-    String.from_utf8(bytes).map_err((error) -> Error.new(ErrorKind.InvalidData, error))
-}
-fn read_file_without_symlinks(path: OSPath) -> [U8] Err! { read_file_without_symlinks_bounded(path, U64{MAX_RESPONSE_BODY_BYTES}) }
-fn read_file_without_symlinks_bounded(path: OSPath, max_bytes: U64) -> [U8] Err! {
-    if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") -> return secure_read_bounded(path, max_bytes)
-    if selected_os() == "windows" {
-        parent :: path.parent().filter((parent) -> !parent.as_os_str().is_empty()).unwrap_or_else(() -> OSPath.new("."))
-        name :: path.file_name() ?? return .Err(Error.new(ErrorKind.InvalidInput, "Canvas source path has no file name"))
-        return read_static_file_bounded(parent, OSPath.new(name), max_bytes)
-    }
-    unsupported()
-}
-fn ensure_no_symlink_directory(path: OSPath) Err! {
-    if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") -> ensure_directory(path) else -> unsupported()
-}
-fn write_new_file_without_symlinks(path: OSPath, bytes: [U8]) Err! {
-    if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") -> write_new(path, bytes) else -> unsupported()
-}
+// The bytes a Canvas source read may return: the devserver response bound.
+SOURCE_MAX_BYTES :: 67108864
+SOURCE_NEW_FILE_MODE :: 438
+SOURCE_TEMP_ATTEMPTS :: 100
+
+// Why a Canvas source path could not be read or written.
 #Error
-enum SourceWriteError { Conflict, Io(Error) }
-impl From<Error> for SourceWriteError { fn from(error: Error) -> Self { .Io(error) } }
-fn with_source_transaction<T>(action: () -> Result<T, SourceWriteError>) -> T SourceWriteError! {
-    lock :: SOURCE_TRANSACTION_LOCK.get_or_init(() -> Mutex.new(_))
-    guard :: lock.lock().map_err((_) -> SourceWriteError.Io(Error.new(ErrorKind.Other, "Canvas source transaction lock was poisoned")))?
+struct CanvasSourceError { message: String }
+
+fn canvas_source_error(message: String) -> CanvasSourceError Never! {
+    CanvasSourceError{message: message}
+}
+
+#Error
+enum SourceWriteError {
+    Conflict
+    Failed(error: CanvasSourceError)
+}
+
+enum ReplaceResult {
+    Applied
+    Conflict
+}
+
+fn source_revision(src: String) -> String Never! { "sha256-{sha256_hex(src)}" }
+
+fn read_source_without_symlinks(path: String) -> String CanvasSourceError! {
+    bytes :: read_file_without_symlinks(path)
+    String.from_bytes(bytes) ?? return Err(canvas_source_error("Canvas source `{path}` is not UTF-8 text"))
+}
+
+fn read_file_without_symlinks(path: String) -> [U8] CanvasSourceError! {
+    held :: source_open_parent(path)
+    current :: source_read_current(held.parent, held.name)
+    file :: current ?? return Err(canvas_source_error("Canvas source `{path}` does not exist"))
+    Ok(file.bytes)
+}
+
+// Create every missing directory of `path`, refusing link components.
+fn ensure_no_symlink_directory(path: String) CanvasSourceError! {
+    directory := source_open_base(path)
+    loop name in source_components(path) {
+        if directory.entry_stat(name) == {
+            .Ok(_) -> {}
+            .Err(_) -> {
+                if directory.create_directory(name) == {
+                    .Ok(_) -> {}
+                    .Err(.AlreadyExists(_)) -> {}
+                    .Err(error) -> { return Err(canvas_source_error("couldn't create Canvas directory `{name}`: {error}")) }
+                }
+            }
+        }
+        directory = directory.open_directory(name) ?? return Err(canvas_source_error("Canvas paths must not traverse symlinks: `{name}`: {err}"))
+    }
+    Ok()
+}
+
+// Create `path` with `bytes`; an existing entry, link or not, is refused.
+fn write_new_file_without_symlinks(path: String, bytes: [U8]) CanvasSourceError! {
+    held :: source_open_parent(path)
+    writer := held.parent.create(held.name, if_exists: .Refuse, mode: Val(SOURCE_NEW_FILE_MODE)) ?? return Err(canvas_source_error("couldn't create Canvas source `{path}`: {err}"))
+    if source_write_all(&writer, bytes) == .Err(error) {
+        source_remove_quietly(held.parent, held.name)
+        return Err(error)
+    }
+    Ok()
+}
+
+// Canvas source transactions run on the devserver's one request task, so a
+// transaction is the action itself; there is no second writer to exclude.
+fn with_source_transaction<T>(action: fn() -> T SourceWriteError!) -> T SourceWriteError! {
     action()
 }
-fn write_source_if_unchanged(path: OSPath, expected: String, candidate: String) SourceWriteError! {
-    with_source_transaction(() -> replace_source_if_unchanged_locked(path, .Some(expected), .Some(candidate)))
+
+fn write_source_if_unchanged(path: String, expected: String, candidate: String) SourceWriteError! {
+    replace_source_if_unchanged_locked(path, Val(expected), Val(candidate))
 }
-fn replace_source_if_unchanged_locked(path: OSPath, expected: String?, candidate: String?) SourceWriteError! {
-    result :: if selected_os() == "linux".bit_or("android").bit_or("macos").bit_or("ios") -> replace_if_unchanged(path, expected.map((s) -> s.as_bytes()), candidate.map((s) -> s.as_bytes())) else -> unsupported()
-    if result.map_err(SourceWriteError.Io)? is { .Applied -> .Ok(_); .Conflict -> .Err(SourceWriteError.Conflict) }
+
+// Replace (or, with no candidate, remove) `path` when its bytes are exactly
+// `expected` (or, with no expectation, when it does not exist).
+fn replace_source_if_unchanged_locked(path: String, expected: String?, candidate: String?) SourceWriteError! {
+    result :: source_replace_if_unchanged(path, expected, candidate) ?? return Err(SourceWriteError.Failed{error: err})
+    if result == .Conflict -> return Err(SourceWriteError.Conflict)
+    Ok()
 }
-O_RDONLY :: I32{0}
-O_WRONLY :: I32{1}
-fn o_creat() -> I32 { if selected_os() == "linux".bit_or("android") -> 0o100 else -> 0x0200 }
-fn o_excl() -> I32 { if selected_os() == "linux".bit_or("android") -> 0o200 else -> 0x0800 }
-fn o_cloexec() -> I32 { if selected_os() == "linux".bit_or("android") -> 0o2000000 else -> 0x01000000 }
-fn o_directory() -> I32 { if selected_os() == "linux".bit_or("android") -> 0o200000 else -> 0x00100000 }
-fn o_nofollow() -> I32 { if selected_os() == "linux".bit_or("android") -> 0o400000 else -> 0x0100 }
-MODE_NEW_FILE :: U32{0o666}
-// Native declarations are canonical imports from core.sys.host.unix_fd (#4494).
-struct CurrentFile { bytes: [U8], mode: U32 }
-struct Target {
-    parent: File
-    name: CString
-    current: CurrentFile?
-    fn replace(self: &Self, bytes: [U8], mode: U32?) Err! {
-        temporary := CString?{.None}
-        loop _ in 0..100 {
-            sequence :: TEMP_FILE_SEQUENCE.fetch_add(1, Ordering.Relaxed)
-            name :: c_name(OsStr.new(".{self.name.to_string_lossy()}.canvas-{sequence}.tmp"))
-            if create_new_at(self.parent, name, mode.map_or(MODE_NEW_FILE, (mode) -> mode.bit_and(0o7777))) is {
-                .Ok(file) -> {
-                    file := file
-                    result :: file.write_all(bytes).and_then((_) -> file.sync_all()).and_then((()) -> mode.map_or(.Ok(_), (mode) -> file.set_permissions(Permissions.from_mode(mode.bit_and(0o7777))).and_then((()) -> file.sync_all())))
-                    if result == .Err(error) { _ :: remove_at(self.parent, name); return .Err(error) }
-                    temporary = .Some(name)
-                    break
+
+fn source_replace_if_unchanged(path: String, expected: String?, candidate: String?) -> ReplaceResult CanvasSourceError! {
+    held :: source_open_parent(path)
+    current :: source_read_current(held.parent, held.name)
+    matches :: if expected == {
+        .Val(text) -> if current == {
+            .Val(file) -> file.bytes == text.bytes()
+            else -> false
+        }
+        else -> current == None
+    }
+    if !matches -> return Ok(ReplaceResult.Conflict)
+    if candidate == {
+        .Val(text) -> {
+            if current == {
+                .Val(file) -> {
+                    if file.bytes == text.bytes() -> return Ok(ReplaceResult.Applied)
+                    source_replace(held, text.bytes(), Val(file.mode))
                 }
-                .Err(error) && error.kind() == ErrorKind.AlreadyExists -> { next }
-                .Err(error) -> { return .Err(error) }
+                else -> source_replace(held, text.bytes(), None)
             }
         }
-        temporary :: temporary ?? return .Err(Error.new(ErrorKind.AlreadyExists, "could not allocate a Canvas source temporary file"))
-        result :: #Unsafe("rename within the retained parent descriptor; C names remain live") { renameat(self.parent.as_raw_fd(), temporary.as_ptr(), self.parent.as_raw_fd(), self.name.as_ptr()) } // GATE #4494
-        if result != 0 {
-            error :: map_nofollow(Error.last_os_error())
-            _ :: remove_at(self.parent, temporary)
-            return .Err(error)
-        }
-        _ :: self.parent.sync_all()
-        .Ok(_)
-    }
-    fn remove(self: &Self) Err! { remove_at(self.parent, self.name) }
-}
-fn secure_read_bounded(path: OSPath, max_bytes: U64) -> [U8] Err! {
-    (parent, name) :: open_parent(path)
-    file := open_file_at(parent, name, O_RDONLY)
-    .Ok(read_opened_file_bounded(&file, max_bytes, () -> .Ok(_))?.bytes)
-}
-fn ensure_directory(path: OSPath) Err! {
-    directory := open_base(path.is_absolute())
-    loop component in path.components() {
-        if component is {
-            .RootDir | .CurDir -> {}
-            .ParentDir -> { return .Err(Error.new(ErrorKind.InvalidInput, "Canvas paths must not contain parent components")) }
-            .Normal(name) -> {
-                c_name :: c_name(name)?
-                if open_directory_at(directory, name) is {
-                    .Ok(child) -> directory = child
-                    .Err(error) && error.kind() == ErrorKind.NotFound -> {
-                        result :: #Unsafe("mkdir relative to retained directory with live encoded name") { mkdirat(directory.as_raw_fd(), c_name.as_ptr(), 0o777) } // GATE #4494
-                        if result != 0 {
-                            create_error :: Error.last_os_error()
-                            if create_error.kind() != ErrorKind.AlreadyExists -> return .Err(map_nofollow(create_error))
-                        }
-                        directory = open_directory_at(directory, name)?
-                    }
-                    .Err(error) -> { return .Err(error) }
-                }
-            }
-            .Prefix(_) -> { return .Err(Error.new(ErrorKind.InvalidInput, "Canvas path has an unsupported prefix")) }
+        else -> {
+            if current != None -> held.parent.remove(held.name) ?? return Err(canvas_source_error("couldn't remove Canvas source `{path}`: {err}"))
         }
     }
-    .Ok(_)
+    Ok(ReplaceResult.Applied)
 }
-fn write_new(path: OSPath, bytes: [U8]) Err! {
-    (parent, name) :: open_parent(path)
-    file := create_new_at(parent, name, MODE_NEW_FILE)
-    if file.write_all(bytes).and_then((_) -> file.sync_all()) == .Err(error) { _ :: remove_at(parent, name); return .Err(error) }
-    require_regular(file)
+
+// The held parent directory of a source path and the final name in it.
+struct SourceTarget {
+    parent: Directory
+    name: String
 }
-fn replace_if_unchanged(path: OSPath, expected: [U8]?, candidate: [U8]?) -> ReplaceResult Err! {
-    target :: open_target(path)
-    current :: target.current.as_ref()
-    matches :: if expected is { .Some(expected) -> current.is_some_and((current) -> current.bytes == expected); .None -> current.is_none() }
-    if !matches -> return .Ok(.Conflict)
-    if candidate is {
-        .Some(candidate) && current.is_some_and((current) -> current.bytes != candidate) -> target.replace(candidate, current.map((current) -> current.mode))?
-        .Some(_) -> {}
-        .None && current.is_some() -> target.remove()?
-        .None -> {}
+
+struct SourceCurrentFile {
+    bytes: [U8]
+    mode: Int
+}
+
+fn source_open_base(path: String) -> Directory CanvasSourceError! {
+    base :: if path.starts_with("/") -> "/" else -> "."
+    source_files.open_directory(base) ?? return Err(canvas_source_error("couldn't open Canvas base directory `{base}`: {err}"))
+}
+
+// The normal components of `path`; `..` is refused, `.` and empty are skipped.
+fn source_components(path: String) -> [String] CanvasSourceError! {
+    names := [String]{}
+    loop part in path.split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." -> return Err(canvas_source_error("Canvas paths must not contain parent components"))
+        &names.push(part)
     }
-    .Ok(.Applied)
+    Ok(names)
 }
-fn open_target(path: OSPath) -> Target Err! {
-    (parent, name) :: open_parent(path)
-    current :: if open_file_at(parent, name, O_RDONLY) is {
-        .Ok(file) -> { file := file; .Some(read_opened_file(&file, () -> .Ok(_))?) }
-        .Err(error) && error.kind() == ErrorKind.NotFound -> .None
-        .Err(error) -> { return .Err(error) }
+
+fn source_open_parent(path: String) -> SourceTarget CanvasSourceError! {
+    names :: source_components(path)
+    if names.len() == 0 || path.ends_with("/") -> return Err(canvas_source_error("Canvas source path has no file name"))
+    parent := source_open_base(path)
+    loop index in 0..<names.len() - 1 {
+        parent = parent.open_directory(names[index]) ?? return Err(canvas_source_error("Canvas source paths must not traverse symlinks: `{names[index]}`: {err}"))
     }
-    .Ok(Target(parent: parent, name: name, current: current))
+    Ok(SourceTarget{parent: parent, name: names[names.len() - 1]})
 }
-fn open_base(absolute: Bool) -> File Err! {
-    base :: if absolute -> OSPath.new("/") else -> OSPath.new(".")
-    OpenOptions.new().read(true).custom_flags(o_directory().bit_or(o_nofollow()).bit_or(o_cloexec())).open(base) // GATE #4494
-}
-fn open_parent(path: OSPath) -> (File, CString) Err! {
-    components :: path.components().collect()
-    name :: if components.last() == .Some(.Normal(name)) -> name else -> return .Err(Error.new(ErrorKind.InvalidInput, "Canvas source path has no file name"))
-    parent := open_base(path.is_absolute())
-    loop component in components[0..<components.len() - 1] {
-        parent = if component is {
-            .RootDir | .CurDir -> parent
-            .ParentDir -> { return .Err(Error.new(ErrorKind.InvalidInput, "Canvas paths must not contain parent components")) }
-            .Normal(name) -> open_directory_at(parent, name)?
-            .Prefix(_) -> { return .Err(Error.new(ErrorKind.InvalidInput, "Canvas source path has an unsupported prefix")) }
-        }
-    }
-    .Ok((_0: parent, _1: c_name(name)?))
-}
-fn c_name(name: OsStr) -> CString Err! {
-    CString.new(name.as_bytes()).map_err((_) -> Error.new(ErrorKind.InvalidInput, "Canvas path contains NUL"))
-}
-fn open_directory_at(parent: File, name: OsStr) -> File Err! { open_file_at(parent, c_name(name), o_directory()) }
-fn open_file_at(parent: File, name: CString, extra_flags: I32) -> File Err! {
-    fd :: #Unsafe("openat borrows live retained parent and terminated encoded name") { openat(parent.as_raw_fd(), name.as_ptr(), extra_flags.bit_or(o_nofollow()).bit_or(o_cloexec()), 0) } // GATE #4494
-    if fd < 0 -> return .Err(map_nofollow(Error.last_os_error()))
-    .Ok(#Unsafe("transfer ownership of newly opened descriptor exactly once") { File.from_raw_fd(fd) })
-}
-fn create_new_at(parent: File, name: CString, mode: U32) -> File Err! {
-    fd :: #Unsafe("exclusive nofollow openat below retained parent") { openat(parent.as_raw_fd(), name.as_ptr(), O_WRONLY.bit_or(o_creat()).bit_or(o_excl()).bit_or(o_nofollow()).bit_or(o_cloexec()), mode) } // GATE #4494
-    if fd < 0 -> return .Err(map_nofollow(Error.last_os_error()))
-    .Ok(#Unsafe("transfer ownership of newly created descriptor exactly once") { File.from_raw_fd(fd) })
-}
-fn remove_at(parent: &File, name: &CString) Err! {
-    result :: #Unsafe("unlink retained-parent entry without following final symlink") { unlinkat(parent.as_raw_fd(), name.as_ptr(), 0) } // GATE #4494
-    if result != 0 -> return .Err(map_nofollow(Error.last_os_error()))
-    .Ok(_)
-}
-fn require_regular(file: &File) Err! { require_regular_metadata(file.metadata()?) }
-fn read_opened_file(file: &File, before_read: () -> Result<Unit, Error>) -> CurrentFile Err! { read_opened_file_bounded(file, U64{MAX_RESPONSE_BODY_BYTES}, before_read) }
-fn read_opened_file_bounded(file: &File, max_bytes: U64, before_read: () -> Result<Unit, Error>) -> CurrentFile Err! {
-    metadata :: file.metadata()?
-    require_regular_metadata(metadata)?
-    if metadata.len() > max_bytes -> return .Err(Error.new(ErrorKind.InvalidData, "file exceeds the devserver response limit"))
-    mode :: metadata.permissions().mode()
-    before_read()?
+
+// The regular, single-link file `name` in `parent`, read within the response
+// bound; None when it does not exist. A file replaced or relinked during the
+// read is refused.
+fn source_read_current(parent: Directory, name: String) -> SourceCurrentFile? CanvasSourceError! {
+    if parent.entry_stat(name) == .Err(_) -> return Ok(None)
+    reader := parent.open(name) ?? return Err(canvas_source_error("Canvas source paths must not traverse symlinks: `{name}`: {err}"))
+    before :: reader.stat() ?? return Err(canvas_source_error("couldn't inspect Canvas source `{name}`: {err}"))
+    source_require_regular(before, name)
+    if before.size > SOURCE_MAX_BYTES -> return Err(canvas_source_error("file exceeds the devserver response limit"))
     bytes := [U8]{}
-    file.take(max_bytes.saturating_add(1)).read_to_end(&bytes)?
-    if (U64{bytes.len()}) > max_bytes -> return .Err(Error.new(ErrorKind.InvalidData, "file exceeds the devserver response limit"))
-    final_metadata :: file.metadata()?
-    if !same_file(metadata, final_metadata) || final_metadata.nlink() != 1 -> return .Err(Error.new(ErrorKind.Other, "Canvas source changed while it was being read"))
-    .Ok(CurrentFile(bytes: bytes, mode: mode))
+    loop {
+        chunk :: reader.read(SOURCE_MAX_BYTES + 1 - bytes.len()) ?? return Err(canvas_source_error("couldn't read Canvas source `{name}`: {err}"))
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+        if bytes.len() > SOURCE_MAX_BYTES -> return Err(canvas_source_error("file exceeds the devserver response limit"))
+    }
+    after :: reader.stat() ?? return Err(canvas_source_error("couldn't inspect Canvas source `{name}`: {err}"))
+    if after.id != before.id || !after.is_file || after.links != 1 -> return Err(canvas_source_error("Canvas source changed while it was being read"))
+    Ok(Val(SourceCurrentFile{bytes: bytes, mode: before.mode}))
 }
-fn require_regular_metadata(metadata: &Metadata) Err! {
-    if !metadata.is_file() -> return .Err(Error.new(ErrorKind.PermissionDenied, "Canvas source path is not a regular file"))
-    if metadata.nlink() != 1 -> return .Err(Error.new(ErrorKind.PermissionDenied, "Canvas source file must not be a hard link"))
-    .Ok(_)
+
+fn source_require_regular(stat: Stat, name: String) CanvasSourceError! {
+    if !stat.is_file -> return Err(canvas_source_error("Canvas source path `{name}` is not a regular file"))
+    if stat.links != 1 -> return Err(canvas_source_error("Canvas source file `{name}` must not be a hard link"))
+    Ok()
 }
-fn same_file(left: Metadata, right: Metadata) -> Bool { left.is_file() && right.is_file() && left.dev() == right.dev() && left.ino() == right.ino() }
-fn map_nofollow(error: Error) -> Error {
-    symlink_errno :: if selected_os() == "linux".bit_or("android") -> 40 else -> 62
-    if error.raw_os_error() == .Some(symlink_errno) { Error.new(ErrorKind.PermissionDenied, "Canvas source paths must not traverse symlinks") } else { error }
+
+fn source_write_all(writer: &FileWriter, bytes: [U8]) CanvasSourceError! {
+    writer.write_all(bytes) ?? return Err(canvas_source_error("couldn't write Canvas source `{writer.path}`: {err}"))
+    writer.fsync() ?? return Err(canvas_source_error("couldn't sync Canvas source `{writer.path}`: {err}"))
+    Ok()
 }
-fn unsupported<T>() -> T Err! { .Err(Error.new(ErrorKind.Unsupported, "Canvas descriptor-relative no-follow filesystem access is unavailable on this platform")) }
-// Non-native read/ensure/write/replace arms dispatch at their public boundaries above.
+
+// Write `bytes` to a fresh temporary beside the target, then rename it over
+// the target inside the held parent, keeping the replaced file's mode.
+fn source_replace(target: SourceTarget, bytes: [U8], mode: Int?) CanvasSourceError! {
+    file_mode :: if mode == {
+        .Val(bits) -> bits.bit_and(4095)
+        else -> SOURCE_NEW_FILE_MODE
+    }
+    pid :: source_sys.pid()
+    temporary := ""
+    loop attempt in 0..<SOURCE_TEMP_ATTEMPTS {
+        name :: ".{target.name}.canvas-{pid}-{attempt}.tmp"
+        if target.parent.create(name, if_exists: .Refuse, mode: Val(file_mode)) == {
+            .Ok(created) -> {
+                writer := created
+                if source_write_all(&writer, bytes) == .Err(error) {
+                    source_remove_quietly(target.parent, name)
+                    return Err(error)
+                }
+                if mode != None -> writer.set_mode(file_mode) ?? return Err(canvas_source_error("couldn't set Canvas source mode: {err}"))
+                temporary = name
+                break
+            }
+            .Err(.AlreadyExists(_)) -> { next }
+            .Err(error) -> { return Err(canvas_source_error("couldn't create a Canvas source temporary file: {error}")) }
+        }
+    }
+    if temporary == "" -> return Err(canvas_source_error("could not allocate a Canvas source temporary file"))
+    if target.parent.rename(temporary, target.name) == .Err(error) {
+        source_remove_quietly(target.parent, temporary)
+        return Err(canvas_source_error("couldn't replace Canvas source `{target.name}`: {error}"))
+    }
+    // The rename is done; a failed directory sync only weakens durability.
+    if target.parent.fsync() == {
+        .Err(_) -> {}
+        else -> {}
+    }
+    Ok()
+}
+
+// Remove a temporary this module created; the original failure is reported.
+fn source_remove_quietly(parent: Directory, name: String) Never! {
+    if parent.remove(name) == {
+        .Err(_) -> {}
+        else -> {}
+    }
+}

@@ -1,44 +1,90 @@
+// The Canvas debug overlay: the active line, graph node and wire path of a
+// stop, typed snapshot values, bounded output, and the native-only tier.
 use {
-    jet_devserver.Canvas.DebugSourceGit.[DebugTier, MAX_DEBUG_VALUE_BYTES, debug_ok, line_span]
-    jet_devserver.Canvas.ValidationJson.[span_json]
-    jet_debug.[DebugSnapshot, ValueSnapshot, FrameSnapshot]
-    std.fmt.[format]
+    debug_test_files :: core.files
+    debug_test_process :: core.process
+    jet_debug.[DebugSnapshot, FrameSnapshot, ValueSnapshot]
+    jet_devserver.[DebugOkRequest, DebugSession, DebugSessions, DebugTier, MAX_DEBUG_VALUE_BYTES, SessionStatus, debug_ok, debug_span_json, line_span, source_revision]
+}
+
+fn test_debug_request(src: String, graph_json: String, transcript: String, snapshot: DebugSnapshot?, status: SessionStatus, watches: [String]) -> DebugOkRequest Never! {
+    DebugOkRequest{src: src, graph_json: graph_json, transcript: transcript, snapshot: snapshot, status: status, session_id: "test-session", tier: .NativeLldb, source_id: "main.jet", breakpoint_lines: [Int]{}, stale_breakpoints: [String]{}, watches: watches}
 }
 
 #Test("running_state_ignores_spoofed_completion_output") {
     src :: "fn run() {{\n    print(\"program finished\")\n}}\n"
-    active :: line_span(src, 2)
-    graph :: "{{\"node_id\":\"fn:main.jet::run@3-6:expr:1:call:print\",\"source_span\":{span_json(active)},\"wire_id\":\"fn:main.jet::run@3-6:wire:1\",\"source_span\":{span_json(active)}}}"
+    active :: debug_span_json(line_span(src, 2))
+    graph :: "[{{\"node_id\":\"fn:main.jet::run@3-6:expr:1:call:print\",\"source_span\":{active}}},{{\"wire_id\":\"fn:main.jet::run@3-6:wire:1\",\"source_span\":{active}}}]"
     transcript :: "breakpoint hit  main.jet:2  in main()\n   2 |     print(\"program finished\")        <- here\nprogram finished\n"
-    out :: debug_ok(src, graph, transcript, .None, SessionStatus.Running, "test-session", DebugTier.Replay, "main.jet", [], [], [])
+    out :: debug_ok(test_debug_request(src, graph, transcript, None, .Running, [String]{}))
     assert(out.contains("\"state\":\"running\""), out)
     assert(out.contains("\"debug_overlay\":\"running\""), out)
     assert(out.contains("\"active_line\":2"), out)
     assert(out.contains("\"active_graph_id\":\"fn:main.jet::run@3-6\""), out)
     assert(out.contains("\"active_node_id\":\"fn:main.jet::run@3-6:expr:1:call:print\""), out)
     assert(out.contains("\"active_wire_id\":\"fn:main.jet::run@3-6:wire:1\""), out)
+    assert(out.contains("\"tier\":\"native-lldb\""), out)
 }
 
 #Test("runtime_snapshot_projects_typed_values_and_wire_path") {
     src :: "fn run() {{\n    total := 1\n    print(total)\n}}\n"
-    active :: line_span(src, 3)
-    graph :: "{{\"node_id\":\"node:print\",\"source_span\":{span_json(active)},\"wire_id\":\"wire:input\",\"source_span\":{span_json(active)}}},{{\"wire_id\":\"wire:output\",\"source_span\":{span_json(active)}}}"
-    snapshot :: DebugSnapshot {
-        function: "run", line: 3,
-        locals: [ValueSnapshot { name: "total", type_name: "Int", value: "1" }],
-        call_stack: [FrameSnapshot { function: "run", line: 3 }]
-    }
-    out :: debug_ok(src, graph, "program finished\n", .Val(&snapshot), SessionStatus.Running, "test-session", DebugTier.Replay, "main.jet", [], [], ["total"])
-    loop field in ["\"runtime_state\":\"live\"", "\"active_line\":3", "\"type\":\"Int\"", "\"value\":\"1\"", "\"name\":\"total\"", "\"run()\"", "\"wire_path\":[\"wire:input\",\"wire:output\"]"] {
-        assert(out.contains(field), "runtime snapshot missing {field}: {out}")
-    }
+    active :: debug_span_json(line_span(src, 3))
+    graph :: "[{{\"node_id\":\"node:print\",\"source_span\":{active}}},{{\"wire_id\":\"wire:input\",\"source_span\":{active}}},{{\"wire_id\":\"wire:output\",\"source_span\":{active}}}]"
+    snapshot :: DebugSnapshot{function: "run", line: 3, locals: [ValueSnapshot{name: "total", type_name: "Int", value: "1"}], call_stack: [FrameSnapshot{function: "run", line: 3}]}
+    out :: debug_ok(test_debug_request(src, graph, "program finished\n", Val(snapshot), .Running, ["total"]))
+    fields :: ["\"runtime_state\":\"live\"", "\"active_line\":3", "\"type\":\"Int\"", "\"value\":\"1\"", "\"name\":\"total\"", "run()", "\"wire_path\":[\"wire:input\",\"wire:output\"]"]
+    loop field in fields -> assert(out.contains(field), "runtime snapshot missing {field}: {out}")
 }
 
 #Test("overlay_marks_bounded_debug_values") {
     src :: "fn run() {{\n    print(\"ok\")\n}}\n"
     huge :: "x".repeat(MAX_DEBUG_VALUE_BYTES + 128)
-    out :: debug_ok(src, "{{}}", "locals: value = {huge}\nvalue = {huge}", .None, SessionStatus.Finished, "test-session", DebugTier.Replay, "main.jet", [], [], ["value"])
+    out :: debug_ok(test_debug_request(src, "{{}}", "locals: value = {huge}\nvalue = {huge}", None, .Finished, ["value"]))
     assert(out.contains("\"locals_truncated\":true"), out)
     assert(out.contains("\"watches_truncated\":true"), out)
     assert(out.len() < 20 * 1024, "debug overlay escaped its bound: {out.len()}")
+}
+
+#Test("only_the_native_tier_is_served") {
+    defaulted :: DebugTier.parse(None) ?? panic("default tier")
+    assert(defaulted == DebugTier.NativeLldb)
+    named :: DebugTier.parse(Val("native-lldb")) ?? panic("native tier")
+    assert(named == DebugTier.NativeLldb)
+    if DebugTier.parse(Val("jet-dev-replay")) == {
+        .Err(failure) -> assert(failure.body.contains("\"kind\":\"unsupported\""), failure.body)
+        else -> panic("the replay tier was accepted")
+    }
+}
+
+fn debug_test_local(snapshot: DebugSnapshot, name: String) -> String Never! {
+    loop local in snapshot.locals {
+        if local.name == name -> return local.value
+    }
+    panic("no local `{name}` in the stop")
+}
+
+// A Canvas session builds the program with `jet build --optimize=none`, pauses
+// it under LLDB at a breakpoint, resumes to the next hit, and stops.
+#Test("a_native_session_builds_pauses_resumes_and_stops") {
+    jet :: debug_test_process.which("jet") ?? panic("the Jet dev shell puts `jet` on PATH")
+    scratch :: debug_test_files.temp_dir("jet-canvas-debug-test") ?? panic("scratch: {err}")
+    source :: debug_test_files.join(scratch.path, "prog.jet")
+    src :: "fn double(x: Int) -> Int {{\n    y :: x * 2\n    y\n}}\n\nfn run() {{\n    count := 0\n    loop i in 0..<2 {{\n        count += double(i)\n    }}\n    print(\"count {{count}}\")\n}}\n"
+    debug_test_files.write(source, src) ?? panic("source: {err}")
+    revision :: source_revision(src)
+    sessions := DebugSessions{jet: jet, next_id: 1, sessions: [String: DebugSession]{}, pause_on_input_end: true}
+    first :: &sessions.execute(source, "prog.jet", revision, None, ["continue"], [2], ["x"], .NativeLldb) ?? panic("execute: {err.body}")
+    assert(first.status == SessionStatus.Running)
+    paused :: first.snapshot ?? panic("first stop has no snapshot: {first.transcript}")
+    assert_eq(paused.function, "double")
+    assert_eq(paused.line, 2)
+    assert_eq(debug_test_local(paused, "x"), "0")
+    second :: &sessions.execute(source, "prog.jet", revision, Val(first.id), ["continue"], [2], ["x"], .NativeLldb) ?? panic("resume: {err.body}")
+    resumed :: second.snapshot ?? panic("second stop has no snapshot: {second.transcript}")
+    assert_eq(resumed.line, 2)
+    assert_eq(debug_test_local(resumed, "x"), "1")
+    tier :: &sessions.stop(source, revision, revision, first.id, .NativeLldb) ?? panic("stop: {err.body}")
+    assert(tier == DebugTier.NativeLldb)
+    assert(sessions.sessions.len() == 0)
+    debug_test_files.remove_all(scratch.path) ?? panic("scratch cleanup: {err}")
 }
