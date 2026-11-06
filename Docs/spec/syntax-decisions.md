@@ -554,8 +554,8 @@ bare and labelled. `tests/ui/call_mapping_type_boundary.jet` proves that types
 do not reroute bare arguments; `tests/ui/wrong_arg_count.jet` covers the
 no-slot arity boundary. The `CallBinder` candidate-set tests cover one,
 zero, and multiple successful imported bodies; `tests/ui/ambiguous_call_e0772.jet`
-pins the E0772 renderer until the C++ overload importer supplies real
-candidate sets.
+drives a real E0772 through `jet check`: two traits give one type a same-shape
+default `put`, so the positional call has more than one viable body.
 
 **S83 — Multi-head functions**: same name, different parameter patterns, each
 head its own body; dispatch by argument shape; heads must be exhaustive.
