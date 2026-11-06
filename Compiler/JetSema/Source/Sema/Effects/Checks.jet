@@ -1271,6 +1271,10 @@ fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: NameRows, node
         &nodes[node_index].memory_calls.push(SemaMemoryCall{callee: callee_key, span: fact.span, executions: executions})
     }
     row_known :: fact.facts.effect_bound != None
+    // D-EFFDBREAD1: the closed `core.db` table carries its declared leaves
+    // (`DB.Read` on queries, `DB.Write` on `execute`, the `DB` root on
+    // transaction control) even though its body reaches only intrinsics.
+    declared_row :: !known_callee || sema_effect_core_db_callee(callee_key)
     if fact.facts.effect_bound == .Val(effect_row) {
         loop entry in effect_row {
             raw :: entry.name
@@ -1279,7 +1283,7 @@ fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: NameRows, node
                 &diagnostics.push(sema_effect_unknown(raw, entry.span))
                 next
             }
-            if !known_callee -> sema_effect_node_add_direct(&nodes, node_index, effect_name, entry.span)
+            if declared_row -> sema_effect_node_add_direct(&nodes, node_index, effect_name, if known_callee -> fact.span else -> entry.span)
         }
     }
     if callee_key == "" && !row_known {
@@ -1292,6 +1296,12 @@ fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: NameRows, node
     if callee_key != "" && !known_callee && !row_known {
         sema_effect_record_memory_open(&nodes, node_index, fact.span, "callee body is unavailable and has no verified signed memory summary")
     }
+}
+
+// A callee declared in `core.db` (D-EFFDBREAD1). The key alone decides it
+// (`kind:module:owner:name`): a collecting thread holds only its own node.
+fn sema_effect_core_db_callee(callee_key: String) -> Bool Never! {
+    callee_key.contains(":<corelib>/core.db:") || callee_key.contains(":<corelib>/core.db.")
 }
 
 fn sema_effect_record_memory_open(nodes: &[SemaEffectNode], node_index: Int, span: Span, reason: String) Never! {
@@ -1807,6 +1817,14 @@ fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: 
         .Clone(_, _) -> {
             ty :: body_type(tree, expression)
             if ty == .Shared(_) -> sema_effect_push_memory_event(&nodes, node_index, node.span, "implicit copy of `{type_name(ty)}` retains a shared reference", "rc", None)
+        }
+        // `shared x` (Rust `Shared.new`): new shared storage that every
+        // handle copy retains.
+        .StaticCall(owner, _, method, _, _) -> {
+            if owner == .Prelude(_, path, _) && path == "jet_std::JetShared" && method.name == "new" {
+                sema_effect_push_memory_event(&nodes, node_index, node.span, "`shared` allocates shared storage", "alloc", None)
+                sema_effect_push_memory_event(&nodes, node_index, node.span, "`shared` introduces reference-counted ownership", "rc", None)
+            }
         }
         else -> {}
     }

@@ -1398,6 +1398,7 @@ fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, entry: String?, options
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()
             if options.profile != "" -> selected.profile = options.profile
+            selected.artifact_build = options.command == "build"
             selected.setting_overrides = options.settings.copy()
             selected.gate_set.allowed = options.gates.copy()
             contributed := jet_cli_contributed_request(^selected, color)

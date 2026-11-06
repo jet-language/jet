@@ -1,17 +1,8 @@
-Error [jet.NonCAbiType]: `fn(I32) I32` is not a C-compatible type for a foreign function parameter or return.
-  --> tests/ui/cffi_abi_function_value.jet:8:19
+Error [jet.NonCAbiType]: `fn(I32) -> I32 Never!` is not a C-compatible type for a foreign function parameter or return.
+  --> cffi_abi_function_value.jet:8:19
     |
   8 |     callback :: c.ping
     |                   ^^^^
  Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
 More: jet-lang.dev/e/E3203
-
-Error [jet.ValuelessCallUsedAsValue]: `callback` doesn't hand back a value
-  --> tests/ui/cffi_abi_function_value.jet:9:11
-    |
-  9 |     print(callback(1))
-    |           ^^^^^^^^
- Why: A call is a value only when its function declares a return type after `->`
- Fix: Inside an arm, wrap the call in `{ … }`; otherwise put `callback` on its own line, or declare it as `fn callback(…) -> Type { … }`
-More: jet-lang.dev/e/E0116

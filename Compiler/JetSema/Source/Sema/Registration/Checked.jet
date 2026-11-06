@@ -2012,12 +2012,14 @@ fn sema_checked_cli_bindings(module_row: SemaRegistrationModule, definition: Str
     result
 }
 
-// E0119 at a struct field or enum payload type that names nothing (#6294):
-// a misspelled member type is reported at its declaration, not its first use.
+// E0119 at a struct field or enum payload type that names nothing (#6294),
+// and E0963 at one whose fixed length names nothing: a misspelled member type
+// is reported at its declaration, not its first use.
 fn sema_checked_member_type_names(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, ty: Type, span: Span, generic_params: [TGenericParam], diagnostics: &[Diagnostic]) {
     module_index :: sema_registration_module_index(graph, module_row.module_identity) ?? return
     generic_names :: loop parameter in generic_params -> parameter.name
     sema_type_unknown_written_names(graph, module_index, ty, span, generic_names, &diagnostics)
+    sema_type_unknown_measure_names(graph, module_index, ty, span, generic_names, &diagnostics)
 }
 
 // Whether a struct field or enum payload type of module row `module_index`
@@ -3230,7 +3232,6 @@ fn sema_checked_coherence_register(graph: SemaRegistrationGraph, module_row: Sem
     }
     if !sema_checked_coherence_trait_known(graph, module_row, state, owner_name, trait_name, span, &diagnostics) -> return
     operator_trait :: owned_trait_is_operator(trait_name)
-    arithmetic_trait :: owned_trait_arithmetic(trait_name)
     owner_type :: sema_checked_coherence_owner_type(state, owner_name)
     rhs :: operator_rhs ?? owner_type
     rhs_name :: type_name(rhs)
@@ -3252,9 +3253,7 @@ fn sema_checked_coherence_register(graph: SemaRegistrationGraph, module_row: Sem
         }
         state.trait_keys[key] = true
     }
-    local_trait :: sema_checked_coherence_local_trait(graph, module_row, state, trait_name)
-    rhs_local :: operator_rhs != None && sema_checked_coherence_rhs_local(state, rhs)
-    if (operator_trait && !local_type && !(arithmetic_trait && rhs_local)) || (!local_type && !local_trait) {
+    if sema_checked_coherence_orphan(graph, module_row, state, owner_name, trait_name, operator_rhs, local_type) {
         &diagnostics.push(sema_error("E0902", span, "this `impl` can't live here", "at least one of the trait or the type must be defined in this program (orphan rule)", "define the trait or type in this file, or move the impl"))
         return
     }
@@ -3266,6 +3265,25 @@ fn sema_checked_coherence_register(graph: SemaRegistrationGraph, module_row: Sem
     }
     valid :: sema_owned_check_impl(owned, owner_type, rhs, methods, associated, sibling, state.distinct_bases.get(owner_name), span, &diagnostics)
     if operator_trait && valid -> sema_checked_coherence_add_operator(&state, owner_name, trait_name, rhs)
+}
+
+// Rust `validate_trait_impl` orphan rule (E0902): neither the trait nor the
+// type is this program's; an operator hook also needs its left type local,
+// or, for arithmetic, a local right-hand type.
+fn sema_checked_coherence_orphan(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, state: SemaCheckedCoherence, owner_name: String, trait_name: String, operator_rhs: Type?, local_type: Bool) -> Bool {
+    operator_trait :: owned_trait_is_operator(trait_name)
+    rhs_local :: operator_rhs != None && sema_checked_coherence_rhs_local(state, operator_rhs ?? sema_checked_coherence_owner_type(state, owner_name))
+    (operator_trait && !local_type && !(owned_trait_arithmetic(trait_name) && rhs_local)) || (!local_type && !sema_checked_coherence_local_trait(graph, module_row, state, trait_name))
+}
+
+// A top-level impl the orphan rule refuses (E0902) is not this program's
+// to check: its body produces no follow-on diagnostics.
+fn sema_checked_impl_refused(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, state: SemaCheckedCoherence, implementation: SemaRegistrationImpl) -> Bool {
+    trait_name :: implementation.declaration.trait_name ?? return false
+    if implementation.declaration.delegation_field != None && !owned_trait_literal(trait_name) -> return false
+    local_type :: sema_checked_coherence_local_type(state, implementation.declaration.type_name) || implementation.target_module_identity != None
+    if local_type -> return false
+    sema_checked_coherence_orphan(graph, module_row, state, implementation.declaration.type_name, trait_name, implementation.declaration.operator_rhs, local_type)
 }
 
 // E0923: the trait an `impl Type.Trait` block names is compiler-owned, declared

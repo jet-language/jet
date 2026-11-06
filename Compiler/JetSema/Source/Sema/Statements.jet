@@ -6033,6 +6033,15 @@ fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, bo
             }
             &diagnostics.push(sema_error("E0617", header_span, "`#{name}` has an invalid DSL header", "a checked text block keeps its Jet boundary; only its declared header shape is legal", "write {expected}"))
         }
+        // `#SQL<Row>`'s row header is a declared type position: a name that
+        // resolves to no type is E0119 at the header.
+        if dsl_args_valid && name == "SQL" && args.len() == 1 && args[0] == .Ident(row_name, row_span, _) && program.registration_graph == .Val(graph) {
+            generic_names :: loop parameter in environment.generic_params -> parameter.name
+            if sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), row_name, generic_names) {
+                &diagnostics.push(sema_unknown_type_name(row_name, row_span))
+                dsl_args_valid = false
+            }
+        }
         nested := sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "scope-dsl@{span.start}", loop_depth)
         if !dsl_args_valid || !nested.complete -> return None
         return Val(TStmt.Region{body: nested.value, span: span})

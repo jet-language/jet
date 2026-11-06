@@ -1507,6 +1507,7 @@ fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_nam
     if target.symbol.name == "to_string" && sema_call_core_module_identity(environment, program, "core.encoding.csv") == (Val(target.symbol.module_name)) {
         if !sema_data_csv_check_rows(args, checked.value, environment, program, &diagnostics) -> return None
     }
+    if !sema_data_encode_check_value(target, args, checked.value, environment, program, &diagnostics) -> return None
     // Rust `record_call_result_views` composes every call's returned views
     // with its arguments; a source-module call (`stream.object_entries(v)`)
     // publishes them like a direct call, so a binding keeps the view's owner.

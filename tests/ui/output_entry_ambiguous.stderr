@@ -1,9 +1,16 @@
-Error [jet.InvalidOutput]: This Package has more than one runnable Executable
- Why: Without `fn run`, a singular run selects only a sole compatible Output or a checked default
- Fix: Choose an explicit Output or add `defaults: { run: ONE }`; candidates: ONE, TWO
+Error [jet.InvalidOutput]: `jet run` has more than one compatible Output
+  --> tests/ui/output_entry_ambiguous.jet:4:1
+    |
+  4 | ONE :: Output.Executable{name: "one", entry: first}
+    | ^^^
+ Why: Available compatible Outputs: ONE, TWO
+ Fix: Write `defaults: { run: output_name }` or select an Output address
 More: jet-lang.dev/e/E1321
 
 Error [jet.MissingRunFunction]: This program has no `run` function
  Why: Running a program starts at `fn run`, and the entry file doesn't define one
  Fix: Add `fn run() { ... }` to the entry file
 More: jet-lang.dev/e/E0101
+
+2 problems found
+run `jet explain E1321` to learn more

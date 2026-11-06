@@ -847,6 +847,48 @@ fn sema_type_unknown_written_names(graph: SemaRegistrationGraph, caller: Int, ty
     }
 }
 
+// Rust `resolve_measure`: a fixed length `[T#N]` in a declared member type
+// names an integer constant, a generic length, or a module value argument
+// (generic modules are expanded before registration). A name that is none of
+// these is E0963 at the written type, once per type.
+fn sema_type_unknown_measure_names(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: &[Diagnostic]) {
+    if ty == {
+        .FixedList(inner, len) -> {
+            if sema_type_measure_unknown_name(graph, caller, len, generic_names) == .Val(unknown) {
+                &diagnostics.push(sema_error("E0963", span, "a fixed-size list length must resolve to a compile-time integer", "the measure name `{unknown}` is not a declared constant or module value parameter", "use an integer literal, an integer constant, or a module Int value argument"))
+                return
+            }
+            sema_type_unknown_measure_names(graph, caller, inner, span, generic_names, &diagnostics)
+        }
+        .Apply(_, args) | .Union(args) -> loop arg in args -> sema_type_unknown_measure_names(graph, caller, arg, span, generic_names, &diagnostics)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_type_unknown_measure_names(graph, caller, inner, span, generic_names, &diagnostics)
+        .Map(key, _, value) | .Result(key, value) -> {
+            sema_type_unknown_measure_names(graph, caller, key, span, generic_names, &diagnostics)
+            sema_type_unknown_measure_names(graph, caller, value, span, generic_names, &diagnostics)
+        }
+        .Tuple(fields) -> loop field in fields -> sema_type_unknown_measure_names(graph, caller, field.ty, span, generic_names, &diagnostics)
+        else -> {}
+    }
+}
+
+// The first name in `measure` that resolves to nothing.
+fn sema_type_measure_unknown_name(graph: SemaRegistrationGraph, caller: Int, measure: Measure, generic_names: [String]) -> String? {
+    if measure == {
+        .Symbol(_, name) -> {
+            if generic_names.contains(name) -> return None
+            loop constant in graph.modules[caller].constants {
+                if constant.symbol.name == name -> return None
+            }
+            if sema_type_graph_lookup_symbol_at(graph, caller, name) == None -> Val(name.copy()) else -> None
+        }
+        .Combined(_, _, left, right) -> {
+            if sema_type_measure_unknown_name(graph, caller, left, generic_names) == .Val(unknown) -> return Val(unknown)
+            sema_type_measure_unknown_name(graph, caller, right, generic_names)
+        }
+        else -> None
+    }
+}
+
 // E0119 for the written parameter and return type names of module row
 // `caller`'s functions and methods. A module whose declared member type names
 // nothing has no function check, where a signature is judged otherwise
