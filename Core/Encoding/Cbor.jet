@@ -1,6 +1,6 @@
 use {
     core: core
-    // Whole-value and bounded streaming CBOR. Typed Decode remains an intrinsic.
+    // Whole-value and bounded streaming CBOR; typed `decode<T>` reads the parsed tree.
     core.encoding.[Dyn, DataEvent, EncodingError, EncodingLimits]
     stream: __core_encoding_stream
     math: core.math
@@ -69,8 +69,8 @@ CBORError: struct {
     }
 }
 impl CBORError {
-    display_text: fn(self) -> String Never! {
-        kind: if self.kind == {
+    kind_name: fn(self) -> String Never! {
+        if self.kind == {
             .Syntax -> "Syntax"
             .Truncated -> "Truncated"
             .Unsupported -> "Unsupported"
@@ -79,7 +79,9 @@ impl CBORError {
             .TrailingData -> "TrailingData"
             .NonCanonical -> "NonCanonical"
         }
-        out := "CBOR {kind} at byte {self.byte_offset}"
+    }
+    display_text: fn(self) -> String Never! {
+        out := "CBOR {self.kind_name()} at byte {self.byte_offset}"
         if self.path != "" -> out = "{out}, path {self.path}"
         "{out}: {self.reason}"
     }
@@ -245,6 +247,21 @@ encode_value: fn(value: Dyn, out: &[U8], canonical: Bool) CBORError! {
 
 parse: fn(bytes: [U8], options: CBOROptions{CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}}) -> Dyn CBORError! {
     parser.parse(bytes, options)
+}
+
+// Typed `decode<T>(bytes)`: the parsed tree decodes into the target. A parse
+// failure is one FieldError at the failing item, its path spelled as the
+// decoder spells paths (`$["id"]` reads `["id"]`). The parameter is not
+// spelled `T`: explicit-argument inference binds by name, so a generic
+// caller's `decode<[T]>` would read as `T := [T]`.
+decode: fn<Target: Decode>(bytes: [U8], options: CBOROptions{CBOROptions.safe()}) -> Target [FieldError]! {
+    tree: parser.parse(bytes, options) ?? return Err([FieldError]{typed_parse_error(err)})
+    value: tree.decode<Target>() ?? return Err(err)
+    Ok(value)
+}
+
+typed_parse_error: fn(error: CBORError) -> FieldError Never! {
+    FieldError{path: error.path.removeprefix("$"), reason: "CBOR {error.kind_name()} at byte {error.byte_offset}: {error.reason}"}
 }
 
 #Test("CBOR whole-value parser preserves limits and indefinite forms") {

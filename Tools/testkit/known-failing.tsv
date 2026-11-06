@@ -97,7 +97,6 @@ tests/ui/crypto_secret_nested_provenance	#6425	check not ported: E1004 and E0119
 tests/ui/generic_lambda_conflict	#6425	check not ported: E0904 inference conflict between argument 2 and the lambda return, with E0112 at the lambda (reports only E0112 at argument 2)
 tests/ui/reflect_name_ledger	#6425	check not ported: E0302 names an ambiguous imported owner by its module (`alpha.Point`; reports `Point`); the snapshot lines also predate the `use { "alpha" "beta" }` block (+2)
 tests/ui/taint/external_boundaries_seed_origin_facts_3	#6425	check not ported: E0433 after E1004 (the unresolved `process.run` call's value is not reported as thrown away)
-tests/ui/serde_u64_direct_codable	#6419	unbuilt: `cbor.decode<U64>(bytes)` with an explicit type argument is E1004 "`core.encoding.cbor` exposes `decode`, but not in this position", as cases comptime_diff/cbor_generic_whole_decode
 tests/cases/archive/archive_names_and_path_rejection_are_source_owned_on_all_tiers.case	#5454	verify-intent: ref build failed: E0109 Arithmetic needs matching number types
 tests/cases/authority/authority_boundary_consumers_take_the_named_value.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/authority/authority_comptime_uses_the_same_value.case	#5454	assert not satisfied: original expect not satisfied
@@ -243,7 +242,7 @@ tests/cases/agent_executor_closeout/agent_executor_network_and_descendant_hostil
 tests/cases/sema_soundness/knowledge_loss_requires_a_spelled_gate.case	#5454	Jet sema reports E0108 (not E0112) for implicit Float->F32 and E0108 (not E0156) for Int(0..10)->Int parameter erasure, E0109 (not E0156) for unary minus on a bounded Int, and ICEs on tests/ui/typestate_wrong_state.jet (#Transition unsupported by the self-hosted checker) instead of E0150
 tests/cases/comptime_diff/cbor_canonical_typed_corpus_matches_comptime_and_aot.case	#5454	E0003 A nested comptime-reachable function has no unique registered module owner
 tests/cases/comptime_diff/cbor_current_whole_encode_parse_matches_comptime_and_aot.case	#5454	E0003 A nested comptime-reachable function has no unique registered module owner
-tests/cases/comptime_diff/cbor_generic_whole_decode_matches_comptime_and_aot.case	#5454	E1004 `core.encoding.cbor` exposes `decode`, but not in this position
+tests/cases/comptime_diff/cbor_generic_whole_decode_matches_comptime_and_aot.case	#5454	ICE: the comptime closure lacks the implicit codec bodies (comptime.build unlowered: Dyn.decode into [Float]: Core/Encoding/Encoding.jet __decode_list is outside the checked program; Parser.datetime Dyn.decode into ZonedDateTime without its Decode implementation)
 tests/cases/comptime_diff/cbor_options_and_hostile_errors_match_comptime_and_aot.case	#5454	E0003 A nested comptime-reachable function has no unique registered module owner
 tests/cases/comptime_diff/comptime_loadable_matches_runtime.case	#5454	E0904 Can't infer `T`
 tests/cases/comptime_diff/comptime_matches_runtime.case	#5454	E0956 Compile-time evaluation of runtime route `jet_text_trim_start` needs the runtime pack's IR
@@ -688,8 +687,6 @@ tests/cases/cli_parts_commands/perl_bind_launders_parse_failure_as_e3208.case	#6
 tests/cases/cli_parts_commands/tcl_bind_missing_source_is_laundered_e3208.case	#6418	unbuilt: E2104 command form not built (E3208)
 tests/cases/cli_parts_surface/jetpack_missing_package_explain_golden.case	#6418	unbuilt: E2104 command form not built (E1274)
 tests/cases/cli_parts_surface/name_suggestion_json_golden.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0107)
-tests/cases/corelib/cbor_whole_codable_bytes_and_original_wire_canonical_validation.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)
-tests/cases/corelib/cbor_whole_indefinite_values_obey_normal_canonical_and_limit_laws.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)
 tests/cases/corelib/core_ioerror_preserves_kind_operation_and_resource.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102)
 tests/cases/corelib/core_net_dns_wire_lookup_observes_task_cancellation.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)
 tests/cases/corelib/core_net_ratified_named_forms_require_exact_labels.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0102)
@@ -704,8 +701,7 @@ tests/cases/debug/dap_cli_pauses_a_running_target_through_production_wire.case	#
 tests/cases/debug/dap_cli_projects_raw_frames_only_when_requested_through_production_wire.case	#6386	unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:)
 tests/cases/debug/dap_cli_rejects_a_cross_executable_attach_through_the_production_wire.case	#6386	unbuilt: DAP debug wire (jet debug) (await deadline exceeded)
 tests/cases/effects/erased_authority_delegations_do_not_enter_effect_facts.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)
-tests/cases/encoding_parity/cbor_migration_plan_matches_aot_and_forced_deopt.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)
-tests/cases/encoding_parity/cbor_primitive_container_boundaries_match_aot_and_forced_deopt.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)
+tests/cases/encoding_parity/cbor_primitive_container_boundaries_match_aot_and_forced_deopt.case	#6419	ICE: the Dyn codec has no F32 or fixed-list lowering (ir.build unlowered: Dyn.decode into F32 / [Int#2] / [U8#2] without its Decode implementation; handle method SerdeEncode of F32 / [Int#2] / [U8#2])
 tests/cases/encoding_parity/exact_typed_json_numbers_match_aot_default_run_and_interpreter.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0107)
 tests/cases/env_dev_trust/dev_declared_missing_secret_is_e1263.case	#6418	unbuilt: `jet dev` project form not built: `jet run --no-color` is not built yet (E2104)
 tests/cases/env_dev_trust/dev_no_entry_is_e1254.case	#6418	unbuilt: `jet dev` project form not built: `jet run --no-color` is not built yet (E2104)
@@ -802,7 +798,7 @@ tests/cases/polyglot_systems/mixed_repo_edit_test_debug_profile_and_recovery_wor
 tests/cases/polyglot_systems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.jvm.case	#6418	`jet inspect bind` is not built yet (E2104)
 tests/cases/polyglot_systems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.python.case	#6418	`jet inspect bind` is not built yet (E2104)
 tests/cases/reflect/arithmetic_policy_is_visible_in_function_reflection.case	#6419	unbuilt: Build reflection has no `program.functions` (E0302 on `b.program.functions`); the verbatim original source also draws L0530 (redundant_final_return) against the Rust-era `$.reports #= 0` predicate
-tests/cases/reflect/checked_text_contract_is_reflected_on_the_nominal_type.case	#6419	the verbatim original source draws L0530 and two L0102 (unused_parameter) against the Rust-era `$.reports #= 0` predicate
+tests/cases/reflect/checked_text_contract_is_reflected_on_the_nominal_type.case	#6419	the verbatim original source draws L0530 and two L0102 (unused_parameter) against the Rust-era `$.reports #= 0` predicate; `jet run main.jet` is an ICE: comptime.build unlowered field base of TypeInfo (`Pattern.reflect().base`)
 tests/cases/repl/repl_history_parent_swap_stays_on_held_directory.case	#6386	unbuilt: DAP debug wire (jet debug) (await deadline exceeded)
 tests/cases/repl/repl_history_two_processes_merge_and_clear_cannot_resurrect.case	#6386	unbuilt: DAP debug wire (jet debug) (await deadline exceeded)
 tests/cases/repl/repl_native_run_uses_stdin_snapshot_not_replaced_temp_path.case	#6386	unbuilt: DAP debug wire (jet debug) (await deadline exceeded)
