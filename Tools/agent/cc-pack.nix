@@ -1,5 +1,5 @@
-# The C toolchain pack `jet cc` fetches on first use (D-NIX-INDEX-ROOT1 = A,
-# Docs/spec/reference/cc-driver.md). release-compiler.mjs builds it with
+# The C toolchain pack `jet cc` fetches on first use
+# (Docs/spec/reference/cc-driver.md). release-compiler.mjs builds it with
 #
 #   nix-build Tools/agent/cc-pack.nix
 #
