@@ -91,6 +91,10 @@ services_up_ordered_with: fn(host: ServiceHost, project_dir: String, env: &Shell
         was_running: services_health_one(project_dir, env, plan).is_running()
         if before_start(plan) == .Err(error) -> return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
         if services_up_one(host, project_dir, env, plan) == .Err(error) -> return Err(services_with_cleanup(error, services_down_ordered(host, project_dir, plans, started)))
+        // A detached supervisor's `services_up_one` returns only after its
+        // service ended and `services_finish_supervisor` recorded the outcome;
+        // readiness, rollback and the ready phase belong to the parent `up`.
+        if sys.get(SERVICES_SUPERVISOR_ENV) != None -> next
         // A restart policy does not weaken readiness: the supervisor owns
         // retries, but dependents still wait for the same healthy state.
         if !services_wait_healthy(project_dir, env, plan, timeout) {

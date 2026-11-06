@@ -173,7 +173,14 @@ services_supervisor_failure: fn(project_dir: String, plan: DevServicePlan) -[FS]
 }
 
 // Publish a small state file as one complete replacement through a
-// create-new temporary beside it.
+// create-new temporary beside it, so a reader never observes a half-written
+// PID, port list, lifecycle, watch baseline or preset file. Every such file
+// is rebuilt or rechecked rather than trusted after a power loss: the loss
+// ends the processes the runtime state describes, the next `up` checks each
+// recorded process against its start identity, presets are rewritten per
+// launch, and an initialized data directory regains its marker. The rename
+// therefore needs no fsync, and a loaded disk never stretches a supervisor's
+// publication.
 services_write_atomic: fn(path: String, contents: [U8]) IOError! -[FS, Env]> {
     parent: files.dirname(path)
     directory: if parent == "" -> "." else -> parent
@@ -189,7 +196,6 @@ services_write_atomic: fn(path: String, contents: [U8]) IOError! -[FS, Env]> {
 services_replace_through: fn(temporary: String, path: String, contents: [U8]) IOError! -[FS]> {
     writer := files.create(temporary, if_exists: .Refuse)
     writer.write_all(contents)
-    writer.fsync()
     close(writer)
     files.rename(temporary, path)
 }

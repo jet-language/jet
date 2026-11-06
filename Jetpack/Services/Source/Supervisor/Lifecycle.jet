@@ -6,7 +6,6 @@ SERVICES_MAX_RESTART_DELAY_MS: 60000
 SERVICES_MAX_WATCH_DEPTH: 64
 SERVICES_MAX_WATCH_ENTRIES: 4096
 SERVICES_WATCH_DEBOUNCE_MS: 250
-SERVICES_SUPERVISOR_PUBLISH_MS: 5000
 SERVICES_STATE_LOCK_SCOPE: "services-state"
 
 // One started generation: the live child, its verified identity, and the
@@ -54,20 +53,27 @@ services_reap_child: fn(child: &&ProcessChild) -[Exec, Time.Wait]> {
 }
 
 // Re-execute this program as the detached supervisor of `plan`, then wait
-// (bounded) until it publishes the service's state or its failure.
-services_spawn_service_supervisor: fn(project_dir: String, env: &ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Time, Time.Wait]> {
+// until it publishes the service's state or its failure, or exits without
+// either. The wait has no clock: a live supervisor is still publishing, and
+// only its own exit ends the wait without its evidence.
+services_spawn_service_supervisor: fn(project_dir: String, env: &ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Time.Wait]> {
     // The parent already loaded, realized, and trust-gated this exact plan;
     // the detached child must not prompt or replay a trust decision.
     spec := process.cmd([String]{sys.executable(), "services", "up", plan.name, "--trust", "--no-color"}).cwd(project_dir).detached()
     spec = env.apply_to(spec) ?? return Err(ServicesError.new("couldn't hand service `{plan.name}` to its supervisor: {err.message()}"))
     spec = spec.env(SERVICES_SUPERVISOR_ENV, "1")
-    spec.spawn() ?? return Err(ServicesError.new("couldn't hand service `{plan.name}` to its supervisor: {err}"))
+    supervisor := spec.spawn() ?? return Err(ServicesError.new("couldn't hand service `{plan.name}` to its supervisor: {err}"))
     dir: services_service_dir(project_dir, plan.name)
-    deadline: services_now_ms() + SERVICES_SUPERVISOR_PUBLISH_MS
-    loop !files.is_file(services_pid_path(dir)) && !files.is_file(services_supervisor_error_path(dir)) {
-        if services_now_ms() >= deadline -> return Err(ServicesError.new("service `{plan.name}` supervisor did not publish runtime state"))
+    loop !services_supervisor_published(dir) {
+        exited: supervisor.exited() ?? return Err(ServicesError.new("couldn't observe the supervisor of service `{plan.name}`: {err}"))
+        // Its last publication may land just before it exits.
+        if exited && !services_supervisor_published(dir) -> return Err(ServicesError.new("service `{plan.name}` supervisor exited without publishing runtime state"))
         time.sleep(time.duration_ms(20))
     }
+}
+
+services_supervisor_published: fn(dir: String) -[FS]> Bool Never! {
+    files.is_file(services_pid_path(dir)) || files.is_file(services_supervisor_error_path(dir))
 }
 
 // The environment a restart composes: the same PATH and variables, without
@@ -462,10 +468,16 @@ services_stop_started_process: fn(started: &StartedService, shutdown: ShutdownPo
     services_stop_process_with_authority(started.state, shutdown, Val(started.authority))
 }
 
-services_mark_lifecycle_ready: fn(project_dir: String, plan: DevServicePlan) ServicesError! -[FS, Env]> {
+// Under the lock a supervisor holds while it publishes a generation, so the
+// ready phase lands after that generation's running lifecycle, never under it.
+// A generation that already ended (a dependency failure stopped it, or it
+// exited) keeps its terminal evidence.
+services_mark_lifecycle_ready: fn(project_dir: String, plan: DevServicePlan) ServicesError! -[FS, Env, Time]> {
+    guard: services_state_lock(project_dir)
     dir: services_service_dir(project_dir, plan.name)
     found: services_read_lifecycle(dir)
     facts := found ?? return
+    if !facts.phase.is_live() -> return
     facts.phase = ServicePhase.Ready
     facts.recovery = "none"
     if services_write_lifecycle(dir, facts) == .Err(error) -> return Err(ServicesError.new("couldn't publish ready lifecycle state: {error}"))
