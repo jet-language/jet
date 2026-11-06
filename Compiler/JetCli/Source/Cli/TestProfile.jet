@@ -236,9 +236,9 @@ fn jet_cli_test_profile_corpus(profile: String, root: String, settings: [TestSet
     options.suite = selected.join(",")
     compiler :: test_settings_get(settings, "compiler") ?? cli_sys.executable()
     options.jet = cli_files.realpath(compiler) ?? compiler
-    // The corpora's `jetpack` ships beside the jet that runs them.
-    beside :: if jet_cli_parent(options.jet) == .Val(directory) -> jet_cli_authority_path(directory, JET_CLI_JETPACK_BINARY) else -> ""
-    options.jetpack = if beside != "" && cli_files.is_file(beside) -> beside else -> jet_cli_find_engine_binary(JET_CLI_JETPACK_BINARY) ?? ""
+    // The corpora's `jetpack`: the `jetpack` setting, else the engine lookup
+    // with the jet under test in the running jet's place.
+    options.jetpack = test_settings_get(settings, "jetpack") ?? jet_cli_find_engine_binary_for(JET_CLI_JETPACK_BINARY, options.jet) ?? ""
     options.filter = test_settings_get(settings, "filter") ?? ""
     if test_settings_get(settings, "cases") == .Val(list) -> options.cases = cli_files.realpath(list) ?? list
     options.jobs = test_settings_number(settings, "jobs")

@@ -23,6 +23,7 @@ one exists instead of adding another spelling for the same job.
 
 | Variable | Accepted value | Effect |
 | --- | --- | --- |
+| `JETPACK_BIN` | executable path | Names the `jetpack` engine that `jet`'s engine verbs (`fetch`, `add`, `env`, `trust`, …) run. The lookup order is `JETPACK_BIN`, then the `jetpack` beside the running `jet`, then `PATH`; a `JETPACK_BIN` that names no executable file refuses with E1228 instead of falling through. `jet test --jetpack=<path>` (the `jetpack` test setting) sets it for every corpus row it runs, which otherwise get the engine this order finds for the jet under test. The name predates the `JET_<AREA>_<SETTING>` convention; it matches the `JETPACK_BIN` that Jetpack's process claims already use. |
 | `JET_CACHE_DIR` | path | Overrides the compiler build-cache directory. |
 | `JET_FFI_CACHE_DIR` | path | Overrides the hidden Rust FFI bridge cache directory. |
 | `JET_ENV_DISABLE` | any non-empty value | D-ENVHOOK1 escape for `jet env hook`; suppresses automatic activation in the current shell and drops environment that hook already activated. |

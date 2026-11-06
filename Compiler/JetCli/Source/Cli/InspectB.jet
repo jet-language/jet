@@ -576,27 +576,60 @@ fn jet_cli_digest(options: [String], color: Bool, json: Bool) -[FS, Env]> JetCLI
 JET_CLI_JETPACK_BINARY :: "jetpack"
 JET_CLI_ENGINE_PROTOCOL_FLAG :: "--engine-protocol"
 JET_CLI_ROOT_ENGINE_DISPATCH_PID_ENV :: "JET_INTERNAL_ROOT_DISPATCH_PID"
+// Names the `jetpack` engine every engine verb runs, ahead of the lookup.
+// `jet test --jetpack=<path>` sets it for the corpora a run executes.
+JET_CLI_JETPACK_BIN_ENV :: "JETPACK_BIN"
 
-// `find_engine_binary`: the directory of the running `jet` first, then
+// `find_engine_binary`, the one lookup order for an engine: `JETPACK_BIN`
+// (for `jetpack`) when set, then the directory of the running `jet`, then
 // `PATH`, so a `jetpack` shadowed on `PATH` never wins over the one `jet`
-// shipped with. A candidate is an executable regular file.
+// shipped with. A candidate is an executable regular file; a `JETPACK_BIN`
+// that names none is no engine, never a fall-through to the lookup.
 fn jet_cli_find_engine_binary(name: String) -[FS, Env]> String? Never! {
+    jet_cli_find_engine_binary_for(name, cli_sys.executable())
+}
+
+// The same order with `jet` standing for the running jet: `jet test
+// --compiler=<jet>` finds the engine that ships beside the jet under test.
+fn jet_cli_find_engine_binary_for(name: String, jet: String) -[FS, Env]> String? Never! {
+    if name == JET_CLI_JETPACK_BINARY {
+        if jet_cli_named_engine() == .Val(named) -> return jet_cli_engine_candidate(named)
+    }
     dirs := [String]{}
-    if jet_cli_parent(cli_sys.executable()) == .Val(directory) -> &dirs.push(directory)
+    if jet_cli_parent(jet) == .Val(directory) -> &dirs.push(directory)
     if cli_sys.get("PATH") == .Val(path) {
         loop directory in path.split(":") -> &dirs.push(if directory == "" -> "." else -> directory)
     }
     loop directory in dirs {
-        candidate :: jet_cli_authority_path(directory, name)
-        if !cli_files.is_file(candidate) -> next
-        stat :: cli_files.stat(candidate) ?? next
-        if stat.is_symlink || (stat.mode.bit_and(73)) != 0 -> return Val(candidate)
+        if jet_cli_engine_candidate(jet_cli_authority_path(directory, name)) == .Val(found) -> return Val(found)
     }
     None
 }
 
-// E1228 `engine-missing` (`missing_engine_message`).
-fn jet_cli_missing_engine(engine: String, verb: String) -> JetDriverVerbOutput Never! {
+// The nonempty JETPACK_BIN, the engine named ahead of the lookup.
+fn jet_cli_named_engine() -[Env]> String? Never! {
+    named :: cli_sys.get(JET_CLI_JETPACK_BIN_ENV) ?? return None
+    if named == "" -> return None
+    Val(named)
+}
+
+// `candidate` when it is an executable regular file (or a symlink to one).
+fn jet_cli_engine_candidate(candidate: String) -[FS]> String? Never! {
+    if !cli_files.is_file(candidate) -> return None
+    stat :: cli_files.stat(candidate) ?? return None
+    if stat.is_symlink || (stat.mode.bit_and(73)) != 0 -> return Val(candidate)
+    None
+}
+
+// E1228 `engine-missing` (`missing_engine_message`). `named` is the
+// JETPACK_BIN path when that is what named no engine.
+fn jet_cli_missing_engine(engine: String, verb: String, named: String?) -> JetDriverVerbOutput Never! {
+    if named == .Val(path) {
+        what :: "`{verb}` needs the `{engine}` engine, and `{JET_CLI_JETPACK_BIN_ENV}` names `{path}`, which isn't an executable file"
+        why :: "`{JET_CLI_JETPACK_BIN_ENV}` names the engine ahead of the one beside `{JET_CLI_BINARY}` and on `PATH`, so jet doesn't look further"
+        fix :: "point `{JET_CLI_JETPACK_BIN_ENV}` at a built `{engine}` binary, or unset it to use the one shipped alongside `{JET_CLI_BINARY}`"
+        return jet_cli_report_output("", "E1228", what, why, fix, false, JET_DRIVER_EXIT_USER_ERROR)
+    }
     what :: "`{verb}` needs the `{engine}` engine, which isn't installed"
     why :: "`{verb}` is a jetpack engine verb — {JET_CLI_BINARY} execs `{engine}` for it rather than building package-manager logic into the compiler"
     fix :: "install the matching Jet toolchain (the `{engine}` binary ships alongside `{JET_CLI_BINARY}`)"
@@ -630,7 +663,7 @@ fn jet_cli_query_engine_protocol(bin: String) -[Exec, Time.Wait]> String? Never!
 // `dispatch`: find the engine, check its protocol version, then run it with
 // inherited stdio and return its exit code (a signal-ended engine exits 1).
 fn jet_cli_engine_dispatch(engine: String, verb: String, argv: [String]) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
-    bin :: jet_cli_find_engine_binary(engine) ?? return jet_cli_missing_engine(engine, verb)
+    bin :: jet_cli_find_engine_binary(engine) ?? return jet_cli_missing_engine(engine, verb, if engine == JET_CLI_JETPACK_BINARY -> jet_cli_named_engine() else -> None)
     reply :: jet_cli_query_engine_protocol(bin)
     if reply != Val(JET_CLI_VERSION) {
         return jet_cli_version_skew(engine, JET_CLI_VERSION, reply)

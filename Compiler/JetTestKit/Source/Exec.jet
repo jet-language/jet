@@ -65,6 +65,8 @@ fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
         name == "JET_FFI_CACHE_DIR" -> if env.trace_node != "" -> sys.get(name) else if env.ffi_cache != "" -> Val(env.ffi_cache) else -> Val(files.join(env.scratch, "ffi"))
         name == "TMPDIR" || name == "TMP" || name == "TEMP" -> Val(files.join(scratch, "tmp"))
         name == "JETPACK_ROOT" -> Val(files.join(scratch, "jetpack"))
+        // The `jet` under test runs its engine verbs with the run's jetpack.
+        name == "JETPACK_BIN" -> if env.jetpack != "" -> Val(env.jetpack) else -> sys.get(name)
         name == "JET_SCHEMA_CACHE_DIR" -> Val(files.join(scratch, "schema"))
         else -> sys.get(name)
     }
@@ -98,6 +100,7 @@ fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, over
             .env("TMP", kit_exec_base_value("TMP", env, scratch) ?? "")
             .env("TEMP", kit_exec_base_value("TEMP", env, scratch) ?? "")
             .env("JETPACK_ROOT", kit_exec_base_value("JETPACK_ROOT", env, scratch) ?? "")
+            .env("JETPACK_BIN", kit_exec_base_value("JETPACK_BIN", env, scratch) ?? "")
             .env("JET_SCHEMA_CACHE_DIR", kit_exec_base_value("JET_SCHEMA_CACHE_DIR", env, scratch) ?? "")
             .env("JET_TOOLCHAIN_ROOT", kit_exec_base_value("JET_TOOLCHAIN_ROOT", env, scratch) ?? "")
     }
