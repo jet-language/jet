@@ -18,8 +18,11 @@ tag=$1; tree=$2; jetdir=$3; suite=$4; shift 4
 sg=${SUITE_OUT:-$JET_SCRATCH_ROOT/lanes/Main/q/sg}
 B=$JET_BASE_ROOT
 # Test scratch and TMPDIR live under the state root: a slow-fsync scratch disk turns durable-state tests into
-# false 120 s timeouts (GoldC-3, 2026-10-31).
+# false 120 s timeouts (GoldC-3, 2026-10-31). A machine's JET_TEST_SCRATCH_DIR places the rows' scratch: keep it
+# on a disk that build output does not share (#6610 c4: a golden shard took 546 s beside the lanes' builds, 39 s
+# on another disk).
 fs=$JET_STATE_ROOT/scratch/Main/sgfs
+sc=${JET_TEST_SCRATCH_DIR:-$fs}/sc-$suite-$tag
 mkdir -p $sg/tmp $fs/tmp
 sha=$(awk 1 "$jetdir/COMMIT" 2>/dev/null || awk 1 "$tree/.chain-base" 2>/dev/null)
 jetpack=""
@@ -59,8 +62,8 @@ runner=${SUITE_RUNNER:-$sg/jet-$tag/jet}
 echo "runner: $runner"
 cd "$tree" || exit 1
 ID=$(awk 1 "$B/latest/IDENTITY")
-rm -rf "$fs/sc-$suite-$tag"
-mkdir -p "$fs/sc-$suite-$tag"
+rm -rf "$sc"
+mkdir -p "$sc"
 # The pool sizes itself: one entry per core while their memory claims (history peaks) fit the room under
 # the build slot's cgroup caps, which it reads itself (2026-11-01: a pool sized from the host's MemAvailable took
 # the machine into swap). SUITE_JOBS and SUITE_MEMORY (e.g. 8G) override the count and the budget.
@@ -68,7 +71,7 @@ pool=()
 [ -n "${SUITE_JOBS:-}" ] && pool+=("--jobs=$SUITE_JOBS")
 [ -n "${SUITE_MEMORY:-}" ] && pool+=("--memory=$SUITE_MEMORY")
 # Suite rows run host tools (C compilers, rustc, interpreters) that only jet-env supplies until jet does.
-JET_COMPILER_IDENTITY=$ID JET_TOOLCHAIN_ROOT=$PWD JET_TEST_SCRATCH_DIR=$fs/sc-$suite-$tag TMPDIR=$fs/tmp timeout 6800 \
+JET_COMPILER_IDENTITY=$ID JET_TOOLCHAIN_ROOT=$PWD JET_TEST_SCRATCH_DIR=$sc TMPDIR=$fs/tmp timeout 6800 \
   "$tree/Tools/agent/jet-env" "$runner" test Compiler --profile "$suite" "--compiler=$sg/jet-$tag/jet" "${pool[@]}" "$@" \
   > "$sg/$suite-$tag.txt" 2>&1
 rc=$?
