@@ -1,0 +1,51 @@
+// Card #6602: an `impl Debug` block in a type's body and a top-level
+// `impl T.Debug` mean the same thing, so `{x:Debug}` renders the authored
+// `debug()` for both spellings, on a struct, an enum, a generic type, and
+// inside a list, on every tier.
+struct NestedPoint {
+    x: Int
+    y: Int
+    impl Debug {
+        fn debug(^self) -> String { "NestedPoint<{self.x},{self.y}>" }
+    }
+}
+
+struct TopPoint {
+    x: Int
+    y: Int
+}
+
+impl TopPoint.Debug {
+    fn debug(^self) -> String { "TopPoint<{self.x},{self.y}>" }
+}
+
+enum Signal {
+    Go
+    Stop
+    impl Debug {
+        fn debug(^self) -> String {
+            if self == {
+                .Go -> "signal:go"
+                .Stop -> "signal:stop"
+            }
+        }
+    }
+}
+
+struct Labeled<T> {
+    value: T
+    impl Debug {
+        fn debug(^self) -> String { "labeled" }
+    }
+}
+
+fn run() {
+    nested :: NestedPoint{x: 1, y: 2}
+    top :: TopPoint{x: 3, y: 4}
+    print("{nested:Debug} {top:Debug}")
+    print("{Signal.Go:Debug} {Signal.Stop:Debug}")
+    labeled :: Labeled<Int>{value: 5}
+    print("{labeled:Debug}")
+    points :: [NestedPoint]{NestedPoint{x: 5, y: 6}, NestedPoint{x: 7, y: 8}}
+    print("{points:Debug}")
+}
