@@ -221,7 +221,7 @@ parser_parse_expression_dispatch_atom: fn(state: &JetParserState, depth: Int) ->
 parser_parse_expression_restricted: fn(state: &JetParserState, minimum: Int, depth: Int, allow_struct_lit: Bool, stop_before_comparison: Bool) -> ParsedExpr {
     if depth > MAX_EXPRESSION_DEPTH {
         span: parser_current(state).span
-        parser_add_error(state, span, "this expression is nested too deeply", "recursive expression parsing is bounded against adversarial nesting", "reduce the nesting depth")
+        parser_add_fatal_code(state, "E1403", span, "this expression is nested too deeply", "recursive expression parsing is bounded against adversarial nesting", "reduce the nesting depth")
         return ParsedExpr{expr: Expr.Unit{span: span, id: parser_node_id(state)}, span: span}
     }
 

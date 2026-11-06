@@ -61,7 +61,7 @@ ParsedType: struct {
 parser_parse_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
     if depth > 256 {
         span: parser_current(state).span
-        parser_add_error(state, span, "this type is nested too deeply", "type parsing is bounded against adversarial nesting", "reduce the nesting depth")
+        parser_add_fatal_code(state, "E1403", span, "this type is nested too deeply", "type parsing is bounded against adversarial nesting", "reduce the nesting depth")
         return ParsedType{ty: Type.Named{name: "__jet_error"}, span: span}
     }
 

@@ -484,7 +484,7 @@ parser_pattern_hole_shape_ok: fn(part: StringPart) -> Bool Never! {
 parser_parse_pattern: fn(state: &JetParserState, depth: Int, allow_named: Bool) -> ParsedPattern {
     if depth > 128 {
         span: parser_current(state).span
-        parser_add_error(state, span, "this pattern is nested too deeply", "pattern recursion is bounded against adversarial nesting", "reduce the pattern nesting depth")
+        parser_add_fatal_code(state, "E1403", span, "this pattern is nested too deeply", "pattern recursion is bounded against adversarial nesting", "reduce the pattern nesting depth")
         return ParsedPattern{pattern: Pattern.Variant{variant: "_", bindings: [PatSlot]{}, leading_dot: false, span: span}, span: span}
     }
     first: parser_parse_pattern_atom(state, depth + 1, allow_named)
