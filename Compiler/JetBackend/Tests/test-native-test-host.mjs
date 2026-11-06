@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 const repo=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
 const [outArg,hostedArg]=process.argv.slice(2);
 if (hostedArg === '--rust-reference') {
- console.log('test-host reference: parked: Rust reference retired (owner #38/#59); Tower #4923');
+ console.log('test-host reference: parked: Rust reference retired (owner #38/#59)');
  process.exit(0);
 }
 if(!outArg||!hostedArg||process.argv.length!==4)throw new Error('expected OUT HOSTED_JET');
@@ -35,9 +35,9 @@ for(const example of examples)for(const [policy,args]of policies){
   reportObserved=runs.every(run=>run.stdout.split('\n').some(line=>{try{const value=JSON.parse(line);return value.schema==='jet.test.v1'&&Array.isArray(value.tests)&&(policy==='filter'||value.tests.length>0);}catch{return false;}}));
  }
  const ok=reportObserved&&native.signal===null&&native.code===expectedCode;
- results.push({example,policy,ok,native:native.code,nativeSignal:native.signal,rustReference:'parked; Tower #4923'});
+ results.push({example,policy,ok,native:native.code,nativeSignal:native.signal,rustReference:'parked'});
  console.log(`${ok?'PASS':'FAIL'}\t${example}\t${policy}`);
  writeFileSync(join(out,'results.json'),JSON.stringify({examples,results,ok:results.every(row=>row.ok)},null,2)+'\n');
 }
-console.log('test-host reference: parked: Rust reference retired (owner #38/#59); Tower #4923');
+console.log('test-host reference: parked: Rust reference retired (owner #38/#59)');
 process.exitCode=results.every(row=>row.ok)?0:1;

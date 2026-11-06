@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [outArg, jetObject, hosted] = process.argv.slice(2);
 if (jetObject === "--rust-reference") {
-  console.log("test runtime Rust reference: parked: Rust reference retired (owner #38/#59); Tower #4923");
+  console.log("test runtime Rust reference: parked: Rust reference retired (owner #38/#59)");
   process.exit(0);
 }
 if (!outArg || !jetObject || !hosted || process.argv.length !== 5) throw new Error("usage: run-test-runtime.mjs OUT JET_ONLY_RUNTIME_OBJECT HOSTED_JET");

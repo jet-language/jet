@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, ...inputs] = process.argv.slice(2);
 if (inputs.includes('--rust-reference') || inputs.includes('--native')) {
-  console.log('alloc-parity seed comparison: parked: Rust reference retired (owner #38/#59); Tower #4923');
+  console.log('alloc-parity seed comparison: parked: Rust reference retired (owner #38/#59)');
   process.exit(0);
 }
 if (!output || !inputs.length) {
@@ -86,7 +86,7 @@ for (const test of [
       if (!result.stderr?.includes(part)) errors.push(`${test.name}/${tier}: diagnostic lacks ${JSON.stringify(part)}`);
     }
   }
-  console.log('alloc-parity seed comparison: parked: Rust reference retired (owner #38/#59); Tower #4923');
+  console.log('alloc-parity seed comparison: parked: Rust reference retired (owner #38/#59)');
   results.push(`${test.name}\t${errors.length === before ? 'PASS' : 'FAIL'}\t${test.status ?? ''}\t${test.signal ?? ''}`);
 }
 writeFileSync(join(out, 'alloc-parity.tsv'), 'case\tresult\tstatus\tsignal\n' + results.join('\n') + '\n');

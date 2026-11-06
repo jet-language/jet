@@ -11,7 +11,9 @@
 #include <string.h>
 #include <limits.h>
 typedef int64_t H;
-typedef struct { unsigned char *data; uint64_t len,cap; } Text;
+// A heap text is this 32-byte body behind its 8-byte owner word.
+typedef struct { unsigned char *data; int64_t len,cap,cache; } Text;
+_Static_assert(sizeof(Text)==32,"refcounted text body");
 enum { KEY_BYTES=16, KEY_KIND=0, KEY_PAYLOAD=8 };
 extern void jet_rt_alloc_init(void);
 extern H jet_rt_alloc(H,H);
@@ -50,7 +52,7 @@ static H key(H kind,H payload) {
 }
 static void renders(H value,const unsigned char *bytes,size_t length) {
     Text *(*routes[])(H)={jet_rt_handle_show_jet_key,jet_rt_handle_debug_jet_key,jet_rt_handle_display_jet_key};
-    for(size_t i=0;i<3;++i){Text *out=routes[i](value);assert(out->len==length&&!memcmp(out->data,bytes,length));jet_rt_string_drop(out);}
+    for(size_t i=0;i<3;++i){Text *out=routes[i](value);assert(out->len>=0&&(size_t)out->len==length&&!memcmp(out->data,bytes,length));jet_rt_string_drop(out);}
 }
 static void projection(H kind,H payload,const unsigned char *bytes,size_t length) {
     H a=key(kind,payload),b=jet_rt_handle_clone_jet_key(a);

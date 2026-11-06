@@ -15,7 +15,7 @@ const root = resolve(here, '../../..');
 const frozenExpected = join(here, 'FmtParityExpected.out');
 const [mode, output, checker] = process.argv.slice(2);
 if (mode === 'reference') {
-  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  console.log("parked: Rust reference retired (owner #38/#59)");
   process.exit(0);
 }
 if (!['prepare', 'compare'].includes(mode) || !output || (mode === 'compare' ? !checker || process.argv.length !== 5 : process.argv.length !== 4))
@@ -70,7 +70,7 @@ if (mode === 'prepare') {
   writeFileSync(join(out, 'source.jet'), jet);
   writeFileSync(join(out, 'fmt_source.jet'), readFileSync(join(root, 'Core/Text/Fmt.jet')));
   writeFileSync(join(out, 'package.jet'), 'name: "fmt_source_parity"\nversion: "0.0.1"\nedition: "2026"\n');
-  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  console.log("parked: Rust reference retired (owner #38/#59)");
   writeFileSync(join(out, 'expected.out'), readFileSync(frozenExpected));
   console.log(`fmt parity prepared: kernels=${kernels.length} cases=${cases.length}; expected bytes are the frozen FmtParityExpected.out; source/native comparison NOT RUN`);
 } else {

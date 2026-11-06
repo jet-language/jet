@@ -12,7 +12,7 @@ import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (mode === 'reference') {
-  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  console.log("parked: Rust reference retired (owner #38/#59)");
   process.exit(0);
 }
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run', 'render'].includes(mode)) throw Error('usage: run-world-sentry-fixtures.mjs OUT assemble|lower|audit|link|run|render');
@@ -54,7 +54,7 @@ if (mode === 'assemble') {
   }
 } else if (mode === 'link') {
   // Aggregated fixture.o already contains the complete Jet runtime.
-  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  console.log("parked: Rust reference retired (owner #38/#59)");
   command('link', nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/world-sentry-fixture.c'), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'world-sentry-fixture')]);
   command('logical-env-link', nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/LogicalEnvironmentTests.c'), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'logical-env-fixture')]);
   command('link-native-link', nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/LinkNativeTests.c'), join(unit, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'link-native-fixture')]);
@@ -70,7 +70,7 @@ if (mode === 'assemble') {
   } catch (error) { failures.push(error.message); }
   const referencePath = process.env.JET_SENTRY_LEDGER_REFERENCE ?? join(out, 'ledger-reference.jsonl');
   const nativePath = join(ledgers, 'return/ledger.jsonl'), stopPath = join(ledgers, 'stop/ledger.jsonl');
-  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  console.log("parked: Rust reference retired (owner #38/#59)");
   for (const [name, binary, args, path] of [['native', join(out, 'world-sentry-fixture'), ['ledger'], nativePath]]) {
     try { command(name, binary, args, { timeout: 30000, env: { ...process.env, JET_MEMORY_LEDGER: path } }); }
     catch (error) { failures.push(error.message); }

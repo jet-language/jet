@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {phase, W} from './s5-lib.mjs';
 import {readSharedPack} from './shared-publications.mjs';
+import {faultReportObject} from '../../packaging/fault-report-object.mjs';
 
 const P = phase('fixtures'), {D, start, blocked} = P;
 const node = process.execPath, T = 'Compiler/JetRuntime/Tests';
@@ -30,9 +31,9 @@ const registry = new Map(), executed = new Map();
 const parked = new Map();
 const driverDirectory = path.dirname(fileURLToPath(import.meta.url));
 for (const line of fs.readFileSync(path.join(driverDirectory, 'parked-modes.tsv'), 'utf8').trim().split('\n').slice(1)) {
-  const [runner, mode, lastReceipt, receiptScope, because, tower] = line.split('\t');
+  const [runner, mode, lastReceipt, receiptScope, because] = line.split('\t');
   if (!parked.has(runner)) parked.set(runner, []);
-  parked.get(runner).push({mode, verdict: 'UNCOVERED', because, tower, lastReceipt, receiptScope});
+  parked.get(runner).push({mode, verdict: 'UNCOVERED', because, lastReceipt, receiptScope});
 }
 if (!P.ready) {
   blocked('fixtures-prerequisites', 'successful same-pin build/runtime receipts are required');
@@ -76,7 +77,8 @@ add('run-native-layout', [r('run-native-layout', '--native', out('native-layout'
 const nfc = out('nfc-expected.scalars');
 const normalization = path.join(W, 'tests/data/unicode/NormalizationTest.txt');
 if (fs.existsSync(normalization)) {
-  const rows = fs.readFileSync(normalization, 'utf8').split('\n').filter(line => /^[0-9A-F]+;/.test(line));
+  // A data row's source column is one or more space-separated code points.
+  const rows = fs.readFileSync(normalization, 'utf8').split('\n').filter(line => /^[0-9A-F]+(?: [0-9A-F]+)*;/.test(line));
   if (hash(normalization) !== '5019ffd530751a741900c849c0e010332f142a3612234639bd200b82138a87db' || rows.length !== 20034) throw Error('official Unicode17 normalization input drift');
   const expected = rows.flatMap(line => {const columns = line.split(';').slice(0,5).map(col => col.trim().split(/\s+/).map(cp => Number.parseInt(cp,16).toString(16).toUpperCase()).join(' ')); return columns.map((_,index) => columns[index < 3 ? 1 : 3]);});
   fs.writeFileSync(nfc, expected.join('\n') + '\n');
@@ -122,9 +124,12 @@ const ownedWitness=new Set(['CAbiDriver','DisplayWitness','RootStdioWitness','Ho
 const dedicated=new Set([...Object.values(ui),'RootCleanupWitness','DataTreeWitness','ScalarReflectWitness','DataEventWitness','TaskVariantPanicWitness','IOWitness']);
 const witnesses=fs.readdirSync(path.join(W,T)).filter(file=>/Witness\.c$/.test(file)).map(file=>file.slice(0,-2)).filter(name=>!ownedWitness.has(name));
 witnesses.push('execution-fixture');
+// The runtime object imports jet_rt_fault_report, which Jet's linker writes
+// into each image; these platform links take it from the shared report source.
+const faultReport=faultReportObject(witnessDir);
 await pool(witnesses.map(name=>async()=>{
   if(!fs.existsSync(object)||!fs.existsSync(provenance))return blocked(`witness-build-${name}`,'no sealed Jet-only runtime object');
-  const built=await start(`witness-build-${name}`,['cc','-std=c11','-O1','-no-pie','-pthread',`${T}/${name}.c`,object,...sys,'-o',binary(name)],env);
+  const built=await start(`witness-build-${name}`,['cc','-std=c11','-O1','-no-pie','-pthread',`${T}/${name}.c`,object,faultReport,...sys,'-o',binary(name)],env);
   const golden=path.join(W,T,`${name}.stdout`);
   if(built&&!dedicated.has(name))await start(`witness-run-${name}`,[binary(name)],env,(code,row)=>code===0&&!row.signal&&(!fs.existsSync(golden)||fs.readFileSync(row.stdout).equals(fs.readFileSync(golden)))&&fs.readFileSync(row.stderr).length===0);
 }),Math.min(16,os.availableParallelism()));

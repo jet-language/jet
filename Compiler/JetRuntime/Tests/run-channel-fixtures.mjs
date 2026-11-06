@@ -14,7 +14,7 @@ const [output, mode] = process.argv.slice(2);
 const parkedModes = ['prepare-native', 'prepare-seed', 'link-seed', 'run-seed', 'cross', 'fatal-reference', 'perf-reference'];
 const modes = ['assemble', 'assemble-stm', 'assemble-sync', 'assemble-observe', 'assemble-publication', 'lower', 'link', 'link-stm', 'run-stm', 'link-sync', 'run-sync', 'link-observe', 'run-observe', 'link-publication', 'run-publication', 'link-weak', 'run-weak', 'run', 'fatal', 'perf'];
 if (parkedModes.includes(mode)) {
-  console.log(`${mode}: parked: Rust reference retired (owner #38/#59); Tower #4923`);
+  console.log(`${mode}: parked: Rust reference retired (owner #38/#59)`);
   process.exit(0);
 }
 if (!output || !modes.includes(mode)) throw Error(`usage: run-channel-fixtures.mjs OUT ${modes.join('|')}`);
@@ -100,7 +100,7 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
       writeFileSync(join(out, `${name}-${tier}.status.json`), JSON.stringify({status:result.status,signal:result.signal,error:result.error?.message})+'\n');
       if (result.error || result.status !== 1 || result.stdout !== '') failures.push(`${name}/${tier}: invalid fatal exit`);
     }
-    console.log('fatal-reference: parked: Rust reference retired (owner #38/#59); Tower #4923');
+    console.log('fatal-reference: parked: Rust reference retired (owner #38/#59)');
   }
   if (failures.length) throw Error(failures.join('\n'));
 } else if (mode === 'perf') {
@@ -116,8 +116,8 @@ if (mode === 'assemble' || mode.startsWith('assemble-')) {
   const median=t=>rows.filter(r=>r.tier===t).map(r=>r.ns).sort((a,b)=>a-b)[2];
   const jet=median('native');
   writeFileSync(join(out,'perf.tsv'),'round\ttier\tns\n'+rows.map(r=>`${r.round}\t${r.tier}\t${r.ns}`).join('\n')+'\n');
-  writeFileSync(join(out,'perf-summary.json'),JSON.stringify({messages:1000000,jet_median_ns:jet,provider:'Jet-only',rust_reference:'parked; Tower #4923'},null,2)+'\n');
-  console.log('perf-reference: parked: Rust reference retired (owner #38/#59); Tower #4923');
+  writeFileSync(join(out,'perf-summary.json'),JSON.stringify({messages:1000000,jet_median_ns:jet,provider:'Jet-only',rust_reference:'parked'},null,2)+'\n');
+  console.log('perf-reference: parked: Rust reference retired (owner #38/#59)');
 } else {
   const binary=join(out,'channel-native');
   const result=command(binary,[],{timeout:120000});
