@@ -511,6 +511,13 @@ x64_object_functions_threads: fn(program: ^X64ObjectModule, functions: ^[X64Comp
     import_rows := [String:Int]{}
     errors := [String]{}
     first_import: first_global + exports.len()
+    // A runtime call to a name this object exports (the runtime's own
+    // compiler-inserted calls, such as jet_rt_string_drop) binds to that
+    // export's global: one symbol per name, never also an undefined one.
+    export_rows := [String:Int]{}
+    loop (index, entry_row) in exports {
+        if (export_rows.get(entry_row.symbol) ?? -1) < 0 -> &export_rows.add(entry_row.symbol, first_global + index).drop("checked absent above")
+    }
     loop part in parts {
         rows := x64_object_text_part_take(part)
         &errors.extend(rows.errors)
@@ -520,19 +527,24 @@ x64_object_functions_threads: fn(program: ^X64ObjectModule, functions: ^[X64Comp
         }
         globals := [Int]{}
         loop symbol in rows.imports {
+            export_symbol: export_rows.get(symbol) ?? -1
+            if export_symbol >= 0 {
+                &globals.push(export_symbol)
+                next
+            }
             found := import_rows.get(symbol) ?? -1
             if found < 0 {
                 found = imports.len()
                 &imports.push(symbol)
                 &import_rows.add(symbol, found).drop("checked absent above")
             }
-            &globals.push(found)
+            &globals.push(first_import + found)
         }
         base: if own_sections -> 0 else -> rela_text.len()
         if !own_sections -> &rela_text.extend(rows.relas)
         // The symbol is the high word of the entry's info (bytes 12..15).
         loop (at_index, at) in rows.runtime_at {
-            symbol: first_import + globals[rows.runtime_local[at_index]]
+            symbol: globals[rows.runtime_local[at_index]]
             loop shift in 0..<4 {
                 byte: U8{(symbol >> (8 * shift)).bit_and(255)}
                 if {
