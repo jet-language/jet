@@ -61,23 +61,23 @@ fn build_error(inputs: Inputs) -> String Never! {
 // c28: membership comes from the registries and the route facts.
 
 #Test("a removed Core fn, dispatcher arm, receiver method or struct field unroutes its row") {
-    inputs :: tree_inputs([String]{"core.text.byte_count", "core.reactive.signal"})
+    inputs :: tree_inputs([String]{"core.text.byte_count", "core.reflect.of"})
     clean :: built(inputs)
     assert_eq(validate_manifest(clean).join("\n"), "")
     assert_eq(row_of(clean, "module:core.text.byte_count").status, "covered")
-    assert_eq(row_of(clean, "module:core.reactive.signal").status, "covered")
-    assert(route_text(row_of(clean, "module:core.reactive.signal").surface.route).starts_with("ir-core-call "))
+    assert_eq(row_of(clean, "module:core.reflect.of").status, "covered")
+    assert(route_text(row_of(clean, "module:core.reflect.of").surface.route).starts_with("ir-core-call "))
     assert_eq(row_of(clean, "receiver:Condition.notify_all").status, "missing")
     assert_eq(row_of(clean, "field:BuildGraph.action_keys").status, "missing")
     broken := inputs.copy()
     broken.core_sources = edited(broken.core_sources, "Core/Text/Text.jet", "fn byte_count(text: String)", "fn byte_count_gone(text: String)")
     broken.core_sources = edited(broken.core_sources, "Core/Tasks/Tasks.jet", "fn notify_all(self)", "fn notify_all_gone(self)")
     broken.core_sources = edited(broken.core_sources, "Core/Build/Build.jet", "    action_keys: [BuildGraphActionKey]\n", "    action_keys_gone: [BuildGraphActionKey]\n")
-    broken.route_files = edited(broken.route_files, BUILD_ROUTES_PATH, "if name == \"jet_std::JetSignal::new\" -> return ir_reactive_signal(", "if name == \"jet_std::JetSignal::gone\" -> return ir_reactive_signal(")
+    broken.route_files = edited(broken.route_files, BUILD_ROUTES_PATH, "if symbol == \"jet_reflect_of\" -> return ir_reflect_of(", "if symbol == \"jet_reflect_gone\" -> return ir_reflect_of(")
     moved :: built(broken)
     assert_eq(validate_manifest(moved).join("\n"), "")
     assert_eq(moved.rows.len(), clean.rows.len())
-    ids :: [String]{"module:core.text.byte_count", "module:core.reactive.signal", "receiver:Condition.notify_all", "field:BuildGraph.action_keys"}
+    ids :: [String]{"module:core.text.byte_count", "module:core.reflect.of", "receiver:Condition.notify_all", "field:BuildGraph.action_keys"}
     loop id in ids {
         row :: row_of(moved, id)
         assert_eq("{id} {row.status}", "{id} unrouted")

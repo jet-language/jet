@@ -145,6 +145,22 @@ fn text(value: String) -> UINode Never! {
     transfer_node(value, width, 1.0, Val(UIAriaRole.Label), UINodeKind.Text, [UINode]{}, None)
 }
 
+// A button sized to its label plus two cells of padding on each side. The
+// callback form `button(display) { … }` registers its click handler through
+// the compiler's retained-closure emission.
+fn button(display: String) -> UINode Never! {
+    width :: Float{tui_text.display_width(display)} + 4.0
+    transfer_node(display, width, 1.0, Val(UIAriaRole.Button), UINodeKind.Button, [UINode]{}, None)
+}
+
+// A text input over `state` with its IME mode. The host provider fills the
+// IME slot, which the audited node transfer leaves absent.
+fn text_input(state: String, ime: UIIMEMode) -> UINode Never! {
+    #Unsafe("Core UI text input: the provider sets the explicitly requested IME slot") {
+        return core.ui.__text_input(state, ime)
+    }
+}
+
 fn desktop() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Desktop, width: 1280, height: 800, scale: 1} }
 fn phone() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Phone, width: 390, height: 844, scale: 2} }
 fn tablet() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Tablet, width: 834, height: 1119, scale: 2} }

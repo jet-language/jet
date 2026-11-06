@@ -931,8 +931,10 @@ fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], typ
     reflect := sema_call_try_reflect_core_call(record, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if reflect.handled -> return reflect
 
-    models := sema_call_try_compute_models_core_call(record, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if models.handled -> return SemaDirectSpecialCheck{handled: true, value: models.value}
+    // D-COMPUTE-AUTODIFF1=D: every `core.compute` call is recorded before any
+    // route returns, so a source-owned member stays visible to the autodiff
+    // trace check exactly like a transform.
+    _ := sema_compute_record_core_call(record, span, &context)
 
     reactive := sema_call_try_reactive_core_call(record.module_name, record.member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if reactive.handled -> return reactive
@@ -945,9 +947,6 @@ fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], typ
 
     service := sema_call_try_service_core_call(record.module_name, record.member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if service.handled -> return service
-
-    ui := sema_call_try_ui_core_call(record.module_name, record.member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if ui.handled -> return ui
 
     SemaDirectSpecialCheck{handled: false, value: None}
 }
@@ -982,15 +981,19 @@ fn sema_call_core_direct_checked(call: Call, expected: Type?, environment: SemaS
     }
     guard := sema_call_try_scope_guard(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if guard.handled -> return guard
-    mount := sema_call_try_ui_mount(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if mount.handled -> return mount
+    ui := sema_call_try_ui_core_call(module_name, member, alias, call.name_span, call.args, call.type_args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if ui.handled -> return ui
     decode := sema_call_try_args_decode(module_name, member, alias, call.name_span, call.args, call.type_args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if decode.handled -> return decode
+    form := sema_call_try_web_form(module_name, member, alias, call.name_span, call.args, call.type_args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if form.handled -> return form
+    transform := sema_call_try_compute_transform(module_name, member, alias, call.name_span, call.args, call.type_args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if transform.handled -> return transform
     live := sema_call_try_live(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if live.handled -> return live
-    // `reactive.derived/computed/autorun` are retained-closure calls with no
-    // Core call record: they check here, not by route.
-    if module_name == "core.reactive" && (member == "derived" || member == "computed" || member == "autorun") {
+    // `reactive.signal/derived/computed/autorun` have no Core call record:
+    // they check here, not by route.
+    if module_name == "core.reactive" && (member == "signal" || member == "derived" || member == "computed" || member == "autorun") {
         return sema_call_try_reactive_core_call(module_name, member, call.args, call.type_args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     sema_call_core_crypto_expert_gate(module_name, member, call.name_span, context, &diagnostics)

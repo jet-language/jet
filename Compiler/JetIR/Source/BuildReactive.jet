@@ -86,15 +86,6 @@ fn ir_reactive_cell_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, val
     cell
 }
 
-// `reactive.signal(value)`: a new cell at version 0.
-fn ir_reactive_signal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
-    if ir_reactive_kind(p, ty) != .Val("Signal") -> return ir_fail_slot(&b, span, "reactive.signal producing {ir_type_name(ty)}")
-    if args.len() != 1 -> return ir_fail_slot(&b, span, "reactive.signal with {args.len()} arguments")
-    int_row :: ir_type_row(&m, Type.Int) ?? return ir_type_fail(&b, span, Type.Int)
-    version :: ir_int_constant(&m, &b, int_row, 0)
-    ir_reactive_cell_new(&m, p, &b, ty, args[0], version, span)
-}
-
 fn ir_reactive_field_value(fields: [BodyStructFieldValue], name: String) -> Int? Never! {
     loop field in fields {
         if field.field.name == name -> return Val(field.value)

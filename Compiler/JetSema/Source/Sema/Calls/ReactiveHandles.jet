@@ -11,6 +11,7 @@ use jet_foundation.[
     FunctionDefaultRef,
     ParamZone,
     Span,
+    SymbolID,
     Type,
     expr_span,
     type_name,
@@ -177,9 +178,12 @@ fn sema_reactive_derived_value(member: String, type_args: [Type], span: Span, ex
     SemaDirectSpecialCheck{handled: true, value: value}
 }
 
+// `reactive.signal(value)` has no Core registry row: sema types the element
+// and rewrites the call into the Core source function `signal<T>`.
 fn sema_reactive_signal_value(type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, args: [CallArg], diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    record :: sema_reactive_core_record("core.reactive", "signal", args, span, &diagnostics) ?? {
+    if args.len() != 1 {
         _ := sema_reactive_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_call_arity_diagnostic("core.reactive.signal", 1, args.len(), false, span))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if !sema_call_core_check_type_args("core.reactive", "signal", 1, true, type_args, span, &diagnostics) {
@@ -191,8 +195,12 @@ fn sema_reactive_signal_value(type_args: [Type], span: Span, expected: Type?, en
     if !sema_reactive_value_ok(value.ty, "signal", args[0].span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     element := if expected_element == .Val(required) -> required else -> sema_call_resolved_type(value.ty, environment, program)
     result_type := Type.Apply{name: "Signal", args: [Type]{element}}
-    value_out :: sema_reactive_core_call_value(record, [TExpr]{value}, span, [Type]{element}, result_type, expected, environment, program, &scopes, &context, &diagnostics)
-    SemaDirectSpecialCheck{handled: true, value: value_out}
+    identity :: sema_call_core_module_identity(environment, program, "core.reactive") ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    target :: sema_call_core_source_target(environment, program, identity, "signal", [Type]{element}, span, false, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    argument := TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    call := sema_tree_node(result_type, TExprKind.Call{callee: callee, type_args: target.type_args, args: [TCallArg]{argument}}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(call, expected, environment, program, &diagnostics)}
 }
 
 fn sema_reactive_loadable_value(member: String, type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, args: [CallArg], diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
