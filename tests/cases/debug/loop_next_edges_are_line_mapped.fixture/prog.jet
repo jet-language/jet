@@ -1,0 +1,21 @@
+fn run() {
+    hits := 0
+    loop i in 0..<3 {
+        if i == 1 {
+            next
+        }
+        hits += i
+    }
+    outer_hits := 0
+    inner_hits := 0
+    outer :: loop i in 0..<3 {
+        loop j in 0..<3 {
+            if j == 1 {
+                next(outer)
+            }
+            inner_hits += 1
+        }
+        outer_hits += 1
+    }
+    print("{hits},{inner_hits},{outer_hits}")
+}
