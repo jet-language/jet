@@ -25,10 +25,16 @@ CompilerServiceError: struct {
     detail: String
 }
 
-// The sibling `jet` binary next to the running `jetpack` process, falling
-// back to a bare PATH lookup (the reverse of the compiler's
+// The `jet` a harness names for the run (the jetpack profile, check.sh and the
+// case runner set it to the compiler under test).
+ENV_JET_COMPILER: "JET"
+
+// The compiler that answers the service: the one `JET` names, else the
+// sibling `jet` next to the running `jetpack` process, else a bare PATH
+// lookup as the last resort (the reverse of the compiler's
 // same-directory-then-PATH engine search).
 envmodel_find_jet_binary: fn() -[FS, Env]> String Never! {
+    if sys.get(ENV_JET_COMPILER) == .Val(named) && named != "" && files.is_file(named) -> return named
     exe: sys.executable()
     if exe != "" {
         name: if sys.is_windows() -> "jet.exe" else -> "jet"

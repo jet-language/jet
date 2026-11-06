@@ -149,11 +149,12 @@ pkg_test_mcp_json_number: fn(text: String) -> Bool {
     }
 }
 
-// MCP.rs valid_json_number bounded integers to Rust `i64`; the 64-bit
-// boundary lexemes stay listed so that bound remains visible.
-#Test("mcp json numbers keep the i64 and finite float bounds") {
-    accepted: [String]{"0", "-0", "7", "9223372036854775807", "-9223372036854775808", "1.5", "-2.5e3", "1E+2"}
+// MCP.rs valid_json_number bounded integers to Rust `i64`; Jet's `Int` is
+// arbitrary precision, so integer lexemes past the 64-bit boundary read
+// exactly. The boundary lexemes stay listed so that change remains visible.
+#Test("mcp json numbers read integers exactly and keep the finite float bound") {
+    accepted: [String]{"0", "-0", "7", "9223372036854775807", "-9223372036854775808", "9223372036854775808", "-9223372036854775809", "1.5", "-2.5e3", "1E+2"}
     loop text in accepted -> assert(pkg_test_mcp_json_number(text), "{text} is a valid JSON number")
-    refused: [String]{"9223372036854775808", "-9223372036854775809", "01", "-", "1.", ".5", "1e", "1e400", "+1", "0x10"}
+    refused: [String]{"01", "-", "1.", ".5", "1e", "1e400", "+1", "0x10"}
     loop text in refused -> assert(!pkg_test_mcp_json_number(text), "{text} is not a valid JSON number")
 }
