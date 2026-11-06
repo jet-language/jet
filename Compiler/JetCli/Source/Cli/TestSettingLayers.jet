@@ -81,7 +81,8 @@ jet_cli_test_setting_source: fn(settings: [TestSetting], name: String) -> String
 // The combinations no run can carry out, refused before anything builds:
 // `list` runs nothing and a slice blesses only part of the rows, so neither
 // takes `update_snapshots`; a corpus-pool setting needs a corpus suite
-// (`corpus`: the run has one); a `cases` file must be readable and a
+// (`corpus`: the run has one); `iterations` and `seed` steer the generated
+// grade, so each needs `grade`; a `cases` file must be readable and a
 // `results` file writable before any test runs.
 jet_cli_test_settings_refusal: fn(settings: [TestSetting], corpus: Bool, color: Bool) -[FS]> JetCLIPlan? Never! {
     update: test_settings_on(settings, "update_snapshots")
@@ -96,6 +97,10 @@ jet_cli_test_settings_refusal: fn(settings: [TestSetting], corpus: Bool, color: 
     loop setting in settings {
         if corpus || setting.value == "false" || !JET_CLI_TEST_CORPUS_SETTINGS.contains(setting.name) -> next
         return Val(jet_cli_fail("E2104", "`{setting.name}` ({setting.source}) steers the corpus suites, and this run has none", jet_cli_why("E2104"), "drop `{test_setting_flag(setting.name)}`, or run a test profile whose suites include a golden, ui or cases corpus", color, JET_DRIVER_EXIT_USAGE))
+    }
+    loop name in JET_CLI_TEST_GENERATED_SETTINGS {
+        if test_settings_get(settings, "grade") != None || test_settings_get(settings, name) == None -> next
+        return Val(jet_cli_fail("E2104", "`{name}` ({jet_cli_test_setting_source(settings, name)}) steers the generated grade, and this run has no `grade`", jet_cli_why("E2104"), "add `--grade=generated`, or drop `{test_setting_flag(name)}`", color, JET_DRIVER_EXIT_USAGE))
     }
     if test_settings_get(settings, "cases") == .Val(list) {
         _: cli_files.read(list) ?? return Val(jet_cli_fail("E2104", "the `cases` file `{list}` ({jet_cli_test_setting_source(settings, "cases")}) can't be read: {err}", jet_cli_why("E2104"), "name a file that lists one test name or corpus row id per line", color, JET_DRIVER_EXIT_USER_ERROR))
@@ -260,6 +265,28 @@ jet_cli_test_settings_apply: fn(options: &JetCLITestOptions, settings: [TestSett
     options.serial = test_settings_on(settings, "serial") || options.measure
     options.trace_tiers = test_settings_on(settings, "trace_tiers")
     options.settings = settings.copy() // copy: the caller's decided list stays its own.
+}
+
+// The settings that steer the generated grade alone (D-CLAIM1=C).
+JET_CLI_TEST_GENERATED_SETTINGS: [String]{"iterations", "seed"}
+
+// The case budget of each property test under the generated grade: the
+// `iterations` setting, 1000 when unset; None when the run has no `grade`
+// (each property then keeps its default budget).
+jet_cli_test_generated_iterations: fn(settings: [TestSetting]) -> String? Never! {
+    if test_settings_get(settings, "grade") == None -> return None
+    Val(test_settings_get(settings, "iterations") ?? "1000")
+}
+
+// The base seed of every property test under the generated grade: the
+// `seed` setting, else JET_PROP_SEED when `inherited` (the caller's
+// environment names one, so None keeps it), else the fixed 0; None when the
+// run has no `grade` (each property then seeds itself).
+jet_cli_test_generated_seed: fn(settings: [TestSetting], inherited: Bool) -> String? Never! {
+    if test_settings_get(settings, "grade") == None -> return None
+    if test_settings_get(settings, "seed") == .Val(seed) -> return Val(seed)
+    if inherited -> return None
+    Val("0")
 }
 
 // The verdict row of one claim outcome: PASS or FAIL, KNOWN-FAILING and

@@ -29,11 +29,11 @@ one exists instead of adding another spelling for the same job.
 | `JET_FFI_CACHE_DIR` | path | Overrides the hidden Rust FFI bridge cache directory. |
 | `JET_ENV_DISABLE` | any non-empty value | D-ENVHOOK1 escape for `jet env hook`; suppresses automatic activation in the current shell and drops environment that hook already activated. |
 | `JET_FUZZ_CORPUS` | path | Overrides the fuzz corpus directory. |
-| `JET_FUZZ_ITERATIONS` | non-negative integer | Sets the generated fuzz-case limit. |
+| `JET_FUZZ_ITERATIONS` | positive integer | Sets the generated fuzz-case limit: the cases each property test runs (200 when unset). `jet test --grade=generated --iterations=<n>` sets it on the test harness (1000 when `--iterations` is unset). |
 | `JET_FUZZ_SEED` | unsigned integer | Makes fuzz generation reproducible. |
 | `JET_FUZZ_TIME_MS` | non-negative integer | Sets the fuzz time budget in milliseconds. |
 | `JET_KEYS_DIR` | path | Overrides the signing-key directory used by publishing and secrets tooling. |
-| `JET_PROP_SEED` | integer from 0 to 2^63-1 | Replays a property-test run with the seed its failure report printed. `jet prove` runs every property from this seed, else from one derived from the program's inputs, and names it in each property row as `effectiveSeed`. |
+| `JET_PROP_SEED` | integer from 0 to 2^63-1 | Replays a property-test run with the seed its failure report printed. `jet test --grade=generated --seed=<n>` sets it on the test harness (the fixed 0 when `--seed` is unset and the caller sets none). `jet prove` runs every property from this seed, else from one derived from the program's inputs, and names it in each property row as `effectiveSeed`. |
 | `JET_RAYLIB_CAPTURE` | path | Writes each frame that `core.game.raylib.end_drawing` presents to the path as a PAM (P7, RGB_ALPHA) image of the canvas. |
 | `JET_RAYLIB_DISPLAY` | `1` | Enables the real raylib display bridge; without it the bridge stays headless. |
 | `JET_REGISTRY_CACHE_DIR` | path | Overrides the local registry-index cache. |

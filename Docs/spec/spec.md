@@ -3758,15 +3758,20 @@ parameter type must be generatable: `Int`, a sized integer, an inline range,
 `Float`, `Float32`, `Bool`, `Char`, `String`, or a list, fixed list, or
 optional of a generatable type; any other type reports E0613. `jet test` runs
 the body on 200 generated cases, each behind the same unwind boundary as a
-claim. Every generated value comes from one recorded sequence of bounded
+claim; the generated grade, `jet test --grade=generated`, runs each property
+on `--iterations=<n>` cases instead (1000 when unset) from the base seed
+`--seed=<n>` (the fixed 0 when unset, unless `JET_PROP_SEED` names one), so a
+graded run is reproducible; `iterations` or `seed` without `grade` is refused.
+Every generated value comes from one recorded sequence of bounded
 choices. The first failing case is shrunk: spans of choices are deleted and
 single choices lowered while the case still fails, so integers move toward
 zero and lists toward fewer, simpler elements. The failure report names the
 failing case, the run seed, the minimized inputs (`minimized_inputs: n = 50`,
 each parameter as `name = value` in Debug form), and the minimized case's own
 report; only that case's output is
-captured. A seed is fresh entropy unless `JET_PROP_SEED` (an integer from 0 to
-2^63-1) names one; rerunning with the printed seed reproduces the run.
+captured. Outside the generated grade a seed is fresh entropy unless
+`JET_PROP_SEED` (an integer from 0 to 2^63-1) names one; rerunning with the
+printed seed reproduces the run.
 (D-TEST1)
 
 For an explicit file, `jet test <file.jet>` builds one generated AOT harness for

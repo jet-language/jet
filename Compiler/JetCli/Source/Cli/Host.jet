@@ -1815,6 +1815,14 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     if options.shuffle_seed == .Val(seed) -> spec = spec.env("JET_TEST_SHUFFLE_SEED", seed)
     if options.serial -> spec = spec.env("JET_TEST_SERIAL", "1")
     if options.trace_tiers -> spec = spec.env("JET_TEST_TRACE_TIERS", "1")
+    // The generated grade runs each property test's `iterations` cases
+    // (default 1000) in place of its default budget, from the base `seed`
+    // (default the fixed 0, unless the caller's JET_PROP_SEED names one), so
+    // a graded run is reproducible (TestProperty.jet).
+    iterations: jet_cli_test_generated_iterations(options.settings)
+    if iterations == .Val(count) -> spec = spec.env("JET_FUZZ_ITERATIONS", count)
+    generated_seed: jet_cli_test_generated_seed(options.settings, cli_sys.get("JET_PROP_SEED") != None)
+    if generated_seed == .Val(seed) -> spec = spec.env("JET_PROP_SEED", seed)
     spec = spec.env("JET_TEST_CAPTURE", options.capture)
     if measure != None -> spec = spec.env("JET_TEST_MEASURE", "1")
     // Under `jet prove --capture-sensitive` the tests read the user's
@@ -1831,7 +1839,7 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     reuse := JetCLITestReuse?{None}
     if !options.update_snapshots && measure == None && !code_suite && cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) == None {
         names: (loop test in native_tests -> test.key).join(",")
-        settings: "{options.filter ?? "-"}\n{options.shuffle_seed ?? "-"}\n{options.serial}\n{options.trace_tiers}\n{options.capture}\n{options.project_root ?? "-"}\n{options.docs}\n{limit_setting ?? -1}\n{names}\n{check_names.join(",")}"
+        settings: "{options.filter ?? "-"}\n{options.shuffle_seed ?? "-"}\n{options.serial}\n{options.trace_tiers}\n{options.capture}\n{options.project_root ?? "-"}\n{options.docs}\n{limit_setting ?? -1}\n{iterations ?? "-"}\n{generated_seed ?? "-"}\n{names}\n{check_names.join(",")}"
         reuse = jet_cli_test_reuse_at(root, binary, settings, records_path)
     }
     how := JetCLITestReuseHow.Plain
