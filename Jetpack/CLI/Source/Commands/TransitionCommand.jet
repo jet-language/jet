@@ -1,0 +1,95 @@
+// `jet split env|package <name>|hosts <name> [--check]` and `jet fold <file>
+// [--check]` (Rust Source/main.rs run_split/run_fold): one reversible
+// package source transition in the current directory's Package root, planned
+// and applied by Jetpack/Environment Transition. `--check` previews the plan
+// without writing; `--json` prints the status object.
+
+fn cli_cmd_split(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+    if parsed.positional.len() == 0 {
+        theme.error_coded("E2104", "`jet split` needs a target", "a split moves one named fact out of `package.jet`, so it has to know which one", "use `jet split env`, `jet split package <name>`, or `jet split hosts <name>`")
+        return EXIT_USAGE
+    }
+    kind :: parsed.positional[0]
+    if kind != "env" && kind != "package" && kind != "hosts" {
+        theme.error_coded("E2101", "unknown split target `{kind}`", "`jet split` moves an environment, a member Package, or a host System out of `package.jet`", "use `jet split env`, `jet split package <name>`, or `jet split hosts <name>`")
+        return EXIT_USAGE
+    }
+    if kind != "env" && parsed.positional.len() < 2 {
+        role :: if kind == "package" -> "a Package name" else -> "a host name"
+        theme.error_coded("E2104", "`jet split {kind}` needs {role}", "a split moves one named fact out of `package.jet`, so it has to know which one", "use `jet split {kind} <name>`")
+        return EXIT_USAGE
+    }
+    target :: if kind == {
+        "env" -> SplitTarget.Environment
+        "package" -> SplitTarget.Package(parsed.positional[1])
+        else -> SplitTarget.Hosts(parsed.positional[1])
+    }
+    check_only :: parsed.flags.transition_check
+    if env_transition_split(cli_current_dir(), target, check_only) == {
+        .Ok(result) -> cli_transition_result(TRANSITION_SPLIT_VERB, result, check_only, parsed.flags.json)
+        .Err(error) -> cli_transition_error(theme, error)
+    }
+}
+
+fn cli_cmd_fold(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+    if parsed.positional.len() == 0 {
+        theme.error_coded("E2104", "`jet fold` needs a generated transition path", "a fold reverses the one split that generated that file", "use `jet fold package/env.jet` or `jet fold packages/<name>/package.jet`")
+        return EXIT_USAGE
+    }
+    path :: parsed.positional[0]
+    check_only :: parsed.flags.transition_check
+    if env_transition_fold(cli_current_dir(), path, check_only) == {
+        .Ok(result) -> cli_transition_result(TRANSITION_FOLD_VERB, result, check_only, parsed.flags.json)
+        .Err(error) -> cli_transition_error(theme, error)
+    }
+}
+
+// The changed files, the package graph fingerprints, and either the preview
+// notice or the journal that a later fold reverses.
+fn cli_transition_result(verb: String, result: TransitionResult, check_only: Bool, json: Bool) -[IO]> Int Never! {
+    summary :: result.summary
+    if json {
+        changes := [Dyn]{}
+        loop change in summary.changes {
+            &changes.push(report_status_object(StatusFields.new().with("path", Dyn.Text(change.path)).with("action", Dyn.Text(change.action.as_str()))))
+        }
+        print(report_render_status(verb, true, StatusFields.new()
+            .with("operation", Dyn.Text(summary.operation))
+            .with("check", Dyn.Bool(check_only))
+            .with("before", Dyn.Text(summary.before_fingerprint))
+            .with("after", Dyn.Text(summary.after_fingerprint))
+            .with("journal", Dyn.Text(summary.journal))
+            .with("changes", Dyn.Array(changes))) ?? return cli_status_encoding_error(err))
+        return EXIT_OK
+    }
+    loop change in summary.changes {
+        action :: change.action.as_str()
+        if check_only -> print("Would {action}: {change.path}") else -> print("{action}d {change.path}.")
+    }
+    if summary.before_fingerprint == summary.after_fingerprint {
+        print("package graph unchanged: {summary.after_fingerprint}")
+    } else {
+        print("package graph before: {summary.before_fingerprint}")
+        print("package graph after: {summary.after_fingerprint}")
+    }
+    if check_only -> print("No files changed.") else -> print("Transition journal: {summary.journal}")
+    EXIT_OK
+}
+
+// A refused transition, coded by what it refused: a retired manifest
+// (E1226), a destination that already exists (E1252), a journal that no
+// longer matches the files (E1204), or a Package input without the required
+// typed shape (E1215).
+fn cli_transition_error(theme: Theme, error: EnvironmentError) -[IO, Time.Wait]> Int Never! {
+    message :: error.message()
+    if message.contains("pkg.jet") || message.contains("retired") {
+        theme.error_coded("E1226", message, "the package transition accepts only the current package manifest and its recorded migration path", "rename the retired manifest to `package.jet`, or run `jet init --check` in the project root")
+    } else if message.contains("already exists") {
+        theme.error_coded("E1252", message, "a transition never overwrites an existing package manifest or generated role file", "review the existing file, or run the transition in an empty package root")
+    } else if message.contains("journal") || message.contains("fingerprint") {
+        theme.error_coded("E1204", message, "a recorded package transition no longer matches the files on disk, so Jet refuses a stale or tampered replay", "restore the recorded files or remove the stale transition journal and make a fresh checked transition")
+    } else {
+        theme.error_coded("E1215", message, "the package manifest or transition input does not have the required typed shape", "fix the named package or role file, then rerun the transition with `--check` first")
+    }
+    EXIT_USER_ERROR
+}

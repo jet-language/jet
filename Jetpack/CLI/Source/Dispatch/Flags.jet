@@ -76,6 +76,8 @@ struct CLIFlags {
     read_only: Bool
     // `secrets keygen --force` overwrites an existing identity.
     force: Bool
+    // `split|fold --check` previews the transition without writing.
+    transition_check: Bool
 
     fn empty() -> CLIFlags Never! {
         CLIFlags{
@@ -118,6 +120,7 @@ struct CLIFlags {
             hangar_repair: false,
             read_only: false,
             force: false,
+            transition_check: false,
         }
     }
 }
@@ -201,6 +204,7 @@ fn cli_parse_args_for(verb: String, args: [String]) -> CLIParsed Never! {
             arg == "--read-only" -> flags.read_only = true
             arg == SECRETS_FLAG_FORCE -> flags.force = true
             arg == "--adapt" -> flags.adapt = true
+            (verb == TRANSITION_SPLIT_VERB || verb == TRANSITION_FOLD_VERB) && arg == TRANSITION_FLAG_CHECK -> flags.transition_check = true
             arg == "--json" -> flags.json = true
             arg == BUILD_FLAG_SHELL_ON_FAIL -> flags.shell_on_fail = true
             arg == TRUST_FLAG_SCOPE -> {
@@ -325,6 +329,7 @@ fn cli_verb_flags(verb: String) -> [String] Never! {
         SECRETS_SUBCOMMAND -> [String]{SECRETS_FLAG_FORCE}
         TOOL_SUBCOMMAND -> [String]{"{TOOL_FLAG_AS} <name>"}
         BROWSER_SUBCOMMAND -> [String]{"{BROWSER_FLAG_BINARY} <path>", "{BROWSER_FLAG_VERSION} <version>", "{BROWSER_FLAG_PROTOCOL} <protocol>"}
+        TRANSITION_SPLIT_VERB | TRANSITION_FOLD_VERB -> [String]{TRANSITION_FLAG_CHECK}
         else -> [String]{}
     }
     out := [String]{}
