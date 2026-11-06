@@ -96,6 +96,8 @@ for (const [runner,witness] of [['run-root-cleanup','RootCleanupWitness'],['run-
 add('run-record-variant-panic',[r('run-record-variant-panic',out('record-variant-panic'),...['DataTreeWitness','DataEventWitness','TaskVariantPanicWitness'].map(binary))],['DataTreeWitness','DataEventWitness','TaskVariantPanicWitness'].map(binary));
 add('run-io-witness',[r('run-io-witness',binary('IOWitness'))],[binary('IOWitness')]);
 add('run-execution-fixtures',[r('run-execution-fixtures',binary('execution-fixture'))],[binary('execution-fixture')]);
+modes('run-alloc-cache-witness', ['assemble','lower','audit','link','run'], front);
+add('run-tdigest-witness',[r('run-tdigest-witness',out('tdigest-witness'),object)],runtime);
 
 // Generator runners operate only in fresh writable data copies outside W.
 for (const runner of ['generate-ed25519-headers','generate-rfc8032-fixtures']) {
@@ -120,7 +122,10 @@ async function pool(tasks,width) {const queue=[...tasks];await Promise.all(Array
 const width=Number(process.env.S5_FIXTURE_WIDTH??6);
 if(!Number.isInteger(width)||width<2||width>6)throw Error('fixture width must be2..6 within declared20G');
 const cryptoWitnesses=['Sha256','CryptoX25519','CryptoEd25519','CryptoChaCha','CryptoAead','CryptoHkdf','AgeCodec','AgeV1','CryptoEntropy','CryptoHash','CryptoEd25519Signature','CryptoWipe','CryptoOsEntropy'].map(name=>`${name}Witness`);
-const ownedWitness=new Set(['CAbiDriver','DisplayWitness','RootStdioWitness','HostFilesTests','HostSpawnTests',...cryptoWitnesses]);
+// Witnesses that need a fixture object, arguments or an RC-pinned layout are
+// built and run by their own runners (s5 or the compiler registry), not here.
+const runnerWitness=['AllocCache','FilesWalk','HostBuildHTTP','HostParallelism','NativeCodecFileLeaves','NativeLayout','NativeTextNormalize','TCPRoutes','TDigest','VaultHooks','VaultProvider'].map(name=>`${name}Witness`);
+const ownedWitness=new Set(['CAbiDriver','DisplayWitness','RootStdioWitness','HostFilesTests','HostSpawnTests',...cryptoWitnesses,...runnerWitness]);
 const dedicated=new Set([...Object.values(ui),'RootCleanupWitness','DataTreeWitness','ScalarReflectWitness','DataEventWitness','TaskVariantPanicWitness','IOWitness']);
 const witnesses=fs.readdirSync(path.join(W,T)).filter(file=>/Witness\.c$/.test(file)).map(file=>file.slice(0,-2)).filter(name=>!ownedWitness.has(name));
 witnesses.push('execution-fixture');
