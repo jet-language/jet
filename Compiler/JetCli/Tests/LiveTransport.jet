@@ -53,7 +53,7 @@ live_transport_rejected: fn(pid: Int, path: String, message: String) {
     if platform != "linux" && platform != "android" -> return
     pid: cli_process.current_pid()
     root: "{cli_sys.temp_dir()}/jet-live-transport-{pid}"
-    cli_files.create_dir(root) ?? panic("exclusive transport fixture directory")
+    cli_files.create_dir_all(root) ?? panic("exclusive transport fixture directory")
     path: "{root}/snapshot.json"
     alias: "{root}/alias.json"
     // Any process start precedes a writer that started at the latest boot time.

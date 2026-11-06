@@ -10,7 +10,7 @@ use {
 #Test("schema_ingress") {
     assert(schema_test_sys.get("JET_SCHEMA_CACHE_DIR") == None)
     root: schema_test_files.join(schema_test_sys.temp_dir(), "jet-schema-ingress-{schema_test_process.current_pid()}")
-    schema_test_files.create_dir(root) ?? panic("exclusive schema fixture root")
+    schema_test_files.create_dir_all(root) ?? panic("exclusive schema fixture root")
     cache: schema_test_files.join(root, ".jet/cache/schema")
     schema_test_files.create_dir_all(cache) ?? panic("schema fixture cache")
     missing: jet_driver_read_schema_dependency(root, "Missing")
@@ -50,7 +50,7 @@ use {
     }
     assert(load_snapshot(root, "Account") == None)
     schema_test_files.remove(path) ?? panic("remove schema fixture file")
-    schema_test_files.create_dir(path) ?? panic("unreadable schema fixture directory")
+    schema_test_files.create_dir_all(path) ?? panic("unreadable schema fixture directory")
     unreadable: jet_driver_read_schema_dependency(root, "Account")
     if unreadable.outcome == {
         .IO(_, bytes) -> assert(bytes == None)

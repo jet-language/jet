@@ -274,7 +274,7 @@ CargoBuildScratch: struct {
             }
             .Err(_) -> {}
         }
-        files.create_dir(path) ?? return Err(CargoBuildError.Failed("could not create build scratch: {err}"))
+        files.create_dir_all(path) ?? return Err(CargoBuildError.Failed("could not create build scratch: {err}"))
         started: time.unix_ns() /% 1000000000
         files.write(files.join(path, STORE_ACTIVE_TMP_MARKER), "pid={pid}\nstarted={started}\n") ?? return Err(CargoBuildError.Failed("could not mark build scratch active: {err}"))
         Ok(CargoBuildScratch{path})

@@ -55,7 +55,7 @@ publication_oci_referrer_root: fn(repo: String, subject: String) -[FS, Env]> Str
     if files.stat(subject_root) == {
         .Ok(subject_info) -> if subject_info.is_symlink || !subject_info.is_dir -> return Err(publication_invalid_oci("registry OCI subject referrers are not a real directory"))
         .Err(error) -> if error == {
-            .NotFound(_) -> files.create_dir(subject_root)
+            .NotFound(_) -> files.create_dir_all(subject_root)
             else -> return Err(error)
         }
     }

@@ -295,7 +295,7 @@ build_ensure_real_directory_step: fn(current: String, symlink: String, not_direc
         }
         .Err(error) -> {
             if !(error == .NotFound(_)) -> return Err(BuildIOError.from(error))
-            if files.create_dir(current) == {
+            if files.create_dir_all(current) == {
                 .Ok(_) -> {}
                 .Err(created) -> {
                     if !(created == .AlreadyExists(_)) -> return Err(BuildIOError.from(created))

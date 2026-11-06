@@ -271,7 +271,7 @@ env_overlay_test_write: fn(path: String, text: String) -[FS]> {
     if env_overlay_commit_staged(authority, stage, (path: String) -[FS]> {
         assert_eq(path, files.join(source, "tree/one.txt"))
         files.rename(files.join(held_moved, "one.txt"), held_saved) ?? panic("hold committed bytes")
-        files.create_dir(files.join(held_moved, "one.txt")) ?? panic("block rollback publication")
+        files.create_dir_all(files.join(held_moved, "one.txt")) ?? panic("block rollback publication")
     }) == {
         .Ok(_) -> panic("the second commit must fail")
         .Err(error) -> {

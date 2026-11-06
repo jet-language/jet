@@ -193,7 +193,7 @@ env_transition_create_real_dirs: fn(root: String, directory: String) Environment
             .Err(error) -> {
                 if error == {
                     .NotFound(_) -> {
-                        files.create_dir(cursor) ?? return Err(env_transition_error("couldn't create {cursor}: {err}"))
+                        files.create_dir_all(cursor) ?? return Err(env_transition_error("couldn't create {cursor}: {err}"))
                         env_transition_sync_directory(cursor) ?? return Err(env_transition_error("couldn't sync {cursor}: {err}"))
                     }
                     else -> { return Err(env_transition_error("couldn't inspect {cursor}: {error}")) }

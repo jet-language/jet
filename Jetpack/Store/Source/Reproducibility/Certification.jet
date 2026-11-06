@@ -48,7 +48,7 @@ RootWorkspace: struct {
         loop {
             sequence: process_sequence_take(STORE_REPRO_CERTIFICATION_SEQUENCE)
             candidate: files.join(parent, "{sys.pid()}-{side}-{attempt}-{sequence}")
-            files.create_dir(candidate) ?? {
+            files.create_dir_all(candidate) ?? {
                 if store_io_is_already_exists(err) -> next
                 return Err(StoreError.IO(err))
             }
@@ -574,7 +574,7 @@ store_repro_report_directory: fn(roots: HangarRoots, create: Bool) -[FS]> String
 store_repro_ensure_directory: fn(path: String, create: Bool) StoreError! -[FS]> {
     info: files.stat(path) ? found -> found ! error -> {
         if !store_io_is_not_found(error) -> return Err(StoreError.IO(error))
-        if create -> files.create_dir(path)
+        if create -> files.create_dir_all(path)
         return
     }
     if info.is_symlink || !info.is_dir -> return Err(store_repro_invalid("reproducibility evidence directory is not real"))

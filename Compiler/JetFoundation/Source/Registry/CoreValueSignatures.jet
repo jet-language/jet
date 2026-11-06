@@ -29,7 +29,7 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
 
     if module_name == "core.data" {
         if member == "__host_path_is_file" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_u8, read)}, Val(core_sig_result(Type.Bool, core_sig_named("EncodingCause")))))
-        if core_sig_one_of(member, [String]{"sum", "mean", "min", "max", "median", "variance", "stddev"}) {
+        if core_sig_one_of(member, [String]{"sum", "mean", "min", "max", "variance", "stddev"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(list_float, read),
             }, Val(core_sig_result(Type.Float, core_sig_named("DataError")))))

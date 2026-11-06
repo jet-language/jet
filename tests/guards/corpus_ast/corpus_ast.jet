@@ -650,19 +650,6 @@ policy_is_named_list_equality: fn(expression: Expr) -> Bool {
         else -> return false
     }
 }
-policy_is_non_idempotent_directory: fn(expression: Expr, aliases: [String: String]) -> Bool {
-    if policy_without_parens(expression) == {
-        .Call(call, _) -> {
-            parts: call.name.split(".").to_list()
-            if parts.len() < 2 -> return false
-            method: parts[parts.len() - 1]
-            module_name: policy_slice_bytes(call.name, 0, call.name.bytes().len() - method.bytes().len() - 1)
-            return method == "create_dir" && policy_module_is_files(module_name, aliases)
-        }
-        .MethodCall(receiver, method, _, _, _, _, _) -> return method == "create_dir" && policy_receiver_is(receiver, "files", aliases)
-        else -> return false
-    }
-}
 
 policy_ascii_literal: fn(expression: Expr) -> Int? {
     if policy_without_parens(expression) == .Str(parts, _, _) {
@@ -1273,12 +1260,12 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
             "unit-scalar-rewrap", "readonly-copy", "error-identity", "http-wrapper-json",
             "http-message-text", "http-typed-json", "delimited-reader-config", "plain-format-fact",
             "dogfood-path-containment", "dogfood-json", "dogfood-url-query", "dogfood-list-equality",
-            "dogfood-directory-setup", "dogfood-ascii", "crypto-naming-fact"}
+            "dogfood-ascii", "crypto-naming-fact"}
         kinds: [String]{"call:process.args", "call:Duration.constructor",
             "call:unit-rewrap", "call:readonly-copy", "expr:error-propagation", "call:http-wrapper",
             "call:response.text", "call:request.body", "call:delimited-split", "call:Fixed.replace",
             "call:path.starts_with", "literal:json-wire", "call:url.query.split", "fn:same_strings",
-            "call:fs.create_dir", "call:String.replace", "call:crypto.sha256_bytes"}
+            "call:String.replace", "call:crypto.sha256_bytes"}
     first_build := Span?{None}
     if policy_applies(manifest, path, row, "first-hour-doc-recipe") && path == "Examples/features/types/typed_literal_forms.jet" {
         policy_visit_program(program, (expression) -> {
@@ -1308,7 +1295,6 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
                 "dogfood-json" -> policy_is_hand_json_wire(expression)
                 "dogfood-url-query" -> policy_is_url_query_reparse(expression)
                 "dogfood-list-equality" -> policy_is_named_list_equality(expression)
-                "dogfood-directory-setup" -> policy_is_non_idempotent_directory(expression, aliases)
                 "dogfood-ascii" -> policy_is_ascii_replacement_chain(expression)
                 "crypto-naming-fact" -> policy_is_legacy_digest_call(expression, aliases)
                 else -> false
@@ -1591,8 +1577,8 @@ policy_check_gate: fn(manifest: PolicyManifest, root: String, gate: String) Poli
 #Test("corpus policy suite gate") { policy_check_gate(policy_manifest(), ".", "suite") ?? panic("{err.message}") }
 #Test("corpus policy site gate") { policy_check_gate(policy_manifest(), ".", "site") ?? panic("{err.message}") }
 #Test("corpus policy docs gate") { policy_check_gate(policy_manifest(), ".", "docs") ?? panic("{err.message}") }
-// Known failing: #6220 (366 Jetpack sites break the dogfood json, path-containment
-// and directory-setup rules; Jetpack grew while the Rust gate was not running).
+// Known failing: #6220 (Jetpack sites break the dogfood json and path-containment
+// rules; Jetpack grew while the Rust gate was not running).
 #Test("corpus policy dogfood gate") { policy_check_gate(policy_manifest(), ".", "dogfood") ?? panic("{err.message}") }
 
 policy_has_rule: fn(violations: [PolicyOccurrence], rule: String) -> Bool {
@@ -1748,8 +1734,6 @@ policy_ast_test_migration_shapes: fn() PolicyError! {
         PolicyShapeCase{path: "Examples/features/text/reintroduced.jet", source: "run: fn() {{ value: Meter.from_float(source.raw() * calibrate(2.0)) }}", rule: "unit-scalar-rewrap", present: false},
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "run: fn() {{ print(\"{{value:Fixed(2)}}\".replace(\",\", \"\")) }}", rule: "plain-format-fact", present: true},
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "run: fn() {{ print(\"{{value:Grouped(2)}}\".replace(\",\", \"\")) }}", rule: "plain-format-fact", present: false},
-        PolicyShapeCase{path: "Docs/site/generate.jet", source: "run: fn() {{ files.create_dir(\"dist\") }}", rule: "dogfood-directory-setup", present: true},
-        PolicyShapeCase{path: "Docs/site/generate.jet", source: "run: fn() {{ files.create_dir_all(\"dist\") }}", rule: "dogfood-directory-setup", present: false},
         PolicyShapeCase{path: "Tools/tower/run.jet", source: "duplicate_equal: fn(left: Dyn, right: Dyn) -> Bool {{ return true }}", rule: "dyn-domain-policy", present: true},
         PolicyShapeCase{path: "Tools/tower/run.jet", source: "javascript_truthy: fn(value: Dyn) -> Bool {{ return true }}", rule: "dyn-domain-policy", present: false},
         PolicyShapeCase{path: "Jetpack/PackageModel/Source/Envelope/PathLaw.jet", source: "run: fn() {{ value: \"text\".replace(\"A\", \"a\").replace(\"B\", \"b\") }}", rule: "dogfood-ascii", present: false},
@@ -1908,7 +1892,6 @@ policy_ast_test_planted_rule_pairs: fn() PolicyError! {
         PolicyPlantedPair{rule: "dogfood-json", kind: "literal:json-wire", rejected: "run: fn() {{ \"{{{{\\\"key\\\": {{value}}}}}}\" }}", clean: "run: fn() {{ json.to_string(value) }}"},
         PolicyPlantedPair{rule: "dogfood-url-query", kind: "call:url.query.split", rejected: "run: fn() {{ query.split(\"&\") }}", clean: "run: fn() {{ url.query() }}"},
         PolicyPlantedPair{rule: "dogfood-list-equality", kind: "fn:same_strings", rejected: "run: fn() {{ same_strings(left, right) }}", clean: "run: fn() {{ left == right }}"},
-        PolicyPlantedPair{rule: "dogfood-directory-setup", kind: "call:fs.create_dir", rejected: "use files: core.files\nrun: fn() {{ files.create_dir(\"dir\") }}", clean: "use files: core.files\nrun: fn() {{ files.create_dir_all(\"dir\") }}"},
         PolicyPlantedPair{rule: "crypto-naming-fact", kind: "call:crypto.sha256_bytes", rejected: "use crypto: core.crypto\nrun: fn() {{ crypto.sha256_bytes(bytes) }}", clean: "use crypto: core.crypto\nrun: fn() {{ crypto.sha256(bytes).hex() }}"},
         PolicyPlantedPair{rule: "raw-cli-process-boundary", kind: "call:process.args", rejected: "run: fn() {{\n    first: process.args()\n    second: process.args()\n}}", clean: "run: fn() {{ process.args() }}"},
         PolicyPlantedPair{rule: "entry-explicit", kind: "stmt:top-level", rejected: "print(\"hello\")", clean: "run: fn() {{ print(\"hello\") }}"},

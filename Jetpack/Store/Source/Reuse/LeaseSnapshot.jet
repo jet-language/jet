@@ -66,7 +66,7 @@ store_snapshot_lease_unlocked: fn(verification: &StoreVerification, roots: Hanga
         }
     }
     lease_root: files.join(leases, lease_name)
-    files.create_dir(lease_root)
+    files.create_dir_all(lease_root)
     lease_lock_path: env_lock_path_for_scope(lease_root, "live")
     live_lock: env_acquire_lease_lock(lease_root, "live") ?? {
         store_reuse_discard_tree(lease_root)

@@ -117,7 +117,7 @@ ShellProjectionMounts: struct {
 // namespace; symlink roots are created directly in the projected store.
 env_shell_projection_fstab: fn(projections: [String: String], scratch: &ShellScratch) -[FS, Env, Time]> ShellProjectionMounts EnvironmentError! {
     empty_store: env_shell_unique_tmp("jetpack-nix-store")
-    files.create_dir(empty_store) ?? return Err(EnvironmentError.InvalidData("{err}"))
+    files.create_dir_all(empty_store) ?? return Err(EnvironmentError.InvalidData("{err}"))
     scratch.scratch_dirs.push(empty_store)
     fstab := "jetpack-nix-store /nix tmpfs mode=0755,x-mount.mkdir 0 0\n"
     fstab = "{fstab}{env_shell_fstab_field(empty_store)} /nix/store none bind,ro,x-mount.mkdir 0 0\n"
@@ -146,7 +146,7 @@ env_shell_projection_fstab: fn(projections: [String: String], scratch: &ShellScr
             return Err(EnvironmentError.InvalidData("canonical Nix projection source `{canonical}` is not a regular node"))
         }
         if node.is_dir {
-            files.create_dir(mountpoint) ?? return Err(EnvironmentError.InvalidData("{err}"))
+            files.create_dir_all(mountpoint) ?? return Err(EnvironmentError.InvalidData("{err}"))
         } else {
             files.create(mountpoint) ?? return Err(EnvironmentError.InvalidData("{err}"))
         }

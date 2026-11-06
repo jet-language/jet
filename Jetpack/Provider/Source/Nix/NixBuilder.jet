@@ -98,7 +98,7 @@ NixBuildScratch: struct {
         nix_builder_create_real_directory(root, "Hangar build scratch root")
         sequence: process_sequence_take(NIX_BUILDER_SCRATCH_SEQUENCE)
         path: files.join(root, "native-{pkg_sha256_hex(drv_path.bytes())}-{sequence}")
-        files.create_dir(path) ?? return Err(NativeNixBuildError.Store("creating native build scratch: {err}"))
+        files.create_dir_all(path) ?? return Err(NativeNixBuildError.Store("creating native build scratch: {err}"))
         files.write(files.join(path, STORE_ACTIVE_TMP_MARKER), "pid={process.current_pid()}\n") ?? return Err(NativeNixBuildError.Store("marking native build scratch: {err}"))
         Ok(NixBuildScratch{path})
     }

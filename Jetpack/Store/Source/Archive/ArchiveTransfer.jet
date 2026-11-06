@@ -453,8 +453,8 @@ store_archive_import_unlocked: fn(verification: &StoreVerification, roots: Hanga
     store_ensure_real_directory(objects_dir, "Hangar object pool")
     stage: files.join(archive_stage, "{process.current_pid()}-{store_archive_unique_suffix()}")
     stage_objects: files.join(stage, "objects")
-    files.create_dir(stage)
-    files.create_dir(stage_objects)
+    files.create_dir_all(stage)
+    files.create_dir_all(stage_objects)
     moved := [HangarArchiveMove]{}
     count: store_archive_import_staged(verification, roots, archive, allow_nix_absolute_symlinks, stage, stage_objects, objects_dir, moved) ? value -> value ! error -> {
         failure := error
@@ -632,7 +632,7 @@ store_archive_verify_contents: fn(roots: HangarRoots, archive: HangarArchive, al
 }
 
 store_archive_verify_staged: fn(roots: HangarRoots, archive: HangarArchive, stage: String, allow_nix_absolute_symlinks: Bool) StoreError! {
-    files.create_dir(stage)
+    files.create_dir_all(stage)
     outputs := [String]{}
     loop object in archive.objects {
         if object.meta != "" -> next

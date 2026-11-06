@@ -2034,10 +2034,6 @@ stddev: fn(values: [Float]) -> Float DataError! {
 
 }
 
-median: fn(values: [Float]) -> Float DataError! {
-    quantile(values, Float{0.5})
-}
-
 quantile: fn(values: [Float], q: Float) -> Float DataError! {
     if nonfinite(q) || q < (Float{0.0}) || q > (Float{1.0}) {
         return Err(data_error(DataErrorKind.InvalidArgument, "quantile q must be a finite value in 0.0 through 1.0", "quantile"))

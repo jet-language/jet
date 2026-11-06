@@ -88,7 +88,7 @@ PackageGenerationStage: struct {
             if !existing.is_dir -> return Err(CLIError.Other("profile generation stage is not a directory"))
             files.remove_all(path)
         }
-        files.create_dir(path)
+        files.create_dir_all(path)
         Ok(PackageGenerationStage{path: path})
     }
 
@@ -182,7 +182,7 @@ cli_build_package_generation_body: fn(verification: &StoreVerification, cache: &
         }
     }
     selected: cli_choose_output_nodes(plan, groups, previous)
-    files.create_dir(rootfs)
+    files.create_dir_all(rootfs)
     cli_copy_package_projection(rootfs, selected, realized)
     loop package in realized -> package.lease.validate()
     metadata: cli_format_package_generation_metadata(generation, plan, realized, groups, roots, rootfs)

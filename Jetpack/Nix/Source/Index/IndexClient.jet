@@ -582,7 +582,7 @@ nix_index_ensure_real_directory: fn(path: String) NixIndexError! -[FS]> {
             }
             .Err(error) -> {
                 if !nix_io_is_not_found(error) -> return Err(NixIndexError.Transport("inspect {current}: {error}"))
-                files.create_dir(current) ?? return Err(NixIndexError.Transport("create {current}: {err}"))
+                files.create_dir_all(current) ?? return Err(NixIndexError.Transport("create {current}: {err}"))
             }
         }
     }

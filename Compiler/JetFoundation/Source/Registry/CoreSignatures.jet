@@ -179,7 +179,7 @@ core_call_parameter_contract: fn(module_name: String, member: String) -> [CoreCa
             core_param_required("date"), core_param_required("time"), core_param_required("zone"),
             core_param_optional("disambiguation", ParamZone.Either, CoreCallDefault.String{value: "compatible"}),
         })
-        module_name == "core.files" && core_sig_one_of(member, [String]{"walk", "walk_parallel", "walk_files"}) -> Val([CoreCallParameterContract]{
+        module_name == "core.files" && core_sig_one_of(member, [String]{"walk", "walk_files"}) -> Val([CoreCallParameterContract]{
             core_param_required("root"), core_param_optional("ignore", ParamZone.Either, absent),
         })
         module_name == "core.http.server" && core_sig_one_of(member, [String]{"bind", "serve"}) -> Val([CoreCallParameterContract]{
@@ -335,7 +335,7 @@ core_sig_numeric_or_default: fn(module_name: String, member: String) -> CoreType
             core_sig_type_parameter("T", CoreCallTypeConstraint.FloatingOrExact),
             CoreCallResultRule.FloatIfExactElseParameter{parameter_index: 0}))
     }
-    if core_sig_one_of(member, [String]{"floor", "ceil", "trunc", "truncate", "fract", "real", "imag", "conj", "float32", "float64", "signum"}) {
+    if core_sig_one_of(member, [String]{"floor", "ceil", "trunc", "truncate", "fract", "real", "imag", "conj", "signum"}) {
         return Val(core_sig_generic(module_name, member,
             [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(t),
             core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))

@@ -16,7 +16,7 @@ use {
 run: fn() {
     scratch: files.temp_dir("pass-directory")
     held_path: files.join(scratch.path, "held")
-    files.create_dir(held_path)
+    files.create_dir_all(held_path)
     files.write(files.join(held_path, "marker.txt"), "held directory\n")
     directory: files.open_directory(held_path)
     spec: process.cmd(["sh", "-c", "cat /proc/self/fd/9/marker.txt"])
@@ -31,7 +31,7 @@ run: fn() {
     }
     close(directory)
     files.rename(held_path, files.join(scratch.path, "moved"))
-    files.create_dir(held_path)
+    files.create_dir_all(held_path)
     files.write(files.join(held_path, "marker.txt"), "replacement\n")
     receipt: passed.run()
     print("child read: {receipt.output.trim()}")

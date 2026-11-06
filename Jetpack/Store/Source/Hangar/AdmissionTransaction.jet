@@ -101,7 +101,7 @@ AdmissionTransaction: struct {
         loop {
             sequence: process_sequence_take(STORE_TRANSACTION_SEQUENCE)
             candidate: files.join(stage_parent, "admission-{process.current_pid()}-{sequence}")
-            if files.create_dir(candidate) == {
+            if files.create_dir_all(candidate) == {
                 .Ok(_) -> return Ok(AdmissionTransaction{verification: verification.copy(), roots: roots, stage: candidate, objects: [AdmissionObject]{}, published: [PublishedObject]{}, receipts: [String]{}, committed: false})
                 .Err(error) -> {
                     if !StoreError.IO(error).is_already_exists() -> return Err(StoreError.IO(error))

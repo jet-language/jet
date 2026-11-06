@@ -193,7 +193,7 @@ image_copy_layout: fn(source: String, destination: String) ImageError! -[FS, Env
     name: files.basename(destination)
     if name == "" -> return Err(image_invalid("OCI copy destination has no UTF-8 name"))
     stage: files.join(parent, ".{name}-jet-oci-copy-{sys.pid()}-{random.token_hex(8) ?? return Err(image_invalid("OCI copy stage name: {err}"))}")
-    files.create_dir(stage)
+    files.create_dir_all(stage)
     if image_publish_staged_copy(canonical_source, stage, destination) == {
         .Ok(_) -> {}
         .Err(error) -> {

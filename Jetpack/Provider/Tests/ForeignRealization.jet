@@ -54,7 +54,7 @@ provider_foreign_test_projection_error: fn(verification: &StoreVerification, roo
     current := provider_foreign_test_write_binding(root, "hostile")
     loop index in 0..<MAX_TREE_DEPTH + 2 {
         current = files.join(current, "d{index}")
-        files.create_dir(current) ?? panic("nested directory")
+        files.create_dir_all(current) ?? panic("nested directory")
     }
     files.write(files.join(current, "payload"), "stable\n") ?? panic("payload")
     if provider_foreign_test_projection_error(verification, root, "hostile") == {

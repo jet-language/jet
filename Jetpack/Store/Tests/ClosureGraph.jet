@@ -206,7 +206,7 @@ store_test_register_entry_locked: fn(verification: &StoreVerification, roots: Ha
     files.remove_all(files.join(roots.hangar_dir(), STORE_CLOSURE_DB_DIR)) ?? panic("remove db")
     files.create_dir_all(dir) ?? panic("dir")
     blocker: files.join(dir, "meta.json.{process.current_pid()}.partial")
-    files.create_dir(blocker) ?? panic("blocker")
+    files.create_dir_all(blocker) ?? panic("blocker")
     assert(store_test_register_entry_locked(verification, roots, ingested.entry) ?? panic("register"))
     assert(!files.exists(files.join(dir, "meta.json")))
     assert_eq((store_journal_transaction_paths(store_journal_dir(roots)) ?? panic("paths")).len(), 1)

@@ -185,7 +185,7 @@ s3cas_copy_nofollow: fn(source: String, destination: String) {
     if metadata.is_symlink {
         files.symlink(files.read_link(source) ?? panic("link target"), destination) ?? panic("link")
     } else if metadata.is_dir {
-        files.create_dir(destination) ?? panic("destination directory")
+        files.create_dir_all(destination) ?? panic("destination directory")
         entries: files.list_dir(source) ?? panic("entries")
         loop entry in entries -> s3cas_copy_nofollow(entry.path, files.join(destination, entry.name))
         files.chmod(destination, metadata.mode) ?? panic("directory permissions")

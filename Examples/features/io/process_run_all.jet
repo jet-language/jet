@@ -45,7 +45,7 @@ run: fn() -[Exec, IO, FS, Env, Time.Wait]> {
     // ever sees more than 2.
     dir: files.mkdtemp("run_all") ?? panic("temp dir")
     marks: "{dir}/marks"
-    files.create_dir(marks) ?? panic("marks dir")
+    files.create_dir_all(marks) ?? panic("marks dir")
     counted: loop _ in 0..<6 -> process.cmd(["sh", "-c", "touch {marks}/$$; ls {marks} | wc -l; sleep 0.2; rm {marks}/$$"])
     most := 0
     loop result in process.run_all(counted, 2) ?? panic("run_all failed") {

@@ -632,7 +632,7 @@ store_journal_ensure_directory_durable: fn(path: String) StoreError! {
     parent: files.dirname(path)
     if parent == "" || parent == path -> return Err(StoreError.Other("closure database path has no parent"))
     store_journal_ensure_directory_durable(parent)
-    if files.create_dir(path) == {
+    if files.create_dir_all(path) == {
         .Ok(_) -> {
             store_sync_store_directory(path)
             store_sync_store_directory(parent)

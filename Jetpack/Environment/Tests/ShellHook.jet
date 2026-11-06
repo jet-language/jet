@@ -154,7 +154,7 @@ env_hook_test_fingerprint: fn(root: String) -> String {
     current := root
     loop index in 0..<(MAX_TREE_DEPTH + 2) {
         current = files.join(current, "d{index}")
-        files.create_dir(current) ?? panic("create deep dir")
+        files.create_dir_all(current) ?? panic("create deep dir")
     }
     files.write(files.join(current, "input.jet"), "// input\n") ?? panic("write input")
     assert_eq(env_hook_definition_fingerprint(root, None), None)

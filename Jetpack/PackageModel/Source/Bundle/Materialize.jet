@@ -219,10 +219,10 @@ pkg_bundle_materialize: fn(plan: &BundlePlan, output: String, compiler_version: 
     }
 }
 pkg_bundle_native_materialize: fn(plan: &BundlePlan, output: String, parent: String, name: String, stage: String, output_stage: String, staged_msix: String, compiler_version: String) -[FS, Env, Exec, Time, Time.Wait]> BundleNativeFacts BundleMaterializeError! {
-    files.create_dir(stage) ?? return Err(BundleMaterializeError{reason: "could not stage package `{stage}`: {err}"})
+    files.create_dir_all(stage) ?? return Err(BundleMaterializeError{reason: "could not stage package `{stage}`: {err}"})
     mac: plan.target == BundleTarget.MacOSApp
     linux: plan.target == BundleTarget.LinuxAppImage
-    if linux -> files.create_dir(output_stage) ?? return Err(BundleMaterializeError{reason: "could not stage AppImage output `{output_stage}`: {err}"})
+    if linux -> files.create_dir_all(output_stage) ?? return Err(BundleMaterializeError{reason: "could not stage AppImage output `{output_stage}`: {err}"})
     pkg_bundle_native_tree(plan, stage, mac)
     writable: if linux -> output_stage else -> parent
     signing := BundleSigningRun{requested: plan.signing_hooks.len() > 0, verified: false, programs: [String]{}, identities: [String]{}}

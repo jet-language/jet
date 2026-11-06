@@ -377,7 +377,7 @@ probe_root: fn() -[FS, Env, Time]> String LaunchError! {
     files.create_dir_all(base) ?? return Err(launch_error("capability probe root `{base}` cannot be created: {err}"))
     root: "{base}/compiled-workload-peer-probe-{sys.pid()}-{time.unix_ns()}"
     if files.exists(root) -> return Err(launch_error("capability probe root `{root}` cannot be created: it already exists"))
-    files.create_dir(root) ?? return Err(launch_error("capability probe root `{root}` cannot be created: {err}"))
+    files.create_dir_all(root) ?? return Err(launch_error("capability probe root `{root}` cannot be created: {err}"))
     Ok(root)
 }
 

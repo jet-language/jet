@@ -153,7 +153,7 @@ BuildAttempt: struct {
 // Stage the scratch copy and publish it at `dir`.
 recipe_debug_stage_scratch: fn(stage: String, dir: String, source: String, output: String) StoreError! -[FS]> {
     recipe_debug_ensure_absent(stage, "failed-build scratch staging")
-    files.create_dir(stage)
+    files.create_dir_all(stage)
     recipe_debug_copy_tree(source, files.join(stage, "source"))
     if files.stat(output) == {
         .Ok(info) -> {
@@ -366,7 +366,7 @@ recipe_debug_num_field: fn(object: [String: Dyn], key: String) -> Int Never! {
 recipe_debug_copy_tree: fn(src: String, dst: String) StoreError! -[FS]> {
     info: files.stat(src)
     if info.is_symlink || !info.is_dir -> return Err(StoreError.InvalidData("build scratch source is not a real directory: {src}"))
-    files.create_dir(dst)
+    files.create_dir_all(dst)
     entries: files.list_dir(src)
     loop entry in entries {
         from: files.join(src, entry.name)

@@ -435,7 +435,7 @@ foundation_publication_test_staged: fn(root: String, expected: String) Never! -[
     assert_eq(files.read(original) ?? panic("read shared original"), "shared original")
     assert_eq((files.stat(path) ?? panic("stat hardlink")).links, 2)
     files.remove(path) ?? panic("remove hardlink")
-    files.create_dir(path) ?? panic("directory destination")
+    files.create_dir_all(path) ?? panic("directory destination")
     foundation_publication_test_reject(root, "input.jet", validate)
     assert((files.stat(path) ?? panic("stat directory")).is_dir)
     foundation_publication_test_no_temporary(root)

@@ -170,7 +170,7 @@ The same direct-boundary rule applies to the held reader, directory, xattr,
 writer-stat and lock operations: canonical private names select the existing
 host kernels without source pass-through facades. Path permission and ownership
 policy uses the compile-target OS family, not a duplicate platform detector.
-`walk`, `walk_parallel`, and `walk_files` own traversal in Jet: depth starts at zero for root
+`walk` and `walk_files` own traversal in Jet: depth starts at zero for root
 entries, results sort by shown path, ancestor symlinks are refused, and each
 directory inherits the existing ignore matcher. The private context preserves
 native path identities (including non-Unicode names) until its scope guard
@@ -638,14 +638,14 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `stat(path)` / `lstat(path)` | `Stat !IOError` | Describe the entry itself, never a final link's target. |
 | `set_mode(path, mode)` | `!IOError` | Set Unix mode bits; non-Unix providers use their documented readonly mapping. |
 | `list_dir(path)` | `[DirEntry] !IOError` | List entries in name order. |
-| `create_dir(path)` / `create_dir_all(path)` | `!IOError` | Both preserve the existing recursive directory-creation behavior, including missing parents. |
+| `create_dir_all(path)` | `!IOError` | Create a directory and any missing parents; an existing directory is success. |
 | `remove(path)` / `remove_dir(path)` / `remove_all(path)` | `!IOError` | Remove a file, empty directory, or tree. |
 | `copy(from, to)` / `copy_dir(from, to)` | `!IOError` | Copy one regular file or a directory tree. Directory copy does not dereference symlinks or special entries. |
 | `rename(from, to, if_exists:)` | `!IOError` | Rename or move a path; `.Replace` (default), `.Refuse`, or `.Swap`. |
 | `symlink(original, link)` / `hard_link(original, link)` | `!IOError` | Create symbolic or hard links. |
 | `read_link(path)` | `String !IOError` | Read a symbolic-link target. |
 | `canonicalize(path)` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. |
-| `walk(root, ignore)` / `walk_parallel(root, ignore)` | `[WalkEntry] !IOError` | Traverse recursively with an optional ignore-file name. The parallel spelling keeps the same ordering and no-follow policy. |
+| `walk(root, ignore)` | `[WalkEntry] !IOError` | Traverse recursively with an optional ignore-file name. |
 | `walk_files(root, ignore)` | `[WalkEntry] !IOError` | Traverse regular files only. |
 | `glob(pattern)` | `[String] !IOError` | Return sorted shown paths matching the native byte glob grammar. |
 | `temp_dir(prefix)` / `temp_file(prefix)` | `TempDir` / `TempFile !IOError` | Create temporary resources whose handles retain `.path`. |
@@ -688,7 +688,7 @@ and clock observation as well as the filesystem surface.
 false. Their false-on-host-error policy is Jet-owned; the host boundary
 supplies only the following-metadata fact or the host error.
 
-`walk`, `walk_parallel`, and `walk_files` accept the optional `ignore` value;
+`walk` and `walk_files` accept the optional `ignore` value;
 `fs.walk(root)` is the convenience form. `DirEntry` has `name`, `path`, and
 `is_dir`. `Stat` has `size`, `kind`, `mode`, `readonly`, `is_file`, `is_dir`,
 `is_symlink`, `id: FileID{device, inode}`, `links`, `owner: Int?` (None on
@@ -2175,7 +2175,6 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.copysign(value, sign)` / `math.fma(a, b, c)` | `Float` | Copy a sign or perform fused multiply-add where supported by the numeric backend. |
 | `math.muladd(a, b, c)` | `Float` | Multiply and add through the math wrapper. |
 | `math.inv(x)` / `math.signum(x)` | `Float` | Reciprocal or floating-point signum. |
-| `math.float32(x)` / `math.float64(x)` | `Float` | Convert through the corresponding floating-point representation. |
 | `math.fabs(x)` / `math.real(x)` / `math.imag(x)` / `math.conj(x)` | `Float` | Absolute floating-point value and scalar component helpers. |
 | `math.is_nan(x)`, `is_inf(x)`, `is_finite(x)` | `Bool` | Test NaN, infinity, or finite status. `is_finite` accepts both `Float` and `F32`. `isnan`, `isinf`, and `isfinite` are aliases. |
 | `math.cmp(a, b)` | `Int` | Accept matching `Float` or `F32` operands and return `-1`, `0`, or `1`; NaN sorts after non-NaN values, two NaNs compare equal, and signed zeros compare equal. |
@@ -3215,7 +3214,7 @@ run: fn() {
 | `sum(values)` / `mean(values)` | `Float !DataError` | Reduce finite numeric values. |
 | `min(values)` / `max(values)` | `Float !DataError` | Select finite numeric extrema. |
 | `variance(values)` / `stddev(values)` | `Float !DataError` | Compute finite numeric dispersion. |
-| `median(values)` / `quantile(values, q)` | `Float !DataError` | Compute bounded order statistics by worst-case linear rank selection on a copy; the caller's list is unchanged. |
+| `quantile(values, q)` | `Float !DataError` | Compute a bounded order statistic by worst-case linear rank selection on a copy; the caller's list is unchanged. `quantile(values, 0.5)` is the median with this error contract; `core.math.stats.median` returns `Float?`. |
 | `rolling_mean(values, window)` | `[Float] !DataError` | Compute a bounded rolling mean. |
 | `query(rows)` | `Query<T>` | Start a deterministic query plan under `DataLimits.safe()`. |
 | `query(stream)` | `Query<T>` | Start a one-shot query over a stream's remaining rows, under the `DataLimits` of the reader that made the stream. |
@@ -3692,7 +3691,7 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `text(value: String) -> UINode` | node | Construct a text node. |
 | `preview(name: String, body: fn() -> UINode, *, viewport: UIPreviewViewport?) -> UIPreview` | preview | Describe a named preview; `viewport:` defaults to `desktop()`. |
 | `playground(name: String, body: fn() -> UINode, *, viewport: UIPreviewViewport?) -> UIPreview` | preview | Describe a named interactive playground; `viewport:` defaults to `desktop()`. |
-| `previews(entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError!`, `playgrounds(entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError!` | registry | Register at most 64 previews, each with a non-empty unique name. |
+| `previews(entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError!` | registry | Register at most 64 previews and playgrounds, each with a non-empty unique name. |
 | `UIPreviewRegistry.render(name: String) -> UINode UIPreviewError!` | node | Call the named preview's body. |
 | `desktop() -> UIPreviewViewport`, `phone() -> UIPreviewViewport`, `tablet() -> UIPreviewViewport` | viewport | Select standard preview dimensions: 1280×800 at scale 1, 390×844 at scale 2, 834×1119 at scale 2. |
 | `key_event(code: String) -> InputEvent` | event | Create `InputEvent.Key{code: code}`. |
@@ -3711,8 +3710,8 @@ scale: Int}` and `UIPreview` is `{kind: UIPreviewKind, name: String, viewport:
 UIPreviewViewport, body: fn() -> UINode}`; both are plain Jet values on every
 tier. Registration fails with `UIPreviewError.EmptyName`, `.TooManyPreviews`,
 or `.DuplicatePreview(name)`; rendering an unregistered name fails with
-`.UnknownPreview(name)`. Preview and playground registries can be imported
-directly as `core.ui.[previews, playgrounds]`.
+`.UnknownPreview(name)`. The registry function can be imported directly as
+`core.ui.[previews]`.
 Host file-dialog, clipboard, shortcut, accessibility, and IME consumers declare
 their corresponding `UI.*` authority needs and use the current failure carrier;
 IME polling yields an optional event after host failure propagation.

@@ -173,8 +173,8 @@ playground: fn(name: String, &&body: fn() -> UINode, *, viewport: UIPreviewViewp
     UIPreview{kind: .Playground, name: name, viewport: viewport ?? desktop(), body: body}
 }
 
+// Registers previews and playgrounds alike; each entry's `kind` tells them apart.
 previews: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(entries) }
-playgrounds: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(entries) }
 
 impl UIPreviewRegistry {
     // Builds the node tree of the preview named `name`.
@@ -295,7 +295,7 @@ preview_registry: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError
         .Ok(_) -> assert(false)
         .Err(error) -> assert(error == UIPreviewError.DuplicatePreview("card"))
     }
-    if playgrounds([playground("", () -> text("blank"))]) == {
+    if previews([playground("", () -> text("blank"))]) == {
         .Ok(_) -> assert(false)
         .Err(error) -> assert(error == UIPreviewError.EmptyName)
     }

@@ -1167,10 +1167,6 @@ publicencrypt: fn(key: X25519PublicKey, bytes: [U8]) -[Rand]> Sealed CryptoError
     seal([X25519PublicKey]{key}, bytes, [U8]{})
 }
 
-publicdecrypt: fn(key: X25519SecretKey, box: Sealed) -> [U8] CryptoError! {
-    open_sealed(key, box, [U8]{})
-}
-
 wrap: fn(key: Secret, recipient: X25519PublicKey) -[Rand]> WrappedKey CryptoError! {
     if recipient.bytes.len() != 32 || key.bytes.len() > 1048576 {
         return Err(CryptoError.KeyRejected)

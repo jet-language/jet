@@ -614,7 +614,7 @@ NixTestProgress: struct {
     assert_eq(store_verified_output_hash(verification, object, Val(hangar), false) ?? panic("memo digest"), first)
 
     replacement: files.join(objects, "memo-replacement")
-    files.create_dir(replacement) ?? panic("replacement")
+    files.create_dir_all(replacement) ?? panic("replacement")
     files.write(files.join(replacement, "payload"), "corrupt") ?? panic("replacement payload")
     displaced: files.join(objects, "memo-displaced")
     files.rename(object, displaced) ?? panic("displace")

@@ -2679,7 +2679,7 @@ jet_cli_external_fmt_temp_dir: fn() -> JetCLIExternalFmtTemp {
     loop attempt in 0..<32 {
         path: jet_cli_authority_path(base, "jet-fmt-{stamp}-{pid}-{attempt}")
         if cli_files.exists(path) -> next
-        cli_files.create_dir(path) ?? return JetCLIExternalFmtTemp{path: "", problem: Val(jet_cli_io_error_text(err))}
+        cli_files.create_dir_all(path) ?? return JetCLIExternalFmtTemp{path: "", problem: Val(jet_cli_io_error_text(err))}
         return JetCLIExternalFmtTemp{path: path, problem: None}
     }
     JetCLIExternalFmtTemp{path: "", problem: Val("could not allocate a formatter staging directory")}

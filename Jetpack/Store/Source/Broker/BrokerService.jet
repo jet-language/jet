@@ -140,7 +140,7 @@ store_broker_promote_staged_archive: fn(verification: &StoreVerification, shared
     store_broker_sweep_stale_incoming(incoming)
     nonce: time.unix_ns()
     stage: files.join(incoming, "{sys.pid()}-{if nonce < 0 -> 0 else -> nonce}")
-    files.create_dir(stage)
+    files.create_dir_all(stage)
     store_broker_atomic_write(files.join(stage, STORE_BROKER_STAGE_MARKER), "{store_broker_now_secs()}".bytes())
     staged: HangarRoots.at(stage)
     failure: store_broker_admission_failure(verification, shared, staged, key, archive, binding)

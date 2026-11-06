@@ -1468,7 +1468,7 @@ function coreCallEffectLeafFor(moduleName, member) {
   // write, so they keep the bare `FS` root.
   if (moduleName === "core.files" && coreCallOneOf(member, [
     "read", "read_bytes", "read_at", "read_link", "map", "open", "exists", "is_dir", "is_fifo", "is_socket",
-    "stat", "lstat", "list_dir", "walk", "walk_parallel", "walk_files", "glob", "canonicalize", "absolute",
+    "stat", "lstat", "list_dir", "walk", "walk_files", "glob", "canonicalize", "absolute",
     "__read_bytes_os", "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes",
     // #3593 provider leaves behind Core/Files/files.jet.
     "__open_reader", "__open_directory", "__close_directory", "__list_directory", "__stat_at", "__path_kind", "__read_link_at",
@@ -1481,7 +1481,7 @@ function coreCallEffectLeafFor(moduleName, member) {
   ])) return "FS.Read";
   if (moduleName === "core.files" && coreCallOneOf(member, [
     "write", "write_bytes", "write_at", "write_atomic", "append_all", "create", "append", "fsync", "remove",
-    "remove_dir", "remove_all", "create_dir", "create_dir_all", "rename", "symlink", "hard_link", "chown",
+    "remove_dir", "remove_all", "create_dir_all", "rename", "symlink", "hard_link", "chown",
     "__write_bytes_os", "__append_bytes_os", "__create_dirs_os", "__write_at_os", "__writer_refusal",
     "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close",
     "jet_files_link_reader_at_raw",

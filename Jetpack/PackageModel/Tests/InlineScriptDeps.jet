@@ -106,7 +106,7 @@ pkg_inline_deps_test_unresolved: fn(dep: InlineDep, script_dir: String) -[FS, En
     files.create_dir_all(current) ?? panic("package root")
     loop index in 0..<(MAX_TREE_DEPTH + 2) {
         current = files.join(current, "d{index}")
-        files.create_dir(current) ?? panic("nested directory")
+        files.create_dir_all(current) ?? panic("nested directory")
     }
     files.write(files.join(current, "payload.jet"), "stable\n") ?? panic("payload")
     error: pkg_inline_deps_test_unresolved(pkg_inline_deps_test_dep("hostile"), root.path)

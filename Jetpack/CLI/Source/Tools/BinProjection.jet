@@ -24,7 +24,7 @@ ToolLiveInstall: struct {
 // supplies its own lease; any other tool re-leases its checked StoreEntry.
 cli_materialize_generation_bins: fn(verification: &StoreVerification, generation_dir: String, tools: &[InstalledUserTool], &&live: ToolLiveInstall?) CLIError! -[FS, Env, Exec, Time, Rand]> {
     bin_dir: files.join(generation_dir, "bin")
-    files.create_dir(bin_dir)
+    files.create_dir_all(bin_dir)
     projected := [String]{}
     held_live := live.move()
     loop index in 0..<tools.len() {

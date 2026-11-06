@@ -87,7 +87,7 @@ run: fn() {
     checkout: files.realpath(repo) ?? return abort("verify-full: checkout `{repo}` cannot be resolved: {err}")
     if inside(checkout, base) || inside(files.realpath("/tmp") ?? "/tmp", base) -> return abort("verify-full: scratch must be external and disk-backed")
     scratch: "{base}/jet-verify-{sys.pid()}-{time.unix_ns()}"
-    files.create_dir(scratch) ?? return abort("verify-full: scratch `{scratch}` cannot be created: {err}")
+    files.create_dir_all(scratch) ?? return abort("verify-full: scratch `{scratch}` cannot be created: {err}")
     evidence_dir: env_or("JET_CI_EVIDENCE_DIR", "{scratch}/evidence")
     evidence: files.absolute(evidence_dir) ?? return abort("verify-full: evidence directory `{evidence_dir}` cannot be resolved: {err}")
     if inside(checkout, evidence) -> return abort("verify-full: evidence must be outside the checkout")

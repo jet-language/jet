@@ -103,7 +103,7 @@ pkg_test_authority_snapshot_probe: fn(resolver: AuthorityResolver, path: String,
     current := root
     loop index in 0..<(PKG_MAX_TREE_DEPTH + 2) {
         current = files.join(current, "d{index}")
-        files.create_dir(current) ?? panic("mkdir level")
+        files.create_dir_all(current) ?? panic("mkdir level")
     }
     files.write(files.join(current, "input.jet"), "// input\n") ?? panic("write")
     resolver: AuthorityResolver.open(root) ?? panic("open")

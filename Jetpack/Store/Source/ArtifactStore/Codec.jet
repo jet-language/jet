@@ -279,7 +279,7 @@ store_artifact_ensure_dir: fn(path: String) ArtifactStoreError! -[FS]> {
         }
         .Err(error) -> {
             if !store_artifact_io_missing(error) -> return Err(ArtifactStoreError.IO(error))
-            if files.create_dir(path) == {
+            if files.create_dir_all(path) == {
                 .Ok(_) -> store_artifact_sync_dir(files.dirname(path))
                 .Err(created) -> {
                     // A concurrent opener of the same store created it first.

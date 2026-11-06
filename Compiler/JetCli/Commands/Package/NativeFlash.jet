@@ -46,7 +46,7 @@ jet_cli_flash_execute: fn(plan: JetCLIFlashPlan) -[FS, Env, Exec, Time.Wait]> Je
     if !status.available -> return jet_cli_flash_execution_failed("authority_unavailable", "native process authority unavailable: {status.reason}", status.mechanism, status.policy)
     prefix: plan.image_sha256.slice(0..<(if plan.image_sha256.len() < 16 -> plan.image_sha256.len() else -> 16))
     output: cli_files.join(cli_sys.temp_dir(), "jet-flash-{cli_sys.pid()}-{prefix}")
-    cli_files.create_dir(output) ?? return jet_cli_flash_execution_failed("authority_setup", "cannot create private flash output: {err}", status.mechanism, status.policy)
+    cli_files.create_dir_all(output) ?? return jet_cli_flash_execution_failed("authority_setup", "cannot create private flash output: {err}", status.mechanism, status.policy)
     source: cli_files.dirname(plan.image.raw)
     args := [String]{}
     // copy: `plan.argv[index]` stays with the caller (`plan` is a read parameter: no move out of

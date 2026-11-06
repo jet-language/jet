@@ -4995,42 +4995,42 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1260,
+      "line": 1256,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1287,
+      "line": 1283,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2124,
+      "line": 2120,
       "column": 5,
       "reason": "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2237,
+      "line": 2233,
       "column": 5,
       "reason": "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2246,
+      "line": 2242,
       "column": 5,
       "reason": "crypto expert: typed signing keys validate the Ed25519 seed width"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2252,
+      "line": 2248,
       "column": 5,
       "reason": "crypto expert: typed verification validates public key and signature widths before strict verification"
     },
@@ -5289,21 +5289,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 2441,
+      "line": 2437,
       "column": 9,
       "reason": "native path bytes originate from the host environment and are split at ASCII boundaries"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3340,
+      "line": 3336,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3674,
+      "line": 3670,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
@@ -10279,12 +10279,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Crypto/Crypto.jet | 331:5 | "vault key import: construct the typed recipient unlock request" |
 | Core | Core/Crypto/Crypto.jet | 336:5 | "vault key import: construct the typed passphrase unlock request" |
 | Core | Core/Crypto/Crypto.jet | 715:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
-| Core | Core/Crypto/Crypto.jet | 1260:5 | "crypto expert: Argon2id password hashing" |
-| Core | Core/Crypto/Crypto.jet | 1287:5 | "crypto expert: Argon2id password verification" |
-| Core | Core/Crypto/Crypto.jet | 2124:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
-| Core | Core/Crypto/Crypto.jet | 2237:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
-| Core | Core/Crypto/Crypto.jet | 2246:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
-| Core | Core/Crypto/Crypto.jet | 2252:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/Crypto.jet | 1256:5 | "crypto expert: Argon2id password hashing" |
+| Core | Core/Crypto/Crypto.jet | 1283:5 | "crypto expert: Argon2id password verification" |
+| Core | Core/Crypto/Crypto.jet | 2120:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
+| Core | Core/Crypto/Crypto.jet | 2233:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
+| Core | Core/Crypto/Crypto.jet | 2242:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
+| Core | Core/Crypto/Crypto.jet | 2248:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
 | Core | Core/Crypto/ExpertCt.jet | 13:5 | "Core fixed-limb workspace reserves its complete operation-owned word capacity before filling" |
 | Core | Core/Crypto/ExpertCt.jet | 39:5 | "Core fixed-limb extraction reserves its exact public output width before filling" |
 | Core | Core/Crypto/ExpertCt.jet | 325:5 | "Core Ed25519 hashing reserves the exact combined public part lengths before filling" |
@@ -10321,9 +10321,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Crypto/Vault.jet | 371:5 | "vault typed revocation commit provider boundary" |
 | Core | Core/Crypto/Vault.jet | 377:5 | "vault passphrase export provider boundary" |
 | Core | Core/Crypto/Vault.jet | 384:5 | "vault recipient export provider boundary" |
-| Core | Core/Data/Data.jet | 2441:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
-| Core | Core/Data/Data.jet | 3340:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/Data/Data.jet | 3674:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 2437:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
+| Core | Core/Data/Data.jet | 3336:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 3670:5 | "inspect existing private Decode carriers only inside checked Core data source" |
 | Core | Core/Db/Db.jet | 1468:9 | "this consuming Close owns the sole SQLite database pointer, including open-error handles; close_v2 permits live statements to finalize later" |
 | Core | Core/Db/Db.jet | 1475:9 | "this consuming Close owns the sole statement pointer; SQLite permits finalize(NULL) and rusqlite drops finalize's status" |
 | Core | Core/Db/Db.jet | 1503:1 | "SQLite owns a live NUL-terminated error/name buffer; strlen and unpack finish before any following engine call" |

@@ -31,8 +31,8 @@ use {
 // on a bad path.
 //
 // `exists` / `is_dir` return booleans rather than errors: a path that cannot
-// be observed is treated as absent. `walk` / `walk_files` / `walk_parallel`
-// take an optional ignore-file name (`.gitignore` style).
+// be observed is treated as absent. `walk` / `walk_files` take an optional
+// ignore-file name (`.gitignore` style).
 //
 // The OS door is the typed `core.files` provider: open/read/write/stat,
 // directory, link, temp, lock, and metadata calls route through it. Walk,
@@ -552,8 +552,8 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
         close(source)
         rename(destination_path, join(root, "moved-destination")) ?? panic("rename destination")
         rename(source_path, join(root, "moved-source")) ?? panic("rename source")
-        create_dir(destination_path) ?? panic("replacement destination")
-        create_dir(source_path) ?? panic("replacement source")
+        create_dir_all(destination_path) ?? panic("replacement destination")
+        create_dir_all(source_path) ?? panic("replacement source")
         write(join(destination_path, "marker.txt"), "wrong destination\n") ?? panic("replacement marker")
         write(join(source_path, "source.txt"), "wrong source\n") ?? panic("replacement source marker")
         receipt: with_source.run() ?? panic("run held directories")
@@ -1111,13 +1111,6 @@ list_dir: fn(path: String | Path) -[FS.Read]> [DirEntry] IOError! {
 }
 
 
-create_dir: fn(path: String | Path) IOError! -[FS.Write]> {
-    target: path_text(path)
-    file_fault("FS.Write", .Write, target)
-    core.files.__create_dirs_os(target)
-}
-
-
 dirname_impl: fn(path: String) -> String Never! {
     raw: path.bytes()
     if raw.len() == 0 -> return ""
@@ -1145,7 +1138,8 @@ dirname_impl: fn(path: String) -> String Never! {
 dirname: fn(path: String) -> String Never! { dirname_impl(path) }
 
 
-create_dir_all: fn(path: String | Path) IOError! -[FS]> {
+/// Create `path` and any missing parents; an existing directory is success.
+create_dir_all: fn(path: String | Path) IOError! -[FS.Write]> {
     target: path_text(path)
     file_fault("FS.Write", .Write, target)
     core.files.__create_dirs_os(target)
@@ -1560,11 +1554,6 @@ walk: fn(root: String | Path, ignore: String?{None}) -[FS]> [WalkEntry] IOError!
 }
 
 
-walk_parallel: fn(root: String | Path, ignore: String?{None}) -[FS]> [WalkEntry] IOError! {
-    walk_impl(path_text(root), ignore, false)
-}
-
-
 walk_files: fn(root: String | Path, ignore: String?{None}) -[FS]> [WalkEntry] IOError! {
     walk_impl(path_text(root), ignore, true)
 }
@@ -1934,11 +1923,9 @@ copy2: fn(from: String, to: String) IOError! -[FS]> { copy_file_impl(from, to) }
 copyfile: fn(from: String, to: String) IOError! -[FS]> { copy2(from, to) }
 
 
-/// Create one directory, or all missing parents when `parents` is true.
-mkdir: fn(path: String, parents: Bool) IOError! -[FS]> {
-    if parents -> return create_dir_all(path)
-    create_dir(path)
-}
+/// Python-compatible spelling of `create_dir_all`: missing parents are always
+/// created, so `parents` does not change the result.
+mkdir: fn(path: String, parents: Bool) IOError! -[FS]> { create_dir_all(path) }
 
 
 rmdir: fn(path: String) IOError! -[FS]> { core.files.remove_dir(path) }
@@ -2223,7 +2210,7 @@ truncate: fn(path: String, size: Int) IOError! -[FS]> {
 }
 
 
-createdirectory: fn(path: String) IOError! -[FS]> { create_dir(path) }
+createdirectory: fn(path: String) IOError! -[FS]> { create_dir_all(path) }
 
 
 filesize: fn(path: String) -[FS]> Int IOError! {
@@ -2279,7 +2266,7 @@ cd: fn(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
     write_at(path, -1, [U8]{120}) ?? panic("clamped write")
     append_all(path, "d") ?? panic("append text")
     assert_eq(read(path) ?? panic("read text"), "xbcd")
-    create_dir(join(root, "one/two")) ?? panic("recursive create_dir parity")
+    create_dir_all(join(root, "one/two")) ?? panic("recursive create_dir_all")
     create_dir_all(join(root, "one/two")) ?? panic("existing directory")
     remove_all(root) ?? panic("cleanup whole-file source policy")
 }
@@ -2434,7 +2421,7 @@ trim_file_line: fn(bytes: &[U8]) Never! {
 #Test("walk owns zero-based depth, path sorting and inherited ignore rules") {
     directory: core.files.temp_dir("walk_source").expect("temporary walk directory")
     child: join(directory.path, "nested")
-    create_dir(child).expect("nested directory")
+    create_dir_all(child).expect("nested directory")
     write(join(directory.path, "visible"), "root").expect("root file")
     write(join(directory.path, "hidden"), "hidden").expect("ignored file")
     write(join(directory.path, ".gitignore"), "hidden\n").expect("root rules")

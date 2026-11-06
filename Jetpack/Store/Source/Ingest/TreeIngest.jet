@@ -507,7 +507,7 @@ store_ingest_tree_unlocked: fn(verification: &StoreVerification, roots: HangarRo
     stage_parent: files.join(hangar, STORE_STAGE_DIR)
     store_ensure_real_directory(stage_parent, "Hangar ingest staging") ?? return Err(store_ingest_store_error(err))
     stage: files.join(stage_parent, stamp)
-    files.create_dir(stage)
+    files.create_dir_all(stage)
 
     // Always scrub this stage dir (success moved trees out; failure quarantines).
     ingested: store_ingest_stage_and_commit(verification, roots, request, output_names, stage, after_child_copy) ? value -> value ! error -> {

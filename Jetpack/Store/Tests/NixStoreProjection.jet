@@ -237,7 +237,7 @@ store_test_register_conflict: fn(verification: &StoreVerification, roots: Hangar
     // Replace the leaf with a symlink escaping the Hangar. The closure
     // verification is the gate that must reject the swapped object.
     target: files.join(roots.root, "external-object")
-    files.create_dir(target) ?? panic("target")
+    files.create_dir_all(target) ?? panic("target")
     store_make_tree_writable_for_removal(leaf) ?? panic("chmod leaf")
     files.remove_all(leaf) ?? panic("remove leaf")
     files.symlink(target, leaf) ?? panic("leaf link")

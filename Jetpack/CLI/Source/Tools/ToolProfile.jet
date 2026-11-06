@@ -282,7 +282,7 @@ cli_disk_file_bytes: fn(path: String, excluded: String?) -[FS]> Int CLIError! {
 cli_write_tool_generation_locked: fn(verification: &StoreVerification, tools: [InstalledUserTool], &&live: ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> Int CLIError! {
     generation: cli_tool_next_generation()
     generation_dir: cli_tool_generation_dir(generation)
-    files.create_dir(generation_dir)
+    files.create_dir_all(generation_dir)
     if cli_tool_write_generation_body(verification, generation, generation_dir, tools, live) == {
         .Ok(written) -> Ok(written)
         .Err(error) -> {
