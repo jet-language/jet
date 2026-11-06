@@ -58,10 +58,13 @@ fn pc_module_markers() {
     pc_require(active.program.items.len() == 2, "C module heads precede unattached library file rules")
     loop fact in active.program.rule_facts -> pc_require(fact.site != Val(RuleSite.File), "C import marker is not a file rule")
     bindgen :: parse_source("#Bindgen module c.sample.__bindgen__ {{ }}".bytes())
-    // The marker is active; authored use of the generated-only namespace
-    // still receives the independent lexical reserved-name diagnostic.
-    pc_require(bindgen.diagnostics.len() == 1 && bindgen.diagnostics[0].code == "E0067", "Bindgen is active while its generated namespace stays reserved")
+    // The marker is active and parses; a hand-written `#Bindgen` is the
+    // driver's E3207, never the generic lexical E0067.
+    pc_require(bindgen.diagnostics.len() == 0, "Bindgen parses so the driver can report E3207")
     pc_require(if bindgen.program.items[0] == .CModule(value) -> value.kind == CModuleKind.Bindgen else -> false, "Bindgen remains its own module kind")
+    // The generated-only namespace stays reserved for authored imports through E3206.
+    reserved :: parse_source("#Import module c.sample.__bindgen__ {{ }}".bytes())
+    pc_require(reserved.diagnostics.len() == 1 && reserved.diagnostics[0].code == "E3206", "an authored `__bindgen__` path is E3206")
 }
 
 // Rust `trait_method_sig`: an effect arrow with no result ends a trait slot

@@ -1,8 +1,17 @@
-Error [jet.ReservedDunderName]: `__bindgen__` is reserved for Jet
-  --> tests/ui/cffi_e3206_reserved_segment.jet:1:23
+Error [jet.ReservedBindgenSegment]: Module path `c.demo.__bindgen__` uses the reserved segment `__bindgen__`
+  --> tests/ui/cffi_e3206_reserved_segment.jet:1:16
     |
   1 | #Import module c.demo.__bindgen__ {
-    |                       ^^^^^^^^^^^
- Why: Double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools
- Fix: Rename it without the second leading underscore
-More: jet-lang.dev/e/E0067
+    |                ^^^^^^^^^^^^^^^^^^
+ Why: Generated bindings live under `c.<lib>.__bindgen__`; user overlays use `#Import module c.<lib>`
+ Fix: Remove `.__bindgen__` and declare the overlay as `#Import module c.<lib>`
+More: jet-lang.dev/e/E3206
+
+Error [jet.InvalidStatement]: Expected `=` before the C symbol, found `{`
+  --> tests/ui/cffi_e3206_reserved_segment.jet:2:15
+    |
+  2 |     fn ping() { }
+    |               ^
+ Why: The parser needs the expected token to keep the surrounding syntax unambiguous
+ Fix: Write the expected token here
+More: jet-lang.dev/e/E0003

@@ -945,11 +945,14 @@ fn numeric_payload(kind: Int, source: [U8], start: Int, end: Int, tables: &Token
 }
 
 // Identifier check: reserved double-underscore names. No identifier is
-// respelled.
+// respelled. The `c.<lib>.__bindgen__` module path segment has its own
+// reports (spec.md "C ABI"): the parser's E3206 for an authored path and the
+// driver's E3207 for a hand-written `#Bindgen`, so it skips E0067 here.
 fn identifier_respelling(source: [U8], start: Int, end: Int, allow_reserved_identifiers: Bool, diagnostics: &[Diagnostic]) -> String? {
     width :: end - start
     if !allow_reserved_identifiers && width >= 2 && byte_at(source, start) == 95 && byte_at(source, start + 1) == 95 {
         text :: slice_text(source, start, end)
+        if text == "__bindgen__" && start > 0 && byte_at(source, start - 1) == 46 -> return None
         add_diagnostic(&diagnostics, "E0067", start, end, "`{text}` is reserved for Jet", "double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools", "rename it without the second leading underscore")
     }
     None

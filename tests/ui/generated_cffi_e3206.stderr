@@ -1,26 +1,8 @@
 Error [jet.ReservedBindgenSegment]: Module path `c.demo.__bindgen__` uses the reserved segment `__bindgen__`
-  --> tests/ui/generated_cffi_e3206.jet:2:16
+  --> tests/ui/generated_cffi_e3206.jet:1:16
     |
-  2 | #Import module c.demo.__bindgen__ {
+  1 | #Import module c.demo.__bindgen__ {
     |                ^^^^^^^^^^^^^^^^^^
- Why: Autogen lives in `c.<lib>.__bindgen__`; users declare overlays as `#Import module c.<lib>` only
- Fix: Drop `__bindgen__` from your module path, or use `#Import module c.demo { … }`
+ Why: Generated bindings live under `c.<lib>.__bindgen__`; user overlays use `#Import module c.<lib>`
+ Fix: Remove `.__bindgen__` and declare the overlay as `#Import module c.<lib>`
 More: jet-lang.dev/e/E3206
-
-Error [jet.RetiredBodyMarker]: This function uses the retired `=` body marker.
-  --> tests/ui/generated_cffi_e3206.jet:3:15
-    |
-  3 |     fn ping() = "demo_ping"
-    |               ^
- Why: A one-expression function body uses `->`; `::` binds a name, and `=` fills a slot inside a definition.
- Fix: Replace `=` with `->`; `jet fmt` applies this fix.
-More: jet-lang.dev/e/E0065
-
-Error [jet.InvalidStatement]: Expected a call, binding, assignment, or `return`, found `}`
-  --> tests/ui/generated_cffi_e3206.jet:4:1
-    |
-  4 | }
-    | ^
- Why: Inside a function body, write a call, binding, assignment, or `return`
- Fix: e.g. print("hello") or x :: 1
-More: jet-lang.dev/e/E0003

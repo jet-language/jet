@@ -27,7 +27,7 @@ fn kit_ui_directives() -> [KitUIDirective] {
         {name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""},
         {name: "runtime_ffi", argv: [], parent: false, exit: "any", streams: "", capability: ""}
     }
-    loop name in ["env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "parent_control_cancel", "generated_source", "no-os", "build_grants", "build_locked", "jetpack_hangar_digest_mismatch", "jetpack_retired_store_verbs", "programmable_build", "target", "cost_cli"] {
+    loop name in ["env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "parent_control_cancel", "no-os", "build_grants", "build_locked", "jetpack_hangar_digest_mismatch", "jetpack_retired_store_verbs", "programmable_build", "target", "cost_cli"] {
         &rows.push(KitUIDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
     }
     rows
@@ -70,10 +70,7 @@ fn kit_ui_invocation(source: String, file: String, lint: Bool) -> KitUICall {
         loop row in rows {
             if row.name == name {
                 known = true
-                // `@generated_source` only reaches the generated-source compile for a
-                // top-level `generated_cffi_*` file; on any other file it is a plain check.
-                plain :: name == "generated_source" && !files.basename(file).starts_with("generated_cffi_")
-                if row.capability != "" && !plain -> call.refused = row.capability
+                if row.capability != "" -> call.refused = row.capability
             }
         }
         if !known -> call.refused = "unported fixture directive: {name}"
