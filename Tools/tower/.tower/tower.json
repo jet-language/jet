@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6615,
-    "rev": 93725,
+    "rev": 93732,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -96296,6 +96296,51 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-06T21:37:32.224Z"
+        },
+        {
+          "n": 6,
+          "text": "A deny written on a package, module, type or function prohibits the denied effects for everything inside it, transitively, at check time (E0749). The existing deny rows keep passing, and a new case covers a deny on a type.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:37:33.904Z"
+        },
+        {
+          "n": 7,
+          "text": "jetpack records each dependency's inferred effect row in the lock. An update that widens a dependency's row prints which package gained which effect, and --locked refuses the widening with a registered diagnostic that has a UI snapshot. Proof: a jetpack case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:37:35.138Z"
+        },
+        {
+          "n": 8,
+          "text": "Code run straight from a URL or the registry asks before its first run in a terminal. Without a terminal it stops, and the Fix names the -A command. Proof: a case for each path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:37:36.325Z"
+        },
+        {
+          "n": 9,
+          "text": "Without a terminal or a writable state store, the notice prints once per run on stderr, and --json carries the effect list as structured detail. Proof: a case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:37:37.405Z"
+        },
+        {
+          "n": 10,
+          "text": "The Run it? prompt path, the always grant writer, and every diagnostic used only by the old model are removed; every in-repository caller, test, snapshot and example is migrated in the same change (no alias, fallback or second path). Proof: a census in the closing commit shows no remaining caller.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:37:38.456Z"
         }
       ],
       "refs": [],
@@ -96307,7 +96352,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:37:13.788Z",
-      "updated": "2026-11-06T21:37:32.224Z",
+      "updated": "2026-11-06T21:38:17.299Z",
       "updatedBy": "Main"
     }
   ],
@@ -182595,6 +182640,158 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-06T21:35:48.142Z"
+    },
+    {
+      "id": "D-AUTH-DEFAULT1",
+      "cardId": "c0ihjl6a",
+      "group": "authority",
+      "title": "Every effect is allowed by default; written code denies, and a run warns when its effects change",
+      "situation": "",
+      "gist": "What may a Jet program do when nobody has written any authority?",
+      "lesson": "Every effect is allowed unless code denies it. Jet knows a program's effects before it starts, so a run lists them up front, and lists them again whenever they change. A written authority row is a ceiling and silences the notice for what it lists.",
+      "explainer": "",
+      "story": "Ana writes a script that reads a file and calls an API. She runs it and sees one line naming what it does, then it runs. Next week a dependency update adds process launching, and the next run names the new effect. Her team adds an authority row to the package, and anything outside that row fails at check time.",
+      "inWild": "Deno denies by default and prompts at first access, so most users pass -A. Node allows everything unless started with --permission. Python, Go and Rust have no authority model at all.",
+      "detail": "Option A is the owner's proposal with four refinements. First, the notice repeats when the effect set changes. Second, a written authority row is a ceiling and silences the notice for what it lists. Third, jetpack reports a dependency whose effects widen, and --locked refuses it. Fourth, code run straight from a URL or the registry asks before its first run.\n\nOption B is the proposal as first stated: a notice on the first run only.\n\nOption C keeps today's model, where undecided effects prompt in a terminal and stop without one.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Allow by default, warn on change, ceilings",
+          "detail": "Every effect is allowed unless denied. The run lists effects before the program starts and again when they change. Authority rows are ceilings, jetpack reports dependency widening, and remote code asks first.",
+          "code": "$ jet run tool.jet\nnote: tool.jet reads files and connects to the network (-A hides this)"
+        },
+        {
+          "key": "B",
+          "name": "Allow by default, warn on first run",
+          "detail": "Every effect is allowed unless denied, and the first run lists the effects once.",
+          "code": "$ jet run tool.jet\nnote: first run: tool.jet reads files and connects to the network"
+        },
+        {
+          "key": "C",
+          "name": "Keep the prompt",
+          "detail": "Undecided effects prompt in a terminal and stop without one.",
+          "code": "$ jet run tool.jet\ntool.jet reads files and connects to the network. Run it? [Y/n/always]"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "No friction for beginners, and nothing changes silently: a new effect, from your code or a dependency, is always named.",
+        "tradeoff": "A run is never blocked by default; protection comes from written ceilings and the change notice.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A dependency update that adds an effect would never be noticed after the first run."
+          },
+          {
+            "key": "C",
+            "reason": "Prompts train people to answer yes, and stop every run without a terminal."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "Unreviewed local code runs with the user's full authority.",
+            "mitigation": "The notice names every effect before the program starts, and ceilings stop what a team denies."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "What may a Jet program do when nobody has written any authority?",
+        "lesson": "Every effect is allowed unless code denies it. A run names its effects before starting, and again whenever they change.",
+        "trio": {
+          "current": {
+            "note": "Today an undecided effect prompts.",
+            "code": "$ jet run tool.jet\ntool.jet reads files and connects to the network. Run it? [Y/n/always]"
+          },
+          "wild": {
+            "lang": "Deno",
+            "note": "Deno prompts at first access; most users pass -A.",
+            "code": "$ deno run main.ts\n⚠ Deno requests net access to \"api.example.com\". Allow? [y/n/A]"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Allow, warn on change",
+            "gist": "Allowed unless denied; changes are named.",
+            "gains": [
+              "No prompts",
+              "Dependency changes are named"
+            ],
+            "losses": [
+              "No block by default"
+            ],
+            "proposed": {
+              "code": "$ jet run tool.jet\nnote: tool.jet reads files and connects to the network (-A hides this)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Allow, warn once",
+            "gist": "Allowed unless denied; first run only.",
+            "gains": [
+              "Simplest notice"
+            ],
+            "losses": [
+              "Later changes go unseen"
+            ],
+            "proposed": {
+              "code": "$ jet run tool.jet\nnote: first run: tool.jet reads files and connects to the network"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep the prompt",
+            "gist": "Undecided effects prompt.",
+            "gains": [
+              "Blocks before running"
+            ],
+            "losses": [
+              "Prompt fatigue"
+            ],
+            "proposed": {
+              "code": "$ jet run tool.jet\nRun it? [Y/n/always]"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "No friction, and nothing changes silently.",
+          "gains": [
+            "Beginners just run",
+            "Teams write ceilings"
+          ],
+          "losses": [
+            {
+              "loss": "Local code runs with full authority.",
+              "mitigation": "Effects are named before start; ceilings deny."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Later dependency changes go unseen."
+            },
+            {
+              "key": "C",
+              "reason": "Prompts train people to say yes."
+            }
+          ],
+          "tradeoff": "Never blocked by default; ceilings and notices protect."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-06T21:38:15.663Z",
+      "outcome": "A",
+      "comment": "Owner ruled in chat 2026-11-06. Build card #6614; its c1 (adversarial review) gates every build criterion.",
+      "ratifiedAt": "2026-11-06"
     }
   ],
   "questions": [
@@ -185654,6 +185851,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T21:38:17.299Z",
+      "by": "Main",
+      "action": "decision.ratify",
+      "ref": "D-AUTH-DEFAULT1",
+      "note": "A (by Main, quoting owner: \"I think by default, we should consider all effects allowed. Packages, functions, types, etc can deny them. When a script or program is first run it warns about the effects that are used unless using the -A flag. [then, in chat:] Approve with my 4 refinements\")"
+    },
+    {
+      "at": "2026-11-06T21:38:15.663Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-AUTH-DEFAULT1",
+      "note": "Every effect is allowed by default; written code denies, and a run warns when its effects change"
+    },
+    {
+      "at": "2026-11-06T21:37:38.457Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ihjl6a",
+      "note": "#10 The Run it? prompt path, the always grant writer, and every "
+    },
+    {
+      "at": "2026-11-06T21:37:37.405Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ihjl6a",
+      "note": "#9 Without a terminal or a writable state store, the notice pri"
+    },
+    {
+      "at": "2026-11-06T21:37:36.325Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ihjl6a",
+      "note": "#8 Code run straight from a URL or the registry asks before its"
+    },
+    {
+      "at": "2026-11-06T21:37:35.138Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ihjl6a",
+      "note": "#7 jetpack records each dependency's inferred effect row in the"
+    },
+    {
+      "at": "2026-11-06T21:37:33.904Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ihjl6a",
+      "note": "#6 A deny written on a package, module, type or function prohib"
+    },
     {
       "at": "2026-11-06T21:37:32.224Z",
       "by": "Main",
