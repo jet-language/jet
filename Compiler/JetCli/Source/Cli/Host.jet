@@ -212,7 +212,7 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
             diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
             if lacks_run && !jet_cli_package_is_library_only(file, result) -> diagnostics.push(sema_no_run_diagnostic())
             if jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None && result.rust_foreign.entries.len() > 0 {
-                if jet_cli_rust_foreign_realize(result.rust_foreign, result.foreign_link) == .Err(error) -> diagnostics.push(jet_cli_rust_foreign_diagnostic(error))
+                if jet_cli_rust_foreign_check(result.rust_foreign, result.foreign_link) == .Err(error) -> diagnostics.push(jet_cli_rust_foreign_diagnostic(error))
             }
             output = if json -> jet_cli_check_json_outcome(file, source, diagnostics, watch.elapsed_millis()) else -> jet_driver_check_outcome(file, source, diagnostics, color, quiet)
             if verbose && !project && !json && output.exit_code == JET_DRIVER_EXIT_OK -> output.stdout = jet_cli_inspect_check_text(file, watch.elapsed_millis(), diagnostics.len())

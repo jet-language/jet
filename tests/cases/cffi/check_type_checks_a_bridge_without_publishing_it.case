@@ -1,0 +1,16 @@
+# `jet check` on a cold cache type-checks the std-only bridge with `cargo check` in a private
+# workspace and publishes nothing: no shared Cargo target, no helper sources, no digest sidecar.
+requires: tool:cargo
+requires: tool:rustc
+fixture: concurrent_bridges_share_one_target.fixture
+env: NO_COLOR=1
+env: JET_FFI_CACHE_DIR={work}/ffi-cache
+mkdir: ffi-cache
+step: jet check main.jet
+cwd: max0
+exit: 0
+file: ffi-cache/deps absent # no shared Cargo target is created or published
+capture: key = sole-entry ffi-cache kind dir
+file: {cap:key}/Cargo.toml absent # the helper manifest is not published under the key
+file: {cap:key}/Cargo.lock absent # nor its resolved lock
+file: {cap:key}/src absent # nor its sources

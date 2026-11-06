@@ -3056,9 +3056,11 @@ carries one requires an audited `#Unsafe` boundary (E0702).
 
 A returned resource may declare `#Close(close)`. Its close function must consume
 exactly `&&` of the handle and return no value, so `close(handle)` owns one
-release. When a dependency is needed, Jet builds a hidden cached cargo bridge
-under `~/.cache/jet/ffi/` or the directory selected by `JET_FFI_CACHE_DIR`; it
-does not add a manifest to the user's project. Missing cargo is E0703, a
+release. When a dependency is needed, `jet run`, `jet build` and `jet test` build
+a hidden cached cargo bridge under `~/.cache/jet/ffi/` or the directory selected
+by `JET_FFI_CACHE_DIR`; it does not add a manifest to the user's project.
+`jet check` reuses a cached bridge, or type-checks the bridge with `cargo check`
+in a private workspace and publishes nothing. Missing cargo is E0703, a
 fetch/build failure is E0704, and an invalid foreign path or signature is E0705.
 A panic at the foreign boundary becomes the shared runtime report. The worked
 surface is [`Examples/Interop/FFI/FFI.jet`](../../Examples/Interop/FFI/FFI.jet);

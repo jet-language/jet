@@ -214,7 +214,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1336,
+  "total": 1335,
   "counts": {
     "Compiler": 676,
     "Core": 186,
@@ -222,7 +222,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Examples": 35,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 415
+    "tests": 414
   },
   "regions": [
     {
@@ -3462,21 +3462,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessExecutionCollect.jet",
-      "line": 311,
+      "line": 335,
       "column": 9,
       "reason": "ok is the canonical writable Bool output slot"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessExecutionCollect.jet",
-      "line": 319,
+      "line": 343,
       "column": 5,
       "reason": "ok lends exactly the C ABI Bool byte"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ProcessExecutionCollect.jet",
-      "line": 422,
+      "line": 446,
       "column": 13,
       "reason": "the child mutex holds the capture builder's initialized bytes"
     },
@@ -6681,13 +6681,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
-      "file": "tests/cases/cffi/concurrent_bridges_share_one_target.fixture/take0/main.jet",
-      "line": 7,
-      "column": 5,
-      "reason": "the foreign call may write through the borrowed value"
-    },
-    {
-      "package": "tests",
       "file": "tests/cases/cffi/ffi_capability_boundary_is_safe_only_inside_unsafe/input/o2/run.jet",
       "line": 7,
       "column": 5,
@@ -9591,8 +9584,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
-| tests | 415 |
-| **total** | **1336** |
+| tests | 414 |
+| **total** | **1335** |
 
 ### Regions
 
@@ -10060,9 +10053,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/ObserveLive.jet | 515:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Parallel.jet | 43:9 | "checked System V (env,start,end)-&gt;Unit callback; env remains borrowed and each range has exclusive output slots" |
 | Compiler | Compiler/JetRuntime/Source/PluginHost.jet | 105:5 | "the linked guest entry reads the live instance and argument area only for this synchronous call" |
-| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 311:9 | "ok is the canonical writable Bool output slot" |
-| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 319:5 | "ok lends exactly the C ABI Bool byte" |
-| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 422:13 | "the child mutex holds the capture builder's initialized bytes" |
+| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 335:9 | "ok is the canonical writable Bool output slot" |
+| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 343:5 | "ok lends exactly the C ABI Bool byte" |
+| Compiler | Compiler/JetRuntime/Source/ProcessExecutionCollect.jet | 446:13 | "the child mutex holds the capture builder's initialized bytes" |
 | Compiler | Compiler/JetRuntime/Source/ProcessRoutes.jet | 112:5 | "supported_out lends exactly one writable C bool byte; Linux implements F_DUPFD_CLOEXEC" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 33:9 | "written under the scheduler root mutex" |
 | Compiler | Compiler/JetRuntime/Source/ProcessSignal.jet | 245:5 | "an idempotent install: every writer stores the same code address" |
@@ -10520,7 +10513,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 98:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |
 | Tools | Tools/packaging/NativeCCompiler.jet | 120:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
 | tests | tests/cases/cffi/cffi_raw_status_out_pointer_reads_only_on_success.fixture/main.jet | 16:5 | "store_load receives a live non-null slot; bytes are read only after status zero" |
-| tests | tests/cases/cffi/concurrent_bridges_share_one_target.fixture/take0/main.jet | 7:5 | "the foreign call may write through the borrowed value" |
 | tests | tests/cases/cffi/ffi_capability_boundary_is_safe_only_inside_unsafe/input/o2/run.jet | 7:5 | "the foreign call may write through the borrowed value" |
 | tests | tests/cases/cffi/ffi_capability_boundary_is_safe_only_inside_unsafe/input/o3/run.jet | 7:5 | "the foreign call may write through the borrowed value" |
 | tests | tests/cases/cffi_native_matrix/fixtures/required_native_c_abi_matrix/default/matrix.jet | 46:5 | "live non-null out slot; read only after status zero" |
