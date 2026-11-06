@@ -1912,12 +1912,13 @@ fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
             .Impl(definition) -> {
                 key :: sema_type_metadata_impl_key(definition.type_name, definition.trait_name ?? "")
                 index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), definition.is_generated_serde)
-                if definition.trait_name == None -> sema_derive_index_codec_methods(&index, definition.type_name, definition.methods)
+                if !sema_derive_is_codec_trait(definition.trait_name ?? "") -> sema_derive_index_codec_methods(&index, definition.type_name, definition.methods)
             }
             .Struct(definition) -> {
                 loop block in definition.trait_impls {
                     key :: sema_type_metadata_impl_key(definition.name, block.trait_name)
                     index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), block.compiler_generated)
+                    if !sema_derive_is_codec_trait(block.trait_name) -> sema_derive_index_codec_methods(&index, definition.name, block.methods)
                 }
                 sema_derive_index_codec_methods(&index, definition.name, definition.methods)
                 if index.nominals.get(definition.name) == None -> index.nominals[definition.name] = position
@@ -1926,6 +1927,7 @@ fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
                 loop block in definition.trait_impls {
                     key :: sema_type_metadata_impl_key(definition.name, block.trait_name)
                     index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), block.compiler_generated)
+                    if !sema_derive_is_codec_trait(block.trait_name) -> sema_derive_index_codec_methods(&index, definition.name, block.methods)
                 }
                 sema_derive_index_codec_methods(&index, definition.name, definition.methods)
                 if index.nominals.get(definition.name) == None -> index.nominals[definition.name] = position
@@ -1938,6 +1940,12 @@ fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
         }
     }
     index
+}
+
+// An `Encode`/`Decode` impl is the codec itself; any other impl's `encode` or
+// `decode` (inherent or another trait's) is a member the codec would collide with.
+fn sema_derive_is_codec_trait(trait_name: String) -> Bool Never! {
+    trait_name == "Encode" || trait_name == "Decode"
 }
 
 fn sema_derive_index_codec_methods(index: &SemaDeriveItemIndex, type_name: String, methods: [Func]) {
