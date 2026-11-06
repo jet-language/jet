@@ -510,6 +510,10 @@ fn sema_expr_precise_integer(value: TExpr, type_name_value: String, span: Span) 
     None
 }
 
+fn sema_expr_decimal_from_int(value: TExpr, span: Span) -> TExpr Never! {
+    sema_tree_node(Type.Named{name: "Decimal"}, TExprKind.PreciseBuiltin{type_name: "Decimal", function: "from_int", args: [TExpr]{value}}, span)
+}
+
 fn sema_expr_precise_complex(value: TExpr, span: Span, line: Int, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_expr_is_numeric(value.ty) -> return None
     real :: sema_expr_numeric_literal_conversion(value, Type.Float, span, line, &diagnostics) ?? return None
@@ -1270,6 +1274,16 @@ fn sema_expr_check_precise_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span,
             }
         }
     }
+    // An exact Int crosses into Decimal without loss, so it meets a Decimal as
+    // a Decimal of the same value (`qty * price`).
+    if lname == (Val("Decimal")) && rname == None && rhs.ty == Type.Int {
+        right = sema_expr_decimal_from_int(rhs.copy(), span)
+        rname = Val("Decimal")
+    }
+    if rname == (Val("Decimal")) && lname == None && lhs.ty == Type.Int {
+        left = sema_expr_decimal_from_int(lhs.copy(), span)
+        lname = Val("Decimal")
+    }
     if (lname == (Val("Decimal")) && (rhs.ty == Type.Float || rhs.ty == Type.Float32)) || (rname == (Val("Decimal")) && (lhs.ty == Type.Float || lhs.ty == Type.Float32)) {
         &diagnostics.push(sema_error("E0131", span, "`Float` and `Decimal` can't be mixed — got `{sema_type_show(lhs.ty)}` and `{sema_type_show(rhs.ty)}`", "precise numeric types never mix with fixed-width integers or floats without an explicit constructor", "use `Decimal(\"…\")` for exact money arithmetic; `Float` is for approximate science"))
         return None
@@ -1284,7 +1298,12 @@ fn sema_expr_check_precise_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span,
     if op == BinOp.Add -> method = Val("add")
     if op == BinOp.Sub -> method = Val("sub")
     if op == BinOp.Mul -> method = Val("mul")
-    if op == BinOp.Div -> method = Val("div")
+    if op == BinOp.Div {
+        method = Val("div")
+        // Decimal division is exact only as a Fraction (`__decimal_div`):
+        // a repeating quotient has no Decimal.
+        if precise_name == "Decimal" -> result_ty = Type.Named{name: "Fraction"}
+    }
     if op == BinOp.Eq || op == BinOp.Ne {
         if precise_name == "Complex" {
             sema_expr_precise_error(op, lhs.ty, rhs.ty, span, &diagnostics)
@@ -4246,11 +4265,16 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
             }
             else -> {}
         }
+        // Decimal is exact, so `-d` is `0 - d` through the same Core subtraction.
+        if sema_expr_precise_name(value.ty) == (Val("Decimal")) {
+            negated :: sema_tree_node(Type.Named{name: "Decimal"}, TExprKind.PreciseBuiltin{type_name: "Decimal", function: "sub", args: [TExpr]{sema_expr_decimal_literal("0", span), value}}, span)
+            return sema_expr_expected_owned(negated, expected, environment, program, &diagnostics)
+        }
         if !sema_expr_is_numeric(value.ty) {
             // UnOp::Neg: no user or Core type has a negation hook (Duration has
             // `.negated()`), so every other operand is this report, never an
             // unreported incomplete check.
-            &diagnostics.push(sema_error("E0109", span, "`-` needs a number, but this is {sema_type_show(value.ty)}", "only Int and Float values can be negated", "use a number here"))
+            &diagnostics.push(sema_error("E0109", span, "`-` needs a number, but this is {sema_type_show(value.ty)}", "only Int, Float and Decimal values can be negated", "use a number here"))
             return None
         }
         result_ty := sema_expr_numeric_base(value.ty)
