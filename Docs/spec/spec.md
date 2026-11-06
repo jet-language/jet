@@ -763,10 +763,11 @@ from newest to oldest, rewrites the first match forward in source order, and
 decodes the current shape. The `rename` operation moves a
 key, `remove` drops it, `add` evaluates its default, and `change` decodes,
 converts, and re-encodes the old field; an old value that does not decode
-fails the call with that field's errors. A converter and an `add` default are
-ordinary Jet expressions checked and lowered through the normal pipeline. If no
-shape matches, the original decode error is returned. Types with no migration
-blocks pay no chain cost, and CSV applies the chain per row (D-MIGRATE4=A).
+fails the call with that field's errors (D-VALIDATE-DECODE1=B). A converter
+and an `add` default are ordinary Jet expressions checked and lowered through
+the normal pipeline. If no shape matches, the original decode error is
+returned. Types with no migration blocks pay no chain cost, and CSV applies the
+chain per row (D-MIGRATE4=A).
 
 ### Struct layout
 

@@ -7,7 +7,7 @@
 // Decode implementation, a container's Core decode helper or the runtime's
 // scalar Decode adapter, whose String Decode reads a native Text in place.
 
-use jet_foundation.[Span, TBuiltinOp, BodyCallArg, NodeKind, BodyHandleOp, TPanicLoc, Type, checked_generated_local, checked_user_local, StmtKind]
+use jet_foundation.[Span, TBuiltinOp, BodyCallArg, Measure, NodeKind, BodyHandleOp, TPanicLoc, Type, checked_generated_local, checked_user_local, measure_literal_value, StmtKind]
 
 // The lowering of `receiver.operation(args)` when the receiver is the
 // canonical Dyn and the operation is one of the tree methods here; None
@@ -417,9 +417,9 @@ ir_dyn_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: 
 }
 
 // `tree.decode<T>()`: T's own Decode implementation, called with the tree; a
-// container or Dyn target's Core/Encoding/Encoding.jet decode helper
-// (ir_codec_decode_helper); else the runtime's canonical scalar adapter
-// jet_rt_codec_decode_<scalar>, which borrows the tree.
+// container, F32 or Dyn target's Core/Encoding/Encoding.jet decode helper
+// (ir_codec_decode_helper, ir_dyn_fixed_decode); else the runtime's canonical
+// scalar adapter jet_rt_codec_decode_<scalar>, which borrows the tree.
 ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, target: Type, args: [Int], span: Span) -> Int Never! {
     if args.len() != 0 -> return ir_fail_slot(&b, span, "Dyn.decode with {args.len()} arguments")
     concrete: ir_fact(p, &b, target, span)
@@ -430,6 +430,7 @@ ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
         helper_key: ir_codec_decode_key(p, helper.name) ?? return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)}: Core/Encoding/Encoding.jet {helper.name} is outside the checked program")
         return ir_call(&m, p, &b, helper_key, helper.type_args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     }
+    if ir_untag(concrete) == .FixedList(element, measure) -> return ir_dyn_fixed_decode(&m, p, &b, ty, receiver, concrete, element, measure, span)
     if ir_untag(concrete) == .Union(members) -> return ir_dyn_union_decode(&m, p, &b, ty, receiver, concrete, members, span)
     scalar: ir_codec_scalar(concrete) ?? return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)} without its Decode implementation")
     tree: ir_expr(&m, p, &b, receiver)
@@ -438,6 +439,46 @@ ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
         if ir_dyn_def(p, ir_ty(p, b, receiver)) == .Val(dyn_row) -> return ir_dyn_text_read(&m, p, &b, ty, dyn_row, tree, "jet_rt_codec_decode_string", span)
     }
     ir_route(&m, p, &b, "jet_rt_codec_decode_{scalar}", [Int]{tree}, [Bool]{true}, ty, span)
+}
+
+// `tree.decode<[T#N]>()`: Core/Encoding/Encoding.jet __decode_fixed_list
+// decodes the List of exactly N items. A `[T#N]` carried as a List is that
+// List; an inline one takes a copy of its N elements.
+ir_dyn_fixed_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, fixed: Type, element: Type, measure: Measure, span: Span) -> Int Never! {
+    count: measure_literal_value(measure) ?? return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(fixed)} without a literal length")
+    err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(fixed)} as {ir_type_name(ty)}") }
+    result_row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    fixed_row: ir_value_type(&m, p, fixed) ?? return ir_type_fail(&b, span, fixed)
+    key: ir_codec_decode_key(p, "__decode_fixed_list") ?? return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(fixed)}: Core/Encoding/Encoding.jet __decode_fixed_list is outside the checked program")
+    length: ir_node(&b, Type.Int, NodeKind.IntLit{value: count, width: None}, span)
+    listed: ir_call(&m, p, &b, key, [Type]{element.copy()}, -1, [IRWriteBack]{}, [BodyCallArg]{ir_codec_arg(receiver), ir_codec_arg(length)}, span)
+    if ir_failed(b) || listed < 0 -> return -1
+    if ir_fixed_count(m, fixed_row) == None -> return ir_adapt(&m, p, &b, listed, result_row, span)
+    list_ty: Type.List{element: element.copy()}
+    list_row: ir_value_type(&m, p, list_ty) ?? return ir_type_fail(&b, span, list_ty)
+    err_row: ir_value_type(&m, p, err_ty) ?? return ir_type_fail(&b, span, err_ty)
+    out: ir_temp(&m, &b, result_row)
+    listed_fresh: b.fresh[listed]
+    decoded: ir_result_is_ok(&m, &b, listed)
+    ir_open_if(&b.f, decoded, b.line)
+    list: ir_box_take(&m, p, &b, listed, 8, list_row)
+    storage: ir_fresh_temp(&m, &b, fixed_row)
+    ir_emit(&b.f, IROp.StackAddress, storage, m.types[fixed_row].size, 8, -1, b.line)
+    ir_fixed_store_back(&m, p, &b, storage, list)
+    made: ir_result_box(&m, p, &b, ty, true, storage)
+    if ir_failed(b) -> return -1
+    ir_emit(&b.f, IROp.Copy, out, made, -1, -1, b.line)
+    b.fresh[made] = false
+    ir_else(&b.f, b.line)
+    b.fresh[listed] = listed_fresh
+    errors: ir_box_take(&m, p, &b, listed, 8, err_row)
+    failed: ir_result_box(&m, p, &b, ty, false, errors)
+    if ir_failed(b) -> return -1
+    ir_emit(&b.f, IROp.Copy, out, failed, -1, -1, b.line)
+    b.fresh[failed] = false
+    ir_end(&b.f, b.line)
+    b.fresh[out] = true
+    out
 }
 
 // `tree.decode<A | B>()`: the first member, in written order, whose own
@@ -517,7 +558,7 @@ ir_codec_arg: fn(value: Int) -> BodyCallArg Never! {
 
 // The Core decode helper for a target with no Decode implementation of its
 // own, and its type arguments: a List (a byte List also takes Bytes and
-// base64 Text), an Option, a String-keyed Map and Dyn itself.
+// base64 Text), an Option, a String-keyed Map, an F32 and Dyn itself.
 ir_codec_decode_helper: fn(p: IRProgram, target: Type) -> (name: String, type_args: [Type])? Never! {
     if ir_dyn_def(p, target) != None -> return Val((name: "__decode_dyn", type_args: [Type]{}))
     if ir_untag(target) == {
@@ -530,6 +571,7 @@ ir_codec_decode_helper: fn(p: IRProgram, target: Type) -> (name: String, type_ar
             if ir_untag(key) != Type.String -> return None
             Val((name: "__decode_map", type_args: [Type]{value.copy()}))
         }
+        .Float32 -> Val((name: "__decode_f32", type_args: [Type]{}))
         else -> None
     }
 }
@@ -561,11 +603,11 @@ ir_codec_scalar: fn(target: Type) -> String? Never! {
 }
 
 // `value.encode()` into a Dyn: a Dyn is itself, a type with its own Encode
-// implementation calls it, an Int, fixed-width integer, Float, Bool, Char or
-// String value is boxed as its Dyn variant (a Char is the Text of its one
-// character), and a String-keyed Map or a List encodes as an Object or Array
-// of its encoded values. The builtin and typed codec routes have no lowering
-// here.
+// implementation calls it, an Int, fixed-width integer, Float, F32, Bool, Char
+// or String value is boxed as its Dyn variant (a Char is the Text of its one
+// character), and a String-keyed Map or a List or fixed List encodes as an
+// Object or Array of its encoded values. The builtin and typed codec routes
+// have no lowering here.
 ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     concrete: ir_ty(p, b, receiver)
     if ir_dyn_def(p, concrete) != None -> return ir_expr(&m, p, &b, receiver)
@@ -580,11 +622,14 @@ ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         if ir_untag(concrete) == .Map(map_key, _, _) {
             if ir_untag(map_key) == Type.String -> return ir_dyn_object_encode(&m, p, &b, ty, typed, span)
         }
-        if ir_untag(concrete) == .List(element) {
+        if ir_sequence_element(concrete) == .Val(element) {
             // A byte List encodes as Dyn.Bytes, the inverse of __decode_bytes
-            // (encoding-decisions.md: Codable `[U8]` is never an integer array).
+            // (encoding-decisions.md: Codable `[U8]` is never an integer array);
+            // an inline `[U8#N]` crosses as a List copy of it.
             if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) {
-                bytes: ir_expr(&m, p, &b, receiver)
+                value: ir_expr(&m, p, &b, receiver)
+                if ir_failed(b) || value < 0 -> return -1
+                bytes: ir_list_operand(&m, p, &b, value, span)
                 if ir_failed(b) || bytes < 0 -> return -1
                 return ir_dyn_box(&m, p, &b, ty, "Bytes", bytes, span)
             }
@@ -595,7 +640,7 @@ ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     }
     variant: if ir_untag(concrete) == {
         .Int | .IntN(_, _) -> "Int"
-        .Float -> "Float"
+        .Float | .Float32 -> "Float"
         .Bool -> "Bool"
         .String | .Char -> "Text"
         else -> ""
@@ -607,6 +652,12 @@ ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if ir_untag(concrete) == .IntN(_, _) {
         int_row: ir_value_type(&m, p, Type.Int) ?? return ir_type_fail(&b, span, Type.Int)
         payload = ir_numeric_cast(&m, p, &b, slot, int_row, span)
+        if ir_failed(b) -> return -1
+    }
+    // An F32 widens to the Float that holds it exactly.
+    if ir_untag(concrete) == Type.Float32 {
+        float_row: ir_value_type(&m, p, Type.Float) ?? return ir_type_fail(&b, span, Type.Float)
+        payload = ir_numeric_cast(&m, p, &b, slot, float_row, span)
         if ir_failed(b) -> return -1
     }
     if ir_untag(concrete) == Type.Char {
