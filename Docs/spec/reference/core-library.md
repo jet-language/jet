@@ -3179,7 +3179,8 @@ run: fn() {
 | `variance(values)` / `stddev(values)` | `Float !DataError` | Compute finite numeric dispersion. |
 | `median(values)` / `quantile(values, q)` | `Float !DataError` | Compute bounded order statistics by worst-case linear rank selection on a copy; the caller's list is unchanged. |
 | `rolling_mean(values, window)` | `[Float] !DataError` | Compute a bounded rolling mean. |
-| `query(rows)` | `Query<T>` | Start a deterministic query plan. |
+| `query(rows)` | `Query<T>` | Start a deterministic query plan under `DataLimits.safe()`. |
+| `query(stream)` | `Query<T>` | Start a one-shot query over a stream's remaining rows, under the `DataLimits` of the reader that made the stream. |
 | `inner_join(left, right, left -> key, right -> key)` | `[DataJoin<T, U>] !DataError` | Preserve duplicate matches. |
 | `left_join(left, right, left -> key, right -> key)` | `[DataJoin<T, ?U>] !DataError` | Retain unmatched left rows as `?U`. |
 | `pivot_sum(rows, row -> key, row -> column, row -> value)` | `[DataPivotCell] !DataError` | Group and sum by a row and column key. |
@@ -3198,7 +3199,10 @@ deterministic operation names; `collect()` materializes `[T] !DataError`.
 The source `query(rows)` facade constructs the shared deferred carrier through
 the data provider, rather than rebuilding its private storage as a source
 record. Filter, sort, and grouping selectors receive an owned row value at
-the provider callback boundary.
+the provider callback boundary. A query's limits bound its sorts, groups, and
+collected rows, and every query derived from it keeps them: grouping a
+`csv_reader` stream with `max_groups = 1` into two groups fails with
+`Limit query.group_by.mean: max_groups 1 exceeded`.
 Grouped `count`, `sum`, and `mean` return `Query<Group<K, V>>`, and `mean`
 requires a floating numeric selector. `DataTracked<T, K>` supports `query`,
 `insert`, `replace`, and `remove`; `DataWatch<T>` supports `get`, `status`, and

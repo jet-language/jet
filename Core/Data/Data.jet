@@ -330,9 +330,10 @@ DataStream: struct<T> {
 // The pull side of a file-backed stream (Rust `DataStream` with its inner
 // reader, `terminal` and `eof`). `pull` reads and decodes one row; a failure
 // stays latched in `terminal`, and `ahead` keeps rows that `len` read early.
+// `limits` are the reader's: they bound `collect` and a query over the stream.
 __StreamSource: struct<T> {
     pull: fn() -> T? DataError!
-    max_output_rows: Int
+    limits: DataLimits
     ahead: [T]
     ahead_index: Int
     terminal: DataError?
@@ -404,9 +405,13 @@ __QueryState: struct {
     consumed: Bool
 }
 
+// `__limits` bound the query's sorts, groups and output: a query over a
+// reader's stream keeps that reader's limits, every other source starts at
+// `DataLimits.safe()`, and each derived query inherits its source's.
 Query: struct<T> {
     __steps: [String]
     __one_shot: Bool
+    __limits: DataLimits
     __state: Shared<__QueryState>
     __cell: Shared<__QueryCell<T>>
 }
@@ -728,8 +733,8 @@ track: fn<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
     Ok(DataTracked<T, K>{snapshot: snapshot_from_rows<T>(rows)})
 }
 
-__query_make: fn<T>(steps: [String], one_shot: Bool, run: ^fn() -> [T] DataError!) -> Query<T> Never! {
-    Query<T>{__steps: steps, __one_shot: one_shot, __state: shared __QueryState{consumed: false}, __cell: shared __QueryCell<T>{run: ^run}}
+__query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: ^fn() -> [T] DataError!) -> Query<T> Never! {
+    Query<T>{__steps: steps, __one_shot: one_shot, __limits: limits, __state: shared __QueryState{consumed: false}, __cell: shared __QueryCell<T>{run: ^run}}
 }
 
 __query_steps: fn(steps: [String], step: String) -> [String] Never! {
@@ -752,15 +757,19 @@ __query_rows: fn<T>(query: Query<T>) -> [T] DataError! {
 
 // `data.query(rows)`: a reusable scan of an in-memory row list.
 query: fn<T>(rows: [T]) -> Query<T> Never! {
-    __query_make<T>([String]{"scan"}, false, () -> Ok(rows.copy()))
+    __query_make<T>([String]{"scan"}, false, DataLimits.safe(), () -> Ok(rows.copy()))
 }
 
-// `data.query(stream)`: a one-shot read of the stream's remaining rows.
+// `data.query(stream)`: a one-shot read of the stream's remaining rows, under
+// the limits of the reader that made the stream.
 __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
-    __query_make<T>([String]{"stream"}, true, () -> {
+    limits: if source.__source == {
+        .Val(pull) -> pull.guard_read().value.limits.copy()
+        else -> DataLimits.safe()
+    }
+    __query_make<T>([String]{"stream"}, true, limits.copy(), () -> {
         reader := source.copy()
         if reader.cancelled -> return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
-        limits := DataLimits.safe()
         out := [T]{}
         loop {
             if __stream_pull<T>(&reader) == {
@@ -822,7 +831,7 @@ __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
 // the failure stays latched (Rust `jet_data_stream_collect`).
 __stream_collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! {
     limit: if stream.__source == {
-        .Val(source) -> source.guard_read().value.max_output_rows
+        .Val(source) -> source.guard_read().value.limits.max_output_rows
         else -> -1
     }
     out := [T]{}
@@ -1043,20 +1052,20 @@ __stream_windows_ready: fn<K, T>(keys: [K], pending: &[__PendingWindow<T>], widt
 // `data.query(tracked)` and `tracked.query()`: a reusable scan of the
 // tracked snapshot rows.
 __query_tracked: fn<T, K>(tracked: DataTracked<T, K>) -> Query<T> Never! {
-    __query_make<T>([String]{"track"}, false, () -> Ok(tracked.snapshot.value.copy()))
+    __query_make<T>([String]{"track"}, false, DataLimits.safe(), () -> Ok(tracked.snapshot.value.copy()))
 }
 
 __query_plan: fn<T>(query: Query<T>) -> [String] Never! { query.__steps.copy() }
 
 __query_collect: fn<T>(query: Query<T>) -> [T] DataError! {
     rows: __query_rows<T>(query) ?? return Err(err)
-    limits := DataLimits.safe()
+    limits: query.__limits.copy()
     if rows.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "query.collect"))
     Ok(rows)
 }
 
 __query_filter: fn<T>(query: Query<T>, predicate: ^fn(T) -> Bool) -> Query<T> Never! {
-    __query_make<T>(__query_steps(query.__steps, "filter"), false, () -> {
+    __query_make<T>(__query_steps(query.__steps, "filter"), false, query.__limits.copy(), () -> {
         rows: __query_rows<T>(query) ?? return Err(err)
         out := [T]{}
         loop row in rows {
@@ -1069,9 +1078,9 @@ __query_filter: fn<T>(query: Query<T>, predicate: ^fn(T) -> Bool) -> Query<T> Ne
 
 // A stable sort by the String key, bounded by `max_sort_rows`.
 __query_sort_by: fn<T>(query: Query<T>, key: ^fn(T) -> String) -> Query<T> Never! {
-    __query_make<T>(__query_steps(query.__steps, "sort_by"), false, () -> {
+    __query_make<T>(__query_steps(query.__steps, "sort_by"), false, query.__limits.copy(), () -> {
         rows: __query_rows<T>(query) ?? return Err(err)
-        limits := DataLimits.safe()
+        limits: query.__limits.copy()
         if rows.len() > limits.max_sort_rows -> return Err(data_error(DataErrorKind.Limit, "max_sort_rows {limits.max_sort_rows} exceeded", "query.sort_by"))
         keys := [String]{}
         loop row in rows {
@@ -1148,7 +1157,7 @@ __query_merge_order: fn(keys: [String], sql_order: Bool, descending: Bool) -> [I
 }
 
 __query_map: fn<T, U>(query: Query<T>, mapper: ^fn(T) -> U) -> Query<U> Never! {
-    __query_make<U>(__query_steps(query.__steps, "map"), true, () -> {
+    __query_make<U>(__query_steps(query.__steps, "map"), true, query.__limits.copy(), () -> {
         rows: __query_rows<T>(query) ?? return Err(err)
         out := [U]{}
         loop row in rows {
@@ -1163,7 +1172,7 @@ __query_map: fn<T, U>(query: Query<T>, mapper: ^fn(T) -> U) -> Query<U> Never! {
 __query_extreme: fn<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V, maximum: Bool) -> Query<V> Never! {
     step: if maximum -> "max" else -> "min"
     operation: "query.{step}"
-    __query_make<V>(__query_steps(query.__steps, step), true, () -> {
+    __query_make<V>(__query_steps(query.__steps, step), true, query.__limits.copy(), () -> {
         rows: __query_rows<T>(query) ?? return Err(err)
         selected := [V]{}
         loop row in rows {
@@ -1185,7 +1194,7 @@ __query_min: fn<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V) -> Query<V>
 __query_max: fn<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, ^key, true) }
 
 __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) -> String, right_key: ^fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
-    __query_make<DataJoin<T, U>>(__query_steps(left.__steps, "inner_join"), true, () -> {
+    __query_make<DataJoin<T, U>>(__query_steps(left.__steps, "inner_join"), true, left.__limits.copy(), () -> {
         left_rows: __query_rows<T>(left) ?? return Err(err)
         right_rows: __query_rows<U>(right) ?? return Err(err)
         inner_join<T, U>(left_rows, right_rows, left_key, right_key)
@@ -1193,7 +1202,7 @@ __query_inner_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) -
 }
 
 __query_left_join: fn<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) -> String, right_key: ^fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
-    __query_make<DataJoin<T, U?>>(__query_steps(left.__steps, "left_join"), true, () -> {
+    __query_make<DataJoin<T, U?>>(__query_steps(left.__steps, "left_join"), true, left.__limits.copy(), () -> {
         left_rows: __query_rows<T>(left) ?? return Err(err)
         right_rows: __query_rows<U>(right) ?? return Err(err)
         left_join<T, U>(left_rows, right_rows, left_key, right_key)
@@ -1244,9 +1253,9 @@ __group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] Nev
 }
 
 __group_count: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Group<K, Int>> Never! {
-    __query_make<Group<K, Int>>(__group_steps<T, K>(grouped, "count"), true, () -> {
+    __query_make<Group<K, Int>>(__group_steps<T, K>(grouped, "count"), true, grouped.__query.__limits.copy(), () -> {
         rows: __query_rows<T>(grouped.__query) ?? return Err(err)
-        limits := DataLimits.safe()
+        limits: grouped.__query.__limits.copy()
         cell: grouped.__key.guard_read()
         keys := [K]{}
         order := [Int]{}
@@ -1271,9 +1280,9 @@ __group_count: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Gr
 // Group sums keep the value callback's numeric type; each numeric domain
 // supplies its own addition to the shared reducer.
 __group_sum: fn<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> V, add: ^fn(V, V) -> V) -> Query<Group<K, V>> Never! {
-    __query_make<Group<K, V>>(__group_steps<T, K>(grouped, "sum"), true, () -> {
+    __query_make<Group<K, V>>(__group_steps<T, K>(grouped, "sum"), true, grouped.__query.__limits.copy(), () -> {
         rows: __query_rows<T>(grouped.__query) ?? return Err(err)
-        limits := DataLimits.safe()
+        limits: grouped.__query.__limits.copy()
         cell: grouped.__key.guard_read()
         keys := [K]{}
         order := [Int]{}
@@ -1311,9 +1320,9 @@ __group_sum_u32: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^f
 __group_sum_u64: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U64) -> Query<Group<K, U64>> Never! { __group_sum<T, K, U64>(grouped, ^value, (left: U64, right: U64) -> left + right) }
 
 __group_mean: fn<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
-    __query_make<Group<K, Float>>(__group_steps<T, K>(grouped, "mean"), true, () -> {
+    __query_make<Group<K, Float>>(__group_steps<T, K>(grouped, "mean"), true, grouped.__query.__limits.copy(), () -> {
         rows: __query_rows<T>(grouped.__query) ?? return Err(err)
-        limits := DataLimits.safe()
+        limits: grouped.__query.__limits.copy()
         cell: grouped.__key.guard_read()
         keys := [K]{}
         order := [Int]{}
@@ -1356,7 +1365,7 @@ __query_sql: fn<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
     if reshapes -> return Err(__query_field_error("SQL projection/grouping changes the row shape; use the Dyn query result"))
     selected := [T]{}
     loop index in __query_sql_select(trees, spec) -> &selected.push(rows[index].copy())
-    Ok(__query_make<T>([String]{"scan", "sql"}, false, () -> Ok(selected.copy())))
+    Ok(__query_make<T>([String]{"scan", "sql"}, false, DataLimits.safe(), () -> Ok(selected.copy())))
 }
 
 // The CSV header door of `csv.query`: every field the SQL names must be a
@@ -1684,7 +1693,7 @@ csv_reader: fn<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> Da
     state: shared __CSVRowSource{records: ^records, header: [String]{}, started: false, row: 0}
     source: shared __StreamSource<T>{
         pull: () -> csv_reader_next<T>(state),
-        max_output_rows: limits.max_output_rows,
+        limits: limits,
         ahead: [T]{},
         ahead_index: 0,
         terminal: None,
@@ -1783,7 +1792,7 @@ json_reader: fn<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> D
     state: shared __JSONRowSource{parser: ^parser, array_started: false, array_done: false, row: 0}
     source: shared __StreamSource<T>{
         pull: () -> json_reader_next<T>(state),
-        max_output_rows: limits.max_output_rows,
+        limits: limits,
         ahead: [T]{},
         ahead_index: 0,
         terminal: None,

@@ -4,9 +4,9 @@
 #   D-BIND1 (syntax-decisions.md:21-22; spec.md:1169-1170) and D-CALLSITE-MARK1
 #   (spec.md:1177-1178); `next` is the module function `stream.next(stream)`
 #   (core-library.md:3106), so the source imports `core.data.stream as stream`.
-# - .out line 2 `groups:ok`: data.query takes no limits and runs under
-#   DataLimits.safe() (core-library.md:3032, :3008 max_groups=100000), so the
-#   reader's max_groups=1 does not apply to the 2 groups (as tooling/data_hostile).
+# - .out line 2: `data.query(stream)` carries the reader's limits
+#   (core-library.md `query(stream)`), so the reader's max_groups=1 refuses
+#   the 2 groups left after `next` (as tooling/data_hostile).
 # - The build grants FS.Read,FS.Write: no package block, and an undecided
 #   required effect stops with E1803 outside a terminal (spec.md:1774-1784,
 #   D-AUTH-AMBIENT1, D-ECO-INLINEPACKAGE1).
