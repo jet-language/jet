@@ -1830,12 +1830,16 @@ alloc_out_of_memory: fn(size: I64) {
 // The live Secrets are scrubbed first: a core dump must not hold them.
 alloc_abort: fn() {
     secret_scrub()
+    // The signal is thread-directed (tgkill, as libc raise does): a
+    // process-directed kill from a task thread may land on another thread,
+    // and this thread would reach the exit fallback before the core dump ends it.
     #Unsafe("the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed") {
         pid: os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        tid: os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         _ := os_syscall_stack4_i64(I64{14}, I64{1}, I64{32}, I64{0}, I64{0}, I64{0}, I64{8})
-        _ := os_syscall_i64(I64{62}, pid, I64{6}, I64{0}, I64{0}, I64{0}, I64{0})
+        _ := os_syscall_i64(I64{234}, pid, tid, I64{6}, I64{0}, I64{0}, I64{0})
         _ := os_syscall_stack4_i64(I64{13}, I64{6}, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
-        _ := os_syscall_i64(I64{62}, pid, I64{6}, I64{0}, I64{0}, I64{0}, I64{0})
+        _ := os_syscall_i64(I64{234}, pid, tid, I64{6}, I64{0}, I64{0}, I64{0})
         _ := os_syscall_i64(I64{231}, I64{127}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     loop {
