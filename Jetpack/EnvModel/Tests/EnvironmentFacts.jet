@@ -9,6 +9,8 @@ use {
     jet_foundation.[CtEnumArg, CtKey, CtMapEntry, CtValue, NamedCtValue]
     jet_pkg_model.[pkg_host_key]
     jetpack_foundation.[ENV_FIELD_GIT_HOOKS_PATH]
+    files: core.files
+    sys: core.sys
 }
 
 envmodel_test_preset_error: fn(set: PresetSet, names: [String]) -> PresetError {
@@ -289,21 +291,20 @@ envmodel_test_snapshot_refused: fn(root: String, relative: String) -[FS, Env]> B
     unsupported: envmodel_test_fact_error(catalog.expand_for_platform([LanguageSpec]{LanguageSpec{name: "Narrow", enable: true}}, "aarch64-darwin"))
     assert(unsupported.contains("does not support host platform"), unsupported)
 
+    // A catalog admits only validated packs, so a required tool without a
+    // command mapping is refused at registration.
     missing := LanguagePackCatalog.empty()
-    missing.packs["Missing"] = LanguagePack{
+    missing_error: envmodel_test_register_error(&missing, LanguagePack{
         name: "Missing",
         packages: [String]{"missing@nixpkgs"},
         host: "native",
         platforms: [String]{"x86_64-linux"},
         license: "MIT",
         required_tools: [String]{"missing"},
-        commands: [String: String]{}
-    }
-    error: envmodel_test_fact_error(missing.expand_for_platform([LanguageSpec]{LanguageSpec{name: "Missing", enable: true}}, "x86_64-linux"))
-    assert(error.contains("missing catalog tools: missing"), error)
-    disabled: missing.expand_for_platform([LanguageSpec]{LanguageSpec{name: "Missing", enable: false}}, "x86_64-linux") ?? panic("a disabled selection expands")
-    assert_eq(disabled.packages.len(), 0)
-    assert_eq(disabled.projections[0].missing_tools, [String]{"missing"})
+        commands: [String: String]{"other": "other"}
+    })
+    assert(missing_error.contains("required tool 'missing' has no command mapping"), missing_error)
+    assert_eq(missing.names().len(), 0)
 
     unlicensed := LanguagePackCatalog.empty()
     unlicensed_error: envmodel_test_register_error(&unlicensed, LanguagePack{

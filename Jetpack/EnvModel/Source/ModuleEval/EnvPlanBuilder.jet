@@ -189,6 +189,9 @@ envmodel_profile_provider_label: fn(source: RefSource, source_name: String, tabl
 // remain parseable and comparable.
 envmodel_provider_reference_from_upstream: fn(upstream: String, provider: String) -> String Never! {
     halves: upstream.split_once(REF_SEPARATOR) ?? return upstream
+    if halves.after.split_once(REF_CHANNEL_MARKER) == .Val(target) {
+        return "{target.before}{REF_PROVIDER_AT}{provider}{REF_CHANNEL_MARKER}{target.after}"
+    }
     "{halves.after}{REF_PROVIDER_AT}{provider}"
 }
 
