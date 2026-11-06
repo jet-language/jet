@@ -1,7 +1,8 @@
 // The C header binder's host half: `jet inspect bind <header.h>` and the
 // compiler's refresh of a missing or stale header cache. Both generate through
-// jet_pkg_model's pkg_cbind_bind_files and write through jet_cli_c_bind_publish,
-// so the command and the compiler share one bind.
+// jet_pkg_model's pkg_cbind_bind_files, record the bind's inputs through
+// pkg_cbind_provenance, and write through jet_cli_c_bind_publish, so the
+// command and the compiler share one bind.
 use {
     cli_files: core.files
     jet_driver.[
@@ -11,18 +12,26 @@ use {
         JET_DRIVER_EXIT_OK,
         JET_DRIVER_EXIT_USER_ERROR,
         jet_driver_file_import_path,
+        jet_driver_foreign_import_libraries,
         jet_driver_foreign_library_from_header,
         jet_driver_foreign_valid_library,
     ]
     jet_foundation.[CModuleKind, DIAGNOSTIC_ERROR, ImportDecl, Item]
     jet_parser.[parse_source]
-    jet_pkg_model.[CBindFiles, HandleOverlay, pkg_cbind_bind_files, pkg_cbind_compute_bind_hash]
+    jet_pkg_model.[
+        ArchiveInput, CBindFiles, ForeignBridgeError, HandleOverlay, pkg_cbind_bind_files, pkg_cbind_compute_bind_hash,
+        pkg_cbind_declared_dependency, pkg_cbind_local_archives, pkg_cbind_provenance, pkg_cbind_stale_input,
+    ]
 }
 
 // The cache directory below a project root, one part at a time.
 JET_CLI_C_BINDINGS_PARTS: [String]{".jet", "bindings", "c"}
 // The largest `.hash` sidecar read back: one hex digest and its line end.
 JET_CLI_C_BIND_HASH_LIMIT: 256
+// The largest `.provenance` record and `.jet` cache read back to check that
+// a current binding's inputs are unchanged.
+JET_CLI_C_BIND_PROVENANCE_LIMIT: 1048576
+JET_CLI_C_BIND_CACHE_LIMIT: 67108864
 
 // One header-path import: the library its basename names and the header.
 JetCLICHeaderImport: struct {
@@ -57,18 +66,45 @@ jet_cli_c_bind_fix: fn(lib: String) -> String Never! {
     "Fix the header path, install dev headers, run `jet inspect bind` manually for details, or hand-write `#Import c.{lib}: module`."
 }
 
-// Write one bind's files into `held` as `<stem>.jet`, `<stem>.metadata` and
-// `<stem>.hash`. The old hash goes first and the new one last, so a write cut
-// short leaves a cache the next compile rebinds, never one it trusts. A bind
-// without metadata removes a stale `.metadata`.
-jet_cli_c_bind_publish: fn(held: JetCLIRootedDirectory, stem: String, bound: CBindFiles) JetCLIReadError! -[FS, Env, Time]> {
+// Write one bind's files into `held` as `<stem>.jet`, `<stem>.metadata`,
+// `<stem>.provenance` and `<stem>.hash`. The old hash goes first and the new
+// one last, so a write cut short leaves a cache the next compile rebinds,
+// never one it trusts. A bind without metadata removes a stale `.metadata`.
+jet_cli_c_bind_publish: fn(held: JetCLIRootedDirectory, stem: String, bound: CBindFiles, provenance: String) JetCLIReadError! -[FS, Env, Time]> {
     _: held.remove("{stem}.hash")
     held.replace("{stem}.jet", bound.cache.bytes(), None)
     if bound.metadata == {
         .Val(text) -> held.replace("{stem}.metadata", text.bytes(), None)
         .None -> { _: held.remove("{stem}.metadata") }
     }
+    held.replace("{stem}.provenance", provenance.bytes(), None)
     held.replace("{stem}.hash", bound.hash.bytes(), None)
+}
+
+// The provenance record of one bind of `header` (absolute, read as
+// `header_text`) published as `<stem>.jet` in `directory`. The package at
+// `root` names the library's declared C dependency, and a local one its
+// archive, so a rebuilt archive makes the binding stale.
+jet_cli_c_bind_provenance: fn(root: String, directory: String, stem: String, lib: String, header: String, header_text: String, bound: CBindFiles) -[FS, Env]> String ForeignBridgeError! {
+    manifest_path: cli_files.join(root, "package.jet")
+    dependency: if cli_files.read(manifest_path) == {
+        .Ok(source) -> pkg_cbind_declared_dependency(source, manifest_path, lib)
+        .Err(_) -> None
+    }
+    archives: if dependency == .Val(target) -> pkg_cbind_local_archives(root, target, lib) else -> [ArchiveInput]{}
+    pkg_cbind_provenance(bound, lib, stem, header, header_text, cli_files.join(directory, "{stem}.jet"), dependency, archives)
+}
+
+// What changed since the current `<lib>.jet` under `root` was bound, as its
+// `.provenance` records: the cache itself or a local archive it links. None
+// without a readable record, so a cache published without one stays usable.
+jet_cli_c_bind_stale: fn(root: String, lib: String) -[FS, Time]> String? Never! {
+    held: JetCLIRootedDirectory.open(root, JET_CLI_C_BINDINGS_PARTS, false) ?? return None
+    stored: held.read("{lib}.provenance", JET_CLI_C_BIND_PROVENANCE_LIMIT) ?? return None
+    record: String.from_bytes(stored) ?? return None
+    cache_bytes: held.read("{lib}.jet", JET_CLI_C_BIND_CACHE_LIMIT) ?? return None
+    cache: String.from_bytes(cache_bytes) ?? return None
+    pkg_cbind_stale_input(record, cache.bytes())
 }
 
 // Admit the close contracts a parsed `#Import c.<lib>: module` overlay names:
@@ -99,7 +135,9 @@ jet_cli_c_bind_admit_overlays: fn(items: [Item], overlays: &[String: HandleOverl
 // The header-path imports of `imports` and of every module nested in `items`,
 // and in `modules` the root-relative paths of the `.jet` files they import
 // from `relative_path`: a file import, or a body-less `name: module`'s
-// `name.jet` and `name/module.jet` (Loader.jet's rules).
+// `name.jet` and `name/module.jet` (Loader.jet's rules). A header whose
+// library the same scope also brings in through `c.<lib>` or `c.[<lib>]` is
+// not bound: the compile reports that pair as E3204.
 jet_cli_c_bind_collect_imports: fn(relative_path: String, imports: [ImportDecl], items: [Item], headers: &[JetCLICHeaderImport], modules: &[String]) Never! {
     loop declaration in imports {
         if declaration.kind == .File(path, _) {
@@ -107,7 +145,15 @@ jet_cli_c_bind_collect_imports: fn(relative_path: String, imports: [ImportDecl],
                 known: loop existing in headers {
                     if existing.lib == lib -> break true
                 } ?? false
-                if !known -> headers.push(JetCLICHeaderImport{lib: lib, header: path})
+                duplicated: loop other in imports {
+                    imported: jet_driver_foreign_import_libraries(other)
+                    if imported.form == "header" -> next
+                    named: loop library in imported.libraries {
+                        if library == lib -> break true
+                    } ?? false
+                    if named -> break true
+                } ?? false
+                if !known && !duplicated -> headers.push(JetCLICHeaderImport{lib: lib, header: path})
             } else {
                 jet_cli_c_bind_reach(jet_driver_file_import_path(relative_path, path).path, modules)
             }
@@ -192,17 +238,26 @@ jet_cli_c_bind_header_path: fn(root: String, header: String) -> String Never! {
 jet_cli_c_bind_refresh: fn(root: String, entry_path: String, files: [JetDriverAuthorizedSourceFile], color: Bool) -[FS, Env, Time]> JetDriverVerbOutput? Never! {
     inputs: jet_cli_c_bind_inputs(files, entry_path, cli_files.is_file(jet_cli_authority_path(root, "package.jet")))
     loop request in inputs.headers {
-        header_text: cli_files.read(jet_cli_c_bind_header_path(root, request.header)) ?? {
+        header_path: jet_cli_c_bind_header_path(root, request.header)
+        header_text: cli_files.read(header_path) ?? {
             return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), jet_cli_c_bind_unreadable("{err}"), jet_cli_c_bind_fix(request.lib), color, JET_DRIVER_EXIT_USER_ERROR))
         }
         overlay: inputs.overlays.get(request.lib) ?? HandleOverlay.empty()
-        if jet_cli_c_bind_current(root, request.lib, header_text) -> next
+        if jet_cli_c_bind_current(root, request.lib, header_text) {
+            if jet_cli_c_bind_stale(root, request.lib) == .Val(changed) {
+                return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), "{changed} changed after the binding was generated.", "regenerate the binding: run `jet inspect bind {request.header} --pkg {request.lib}`.", color, JET_DRIVER_EXIT_USER_ERROR))
+            }
+            next
+        }
         bound: pkg_cbind_bind_files(header_text, request.lib, overlay) ?? {
             return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), "{err.message}.", jet_cli_c_bind_fix(request.lib), color, JET_DRIVER_EXIT_USER_ERROR))
         }
         held: JetCLIRootedDirectory.open(root, JET_CLI_C_BINDINGS_PARTS, true) ?? return Val(jet_cli_c_bind_write_refused(request.header, request.lib, err.message, color))
+        provenance: jet_cli_c_bind_provenance(root, held.path, request.lib, request.lib, header_path, header_text, bound) ?? {
+            return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), "{err.message}.", jet_cli_c_bind_fix(request.lib), color, JET_DRIVER_EXIT_USER_ERROR))
+        }
         _owner: held.lock("C binding cache") ?? return Val(jet_cli_c_bind_write_refused(request.header, request.lib, err.message, color))
-        jet_cli_c_bind_publish(held, request.lib, bound) ?? return Val(jet_cli_c_bind_write_refused(request.header, request.lib, err.message, color))
+        jet_cli_c_bind_publish(held, request.lib, bound, provenance) ?? return Val(jet_cli_c_bind_write_refused(request.header, request.lib, err.message, color))
     }
     None
 }
@@ -270,23 +325,25 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
     loop link in links -> overlay = overlay.with_link(link)
     bound: pkg_cbind_bind_files(header_text, library, overlay) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), "{err.message}.", jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
     cwd: cli_files.cwd() ?? "."
+    absolute: if header.starts_with("/") -> header else -> jet_cli_entry_join(cwd, header)
+    root: cli_files.realpath(jet_cli_source_root(absolute)) ?? return jet_cli_c_bind_io_error(header, "could not resolve the project root of {header} ({err})", color)
     if output == .Val(path) {
-        absolute: if path.starts_with("/") -> path else -> jet_cli_entry_join(cwd, path)
-        name: jet_cli_file_name(absolute)
-        parent: jet_cli_parent(absolute) ?? "/"
+        target: if path.starts_with("/") -> path else -> jet_cli_entry_join(cwd, path)
+        name: jet_cli_file_name(target)
+        parent: jet_cli_parent(target) ?? "/"
         cli_files.create_dir_all(parent) ?? return jet_cli_c_bind_io_error(path, "could not create output directory {parent} ({err})", color)
         directory: cli_files.realpath(parent) ?? return jet_cli_c_bind_io_error(path, "could not resolve output directory {parent} ({err})", color)
         held: JetCLIRootedDirectory.open(directory, [String]{}, false) ?? return jet_cli_c_bind_io_error(path, err.message, color)
         stem: if name.ends_with(".jet") -> name.slice(0..<(name.len() - 4)) else -> name
         if stem == "" -> return jet_cli_c_bind_argument_error("inspect bind output `{path}` names no file", color)
-        jet_cli_c_bind_publish(held, stem, bound) ?? return jet_cli_c_bind_io_error(path, err.message, color)
+        provenance: jet_cli_c_bind_provenance(root, directory, stem, library, absolute, header_text, bound) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), "{err.message}.", jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
+        jet_cli_c_bind_publish(held, stem, bound, provenance) ?? return jet_cli_c_bind_io_error(path, err.message, color)
         return jet_cli_c_bind_done(header, path, bound)
     }
-    absolute: if header.starts_with("/") -> header else -> jet_cli_entry_join(cwd, header)
-    root: cli_files.realpath(jet_cli_source_root(absolute)) ?? return jet_cli_c_bind_io_error(header, "could not resolve the project root of {header} ({err})", color)
     held: JetCLIRootedDirectory.open(root, JET_CLI_C_BINDINGS_PARTS, true) ?? return jet_cli_c_bind_io_error(header, err.message, color)
+    provenance: jet_cli_c_bind_provenance(root, held.path, library, library, absolute, header_text, bound) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), "{err.message}.", jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
     _owner: held.lock("C binding cache") ?? return jet_cli_c_bind_io_error(header, err.message, color)
-    jet_cli_c_bind_publish(held, library, bound) ?? return jet_cli_c_bind_io_error(header, err.message, color)
+    jet_cli_c_bind_publish(held, library, bound, provenance) ?? return jet_cli_c_bind_io_error(header, err.message, color)
     jet_cli_c_bind_done(header, jet_cli_entry_join(root, ".jet/bindings/c/{library}.jet"), bound)
 }
 

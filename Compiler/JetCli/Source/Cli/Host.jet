@@ -990,9 +990,17 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
     checks := jet_cli_ir_checks(result, checked, options)
     checks.checked_alloc = jet_cli_checked_alloc(options)
     declarations := jet_driver_checked_declarations(checked)
-    // The program's C closure defines its foreign functions' symbols.
+    // The program's C closure defines its foreign functions' symbols. An
+    // `extern rust` function is called through the slot descriptor its helper
+    // crate's archive defines (JetIR BuildForeign.jet ir_rust_foreign_call).
     closure_symbols := [String:Bool]{}
-    loop row in declarations.foreign -> closure_symbols[row.symbol.copy()] = true
+    loop row in declarations.foreign {
+        closure_symbols[row.symbol.copy()] = true
+        if row.language.starts_with("rust:") {
+            closure_symbols["jet_ffi_{row.name}_cabi"] = true
+            closure_symbols["jet_ffi_cabi_free"] = true
+        }
+    }
     entry_key: checked.entry_key ?? ""
     entry_source := ""
     loop function in checked.functions {

@@ -52,7 +52,7 @@ pkg_cbind_render_binding: fn(p: CProto, used_names: &[String], contract: Foreign
     }
     params_str: params.join(", ")
     close_marker: if handles.handle_for_type(p.ret) == {
-        .Val(handle) -> "#Close({handle.close})\n"
+        .Val(handle) -> "#Close({pkg_cbind_close_function_name(handle.close)})\n"
         .None -> ""
     }
     symbol: pkg_cbind_quote(p.name)
@@ -60,6 +60,13 @@ pkg_cbind_render_binding: fn(p: CProto, used_names: &[String], contract: Foreign
         .Val(result) -> Ok("{close_marker}{function_name}: fn({params_str}) -> {result} = {symbol}")
         .None -> Ok("{close_marker}{function_name}: fn({params_str}) = {symbol}")
     }
+}
+
+// The Jet name a handle's C close function `close` is bound under. `#Close`
+// and the handle fact name the Jet function, which the C symbol spells only
+// when it is already snake case (`gzclose`, not `XML_ParserFree`).
+pkg_cbind_close_function_name: fn(close: String) -> String Never! {
+    foundation_generated_snake_name(close, "function")
 }
 
 // The Jet type of one parameter: an out-length, a counted slice, an owned

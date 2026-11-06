@@ -1,6 +1,6 @@
 use {
     cbind_core_files: core.files
-    jetpack_foundation.[foundation_generated_snake_name]
+    jetpack_foundation.[SYSTEM_LIB_TARGET, foundation_generated_snake_name]
 }
 
 // Native C header -> Jet `#Bindgen` cache generator, ported from
@@ -94,6 +94,12 @@ CBindFiles: struct {
     // Function names bound, and prototypes skipped with their reason.
     bound: [String]
     skipped: [(name: String, reason: String)]
+    // What the `<lib>.provenance` record adds (pkg_cbind_provenance): the
+    // handle facts' stable keys (sorted, unique), the link closure's stable
+    // key, and the boundary row the cache stamps.
+    handle_keys: [String]
+    link_closure: String
+    boundary: ForeignBoundaryContract
 }
 
 // The one C header bind: `jet inspect bind <header.h>` and the compiler's
@@ -102,8 +108,112 @@ pkg_cbind_bind_files: fn(header_src: String, lib: String, overlay: HandleOverlay
     result: pkg_cbind_generate_with_overlay(header_src, lib, overlay)
     facts := [FFIHandleFact]{}
     loop handle in result.handles -> facts.push(pkg_cffi_canonical_handle_fact(handle))
-    metadata: if facts.len() == 0 && result.link_closure.transitive.len() == 0 -> None else -> Val(pkg_cffi_render_binding_metadata(result.link_closure.primary, facts, pkg_cffi_canonical_link_closure(result.link_closure)))
-    Ok(CBindFiles{cache: result.source, metadata: metadata, hash: pkg_cbind_compute_bind_hash(header_src, ""), bound: result.bound, skipped: result.skipped})
+    closure: pkg_cffi_canonical_link_closure(result.link_closure)
+    closure_key: closure.stable_key()
+    handle_keys: loop fact in pkg_cffi_sorted_facts(facts) -> fact.stable_key()
+    metadata: if facts.len() == 0 && result.link_closure.transitive.len() == 0 -> None else -> Val(pkg_cffi_render_binding_metadata(result.link_closure.primary, facts, closure))
+    Ok(CBindFiles{cache: result.source, metadata: metadata, hash: pkg_cbind_compute_bind_hash(header_src, ""), bound: result.bound, skipped: result.skipped, handle_keys: handle_keys, link_closure: closure_key, boundary: result.boundary})
+}
+
+// The binder schema a C binding's identity and provenance name.
+C_BINDER_SCHEMA: "jet-c-bind-v1"
+
+// The `<stem>.provenance` record of one header bind (Rust CFFI.rs
+// write_c_binding_provenance). Its identity covers the header, the cache, the
+// handle facts, the link closure, the package's declared C dependency
+// `dependency` (None when it declares none) and each local archive in
+// `archives` that dependency links, so a changed archive makes the binding
+// stale (pkg_cbind_stale_input). The rows then name the same inputs with
+// their digests, the boundary row the cache stamps, and the cache and
+// metadata artifacts.
+pkg_cbind_provenance: fn(bound: CBindFiles, lib: String, stem: String, header_path: String, header_src: String, cache_path: String, dependency: String?, archives: [ArchiveInput]) -[Env]> String ForeignBridgeError! {
+    descriptor: pkg_binder_descriptor(ForeignLanguage.C) ?? return Err(pkg_bridge_error("C binder descriptor is not registered"))
+    language: (ForeignLanguage.C).root()
+    header_sha: pkg_sha256_hex(header_src.bytes())
+    cache_sha: pkg_sha256_hex(bound.cache.bytes())
+    identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    identity.field("language", language.bytes())
+    identity.field("binder_schema", C_BINDER_SCHEMA.bytes())
+    identity.field("library", lib.bytes())
+    identity.field("abi", "c_{lib}".bytes())
+    identity.field("descriptor", descriptor.stamp().bytes())
+    identity.field("header_path", header_path.bytes())
+    identity.field("header_bytes", header_src.bytes())
+    identity.field("cache_path", cache_path.bytes())
+    identity.field("cache_bytes", bound.cache.bytes())
+    identity.field("handle_facts", bound.handle_keys.join("\n").bytes())
+    identity.field("link_closure", bound.link_closure.bytes())
+    if dependency == {
+        .Val(target) -> identity.field("dependency", target.bytes())
+        .None -> identity.field("dependency_missing", "true".bytes())
+    }
+    pkg_bridge_add_archive_inputs(identity, archives.copy())
+    fields := [(name: String, value: String)]{
+        (name: "language", value: language),
+        (name: "abi", value: "c_{lib}"),
+        (name: "transport", value: "direct-c-abi"),
+        (name: "binder-schema", value: C_BINDER_SCHEMA),
+        (name: "descriptor", value: descriptor.stamp()),
+        (name: "source", value: header_path),
+        (name: "source-sha256", value: header_sha),
+        (name: "cache", value: cache_path),
+        (name: "cache-sha256", value: cache_sha),
+    }
+    loop field in bound.boundary.provenance_fields() -> fields.push(field)
+    // One `handle-fact` row per handle: a stable key is itself a
+    // `key=value;...` record, never folded into one multi-line value.
+    loop key in bound.handle_keys -> fields.push((name: "handle-fact", value: key))
+    fields.push((name: "link-closure", value: bound.link_closure))
+    if dependency == .Val(target) -> fields.push((name: "dependency", value: target))
+    loop input in archives {
+        fields.push((name: "linked-library", value: input.library))
+        fields.push((name: "linked-archive", value: input.path))
+        digest: if input.bytes == .Val(bytes) -> pkg_sha256_hex(bytes) else -> "missing"
+        fields.push((name: "linked-archive-sha256", value: digest))
+    }
+    artifacts := [(name: String, digest: String)]{(name: "{stem}.jet", digest: cache_sha)}
+    if bound.metadata == .Val(text) -> artifacts.push((name: "{stem}.metadata", digest: pkg_sha256_hex(text.bytes())))
+    pkg_bridge_render_provenance(identity.finish(), fields, artifacts)
+}
+
+// What changed since a C binding's provenance record `provenance` was
+// written: the generated cache `cache` (the current `<stem>.jet` bytes) when
+// its digest differs from the recorded one, else the first recorded local
+// archive whose bytes differ (a missing archive reads as `missing`). None
+// when the cache and every recorded archive are unchanged.
+pkg_cbind_stale_input: fn(provenance: String, cache: [U8]) -[FS]> String? Never! {
+    archive := ""
+    loop line in provenance.split("\n") {
+        row: line.split_once("=") ?? next
+        if row.before == "cache-sha256" && row.after != pkg_sha256_hex(cache) -> return Val("the generated cache")
+        if row.before == "linked-archive" -> archive = row.after
+        if row.before != "linked-archive-sha256" || archive == "" -> next
+        current: if cbind_core_files.read_bytes(archive) == .Ok(bytes) -> pkg_sha256_hex(bytes) else -> "missing"
+        if current != row.after -> return Val("the local archive `{archive}`")
+        archive = ""
+    }
+    None
+}
+
+// The `<lib>: c@<target>` dependency the Package source `package_source`
+// (read from `package_path`) declares; None when it declares none or does
+// not parse.
+pkg_cbind_declared_dependency: fn(package_source: String, package_path: String, lib: String) -> String? Never! {
+    facts: PackageFacts.parse(package_source, package_path) ?? return None
+    source: facts.deps.get(lib) ?? return None
+    if source == {
+        .CLib(target) -> Val(target)
+        else -> None
+    }
+}
+
+// The local archive a declared C dependency `target` links for `lib`: a
+// directory target, relative to `project_root`, names `lib<lib>.a` there.
+// `system` and `nixpkgs:` targets are provisioned, never local archives.
+pkg_cbind_local_archives: fn(project_root: String, target: String, lib: String) -[FS, Env]> [ArchiveInput] Never! {
+    if target == SYSTEM_LIB_TARGET || target.starts_with("nixpkgs:") -> return [ArchiveInput]{}
+    directory: if cbind_core_files.is_absolute(target) -> target else -> cbind_core_files.join(project_root, target)
+    pkg_bridge_local_archive_inputs([String]{directory}, [String]{lib})
 }
 
 C_BINDING_METADATA_SCHEMA: "jet-c-binding-metadata-v1"
@@ -122,7 +232,7 @@ pkg_cffi_sorted_facts: fn(facts: [FFIHandleFact]) -> [FFIHandleFact] Never! {
 
 // The binder's handle fact as the canonical bundle fact.
 pkg_cffi_canonical_handle_fact: fn(fact: HandleFact) -> FFIHandleFact Never! {
-    FFIHandleFact{lib: fact.link_closure.primary, typedef_name: fact.typedef_name, jet_name: fact.jet_name, close: fact.close, close_source: fact.close_source, thread_safety: fact.thread_safety}
+    FFIHandleFact{lib: fact.link_closure.primary, typedef_name: fact.typedef_name, jet_name: fact.jet_name, close: pkg_cbind_close_function_name(fact.close), close_source: fact.close_source, thread_safety: fact.thread_safety}
 }
 
 pkg_cffi_canonical_link_closure: fn(closure: LinkClosure) -> FFILinkClosure Never! {

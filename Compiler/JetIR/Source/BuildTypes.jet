@@ -362,6 +362,8 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
     if ir_raw_pointer(ty) || ir_pin_target(ty) != None -> return Val(ir_intern_type(m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
     name: ir_nominal_name(ty) ?? return None
     args: ir_type_args(ty)
+    // A C handle a foreign function names: its pointer, closed by its drop.
+    if ir_foreign_handle_of(p, ty) == .Val(handle) -> return Val(ir_foreign_handle_row(m, p, ty, handle))
     // A loaded plugin's handle type carries its interface identity as a
     // phantom argument; every interface shares the one runtime handle.
     if args.len() == 0 || name == "Plugin" {

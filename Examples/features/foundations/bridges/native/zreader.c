@@ -1,7 +1,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <zlib.h>
+
+// The adapter compiles from source as the package's `zreader` C dependency,
+// and the `z` dependency links zlib; these are the zlib entry points it uses.
+typedef struct gzFile_s *gzFile;
+gzFile gzopen(const char *path, const char *mode);
+char *gzgets(gzFile file, char *buf, int len);
+int gzclose(gzFile file);
 
 typedef struct {
     gzFile file;
