@@ -620,12 +620,25 @@ fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
             }
             if !ir_glue_drops(m, member.ty) -> next
             value :: ir_load_at(&m, &a, at, member.offset, member.ty)
-            ir_emit(&a.f, IROp.Drop, -1, value, -1, -1, a.line)
+            ir_drop_part(&m, &a, value)
         }
     }
     if a.error != "" -> ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
     ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
     m.functions[id] = ^a.f
+}
+
+// Drops `value`, a member read out of its holder: a handle that moved out
+// (ir_move_member) left a null word, which holds nothing to drop.
+fn ir_drop_part(m: &IRModule, b: &IRBuilder, value: Int) Never! {
+    if !ir_is_handle(m, b.f.slot_type[value]) {
+        ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
+        return
+    }
+    held :: ir_option_is_some(&m, &b, value)
+    ir_open_if(&b.f, held, b.line)
+    ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
+    ir_end(&b.f, b.line)
 }
 
 // Gives up one owner of the counted buffer `data` of the header row `row`

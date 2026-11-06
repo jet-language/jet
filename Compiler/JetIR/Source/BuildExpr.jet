@@ -1140,7 +1140,7 @@ fn ir_assign_place(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: TB
             member.boxed -> ir_wrapper_drop(&m, &b, base, member)
             m.types[member.ty].drop != "" -> {
                 old :: ir_member_read(&m, &b, base, member)
-                ir_emit(&b.f, IROp.Drop, -1, old, -1, -1, b.line)
+                ir_drop_part(&m, &b, old)
             }
             else -> {}
         }
@@ -1438,6 +1438,8 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             return ir_read_binding(&m, &b, binding)
         }
         .Move(value) -> {
+            taken :: ir_move_member(&m, p, &b, value, span)
+            if taken != -2 -> return taken
             slot :: ir_expr(&m, p, &b, value)
             b.moving = slot
             return slot
@@ -1530,7 +1532,11 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                 return ir_trait_propagate(&m, p, &b, method, value, expression_ty, span)
             }
             backs := [IRWriteBack]{}
-            self_slot :: if receiver_access == "write" -> ir_place_address(&m, p, &b, receiver, &backs, span) else -> ir_expr(&m, p, &b, receiver)
+            self_slot :: if {
+                receiver_access == "write" -> ir_place_address(&m, p, &b, receiver, &backs, span)
+                receiver_access == "move" -> ir_move_receiver(&m, p, &b, receiver, span)
+                else -> ir_expr(&m, p, &b, receiver)
+            }
             if ir_failed(b) -> return -1
             if self_slot < 0 -> return ir_fail_slot(&b, span, "Unit receiver")
             value :: ir_call(&m, p, &b, key, all, self_slot, backs, args, span)
@@ -2097,7 +2103,8 @@ fn ir_close_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, inner: In
     if !ir_unit_type(ty) -> return ir_fail_slot(&b, span, "close with a {ir_type_name(ty)} result")
     value :: if ir_body_node(p, b, inner).kind == .Move(moved) -> moved else -> inner
     if ir_body_node(p, b, value).kind == .Local(_) -> return ir_drop_value(&m, p, &b, value, span)
-    slot :: ir_expr(&m, p, &b, value)
+    taken :: ir_move_member(&m, p, &b, value, span)
+    slot :: if taken != -2 -> taken else -> ir_expr(&m, p, &b, value)
     if ir_failed(b) || slot < 0 -> return -1
     if !b.fresh[slot] {
         row :: b.f.slot_type[slot]

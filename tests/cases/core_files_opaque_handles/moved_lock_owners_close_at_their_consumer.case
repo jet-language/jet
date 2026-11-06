@@ -1,0 +1,21 @@
+# A consumed owner closes its lock where its consumer ends it, never at the
+# source's scope end (#6584): a `^self` method's receiver, a member moved out
+# with `^x.f` (as a receiver, an argument, a close, then reinitialized, and
+# on one branch), a `me := ^param` local, and a whole handle. Every lock
+# descriptor closes once: no leak and no second close.
+fixture: moved_lock_owners_close_at_their_consumer.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = moved_lock_owners_close_at_their_consumer.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = moved_lock_owners_close_at_their_consumer.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = moved_lock_owners_close_at_their_consumer.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = moved_lock_owners_close_at_their_consumer.out
