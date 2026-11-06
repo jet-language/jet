@@ -7,6 +7,13 @@ encoding_word: fn(address: I64) -> I64 {
 encoding_store: fn(address: I64, value: I64) {
     #Unsafe("owns a writable aligned word in a fresh encoding carrier or caller output") { os_store_i64(address, value) }
 }
+// A fresh one-word enum carrier holding variant `kind`: the runtime
+// constructor of a fieldless enum's unit variant.
+encoding_enum_new: fn(kind: I64) -> I64 {
+    result: jet_rt_alloc(ENCODING_ENUM_BYTES, I64{8})
+    encoding_store(wrapping(result + ENCODING_ENUM_TAG), kind)
+    result
+}
 encoding_enum_clone: fn(value: I64) -> I64 {
     result: jet_rt_alloc(ENCODING_ENUM_BYTES, I64{8})
     encoding_store(wrapping(result + ENCODING_ENUM_TAG), encoding_word(wrapping(value + ENCODING_ENUM_TAG)))
