@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6612,
-    "rev": 93612,
+    "nextNum": 6613,
+    "rev": 93621,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27618,13 +27618,18 @@
       "milestoneId": "e3-m20-enum-language-reflection",
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nDeliver D-ENUM-CASEVALUES1=A (ratified): `T.@values` is a registered compile-time fact that reads as ordinary `[T#N]` data. It lists every accessible payload-free leaf once, in declaration order, as a stock compiler/Core addition. It adds no `T.cases()`, no alias, no enum-collection wrapper and no runtime registry.\n\nRatified example:\n```jet\nDirection: enum { North South }\n@choices: Direction.@values // ordinary [Direction#2]\n@count: @choices.len()\nrun: fn() {\n    print(@count) // 2; adding East makes 3.\n}\n```\n\n## Current state\n- Nothing implements `@values` in Compiler/JetParser, Compiler/JetSema, crates/jet-sema, Examples or Core (grep, 2026-09-28). The Rust recovery 0732a643 was never integrated.\n- The `T.@name` fact namespace already exists for other facts: `Compiler/JetSema/Source/Sema/Comptime/Reflection.jet:1162-1165` builds `{definition.name}.@range` fact rows. Enum variant metadata is at `:1102-1156` and `:1395` `sema_comptime_reflection_enum_type_info`.\n- Payload-free versus payload variants: `VariantPayload.Unit` (`Reflection.jet:1103-1104`). Groups (D-TAG1) add paths; sparse discriminants do not create gaps.\n\n## Changes\n1. JetParser/JetSema: resolve `T.@values` through the same registered `@`-fact path as `@range`. Do not reserve an unmarked method.\n2. JetSema `Comptime/Reflection.jet`: add `sema_comptime_reflection_enum_values(definition)`. It returns a `TComptimeValue.List` of the payload-free leaves in declaration order (group leaves included once, by full path), typed `[T#N]` with the nominal `T` kept.\n3. Rejections (registered, with snapshots): a payload-bearing enum (E-row: \"`Shape.@values` needs every case to be payload-free; `Circle` carries a Float\"), a non-enum type, and an enum whose leaves are not all accessible from the use site. Do no filtering, no fabricated payloads, and no integer casts.\n4. JetCodegen: materialize the constant like any other `[T#N]` constant, with no mandatory heap collection. Independent iterations share no cursor state.\n5. Rust mirror (the shipped binary must run the golden): the same fact in crates/jet-sema's `@` fact resolver.\n6. Add `Examples/features/types/enum_values.jet` + `.out` (count, order, a group path, sparse codes, two independent loops) and `tests/ui/enum_values_payload.jet` / `enum_values_non_enum.jet`.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `jet test Compiler --profile golden types/enum_values` passes on O0, O1 and O2.\n- `jet test Compiler --profile ui enum_values_` passes.\n\n## Batch\nbatch-jetc-sema: the fact is resolved in JetSema's comptime reflection. The codegen and Rust mirror land in the same build.\n\n## Dependencies\nNone; D-ENUM-CASEVALUES1=A is ratified. D-ENUM-CASEMETA1 descriptions stay separate but share the declaration owner.\n",
+      "plan": "## Goal\nDeliver D-ENUM-CASEVALUES1=A (ratified): `T.$values` is a registered compile-time fact that reads as ordinary `[T#N]` data. It lists every accessible payload-free leaf once, in declaration order, as a stock compiler/Core addition. It adds no `T.cases()`, no alias, no enum-collection wrapper and no runtime registry.\n\nRatified example:\n```jet\nDirection: enum { North South }\nchoices: Direction.$values // ordinary [Direction#2]\ncount: choices.len()\nrun: fn() {\n    print(count) // 2; adding East makes 3.\n}\n```\n\n## Current state\n- Nothing implements `$values` in Compiler/JetParser, Compiler/JetSema, crates/jet-sema, Examples or Core (grep, 2026-09-28). The Rust recovery 0732a643 was never integrated.\n- The `T.$name` compiler-fact namespace (D-COMPILER-NS1=A: `$` marks every compiler fact, as in `T.$layout` and `$build.os`) already exists for other facts: Comptime/Reflection.jet builds the range fact rows. Enum variant metadata is at `:1102-1156` and `:1395` `sema_comptime_reflection_enum_type_info`.\n- Payload-free versus payload variants: `VariantPayload.Unit` (`Reflection.jet:1103-1104`). Groups (D-TAG1) add paths; sparse discriminants do not create gaps.\n\n## Changes\n1. JetParser/JetSema: resolve `T.$values` through the same registered `$` compiler-fact path as the range fact. Do not reserve an unmarked method.\n2. JetSema `Comptime/Reflection.jet`: add `sema_comptime_reflection_enum_values(definition)`. It returns a `TComptimeValue.List` of the payload-free leaves in declaration order (group leaves included once, by full path), typed `[T#N]` with the nominal `T` kept.\n3. Rejections (registered, with snapshots): a payload-bearing enum (E-row: \"`Shape.$values` needs every case to be payload-free; `Circle` carries a Float\"), a non-enum type, and an enum whose leaves are not all accessible from the use site. Do no filtering, no fabricated payloads, and no integer casts.\n4. JetCodegen: materialize the constant like any other `[T#N]` constant, with no mandatory heap collection. Independent iterations share no cursor state.\n5. (Rust mirror retired: the native compiler is the only implementation.)\n6. Add `Examples/features/types/enum_values.jet` + `.out` (count, order, a group path, sparse codes, two independent loops) and `tests/ui/enum_values_payload.jet` / `enum_values_non_enum.jet`.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `jet test Compiler --profile golden types/enum_values` passes on O0, O1 and O2.\n- `jet test Compiler --profile ui enum_values_` passes.\n\n## Batch\nbatch-jetc-sema: the fact is resolved in JetSema's comptime reflection. The codegen and Rust mirror land in the same build.\n\n## Dependencies\nNone; D-ENUM-CASEVALUES1=A is ratified. D-ENUM-CASEMETA1 descriptions stay separate but share the declaration owner.\n",
       "checkSteps": "1. Owner decides the complete draft D-ENUM-CASEVALUES1 before any public method is implemented. Main first checks decision-ID uniqueness and whether an uncaptured existing API already satisfies the workload.\n2. If chosen, T.cases() yields each payload-free leaf exactly once in declaration order; groups are not values and sparse external codes do not create gaps.\n3. The iterator's items retain nominal type T. Payload-bearing or non-enum receivers receive a Jet diagnostic explaining why explicit supplied values are required.\n4. No payload values are fabricated and no implicit heap collection is required. Ordinary iterator adapters are reused.\n5. Adding a payload-free case updates the generated catalog without a second user-maintained list. Reordering deliberately changes presentation order, not a wire protocol code.\n6. Existing user methods named cases require a coherent declaration conflict diagnostic, not hidden replacement or dispatch ambiguity.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-enum-f03-finite-case-values. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main: the `@` fact sigil did not survive; D-COMPILER-NS1=A makes `$` mark every compiler fact, so the catalog is `T.$values` (T.@layout is a plain E0302 today). The Rust mirror step is gone with crates/. Answer from the syntax owner, CardCleanup."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -27687,7 +27692,7 @@
         },
         {
           "n": 2,
-          "text": "Under A, T.@values is ordinary compile-time [T#N] data; under C, T.cases() returns a fresh ordinary Iter<T>. B adds neither operation.",
+          "text": "Under A, T.$values is ordinary compile-time [T#N] data; under C, T.cases() returns a fresh ordinary Iter<T>. B adds neither operation.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -27723,7 +27728,7 @@
         },
         {
           "n": 6,
-          "text": "A uses the existing registered @ fact namespace without reserving an unmarked method. C diagnoses a conflicting cases method rather than replacing it. Prove applicable I9 paths and registered diagnostics.",
+          "text": "A uses the existing registered $ compiler-fact namespace without reserving an unmarked method. C diagnoses a conflicting cases method rather than replacing it. Prove applicable I9 paths and registered diagnostics.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -27732,7 +27737,7 @@
         },
         {
           "n": 7,
-          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `Examples/features/types/enum_values.jet` prints the count, order and names from `Direction.@values`, and grows by one when a case is added: `jet test Compiler --profile golden types/enum_values` passes, and `jet test Compiler --profile ui enum_values_payload` passes. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
+          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `Examples/features/types/enum_values.jet` prints the count, order and names from `Direction.$values`, and grows by one when a case is added: `jet test Compiler --profile golden types/enum_values` passes, and `jet test Compiler --profile ui enum_values_payload` passes. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -27827,7 +27832,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:35.846Z",
-      "updated": "2026-11-06T18:35:17.141Z",
+      "updated": "2026-11-06T19:41:52.541Z",
       "updatedBy": "Main",
       "workOrder": 128,
       "goals": []
@@ -47986,20 +47991,25 @@
       "id": "c06lr0kz",
       "num": 4284,
       "title": "Finish marker, subject and typed-default source cutovers",
-      "body": "Ratified contract scope; no new ballot or default is authorized.\n\n\n**Scope:** Default values: the default rides the type; One placement law for markers; the five forms retire; Repeating one marker on one target; Marker/trait name-collision law, and the two worst renames; Writing many members that share one prefix; Bare-member shorthand for one-parameter callable arguments; One rule for subject shorthand: method heads and a nesting fence\n\n**Decision IDs:** D-DEFAULT-SHAPE1, D-MARK-FORM1, D-MARK-REPEAT1, D-MARKER-NAME-HYGIENE1, D-SPREAD1, D-SUBJECT-CALL1, D-SUBJECT-COHERE1\n\n**Acceptance criteria / missing boundary:**\n\n- **D-DEFAULT-SHAPE1:** The default fuses into the annotation using the same `Type{value}` atom bindings already use. One law: `name :: Int{3}` — the name owns the typed value; `name: Int{3}` — the slot ships holding it, caller may override; `name: Int` — the slot ships empty, caller must fill.\n  - **Gap witness:** CONTRADICTED — Rust Parser/Items/type_methods_fields.rs:176-189 rejects retired = with E0385. Jet Parser/Items.jet:1657-1667 still accepts =/ := field defaults without E0385 and does not parse -> computed fields. Current named parameter witness: basics/named_args.jet:34.\n- **D-MARK-FORM1:** A marker, or one bracket group, sits right before its target. Parentheses appear exactly when arguments are written.\n  - **Gap witness:** PARTIAL — Rust Parser/Items/marker_groups.rs:200-218 performs registry/site/signature validation and records AppliedRuleApplication. Jet Parser/Items.jet:450-466 only parses name/sign/arguments at the corresponding seam; complete registry/site/signature/duplicate-law enforcement and general empty-argument gates were not established. Anonymous groups exist on both sides.\n- **D-MARK-REPEAT1:** Writing one marker twice on one target is an error with a remove-the-repeat fix. Rows where repetition carries meaning are marked repeatable in the registry: Pre, Post, and allow.\n  - **Gap witness:** PARTIAL — Rust Parser/Items/marker_groups.rs:200-218 performs registry/site/signature validation and records AppliedRuleApplication. Jet Parser/Items.jet:450-466 only parses name/sign/arguments at the corresponding seam; complete registry/site/signature/duplicate-law enforcement and general empty-argument gates were not established. Anonymous groups exist on both sides.\n- **D-MARKER-NAME-HYGIENE1:** Adopt the naming law for all future markers. Rename serde's #Tag to #Discriminant (the standard term for the variant field) and the scheduled #Task to #Job (a scheduled unit of work, distinct from the Task handle).\n  - **Gap witness:** PARTIAL — Shared Prelude names Discriminant and Rename instead of unrelated Tag branding, but Jet Parser/DeclarationMarkers.jet:36 still classifies Tag and Foundation/MIR/MIR.jet:1161 retains Tag alongside RenameAll. Complete active/retired no-alias name hygiene in both consumers is not established; stale internal enum names alone are not asserted as user acceptance.\n- **D-SPREAD1:** Write the prefix, a dot, then the members in brackets. It works in any Jet code, not only config files.\n  - **Gap witness:** PARTIAL — Rust Foundation/Syntax/core_surface.rs:793-795 specifies bare-member spread. Jet Parser/Expressions.jet:1262-1265,1678-1681 parses prefix.[members]; complete expression flattening and all sema/runtime consumers were not proved here.\n- **D-SUBJECT-CALL1:** Where the expected argument is a one-parameter callable, a bare member chain stands for that lambda, including method calls along the chain. The pipeline drops from 33 tokens to 15.\n  - **Gap witness:** PARTIAL — Rust Syntax.rs:235-236,267-270 registers shorthand chains. Jet Parser/Expressions.jet:706-709 recognizes lower-case implicit subject heads; complete method-first typed-call lowering and nesting-lint policy behavior were not established.\n- **D-SUBJECT-COHERE1:** A `.method(args)` head chain becomes legal in call slots, matching loops: one rule everywhere the shorthand exists. A new lint, selector `subject_shorthand_nesting`, fires when shorthand appears inside another shorthand scope and shows the named-binding rewrite.\n  - **Gap witness:** PARTIAL — Rust Syntax.rs:235-236,267-270 registers shorthand chains. Jet Parser/Expressions.jet:706-709 recognizes lower-case implicit subject heads; complete method-first typed-call lowering and nesting-lint policy behavior were not established.\n\n\nEffective-scope corrections:\nD-MARKER-NAME-HYGIENE1: Keep the no-collision marker naming law and scheduled #Job. Treat historical #Discriminant as subsequently retired into #Codable(tag:) by D-CODABLE-OPTIONS1, not newly active.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V24 (D-DEFAULT-SHAPE1):\nDecision IDs: D-DEFAULT-SHAPE1\n\nActive contract: The default fuses into the annotation using the same `Type{value}` atom bindings already use. One law: `name :: Int{3}` — the name owns the typed value; `name: Int{3}` — the slot ships holding it, caller may override; `name: Int` — the slot ships empty, caller must fill.\n\nGap evidence (static source witness, not a passing test): Rust Parser/Items/type_methods_fields.rs:176-189 rejects retired = with E0385. Jet Parser/Items.jet:1657-1667 still accepts =/ := field defaults without E0385 and does not parse -> computed fields. Current named parameter witness: basics/named_args.jet:34.\n\nCoverage disposition: Same contract boundary is already assigned to P20.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.",
+      "body": "Ratified contract scope; no new ballot or default is authorized.\n\n\n**Scope:** Default values: the default rides the type; One placement law for markers; the five forms retire; Repeating one marker on one target; Marker/trait name-collision law, and the two worst renames; Writing many members that share one prefix; Bare-member shorthand for one-parameter callable arguments; One rule for subject shorthand: method heads and a nesting fence\n\n**Decision IDs:** D-DEFAULT-SHAPE1, D-MARK-FORM1, D-MARK-REPEAT1, D-MARKER-NAME-HYGIENE1, D-SPREAD1, D-SUBJECT-CALL1, D-SUBJECT-COHERE1\n\n**Acceptance criteria / missing boundary:**\n\n- **D-DEFAULT-SHAPE1:** The default fuses into the annotation using the same `Type{value}` atom bindings already use. One law, by position: in a binding position `name: Int{3}` declares the value 3; in a slot position (parameter or field) `port: Int{3000}` is the slot's default, which a caller or literal may override; `port: Int` is a slot with no default that the caller must fill.\n  - **Gap witness:** CONTRADICTED — Rust Parser/Items/type_methods_fields.rs:176-189 rejects retired = with E0385. Jet Parser/Items.jet:1657-1667 still accepts =/ := field defaults without E0385 and does not parse -> computed fields. Current named parameter witness: basics/named_args.jet:34.\n- **D-MARK-FORM1:** A marker, or one bracket group, sits right before its target. Parentheses appear exactly when arguments are written.\n  - **Gap witness:** PARTIAL — Rust Parser/Items/marker_groups.rs:200-218 performs registry/site/signature validation and records AppliedRuleApplication. Jet Parser/Items.jet:450-466 only parses name/sign/arguments at the corresponding seam; complete registry/site/signature/duplicate-law enforcement and general empty-argument gates were not established. Anonymous groups exist on both sides.\n- **D-MARK-REPEAT1:** Writing one marker twice on one target is an error with a remove-the-repeat fix. Rows where repetition carries meaning are marked repeatable in the registry: Pre, Post, and allow.\n  - **Gap witness:** PARTIAL — Rust Parser/Items/marker_groups.rs:200-218 performs registry/site/signature validation and records AppliedRuleApplication. Jet Parser/Items.jet:450-466 only parses name/sign/arguments at the corresponding seam; complete registry/site/signature/duplicate-law enforcement and general empty-argument gates were not established. Anonymous groups exist on both sides.\n- **D-MARKER-NAME-HYGIENE1:** Adopt the naming law for all future markers. Rename serde's #Tag to #Discriminant (the standard term for the variant field) and the scheduled #Task to #Job (a scheduled unit of work, distinct from the Task handle).\n  - **Gap witness:** PARTIAL — Shared Prelude names Discriminant and Rename instead of unrelated Tag branding, but Jet Parser/DeclarationMarkers.jet:36 still classifies Tag and Foundation/MIR/MIR.jet:1161 retains Tag alongside RenameAll. Complete active/retired no-alias name hygiene in both consumers is not established; stale internal enum names alone are not asserted as user acceptance.\n- **D-SPREAD1:** Write the prefix, a dot, then the members in brackets. It works in any Jet code, not only config files.\n  - **Gap witness:** PARTIAL — Rust Foundation/Syntax/core_surface.rs:793-795 specifies bare-member spread. Jet Parser/Expressions.jet:1262-1265,1678-1681 parses prefix.[members]; complete expression flattening and all sema/runtime consumers were not proved here.\n- **D-SUBJECT-CALL1:** Where the expected argument is a one-parameter callable, a bare member chain stands for that lambda, including method calls along the chain. The pipeline drops from 33 tokens to 15.\n  - **Gap witness:** PARTIAL — Rust Syntax.rs:235-236,267-270 registers shorthand chains. Jet Parser/Expressions.jet:706-709 recognizes lower-case implicit subject heads; complete method-first typed-call lowering and nesting-lint policy behavior were not established.\n- **D-SUBJECT-COHERE1:** A `.method(args)` head chain becomes legal in call slots, matching loops: one rule everywhere the shorthand exists. A new lint, selector `subject_shorthand_nesting`, fires when shorthand appears inside another shorthand scope and shows the named-binding rewrite.\n  - **Gap witness:** PARTIAL — Rust Syntax.rs:235-236,267-270 registers shorthand chains. Jet Parser/Expressions.jet:706-709 recognizes lower-case implicit subject heads; complete method-first typed-call lowering and nesting-lint policy behavior were not established.\n\n\nEffective-scope corrections:\nD-MARKER-NAME-HYGIENE1: Keep the no-collision marker naming law and scheduled #Job. Treat historical #Discriminant as subsequently retired into #Codable(tag:) by D-CODABLE-OPTIONS1, not newly active.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.\n\nAlso covers V24 (D-DEFAULT-SHAPE1):\nDecision IDs: D-DEFAULT-SHAPE1\n\nActive contract: The default fuses into the annotation using the same `Type{value}` atom bindings already use. One law, by position: in a binding position `name: Int{3}` declares the value 3; in a slot position (parameter or field) `port: Int{3000}` is the slot's default, which a caller or literal may override; `port: Int` is a slot with no default that the caller must fill.\n\nGap evidence (static source witness, not a passing test): Rust Parser/Items/type_methods_fields.rs:176-189 rejects retired = with E0385. Jet Parser/Items.jet:1657-1667 still accepts =/ := field defaults without E0385 and does not parse -> computed fields. Current named parameter witness: basics/named_args.jet:34.\n\nCoverage disposition: Same contract boundary is already assigned to P20.json; this amendment adds violation-specific regression evidence and criteria to that draft, not another implementation card.\n\nAll named tests/goldens below are REQUIRED delivery artifacts, proposed here unless an existing owner already names them; none was executed by this audit. Each runs the production Jet path, records compiler/source/provider identity, asserts exit/diagnostic/output or real side effects, and fails if the owning implementation is bypassed. Registry presence, mocks and fixed echo output cannot satisfy behavioral criteria. Unavailable hosts and inconclusive measurement cells remain open.",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
-      "plan": "1. Rust freeze: do not change Source/, crates/ Rust implementations or add Rust tests. Implement in the Jet compiler, Jet-hosted tooling and owning Jet packages. Core/, Docs/ and canonical Prelude/*.jet are shared inputs to the frozen reference: coordinate owner timing before editing them. Regenerate generated Compiler registries; never hand-edit DiagnosticRows.jet, CoreCallRows.jet or CoreSources.jet. Historical Rust file:line witnesses diagnose the gap; they do not authorize a Rust repair.\n2. Implement only the missing consumer boundary identified by each cited gap witness, preserving working behavior; reuse the owning source, checker, registry and provider seam rather than introduce a parallel mechanism.\n3. [D-DEFAULT-SHAPE1] The default fuses into the annotation using the same `Type{value}` atom bindings already use. One law: `name :: Int{3}` — the name owns the typed value; `name: Int{3}` — the slot ships holding it, caller may override; `name: Int` — the slot ships empty, caller must fill. Owning evidence: CONTRADICTED — Rust Parser/Items/type_methods_fields.rs:176-189 rejects retired = with E0385. Jet Parser/Items.jet:1657-1667 still accepts =/ := field defaults without E0385 and does not parse -> computed fields. Current named parameter witness: basics/named_args.jet:34.\n4. [D-MARK-FORM1] A marker, or one bracket group, sits right before its target. Parentheses appear exactly when arguments are written. Owning evidence: PARTIAL — Rust Parser/Items/marker_groups.rs:200-218 performs registry/site/signature validation and records AppliedRuleApplication. Jet Parser/Items.jet:450-466 only parses name/sign/arguments at the corresponding seam; complete registry/site/signature/duplicate-law enforcement and general empty-argument gates were not established. Anonymous groups exist on both sides.\n5. [D-MARK-REPEAT1] Writing one marker twice on one target is an error with a remove-the-repeat fix. Rows where repetition carries meaning are marked repeatable in the registry: Pre, Post, and allow. Owning evidence: PARTIAL — Rust Parser/Items/marker_groups.rs:200-218 performs registry/site/signature validation and records AppliedRuleApplication. Jet Parser/Items.jet:450-466 only parses name/sign/arguments at the corresponding seam; complete registry/site/signature/duplicate-law enforcement and general empty-argument gates were not established. Anonymous groups exist on both sides.\n6. [D-MARKER-NAME-HYGIENE1] Keep the no-collision marker naming law and scheduled #Job. Treat historical #Discriminant as subsequently retired into #Codable(tag:) by D-CODABLE-OPTIONS1, not newly active. Owning evidence: PARTIAL — Shared Prelude names Discriminant and Rename instead of unrelated Tag branding, but Jet Parser/DeclarationMarkers.jet:36 still classifies Tag and Foundation/MIR/MIR.jet:1161 retains Tag alongside RenameAll. Complete active/retired no-alias name hygiene in both consumers is not established; stale internal enum names alone are not asserted as user acceptance.\n7. [D-SPREAD1] Write the prefix, a dot, then the members in brackets. It works in any Jet code, not only config files. Owning evidence: PARTIAL — Rust Foundation/Syntax/core_surface.rs:793-795 specifies bare-member spread. Jet Parser/Expressions.jet:1262-1265,1678-1681 parses prefix.[members]; complete expression flattening and all sema/runtime consumers were not proved here.\n8. [D-SUBJECT-CALL1] Where the expected argument is a one-parameter callable, a bare member chain stands for that lambda, including method calls along the chain. The pipeline drops from 33 tokens to 15. Owning evidence: PARTIAL — Rust Syntax.rs:235-236,267-270 registers shorthand chains. Jet Parser/Expressions.jet:706-709 recognizes lower-case implicit subject heads; complete method-first typed-call lowering and nesting-lint policy behavior were not established.\n9. [D-SUBJECT-COHERE1] A `.method(args)` head chain becomes legal in call slots, matching loops: one rule everywhere the shorthand exists. A new lint, selector `subject_shorthand_nesting`, fires when shorthand appears inside another shorthand scope and shows the named-binding rewrite. Owning evidence: PARTIAL — Rust Syntax.rs:235-236,267-270 registers shorthand chains. Jet Parser/Expressions.jet:706-709 recognizes lower-case implicit subject heads; complete method-first typed-call lowering and nesting-lint policy behavior were not established.\n10. Migrate every affected public caller, example, test and existing doc/changelog section in the same clean cutover. Coordinate overlapping scopes; P23 owns module names, P03 non-Effect enums, #3986 Effect, P12 marker generation, P19 diagnostic templates and P27 fact-query lifetime separation.\n11. D-EXEC1 staging: finish stage zero and semantic/output parity on current engines first; unify the compiled runtime and shared low-level ABI/drop representation next; build Jet O0/O1 x86-64 then aarch64, require whole-example-corpus parity and O0 live function replacement, and only then retire Cranelift/MIREval/--interpret in one cutover. Frozen engine-specific work stays frozen until its step lands. Before retirement retain applicable current-engine proof; after retirement retarget durable tests to O0/O1/O2/web. No early engine deletion or declaration that a surviving old engine is itself a violation.\n12. Deliver the named Jet-side tests/goldens and real consumer receipts in criteria. Main runs verification once on the integrated snapshot; performance/process requirements require their real receipts, not fabricated code.",
+      "plan": "1. Rust freeze: do not change Source/, crates/ Rust implementations or add Rust tests. Implement in the Jet compiler, Jet-hosted tooling and owning Jet packages. Core/, Docs/ and canonical Prelude/*.jet are shared inputs to the frozen reference: coordinate owner timing before editing them. Regenerate generated Compiler registries; never hand-edit DiagnosticRows.jet, CoreCallRows.jet or CoreSources.jet. Historical Rust file:line witnesses diagnose the gap; they do not authorize a Rust repair.\n2. Implement only the missing consumer boundary identified by each cited gap witness, preserving working behavior; reuse the owning source, checker, registry and provider seam rather than introduce a parallel mechanism.\n3. [D-DEFAULT-SHAPE1] The default fuses into the annotation using the same `Type{value}` atom bindings already use. One law, by position: in a binding position `name: Int{3}` declares the value 3; in a slot position (parameter or field) `port: Int{3000}` is the slot's default, which a caller or literal may override; `port: Int` is a slot with no default that the caller must fill. Owning evidence: CONTRADICTED — Rust Parser/Items/type_methods_fields.rs:176-189 rejects retired = with E0385. Jet Parser/Items.jet:1657-1667 still accepts =/ := field defaults without E0385 and does not parse -> computed fields. Current named parameter witness: basics/named_args.jet:34.\n4. [D-MARK-FORM1] A marker, or one bracket group, sits right before its target. Parentheses appear exactly when arguments are written. Owning evidence: PARTIAL — Rust Parser/Items/marker_groups.rs:200-218 performs registry/site/signature validation and records AppliedRuleApplication. Jet Parser/Items.jet:450-466 only parses name/sign/arguments at the corresponding seam; complete registry/site/signature/duplicate-law enforcement and general empty-argument gates were not established. Anonymous groups exist on both sides.\n5. [D-MARK-REPEAT1] Writing one marker twice on one target is an error with a remove-the-repeat fix. Rows where repetition carries meaning are marked repeatable in the registry: Pre, Post, and allow. Owning evidence: PARTIAL — Rust Parser/Items/marker_groups.rs:200-218 performs registry/site/signature validation and records AppliedRuleApplication. Jet Parser/Items.jet:450-466 only parses name/sign/arguments at the corresponding seam; complete registry/site/signature/duplicate-law enforcement and general empty-argument gates were not established. Anonymous groups exist on both sides.\n6. [D-MARKER-NAME-HYGIENE1] Keep the no-collision marker naming law and scheduled #Job. Treat historical #Discriminant as subsequently retired into #Codable(tag:) by D-CODABLE-OPTIONS1, not newly active. Owning evidence: PARTIAL — Shared Prelude names Discriminant and Rename instead of unrelated Tag branding, but Jet Parser/DeclarationMarkers.jet:36 still classifies Tag and Foundation/MIR/MIR.jet:1161 retains Tag alongside RenameAll. Complete active/retired no-alias name hygiene in both consumers is not established; stale internal enum names alone are not asserted as user acceptance.\n7. [D-SPREAD1] Write the prefix, a dot, then the members in brackets. It works in any Jet code, not only config files. Owning evidence: PARTIAL — Rust Foundation/Syntax/core_surface.rs:793-795 specifies bare-member spread. Jet Parser/Expressions.jet:1262-1265,1678-1681 parses prefix.[members]; complete expression flattening and all sema/runtime consumers were not proved here.\n8. [D-SUBJECT-CALL1] Where the expected argument is a one-parameter callable, a bare member chain stands for that lambda, including method calls along the chain. The pipeline drops from 33 tokens to 15. Owning evidence: PARTIAL — Rust Syntax.rs:235-236,267-270 registers shorthand chains. Jet Parser/Expressions.jet:706-709 recognizes lower-case implicit subject heads; complete method-first typed-call lowering and nesting-lint policy behavior were not established.\n9. [D-SUBJECT-COHERE1] A `.method(args)` head chain becomes legal in call slots, matching loops: one rule everywhere the shorthand exists. A new lint, selector `subject_shorthand_nesting`, fires when shorthand appears inside another shorthand scope and shows the named-binding rewrite. Owning evidence: PARTIAL — Rust Syntax.rs:235-236,267-270 registers shorthand chains. Jet Parser/Expressions.jet:706-709 recognizes lower-case implicit subject heads; complete method-first typed-call lowering and nesting-lint policy behavior were not established.\n10. Migrate every affected public caller, example, test and existing doc/changelog section in the same clean cutover. Coordinate overlapping scopes; P23 owns module names, P03 non-Effect enums, #3986 Effect, P12 marker generation, P19 diagnostic templates and P27 fact-query lifetime separation.\n11. D-EXEC1 staging: finish stage zero and semantic/output parity on current engines first; unify the compiled runtime and shared low-level ABI/drop representation next; build Jet O0/O1 x86-64 then aarch64, require whole-example-corpus parity and O0 live function replacement, and only then retire Cranelift/MIREval/--interpret in one cutover. Frozen engine-specific work stays frozen until its step lands. Before retirement retain applicable current-engine proof; after retirement retarget durable tests to O0/O1/O2/web. No early engine deletion or declaration that a surviving old engine is itself a violation.\n12. Deliver the named Jet-side tests/goldens and real consumer receipts in criteria. Main runs verification once on the integrated snapshot; performance/process requirements require their real receipts, not fabricated code.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main: D-DECL-COLON1=A (c92bf872eb) retired `::`, so the D-DEFAULT-SHAPE1 law is now stated by position instead of by sigil. Answer from the syntax owner, CardCleanup."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -48676,7 +48686,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-02T18:26:03.045Z",
-      "updated": "2026-11-06T18:42:13.511Z",
+      "updated": "2026-11-06T19:41:48.793Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -69662,6 +69672,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main: c5 named `Examples/features/lowlevel/run.jet`, a path that does not exist; reworded to the three projects that census row covered. The E1002 root no longer reproduces; opaque_handles still needs its expected stream."
+        },
+        {
           "at": "2026-10-30",
           "by": "Main",
           "text": "Owner 2026-10-30: ballot the namespace question for C6 instead of Main's ruling. Options: one shared namespace where a re-export takes over the child module name, versus separate module and value namespaces as in Rust. C13 (E0610 fix text) proceeds independently."
@@ -69771,7 +69786,7 @@
         },
         {
           "n": 5,
-          "text": "Examples/features/lowlevel/run.jet pass o0+o1 goldens (was #5673: golden: E1002 `_` is reserved for first-party or foreign packages)",
+          "text": "Every non-polyglot lowlevel example project (cbind, native_c and opaque_handles, or their successors after the Examples cutover) passes its O0 and O1 goldens with no E1002 (was #5673: golden: E1002 `_` is reserved for first-party or foreign packages; the 2026-10-28 census recorded the path without the project directory). On vb5 (dev 7f0b3d03ed) cbind and native_c PASS on O0/O1/O2 and opaque_handles fails only for its missing expected stream.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -69860,7 +69875,7 @@
       "parentId": "c0max8v8",
       "needsAcceptance": false,
       "created": "2026-10-28T11:42:12.218Z",
-      "updated": "2026-11-05T23:27:51.171Z",
+      "updated": "2026-11-06T19:43:42.307Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -94694,11 +94709,11 @@
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T02:10:43.995Z"
+          "evidence": "c92bf872eb: Docs/spec/syntax-decisions.md logs D-DECL-COLON1=A (line 2994; table row 21 cites it for ':') and lists E0202 among the retired call-mark codes of D-CALLSITE-MARK2.",
+          "at": "2026-11-06T19:40:50.873Z"
         },
         {
           "n": 3,
@@ -94748,11 +94763,11 @@
         {
           "n": 8,
           "text": "D-CALLSITE-MARK2=A: every call is plain, with no & or && on arguments or receivers, and sema takes each argument's convention from the callee. E0202 and E0224 retire. The changeability error quotes the signature line; two overlapping inputs with one edited stay an error; a use after a call that took the value names that call, with the fix x.copy() or a reorder; a call never copies on its own; values.push(values.len()) stays legal; a part of a list passed to a writing parameter is a write window. Marks remain only on a named write window (edit: &values[2..3]), a writing match (if &shape == { … }) and a task that takes a name. UI snapshots for each error; goldens on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T17:29:33.041Z"
+          "evidence": "8fe1586eaa (E0202 deleted; E0111/E0205 quote the signature line). Main focused proof with s1 built from c92bf872eb (jet 34ee7338c11f776c): cases 13/13 PASS (hardening, determinism, corelib, ownership, compute_views, explain_syntax today-52-45, syntax_reconciliation retired_authority…), ui 9/9 PASS (plain_call_changes_colon_binding, plain_call_changes_read_parameter, param_read_write_fix, read_param_method_write_fix, write_window…, iter_*, pool_read_only_param_mutation, range_write_window_list_param), golden memory/parameter_modes and memory/write_param_forward PASS on O0/O1/O2. Pre-existing failures carried elsewhere: corelib/game_run_needs_mutable_scene_lvalue (CoreCliLead), the multi_trait …_2 ui row (KF #6425).",
+          "at": "2026-11-06T19:45:32.239Z"
         },
         {
           "n": 9,
@@ -94790,7 +94805,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T02:04:25.306Z",
-      "updated": "2026-11-06T19:34:03.071Z",
+      "updated": "2026-11-06T19:45:32.239Z",
       "updatedBy": "Main"
     },
     {
@@ -96068,6 +96083,66 @@
       "needsAcceptance": false,
       "created": "2026-11-06T19:23:08.815Z",
       "updated": "2026-11-06T19:23:08.815Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0a8z3u0",
+      "num": 6612,
+      "title": "Tool symbol paths use `.`, not `::`: inspect, find, semindex, docs and the impact selector",
+      "body": "Owner 2026-11-06 chose A: with `::` gone from source (D-DECL-COLON1=A, #6586), tool symbol paths switch from `module::name` to `.`, matching source qualification such as `alias.Type.method`. This changes the public JSON and text output of jet inspect, jet find, the semantic index and jet docs, and the user-typed selector of `jet inspect impact <file> <symbol>`. Greenfield cutover: no `::` reader stays behind.\n\nSites found by the syntax owner at c92bf872eb:\n- User-typed: the jet inspect impact selector (Inspect.jet:1580).\n- User-visible JSON or text: semindex identity, summary and call_path keys (SemIndexBuild.jet 149/1481/1526/1530/2151, Sema SemanticIndex.jet:422, InspectOutput.jet:32; the case semindex_projects_omitted_inferred_effects expects `inferred_effect_signature::announce`); inspect rights keys (InspectRights.jet 142/168/173); inspect shapes (InspectShapes.jet:422); find (Find.jet:308); docs `parent::name` (Docs.jet:279); codemod and try identities (Codemod.jet:1371, Try.jet:242).\n- Internal parsing: ArchitectureAdvice.jet:47, Fill.jet:80, SemIndexBuild.jet:1797, and the ComptimeIR.jet:103 and Pipeline.jet:2712 cache keys.\n- Real Rust paths in RustForeign.jet:210-232 are foreign syntax and stay.\n\nModule paths contain dots (`core.process`), so a tool must know where the module path ends. The tools have the module graph, so a reader resolves the longest prefix that names a module, and the rest is the member path. Writers emit the same form.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every tool output and selector listed in the body writes and reads symbol paths with `.` (for example `inferred_effect_signature.announce`), with no `::` writer, reader or fallback left except real Rust paths in RustForeign.jet; a repo search for `::` in Compiler/ outside Rust-foreign code and dated docs finds none.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T19:42:47.718Z"
+        },
+        {
+          "n": 2,
+          "text": "Readers split a dotted path at the longest prefix that names a module in the program's module graph; a case proves `jet inspect impact <file> core.process.spawn`-style selectors and an ambiguous or unknown prefix gives a registered diagnostic with a UI snapshot.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T19:42:47.719Z"
+        },
+        {
+          "n": 3,
+          "text": "The affected cases, snapshots and goldens (semindex_projects_omitted_inferred_effects and every inspect, find, docs, codemod and try row that names a symbol) are updated in the same commit and pass on the default tier; the spec text that documents these outputs shows the `.` form.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T19:42:47.719Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "syntax",
+        "tooling",
+        "owner-direction"
+      ],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T19:42:47.719Z",
+      "updated": "2026-11-06T19:42:47.719Z",
       "updatedBy": "Main"
     }
   ],
@@ -183604,6 +183679,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T19:45:32.239Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ofw8u4",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-06T19:43:42.307Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jwqaa5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T19:43:41.452Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jwqaa5",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T19:42:47.719Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0a8z3u0",
+      "note": "Tool symbol paths use `.`, not `::`: inspect, find, semindex, docs and the impact selector"
+    },
+    {
+      "at": "2026-11-06T19:41:52.541Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xb6zik",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T19:41:51.527Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xb6zik",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T19:41:48.794Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06lr0kz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T19:41:47.567Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06lr0kz",
+      "note": "body,plan"
+    },
+    {
+      "at": "2026-11-06T19:40:50.873Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ofw8u4",
+      "note": "#2"
+    },
     {
       "at": "2026-11-06T19:35:29.905Z",
       "by": "Main",
