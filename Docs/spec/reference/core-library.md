@@ -3687,8 +3687,20 @@ UIAccessibility}` when the node carries metadata.
 `CapabilityUnavailable(capability: String)`, `CapabilityDenied(capability:
 UICapability)`, `InvalidRequest(String)`, `HostFailure(service: String,
 message: String)`, `ResourceDenied(String)`, `ShortcutConflict(shortcut:
-UIShortcut, existing_action: String)`, and `QueueFull(service: String)`; a
-headless host reports `Cancelled(.Headless)`.
+UIShortcut, existing_action: String)`, and `QueueFull(service: String)`.
+Every `core.ui.host` service answer is Core's: the host is a provider of
+primitives (capability flags, clipboard text, queued raw events, dialog
+tokens and results), and multi-field provider text is a record of
+length-prefixed fields (`<decimal UTF-8 byte length>:<bytes>`). A native
+build's provider is headless and reports every capability absent, so each
+service fails with `CapabilityUnavailable` after Core validates the request.
+On the web, a page that installs no `globalThis.jetUiProvider` gets the
+runtime's default browser provider: composition events feed `ime.poll`,
+drag/drop events feed `drag_drop.poll`, and shortcuts and accessibility are
+available. `clipboard.read_text` answers the clipboard text the page last
+observed (a paste, copy or cut, or its own `write_text`), because a browser
+lends the live clipboard only to a user gesture; before any is observed it
+fails with `HostFailure`. File dialogs and font shaping are absent there.
 TUI capability selection, ASCII-only case folding, encoded-OS flag semantics,
 dimension parsing, and defaults are Jet policy. The private environment-byte
 leaf samples the same startup facts; the shared terminal leaf remains the

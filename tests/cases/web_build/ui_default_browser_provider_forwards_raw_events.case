@@ -1,0 +1,15 @@
+# A page with no `globalThis.jetUiProvider` gets the web runtime's default core.ui.host provider (#6596), which
+# forwards browser primitives only. A DOM stub fires paste, composition and drag/drop events before the run:
+# Core decodes each length-prefixed record (IME and dropped text holding U+241F and U+001F arrive intact), the
+# clipboard answers the pasted text and then the program's own write, file dialogs and font shaping are absent,
+# and a drag leave's raw `none` effect reaches Core's decoder unchanged.
+requires: tool:node
+fixture: ui_default_browser_provider_forwards_raw_events.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = ui_default_browser_provider_forwards_raw_events.out

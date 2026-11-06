@@ -23,14 +23,14 @@ struct UIIMEEvent {
     composition: UIIMEComposition?
 }
 
-// One raw event from the provider's IME queue (queue 0, capability code 2),
-// U+001F-separated: target, phase, text, selection start, selection end, and
+// One raw event from the provider's IME queue (queue 0, capability code 2), a
+// provider record of target, phase, text, selection start, selection end, and
 // the marked range's start and end (both empty when absent). A Cancel event
 // has no composition.
 fn poll() -[IO]> UIIMEEvent? UIHostError! {
     if !core.ui.host.__capability(2) -> return Err(UIHostError.CapabilityUnavailable{capability: "IME"})
     raw :: core.ui.host.__event_pop(0) ?? return Ok(None)
-    fields :: raw.split(String.from_bytes([U8]{31}) ?? panic("U+001F is UTF-8")).to_list()
+    fields :: core.ui.host.__provider_fields(raw) ?? return Err(ime_failure("an IME event is not a provider record"))
     if fields.len() != 7 -> return Err(ime_failure("an IME event has 7 fields, not {fields.len()}"))
     phase :: ime_phase(fields[1])
     target :: UINodeID{value: fields[0].copy()}

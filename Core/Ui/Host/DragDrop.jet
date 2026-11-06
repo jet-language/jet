@@ -32,13 +32,13 @@ struct UIDragEvent {
 }
 
 // One raw event from the provider's drag/drop queue (queue 1, capability
-// code 3), U+001F-separated: target, phase, operation, then one field per item
-// whose first character is its kind (`T` text, `U` URI) and the rest its
+// code 3), a provider record of target, phase, operation, then one field per
+// item whose first character is its kind (`T` text, `U` URI) and the rest its
 // value. A browser item has no native path, so a provider never sends a file.
 fn poll() -[IO]> UIDragEvent? UIHostError! {
     if !core.ui.host.__capability(3) -> return Err(UIHostError.CapabilityUnavailable{capability: "DragDrop"})
     raw :: core.ui.host.__event_pop(1) ?? return Ok(None)
-    fields :: raw.split(String.from_bytes([U8]{31}) ?? panic("U+001F is UTF-8")).to_list()
+    fields :: core.ui.host.__provider_fields(raw) ?? return Err(drag_failure("a drag/drop event is not a provider record"))
     if fields.len() < 3 -> return Err(drag_failure("a drag/drop event has at least 3 fields, not {fields.len()}"))
     phase :: drag_phase(fields[1])
     operation :: drag_operation(fields[2])
