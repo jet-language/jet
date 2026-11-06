@@ -859,6 +859,7 @@ parser_parse_param: fn(state: &JetParserState, zone: ParamZone) -> Param {
             mark: parser_bump(&state)
             convention = AccessConvention.Move
             leading_mark = parser_text(state, mark)
+            if mark.kind == TOKEN_CARET -> parser_retired_take_mark(state, mark.span, "^", "&&")
         }
         else -> {}
     }
@@ -919,6 +920,7 @@ parser_parse_param: fn(state: &JetParserState, zone: ParamZone) -> Param {
                 cap: parser_bump(&state)
                 type_convention := AccessConvention.Move
                 if cap.kind == TOKEN_AMP -> type_convention = AccessConvention.Write
+                if cap.kind == TOKEN_CARET -> parser_retired_take_mark(state, cap.span, "^", "&&")
                 if convention != AccessConvention.Read {
                     leading_label: if convention == AccessConvention.Write -> "the write-access marker `&`" else -> "the take marker `{leading_mark}`"
                     type_text: parser_text(state, cap)
@@ -1052,7 +1054,14 @@ parser_parse_function: fn(state: &JetParserState, modifiers: ParsedItemModifiers
     } else {
         params = parser_parse_param_list(&state)
     }
-    signature: parser_parse_callable_result(&state)
+    // D-COPY-MOVE-SPELL1=A: `x.copy()` and `x.move()` are the compiler's own
+    // copy and take, so a method may not take either name (E0436). A module
+    // function keeps it (`files.move(from, to)`).
+    if (func_name == "copy" || func_name == "move") && params.len() > 0 && params[0].name == "self" {
+        verb: if func_name == "copy" -> "copy" else -> "take"
+        parser_add_error_code(state, "E0436", func_name_span, "a method can't be named `{func_name}`", "`x.{func_name}()` is the compiler's own {verb} of a named value, so a method with that name would be shadowed at every call", "rename the method and its calls, for example to `emit_{func_name}`")
+    }
+    signature: parser_parse_callable_result(state)
     return_type := signature.return_type
     return_type_span := signature.return_type_span
     declared_effects := signature.effects

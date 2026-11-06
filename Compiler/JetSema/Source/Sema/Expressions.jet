@@ -3386,7 +3386,7 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
         return SemaMethodSpecialCheck{handled: true, value: printed.value}
     }
     diagnostics_before := diagnostics.len()
-    route := if nested -> sema_call_core_resolve_import_path_route(environment, program, scopes, alias, module_name, method, type_args, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics) else -> sema_call_core_resolve_import_route(environment, program, scopes, alias, method, type_args, args.len(), sema_call_core_first_is_move(args), method_span, alias_span, &context, &diagnostics)
+    route := if nested -> sema_call_core_resolve_import_path_route(environment, program, scopes, alias, module_name, method, type_args, args.len(), sema_call_core_configured_client(args), method_span, alias_span, context, diagnostics) else -> sema_call_core_resolve_import_route(environment, program, scopes, alias, method, type_args, args.len(), sema_call_core_configured_client(args), method_span, alias_span, context, diagnostics)
     route_value: route ?? {
         if diagnostics.len() != diagnostics_before -> return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: false, value: None}
@@ -5590,6 +5590,21 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
             return edited
         }
     }
+    // D-CALLSITE-MARK2=A: an unmarked place inside a shared cell is edited
+    // through the cell when the resolved method writes its receiver, as
+    // `cell.place.method()` was. The built place spans its value, so it
+    // carries no written mark.
+    if !written_place && sema_receiver_mark_place_root(receiver) != None {
+        place: Expr.Place{value: receiver, access: PlaceAccess.Write, span: expr_span(receiver), id: AST_NODE_GENERATED}
+        if sema_shared_access_call_place(place, method_span, environment, program, scopes) == .Val(cell) {
+            if sema_expr_shared_place_call_writes(receiver, method, method_span, owner_type_args, type_args, args, environment, program, scopes, state, tail_store, context) {
+                rewritten: sema_shared_access_desugar_place_call(cell.handle, cell.place, cell.place_span, method, method_span, owner_type_args, type_args, args, cell.span)
+                edited: sema_check_expression(rewritten, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                sema_shared_cycle_check_call(receiver, args, environment, program, scopes, state, diagnostics)
+                return edited
+            }
+        }
+    }
     // Check the ordinary unmarked call, then
     // compare the written receiver mark with its resolved convention.
     unmarked: sema_receiver_mark_begin(&state, receiver)
@@ -5602,6 +5617,28 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
         if receiver == .Place(value, _, _, _) -> sema_shared_cycle_check_call(value, args, environment, program, &scopes, state, &diagnostics)
     }
     checked
+}
+
+// Whether the plain call `receiver.method(args)` resolves to a method that
+// writes its receiver. The call is checked as a probe: scopes, context and
+// ownership state roll back and its diagnostics are dropped.
+sema_expr_shared_place_call_writes: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+    scope_mark: sema_scope_mark(scopes)
+    context_mark: sema_check_context_mark(context)
+    fork: sema_ownership_fork(state)
+    probe_diagnostics := [Diagnostic]{}
+    unmarked: sema_receiver_mark_begin(state, receiver)
+    _ := sema_expr_check_method_call(unmarked, method, method_span, owner_type_args, type_args, args, None, environment, program, scopes, state, tail_store, context, probe_diagnostics)
+    writes := false
+    if state.receiver_frames.len() > 0 {
+        frame: state.receiver_frames.pop() ?? panic("a receiver frame was pushed")
+        writes = frame.convention == (Val(AccessConvention.Write))
+    }
+    sema_ownership_fork_rollback(state, fork)
+    sema_ownership_fork_close(state, fork)
+    sema_check_context_rollback(context, context_mark)
+    sema_scope_rollback(scopes, scope_mark)
+    writes
 }
 
 sema_expr_check_list_literal: fn(elements: [Expr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

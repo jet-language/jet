@@ -189,7 +189,7 @@ PlugCx: struct {
         dst
     }
 
-    copy: fn(&self, row: Int, value: Int) -> Int Never! {
+    emit_copy: fn(&self, row: Int, value: Int) -> Int Never! {
         dst: &self.temp(row)
         &self.emit(IROp.Copy, dst, value, -1, -1)
         dst
@@ -263,7 +263,7 @@ PlugCx: struct {
         if overlap {
             sources = [Int]{}
             loop value in values {
-                kept: &self.copy(self.f.slot_type[value], value)
+                kept: &self.emit_copy(self.f.slot_type[value], value)
                 &sources.push(kept)
             }
         }
@@ -317,7 +317,7 @@ PlugCx: struct {
 
     // An i32 slot's value zero-extended to a word.
     zext: fn(&self, value: Int) -> Int Never! {
-        wide: &self.copy(self.rows.word, value)
+        wide: &self.emit_copy(self.rows.word, value)
         mask: &self.word(4294967295)
         &self.op2(IROp.BitAnd, self.rows.word, wide, mask)
     }
@@ -332,24 +332,24 @@ PlugCx: struct {
     // The i32 of a word's low 32 bits.
     narrow32: fn(&self, value: Int) -> Int Never! {
         low: &self.sext(value, 32)
-        &self.copy(self.rows.i32, low)
+        &self.emit_copy(self.rows.i32, low)
     }
 
     unsigned: fn(&self, value: Int, wide: Bool) -> Int Never! {
-        if wide -> return &self.copy(self.rows.u64, value)
+        if wide -> return &self.emit_copy(self.rows.u64, value)
         low: &self.zext(value)
-        &self.copy(self.rows.u32, low)
+        &self.emit_copy(self.rows.u32, low)
     }
 
     signed: fn(&self, value: Int, wide: Bool) -> Int Never! {
-        bits: &self.copy(self.rows.word, value)
+        bits: &self.emit_copy(self.rows.word, value)
         if wide -> return bits
         &self.narrow32(bits)
     }
 
     // A comparison's Bool as an i32.
     flag: fn(&self, test: Int) -> Int Never! {
-        slot: &self.copy(self.rows.i32, test)
+        slot: &self.emit_copy(self.rows.i32, test)
         self.flags[slot] = test
         slot
     }
@@ -442,7 +442,7 @@ PlugCx: struct {
             return
         }
         loop slot in frame.result_slots {
-            kept: &self.copy(self.f.slot_type[slot], slot)
+            kept: &self.emit_copy(self.f.slot_type[slot], slot)
             &self.push(kept)
         }
     }
@@ -630,7 +630,7 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
         }
         op == WASM_OP_LOCAL_GET -> {
             local: cx.locals[a]
-            value: &cx.copy(cx.f.slot_type[local], local)
+            value: &cx.emit_copy(cx.f.slot_type[local], local)
             &cx.push(value)
         }
         op == WASM_OP_LOCAL_SET -> {
@@ -678,7 +678,7 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
             size: &cx.load(rows.word, memories, scope.memory * 24 + 8)
             shift: &cx.word(16)
             pages: &cx.op2(IROp.Shr, rows.word, size, shift)
-            value: &cx.copy(rows.i32, pages)
+            value: &cx.emit_copy(rows.i32, pages)
             &cx.push(value)
         }
         op == WASM_OP_MEMORY_GROW -> {
@@ -688,7 +688,7 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
             at: &cx.word(cx.at)
             old: &cx.rt("jet_plugin_memory_grow", [Int]{cx.inst, memory, delta, fid, at}, rows.word)
             &cx.check(false)
-            value: &cx.copy(rows.i32, old)
+            value: &cx.emit_copy(rows.i32, old)
             &cx.push(value)
         }
         op == WASM_OP_I32_CONST -> {
@@ -811,14 +811,14 @@ plug_memory_access: fn(cx: &PlugCx, scope: PlugScope, op: Int, offset: Int) Neve
         address: &cx.pop()
         pointer: &cx.address(scope.memory, address, offset, width)
         value: &cx.load(narrow, pointer, 0)
-        kept: if narrow == result -> value else -> &cx.copy(result, value)
+        kept: if narrow == result -> value else -> &cx.emit_copy(result, value)
         &cx.push(kept)
         return
     }
     value: &cx.pop()
     address: &cx.pop()
     pointer: &cx.address(scope.memory, address, offset, width)
-    stored: if cx.f.slot_type[value] == narrow -> value else -> &cx.copy(narrow, value)
+    stored: if cx.f.slot_type[value] == narrow -> value else -> &cx.emit_copy(narrow, value)
     &cx.store(pointer, 0, stored)
 }
 
@@ -866,7 +866,7 @@ plug_int_arith: fn(cx: &PlugCx, index: Int, wide: Bool) Never! {
             else -> "jet_plugin_popcnt"
         }
         count: &cx.rt(name, [Int]{bits, size}, cx.rows.word)
-        result: if wide -> count else -> &cx.copy(row, count)
+        result: if wide -> count else -> &cx.emit_copy(row, count)
         return &cx.push(result)
     }
     right: &cx.pop()
@@ -1044,7 +1044,7 @@ plug_convert: fn(cx: &PlugCx, op: Int) Never! {
             result = &cx.narrow32(value)
         }
         op == 0xac -> {
-            result = &cx.copy(rows.word, value)
+            result = &cx.emit_copy(rows.word, value)
         }
         op == 0xad -> {
             result = &cx.zext(value)
@@ -1081,9 +1081,9 @@ plug_convert: fn(cx: &PlugCx, op: Int) Never! {
                 op == 0xc1 || op == 0xc3 -> 16
                 else -> 32
             }
-            word: if op <= 0xc1 -> &cx.copy(rows.word, value) else -> value
+            word: if op <= 0xc1 -> &cx.emit_copy(rows.word, value) else -> value
             extended: &cx.sext(word, bits)
-            result = if op <= 0xc1 -> &cx.copy(rows.i32, extended) else -> extended
+            result = if op <= 0xc1 -> &cx.emit_copy(rows.i32, extended) else -> extended
         }
     }
     &cx.push(result)
@@ -1107,7 +1107,7 @@ plug_bulk: fn(cx: &PlugCx, scope: PlugScope, op: Int, a: Int, b: Int) Never! {
     if op == WASM_OP_TABLE_SIZE {
         table: &cx.word(scope.tables[a])
         size: &cx.rt("jet_plugin_table_size", [Int]{cx.inst, table}, rows.word)
-        result: &cx.copy(rows.i32, size)
+        result: &cx.emit_copy(rows.i32, size)
         return &cx.push(result)
     }
     if op == WASM_OP_TABLE_GROW {
@@ -1116,7 +1116,7 @@ plug_bulk: fn(cx: &PlugCx, scope: PlugScope, op: Int, a: Int, b: Int) Never! {
         table: &cx.word(scope.tables[a])
         old: &cx.rt("jet_plugin_table_grow", [Int]{cx.inst, table, value, delta, fid, at}, rows.word)
         &cx.check(false)
-        result: &cx.copy(rows.i32, old)
+        result: &cx.emit_copy(rows.i32, old)
         return &cx.push(result)
     }
     count: &cx.pop()
@@ -1185,7 +1185,7 @@ plug_thunk: fn(kit: PlugKit, fid: Int, ty: WasmFuncType) -> IRFunction Never! {
     if row >= 0 {
         stored: if {
             row == rows.f32 -> &cx.promote(result)
-            row == rows.i32 -> &cx.copy(rows.word, result)
+            row == rows.i32 -> &cx.emit_copy(rows.word, result)
             else -> result
         }
         &cx.store(area, 0, stored)
@@ -1241,7 +1241,7 @@ plug_import_stub: fn(kit: PlugKit, fid: Int, import: Int, ty: WasmFuncType) -> I
         kind: cx.f.slot_type[slot]
         stored: if {
             kind == rows.f32 -> &cx.promote(slot)
-            kind == rows.i32 -> &cx.copy(rows.word, slot)
+            kind == rows.i32 -> &cx.emit_copy(rows.word, slot)
             else -> slot
         }
         &cx.store(area, k * 8, stored)

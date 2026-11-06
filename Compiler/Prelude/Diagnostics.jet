@@ -2242,9 +2242,9 @@ MoveWithoutMarker: struct {
         edit: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "A named binding passed without `^` to a take parameter where the call is not its last use — it is read again later, on a later loop pass, or in another argument of the same call — or that keeps a required `^` (a value with cleanup, a type parameter, a capture), or a std constructor consuming a borrowed value" }
+        what: fn(self) -> String { "A named binding a take parameter receives where the call is not its last use — it is read again later, on a later loop pass, or in another argument of the same call — or a value with cleanup that moves where no `x.move()` is written, or a std constructor consuming a borrowed value" }
         why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Pass a copy with `.copy()`, reorder so the call is the name's last use, or write `^` where the value must be handed over." }
+        fix: fn(self) -> String { "Pass a copy with `.copy()`, reorder so the call is the name's last use, or write `x.move()` where a value with cleanup is handed over." }
     }
 }
 
@@ -2409,17 +2409,14 @@ PersistentMutableBorrow: struct {
     }
 }
 
-MissingReceiverMark: struct {
+RetiredMissingReceiverMark: struct {
     impl Diagnostic {
         code: "E0224"
-        meaning: "A method call writes or takes a named place without its receiver mark"
-        detail: true
-        edit: .SourceEdit
+        status: .Retired
         no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "This call writes or takes the named place it is called on, but the place has no mark." }
-        why: fn(self) -> String { "A method declared with `&self` writes its receiver and one declared with `^self` takes it; the mark shows that permission on the named place, the same way `edit(&buf)` and `consume(^text)` mark arguments." }
-        fix: fn(self) -> String { "Write `&` before the place for a writing call (`&buf.append(x)`) or `^` for a taking call (`^buf.seal()`)." }
+        what: fn(self) -> String { "*Retired* (was: a writing or taking call without its receiver mark; D-CALLSITE-MARK2=A writes calls plain)" }
+        why: fn(self) -> String { "The registered sema rule applies here" }
+        fix: fn(self) -> String { "Follow the guidance for E0224" }
     }
 }
 
@@ -2432,8 +2429,8 @@ UnusedPlaceMark: struct {
         edit: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "This `&` or `^` mark does not match a call or move that writes or takes the marked place." }
-        why: fn(self) -> String { "A mark belongs only on a named place that a call writes or takes, or that `^` moves as a value. Read calls and fresh values such as literals and call results take no mark, and a collection element stays in its collection." }
+        what: fn(self) -> String { "This mark does not match a call or move that writes or takes the marked place." }
+        why: fn(self) -> String { "A mark belongs only on a write window bound to a name, a match that writes into its subject, and `task &&name`, and `x.move()` takes a name or one of its fields. Read calls and fresh values such as literals and call results take no mark, and a collection element stays in its collection." }
         fix: fn(self) -> String { "Remove the mark." }
     }
 }
@@ -2446,9 +2443,9 @@ ReceiverMarkMismatch: struct {
         edit: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "This receiver mark does not match the permission the call uses." }
-        why: fn(self) -> String { "A call that writes its receiver needs `&`, and a call that takes its receiver needs `^`; the mark states the permission the resolved method declares." }
-        fix: fn(self) -> String { "Replace the mark with the one the call declares." }
+        what: fn(self) -> String { "This receiver mark names the other permission than the call uses." }
+        why: fn(self) -> String { "The resolved method's signature declares whether a call writes (`&self`) or takes (`&&self`) its receiver, and the call is written plain." }
+        fix: fn(self) -> String { "Remove the mark." }
     }
 }
 
@@ -12778,6 +12775,63 @@ RetiredDeclarationSpelling: struct {
         what: fn(self) -> String { "`{self.old}` is a retired declaration spelling; write `{self.new}`." }
         why: fn(self) -> String { "Every declaration is written `name: value`: a binding `limit: 100`, a function `area: fn(r: Float) -> Float`, a type `Point: struct`; `:=` stays the mutable binding." }
         fix: fn(self) -> String { "Write `{self.new}`; `jet fix` applies this fix." }
+    }
+}
+
+RetiredCallMark: struct {
+    written: String
+    declarer: String
+    repair: String
+
+    impl Diagnostic {
+        code: "E0434"
+        severity: .Lint
+        lint_name: "retired_call_mark"
+        meaning: "A call writes a memory mark its signature already states; calls are written plain"
+        detail: true
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "`{self.written}` repeats what {self.declarer} declares; a call is written plain." }
+        why: fn(self) -> String { "A signature says what a function does to each input (`c: &Counter` edits it, `c: &&Counter` takes it), so the call reads `bump(score)`. A mark stays only on a write window bound to a name, a match that writes into its subject, and `task &&name`." }
+        fix: fn(self) -> String { "{self.repair}; `jet fix` applies this fix." }
+    }
+}
+
+RetiredTakeMark: struct {
+    old: String
+    new: String
+
+    impl Diagnostic {
+        code: "E0435"
+        severity: .Lint
+        lint_name: "retired_take_mark"
+        stage: [.Parse]
+        meaning: "A take uses the retired `^` mark; a signature writes `&&` and a value writes `x.move()`"
+        detail: true
+        edit: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "`{self.old}` is a retired take spelling; write `{self.new}`." }
+        why: fn(self) -> String { "A take is written `&&` in a signature (`seal: fn(&&self)`, `c: &&Counter`) and a task capture (`task &&name`), and `x.move()` in a value; `^` is no longer a mark." }
+        fix: fn(self) -> String { "Write `{self.new}`; `jet fix` applies this fix." }
+    }
+}
+
+MethodNamedCopyOrMove: struct {
+    name: String
+    verb: String
+
+    impl Diagnostic {
+        code: "E0436"
+        stage: [.Parse]
+        meaning: "A method is named `copy` or `move`, the compiler's own copy and take"
+        detail: true
+        no_fix: .Behavior
+        fix_next: "Rename the method and its calls."
+        what: fn(self) -> String { "a method can't be named `{self.name}`" }
+        why: fn(self) -> String { "`x.{self.name}()` is the compiler's own {self.verb} of a named value, so a method with that name would be shadowed at every call" }
+        fix: fn(self) -> String { "rename the method and its calls, for example to `emit_{self.name}`" }
     }
 }
 

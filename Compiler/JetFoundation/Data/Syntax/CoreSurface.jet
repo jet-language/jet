@@ -324,17 +324,18 @@ SIZED_NUMERIC_TYPES: [String]{
 
 /// (ratified, supersedes): memory model v5 sigils. Two
 /// sigils plus unmarked: unmarked = read (enforced in S2), `&T` = exclusive
-/// write, `^T` = move (consume). A deliberate copy is the built-in method
-/// `x.copy()`. At call sites `&`/`^` mark the
-/// named place a call writes or takes, receiver or argument alike
-/// (`&buf.append(x)`, `^buf.seal()`, `edit(&buf)`).
-SIGIL_MOVE: "^"
+/// write, `&&T` = take (consume; D-MOVE-SIGIL1=A). A deliberate copy is the
+/// built-in method `x.copy()` and an early move `x.move()`. Marks live in
+/// signatures (D-CALLSITE-MARK2=A): calls are plain (`buf.append(x)`,
+/// `buf.seal()`, `edit(buf)`); a mark stays only on a write window bound to a
+/// name, a match that writes into its subject, and `task &&name`.
+SIGIL_MOVE: "&&"
 
 SIGIL_WRITE: "&"
 
 WRITE_ACCESS_LABEL: "the write-access marker `&`"
 
-MOVE_MARKER_LABEL: "the move marker `^`"
+MOVE_MARKER_LABEL: "the take marker `&&`"
 
 /// The two parameter-zone separators. Written in a parameter
 /// list, not as operators: `/` closes the positional-only zone (a label is

@@ -46,7 +46,8 @@ LEXICAL_LEDGER: [LexicalEntry]{
     { spelling: "!", meaning: "error-contract mark after its error type (`E!`, `(A | B)!`); deny-only root in an effect row", decision: "D-TYPE-SUFFIX1=A; D-EFF4" },
     { spelling: "?", meaning: "optional type mark after its type (`T?`)", decision: "D-TYPE-SUFFIX1=A" },
     { spelling: "??", meaning: "fallback", decision: "D-RESULT-DECON2" },
-    { spelling: "&place.method(…) / ^place.method(…)", meaning: "receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement", decision: "D-CAP-RECEIVER1=D" },
+    { spelling: "x.move()", meaning: "an early take: a compiler-owned method that moves a named place out before its last use; a call that takes is written plain because its signature declares `&&T` or `&&self`", decision: "D-COPY-MOVE-SPELL1=A; D-CALLSITE-MARK2=A" },
+    { spelling: "&&T / &&self", meaning: "take mark in a signature, and `task &&name` for a task capture; `&T` / `&self` is the write mark; calls stay unmarked", decision: "D-MOVE-SIGIL1=A; D-CALLSITE-MARK2=A" },
     { spelling: "&self.field / &self.[a, b]", meaning: "stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[`", decision: "D-METHOD-FOOTPRINT1=A; D-SPREAD1=A" },
     { spelling: "T{{expr}}", meaning: "field default", decision: "D-DEFAULT-SHAPE1" },
     { spelling: "Name{{\"…\"}}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1" },
@@ -114,8 +115,8 @@ KW_CONC_TASK: "task"
 /// creates a deeply immutable owned snapshot for a task crossing.
 KW_FREEZE: "freeze"
 
-// This rule adds no second token for consuming captures: `task ^name`
-// reuses SIGIL_MOVE (`^`) as task-capture syntax on a group child.
+// This rule adds no second token for consuming captures: `task &&name`
+// reuses SIGIL_MOVE (`&&`) as task-capture syntax on a group child.
 // The child owns the value; later use of the name is ordinary E0121.
 /// `task.all` is the one fan-out
 /// selector that accepts either positional branches or uniformly named

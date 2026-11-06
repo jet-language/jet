@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0224 — Jet diagnostic</title>
-<meta name="description" content="This call writes or takes the named place it is called on, but the place has no mark.">
+<meta name="description" content="*Retired* (was: a writing or taking call without its receiver mark; D-CALLSITE-MARK2=A writes calls plain)">
 <meta property="og:title" content="E0224 — Jet diagnostic">
-<meta property="og:description" content="This call writes or takes the named place it is called on, but the place has no mark.">
+<meta property="og:description" content="*Retired* (was: a writing or taking call without its receiver mark; D-CALLSITE-MARK2=A writes calls plain)">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,45 +25,18 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0224</h1>
-<p>This call writes or takes the named place it is called on, but the place has no mark.</p>
+<p>*Retired* (was: a writing or taking call without its receiver mark; D-CALLSITE-MARK2=A writes calls plain)</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">This call writes or takes the named place it is called on, but the place has no mark.</p>
+<p class="diag-copy what" data-registry-field="what">*Retired* (was: a writing or taking call without its receiver mark; D-CALLSITE-MARK2=A writes calls plain)</p>
 <h2>Why</h2>
-<p class="diag-copy why" data-registry-field="why">A method declared with `&amp;self` writes its receiver and one declared with `^self` takes it; the mark shows that permission on the named place, the same way `edit(&amp;buf)` and `consume(^text)` mark arguments.</p>
+<p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write `&amp;` before the place for a writing call (`&amp;buf.append(x)`) or `^` for a taking call (`^buf.seal()`).</p>
+<p class="diag-copy fix" data-registry-field="fix">Follow the guidance for E0224</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0224</code>: <code>tests/ui/ownership/builtin_and_composite_receivers_use_the_call_access_frame.stderr</code>.</p>
-<pre class="diag">Error [jet.UseWhileWriteActive]: `values` is being changed in this call, so it can&#39;t be used again here
-  --&gt; builtin_and_composite_receivers_use_the_call_access_frame.jet:4:30
-    |
-  4 |     &amp;values.insert(0, values.remove(0, .Slot))
-    |                              ^^^^^^
- Why: While something is being changed through the write-access marker `&amp;`, nobody else may be looking at it
- Fix: Pass the write-access marker `&amp;` (`&amp;values`) only once, or copy first with `values.copy()`
-More: jet-lang.dev/e/E0204
-
-Error [jet.MissingReceiverMark]: This call writes `values`, but `values` has no `&amp;` mark
-  --&gt; builtin_and_composite_receivers_use_the_call_access_frame.jet:4:23
-    |
-  4 |     &amp;values.insert(0, values.remove(0, .Slot))
-    |                       ^^^^^^
- Why: The method is declared with `&amp;self`, so the call writes the named place it is called on; the mark sits on that place, the same way `edit(&amp;buf)` and `consume(^text)` mark arguments
- Fix: Write `&amp;values`
-More: jet-lang.dev/e/E0224
-
-Error [jet.BindingTypeMismatch]: Argument 2 to `.insert()` should be Int (a whole number), not Int?
-  --&gt; builtin_and_composite_receivers_use_the_call_access_frame.jet:4:30
-    |
-  4 |     &amp;values.insert(0, values.remove(0, .Slot))
-    |                              ^^^^^^
- Why: Built-in methods need arguments of the right type
- Fix: Use Int (a whole number) here
-More: jet-lang.dev/e/E0108
-</pre>
+<p>No UI snapshot currently mentions this code.</p>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

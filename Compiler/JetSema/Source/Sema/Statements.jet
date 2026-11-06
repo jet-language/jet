@@ -5940,7 +5940,7 @@ sema_stmt_defer_close_resource: fn(close: Expr, scopes: SemaScopeTable) -> Symbo
         .Call(call, _) -> {
             if call.name != "close" || call.args.len() != 1 -> return None
             argument := call.args[0]
-            if argument.convention != AccessConvention.Move -> return None
+            if argument.convention == AccessConvention.Write -> return None
             root: sema_stmt_for_in_expr_root_ident(argument.expr) ?? return None
             index: sema_scope_resolve_index_at(scopes, root, expr_span(argument.expr)) ?? return None
             binding: scopes.bindings[index]
@@ -5955,15 +5955,18 @@ sema_stmt_check_defer_close: fn(close: Expr, span: Span, environment: SemaScopeE
         .Call(call, _) -> {
             if call.name != "close" -> return None
             if call.args.len() != 1 {
-                &diagnostics.push(sema_error("E0104", call.name_span, "`close` takes exactly one resource, got {call.args.len()}", "`close` consumes one value through its nominal `Close` implementation and the move marker `^`", "write `close(^resource)` with the move marker `^`"))
-                loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                diagnostics.push(sema_error("E0104", call.name_span, "`close` takes exactly one resource, got {call.args.len()}", "`close` takes one value through its nominal `Close` implementation", "write `defer close(resource)`"))
+                loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
                 return None
             }
             argument := call.args[0]
-            resource_value := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            if argument.convention != AccessConvention.Move {
-                &diagnostics.push(sema_error("E0201", argument.span, "`close` takes ownership of its resource", "`Close.close(^self)` is consuming through the move marker `^`, so cleanup runs on exactly one owner", "write `close(^resource)` with the move marker `^`"))
+            resource_value := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
+            if argument.convention == AccessConvention.Write {
+                diagnostics.push(sema_error("E0201", argument.span, "`close` takes ownership of its resource", "`Close.close(&&self)` takes its receiver, so cleanup runs on exactly one owner; `&` would only lend it", "write `defer close(resource)`"))
                 return None
+            }
+            if argument.convention == AccessConvention.Move && argument.flags.written_mark == .Val(mark) {
+                diagnostics.push(sema_ownership_retired_mark_diagnostic("`close`", mark, "^", TextEdit{span: mark, new_text: ""}))
             }
             value: resource_value ?? return None
             resource_id: sema_stmt_defer_close_resource(close, scopes) ?? return None

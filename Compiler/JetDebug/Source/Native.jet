@@ -293,7 +293,7 @@ impl NativeSession {
         text := ""
         if word == {
             "s" | "step" | "n" | "next" | "c" | "continue" | "f" | "finish" -> {
-                moved: &self.move(word) ?? return Err(err)
+                moved: &self.advance(word) ?? return Err(err)
                 text = &self.report(moved, file, lines) ?? return Err(err)
                 return Ok(NativeDebugStep{text: text, stop: moved})
             }
@@ -334,7 +334,7 @@ impl NativeSession {
     // Run one run-control command. A step that lands in code without Jet line
     // information finishes out of it back to the Jet caller, or continues when
     // no Jet frame is left to return to.
-    move: fn(&self, word: String) -> NativeStop NativeDebugError! {
+    advance: fn(&self, word: String) -> NativeStop NativeDebugError! {
         stop := if word == {
             "s" | "step" -> &self.step_in() ?? return Err(err)
             "n" | "next" -> &self.step_over() ?? return Err(err)

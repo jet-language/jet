@@ -1618,13 +1618,13 @@ parser_parse_defer_statement: fn(state: &JetParserState) -> Stmt {
     start: parser_bump(&state)
     close: parser_parse_expression(&state, 1, 0)
     valid: if close.expr == {
-        .Call(call, _) -> call.name == "close" && call.args.len() == 1 && call.args[0].convention == AccessConvention.Move && call.args[0].expr == .Ident(_, _, _)
+        .Call(call, _) -> call.name == "close" && call.args.len() == 1 && call.args[0].convention != AccessConvention.Write && call.args[0].expr == .Ident(_, _, _)
         else -> false
     }
     span: parser_cover(start.span, close.span)
     if !valid {
-        parser_add_error(&state, span, "`defer` only schedules a consuming resource close", "Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked through the move marker `^`", "write `defer close(^resource)` with the move marker `^`")
-        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}}
+        parser_add_error(state, span, "`defer` only schedules a consuming resource close", "Jet has no general deferred-action mechanism; resource cleanup stays explicit and ownership-checked through `close`, which takes its resource", "write `defer close(resource)`")
+        return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
     }
     parser_finish_statement(&state)
     Stmt.DeferClose{close: close.expr, span: ^span}

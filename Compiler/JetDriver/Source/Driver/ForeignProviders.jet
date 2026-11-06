@@ -831,7 +831,7 @@ jet_driver_foreign_find_generated_module: fn(program: Program, language: String,
 
 jet_driver_foreign_make_adapter_function: fn(handle: String, raw_function: String, origin_path: String, diagnostics: &[Diagnostic]) -> Func? {
     adapter_name: "__jet_ffi_close_{handle}"
-    source: "{adapter_name}: fn(handle: ^{handle}) {{\n    {raw_function}(handle.copy())\n}}\n"
+    source: "{adapter_name}: fn(handle: &&{handle}) {{\n    {raw_function}(handle.copy())\n}}\n"
     lexed: lex_generated(source.bytes())
     // copy: `lexed` still feeds jet_driver_has_errors and parse_lexed below, so it keeps its
     // diagnostics. The caller's diagnostics list gets a copy of each, re-pathed to the adapter
@@ -965,7 +965,7 @@ jet_driver_foreign_adapter_path: fn(surface: JetDriverForeignSurface, index: Int
 }
 
 jet_driver_foreign_adapter_source: fn(adapter: SemaForeignCloseAdapterInput) -> String Never! {
-    "__jet_ffi_close_{adapter.handle_type}: fn(handle: ^{adapter.handle_type}) {{\n    {adapter.raw_function}(handle.copy())\n}}\n"
+    "__jet_ffi_close_{adapter.handle_type}: fn(handle: &&{adapter.handle_type}) {{\n    {adapter.raw_function}(handle.copy())\n}}\n"
 }
 
 jet_driver_foreign_source_for_path: fn(load: JetDriverLoadResult, path: String) -> String Never! {

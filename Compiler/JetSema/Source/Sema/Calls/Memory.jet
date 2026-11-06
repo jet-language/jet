@@ -47,8 +47,8 @@ sema_call_memory_address_of: fn(args: [CallArg], span: Span, expected: Type?, en
 // fact is recorded with the binding (sema_pin_record_binding).
 sema_call_memory_pin: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if args.len() != 1 {
-        &diagnostics.push(sema_error("E0104", span, "`pin` expects 1 argument, got {args.len()}", "a pin names one storage location", "write `mem.pin(&place)` with the write-access marker `&`"))
-        sema_call_memory_discard_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        diagnostics.push(sema_error("E0104", span, "`pin` expects 1 argument, got {args.len()}", "a pin names one storage location", "write `mem.pin(place)`"))
+        sema_call_memory_discard_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return None
     }
     argument: args[0]
@@ -111,7 +111,7 @@ sema_call_memory_static_arity: fn(name: String, method: String, args: [CallArg],
     }
     fix := if {
         name == "Pool" -> "write `mem.Pool.new(slots: N)`"
-        name == "Fixed" && method == "over" -> "write `mem.Fixed.over(&bytes)`"
+        name == "Fixed" && method == "over" -> "write `mem.Fixed.over(bytes)`"
         name == "Fixed" -> "write `mem.Fixed.new(size: N)`"
         else -> "write `mem.{name}.new()` or `mem.{name}.new(capacity: N)`"
     }
@@ -164,9 +164,11 @@ sema_call_memory_check_fixed_buffer: fn(argument: CallArg, value: TExpr, environ
         .Ident(_, _, _) -> true
         else -> false
     }
-    direct_write := argument.convention == AccessConvention.Write && direct_expr
+    // D-CALLSITE-MARK2=A: `over`'s parameter is a write window, so the
+    // buffer's name passed plain is that window.
+    direct_write := argument.convention != AccessConvention.Move && direct_expr
     if !fixed_bytes || !direct_write {
-        &diagnostics.push(sema_error("E0103", argument.span, "`Fixed.over` needs one mutable fixed-size byte buffer", "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed", "bind `[Byte#N]` storage, then write `fixed: mem.Fixed.over(&storage)` with the write-access marker `&`"))
+        diagnostics.push(sema_error("E0103", argument.span, "`Fixed.over` needs one mutable fixed-size byte buffer", "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed", "bind `[Byte#N]` storage with `:=`, then write `fixed: mem.Fixed.over(storage)`"))
         return false
     }
     parameter := SemaCallParam{label: "buffer", name: "buffer", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Write, ty: Val(value.ty), variadic: false}
@@ -198,8 +200,8 @@ sema_call_try_memory_static: fn(receiver: Expr, method: String, args: [CallArg],
             if sema_expr_core_import_module(environment, program, alias) != Val("core.mem") -> return SemaMethodSpecialCheck{handled: false, value: None}
             if name != "Arena" && name != "Bump" && name != "Pool" && name != "Fixed" -> return SemaMethodSpecialCheck{handled: false, value: None}
             if method != "new" && !(name == "Fixed" && method == "over") {
-                &diagnostics.push(sema_error("E0102", span, "`{name}` has no method `{method}`", if name == "Fixed" -> "`Fixed` supports `new` and `over` constructors" else -> "allocator constructors use `new`", if name == "Fixed" -> "write `mem.Fixed.new(size: N)` or `mem.Fixed.over(&bytes)`" else -> "write `mem.{name}.new()`"))
-                sema_call_memory_discard_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                diagnostics.push(sema_error("E0102", span, "`{name}` has no method `{method}`", if name == "Fixed" -> "`Fixed` supports `new` and `over` constructors" else -> "allocator constructors use `new`", if name == "Fixed" -> "write `mem.Fixed.new(size: N)` or `mem.Fixed.over(bytes)`" else -> "write `mem.{name}.new()`"))
+                sema_call_memory_discard_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
             if name == "Fixed" && !fixed_allowed {

@@ -567,7 +567,10 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             complete = false
             next
         }
-        if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, state, context, &diagnostics, args[index].convention == AccessConvention.Move) -> return None
+        // A bare name a take parameter receives is that parameter's take, as
+        // `name.move()` was (D-CALLSITE-MARK2=A).
+        taken_name: args[index].convention == AccessConvention.Move || decision == SemaCallConventionDecision.NeedsImplicitClone
+        if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, state, context, diagnostics, taken_name) -> return None
         // A self-typed read that does not fit reports the generic E0108 at
         // the value; like any other argument, that becomes the call's E0112.
         // Integer narrowing keeps its own E0108 (Rust check_type_assignable
@@ -710,7 +713,7 @@ sema_call_owned_trait_bound: fn(ty: Type) -> String? {
 
 // A fixed-shape Core route checks its own arguments. An unmarked bare name
 // passed to one of its taking parameters still moves at its last use, as at
-// an ordinary call; a name another argument of the same call also references
+// an ordinary call; a name a later argument of the same call also references
 // has no last use there. `values` are the checked arguments, in `args` order.
 sema_call_note_route_implicit_takes: fn(params: [SemaCallParam], args: [CallArg], values: [TExpr], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: SemaCheckContext) {
     loop index in 0..<args.len() {
@@ -722,8 +725,7 @@ sema_call_note_route_implicit_takes: fn(params: [SemaCallParam], args: [CallArg]
         twice := false
         loop reference in context.name_references {
             if reference.symbol.id.key != key -> next
-            loop other in 0..<args.len() {
-                if other == index -> next
+            loop other in index + 1..<args.len() {
                 other_span: expr_span(args[other].expr)
                 if reference.span.start >= other_span.start && reference.span.end <= other_span.end -> twice = true
             }
@@ -995,11 +997,11 @@ sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Ty
     diagnostics[mismatch_index] = sema_call_argument_mismatch(callee, index, required, offered_ty, shown_span)
 }
 
-// Whether an argument other than `own` references the binding `key`;
+// Whether an argument after `own` references the binding `key`: arguments
+// run in order, so an earlier one has read the name before the take.
 // `starts` holds each argument's first name reference and the end.
 sema_call_key_named_elsewhere: fn(key: String, own: Int, starts: [Int], context: SemaCheckContext) -> Bool Never! {
-    loop other in 0..<starts.len() - 1 {
-        if other == own -> next
+    loop other in own + 1..<starts.len() - 1 {
         loop index in starts[other]..<starts[other + 1] {
             if index < context.name_references.len() && context.name_references[index].symbol.id.key == key -> return true
         }

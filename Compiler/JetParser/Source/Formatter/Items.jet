@@ -1875,14 +1875,14 @@ jfmt_fmt_param: fn(f: &JetFmt, p: Param) {
     // (`name: &Type`), or `self` for a receiver (`&self`). `Read` is unmarked.
     sigil: if p.convention == {
         .Write -> "&"
-        .Move -> "^"
+        .Move -> "&&"
         .Read -> ""
     }
     is_self_receiver: p.name == "self" && jfmt_type_name_is_empty(p.ty)
     if is_self_receiver {
-        // `&self` / `^self`: the sigil attaches to `self`, no type printed.
-        if sigil.len() > 0 -> jfmt_write(&f, sigil)
-        jfmt_write(&f, p.name)
+        // `&self` / `&&self`: the sigil attaches to `self`, no type printed.
+        if sigil.len() > 0 -> jfmt_write(f, sigil)
+        jfmt_write(f, p.name)
     } else {
         // `timeout seconds: Int` — public label, then local name.
         if p.public_label == .Val(label) {
