@@ -379,18 +379,19 @@ fn parser_parse_take_pattern_literal(state: &JetParserState, depth: Int) -> Pars
 // Other payload expressions construct a value, and so does an ALL_CAPS
 // constant name: `x == Val(LIMIT)` compares with the constant.
 // This restriction belongs to comparison RHS parsing, not dispatch-arm or
-// nested leading-dot patterns.
-fn parser_comparison_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
+// nested leading-dot patterns. `value` is a value context (no `if` head
+// whose `{` opens the body), as for parser_named_struct_pattern_ahead.
+fn parser_comparison_pattern_rhs_ahead(state: &JetParserState, value: Bool) -> Bool Never! {
     token :: parser_current(&state)
     if token.kind == TOKEN_IDENT && parser_value(state, token) == "Val" {
         return parser_kind_at(&state, 1) == TOKEN_LPAREN && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_RPAREN && !parser_constant_name(parser_value_at(&state, 2))
     }
-    parser_pattern_rhs_ahead(&state)
+    parser_pattern_rhs_ahead(&state, value)
 }
 
 // Rust `try_pattern_rhs`: the heads that start a pattern after `==` or as a
 // bare arm head. Anything else is an ordinary value.
-fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
+fn parser_pattern_rhs_ahead(state: &JetParserState, value: Bool) -> Bool Never! {
     token :: parser_current(&state)
     if token.kind == {
         TOKEN_DOT -> {
@@ -407,7 +408,7 @@ fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
         TOKEN_STRING -> parser_string_pattern_ahead(state, token)
         // A bare `Variant(…)` or `Variant | …` is a pattern that
         // lacks its leading dot (E0367).
-        TOKEN_IDENT -> parser_typed_pattern_ahead(&state) || parser_bare_variant_head(&state) || parser_named_struct_pattern_ahead(&state)
+        TOKEN_IDENT -> parser_typed_pattern_ahead(&state) || parser_bare_variant_head(&state) || parser_named_struct_pattern_ahead(&state, value)
         else -> false
     }
 }
@@ -417,8 +418,12 @@ fn parser_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
 // its brace body reads as pattern entries: `..`, `field:`, `field,`, or a
 // lone `field}` followed by what ends the pattern. Typed literals such as
 // `I64{0}`, `I64{-4}` and a constant compared before a body (`CONST {`)
-// stay values.
-fn parser_named_struct_pattern_ahead(state: &JetParserState) -> Bool Never! {
+// stay values. Where a `{` may open a body (`value` false), a block may
+// start with the binding `name: value`, so a first `field:` reads as a
+// pattern entry only when the matching `}` closes into the body or more of
+// the condition; in a value context (`same :: p == Point{x: 0, y}`) no
+// block can start there.
+fn parser_named_struct_pattern_ahead(state: &JetParserState, value: Bool) -> Bool Never! {
     token :: parser_current(&state)
     if token.kind != TOKEN_IDENT || parser_kind_at(&state, 1) != TOKEN_LBRACE -> return false
     name :: parser_value(state, token)
@@ -428,7 +433,7 @@ fn parser_named_struct_pattern_ahead(state: &JetParserState) -> Bool Never! {
     if first.kind != TOKEN_IDENT || parser_value(state, first) == "_" -> return false
     second :: parser_kind_at(&state, 3)
     if second == TOKEN_COMMA -> return true
-    if second == TOKEN_COLON -> return parser_named_pattern_closes_into_body(state, true)
+    if second == TOKEN_COLON -> return value || parser_named_pattern_closes_into_body(state, true)
     if second != TOKEN_RBRACE -> return false
     after :: parser_kind_at(&state, 4)
     after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW || after == TOKEN_COMMA || after == TOKEN_RPAREN || after == TOKEN_RBRACKET || after == TOKEN_RBRACE || after == TOKEN_AND_AND
@@ -487,7 +492,7 @@ fn parser_parse_pattern(state: &JetParserState, depth: Int, allow_named: Bool) -
     end := first.span
     loop parser_current_kind(&state) == TOKEN_PIPE {
         parser_bump(&state)
-        if !parser_pattern_rhs_ahead(&state) && !(parser_current_kind(&state) == TOKEN_IDENT && parser_pascal_name(parser_value_at(&state, 0)) && !parser_constant_name(parser_value_at(&state, 0))) {
+        if !parser_pattern_rhs_ahead(&state, false) && !(parser_current_kind(&state) == TOKEN_IDENT && parser_pascal_name(parser_value_at(&state, 0)) && !parser_constant_name(parser_value_at(&state, 0))) {
             parser_add_error_here(&state, "expected a variant pattern after `|` in an or-pattern", "or-patterns join two variant patterns: `.A(x) | .B(x)`", "write a leading-dot variant after `|`")
             break
         }
@@ -771,7 +776,7 @@ fn parser_struct_field_nested_pattern_ahead(state: &JetParserState) -> Bool Neve
         }
         TOKEN_LBRACE -> parser_literal_fields_ahead(&state)
         TOKEN_LBRACKET -> !parser_typed_literal_head_ahead(&state)
-        TOKEN_IDENT -> parser_named_struct_pattern_ahead(&state)
+        TOKEN_IDENT -> parser_named_struct_pattern_ahead(&state, false)
         else -> false
     }
 }

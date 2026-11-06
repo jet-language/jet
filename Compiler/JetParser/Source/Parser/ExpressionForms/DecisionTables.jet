@@ -198,7 +198,7 @@ fn parser_expression_form_dispatch_atom(state: &JetParserState, depth: Int) -> P
     lhs :: parser_parse_expression_dispatch_atom(&state, depth + 1)
     comparator_op :: parser_expression_form_dispatch_op(parser_current_kind(&state)) ?? return lhs
     parser_bump(&state)
-    if comparator_op == BinOp.Eq && parser_pattern_rhs_ahead(&state) {
+    if comparator_op == BinOp.Eq && parser_pattern_rhs_ahead(&state, false) {
         pattern :: parser_parse_pattern(&state, depth + 1, true)
         span :: parser_cover(lhs.span, pattern.span)
         return ParsedExpr{expr: parser_expression_form_pattern_condition(&state, lhs.expr, pattern, comparator_op), span: span}

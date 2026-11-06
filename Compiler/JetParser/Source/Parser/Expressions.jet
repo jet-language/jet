@@ -245,11 +245,11 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
             next
         }
 
-        if operator == TOKEN_EQ_EQ && parser_comparison_pattern_rhs_ahead(&state) {
+        if operator == TOKEN_EQ_EQ && parser_comparison_pattern_rhs_ahead(&state, allow_struct_lit) {
             // Rust `try_named_struct_pattern`: a `Point{…}` head that does
             // not read as a pattern (`Envelope{ badge: dep.Badge{ … } }`) is
             // the struct value it spells.
-            named :: parser_named_struct_pattern_ahead(&state)
+            named :: parser_named_struct_pattern_ahead(&state, allow_struct_lit)
             saved_position :: state.position
             saved_diagnostics :: state.diagnostics.len()
             saved_blocks :: state.block_spans.len()

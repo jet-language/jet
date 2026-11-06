@@ -952,7 +952,7 @@ fn parser_parse_if_arms(state: &JetParserState, subject: Expr, start: Span, op: 
 fn parser_parse_if_arm_head(state: &JetParserState, subject: Expr, pattern_subject: Expr, op: BinOp) -> Expr {
     range :: parser_parse_range_arm_head(&state, pattern_subject)
     if range == .Val(head) -> return head
-    if parser_pattern_rhs_ahead(&state) {
+    if parser_pattern_rhs_ahead(&state, false) {
         saved_position :: state.position
         saved_diagnostics :: state.diagnostics.len()
         saved_blocks :: state.block_spans.len()
