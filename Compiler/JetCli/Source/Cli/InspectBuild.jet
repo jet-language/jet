@@ -181,19 +181,13 @@ fn jet_cli_build_package_as(file: String, color: Bool, options: BuildOptions, bu
 // built, or when `file` is not its directory's workspace index.
 fn jet_cli_build_workspace_members(file: String, color: Bool, options: BuildOptions, threads: Int?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     built := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    canonical :: build_files.realpath(file) ?? return built
-    root :: jet_cli_parent(canonical) ?? return built
-    index_path := ""
-    if jet_cli_workspace_source(root, color) == {
-        .Index(path) -> index_path = path
-        else -> return built
-    }
-    if (build_files.realpath(index_path) ?? index_path) != canonical -> return built
+    index :: jet_cli_workspace_index_of(file, color) ?? return built
     members := [JetCLIWorkspaceMember]{}
-    if jet_cli_workspace_members(root, index_path, "build", color) == {
+    if jet_cli_workspace_members(index.root, index.path, "build", color) == {
         .Refused(plan) -> return jet_cli_execute(^plan)
         .Members(found) -> members = found
     }
+    root :: index.root
     loop member in jet_cli_workspace_build_order(root, members) {
         notices := [String]{}
         entry := JetCLIEntry?{None}
@@ -214,6 +208,26 @@ fn jet_cli_build_workspace_members(file: String, color: Bool, options: BuildOpti
         if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     }
     built
+}
+
+// The workspace whose index `file` is: its root directory and index path.
+struct JetCLIWorkspaceIndex {
+    root: String
+    path: String
+}
+
+// The workspace `file` indexes, or None when `file` is not its directory's
+// workspace index (a `workspace.jet`, or a `package.jet` listing members).
+fn jet_cli_workspace_index_of(file: String, color: Bool) -[FS]> JetCLIWorkspaceIndex? Never! {
+    canonical :: build_files.realpath(file) ?? return None
+    root :: jet_cli_parent(canonical) ?? return None
+    if jet_cli_workspace_source(root, color) == {
+        .Index(path) -> {
+            if (build_files.realpath(path) ?? path) != canonical -> return None
+            return Val(JetCLIWorkspaceIndex{root: root, path: path})
+        }
+        else -> return None
+    }
 }
 
 // `members` with each after the members its manifest names as path `deps:`,

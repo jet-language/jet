@@ -1145,6 +1145,13 @@ fn jet_cli_build_entry(jet_argv: [String], args: [String], passthrough: [String]
                 .Absent -> {}
             }
         }
+        // A `workspace.jet` root without `-p` builds the workspace: each member,
+        // then the index's own plan (InspectBuild.jet jet_cli_build_workspace_members).
+        if jet_cli_option_value(jet_argv, "-p") == None {
+            if jet_cli_workspace_source(directory, color) == .Index(index_path) {
+                if jet_cli_file_name(index_path) == JET_CLI_WORKSPACE_FILE -> return jet_cli_build_entry(jet_argv, [String]{"build", index_path}, passthrough, color, quiet, threads, json)
+            }
+        }
         notices := [String]{}
         resolved :: jet_cli_resolve_bare_entry("build", directory, jet_cli_option_value(jet_argv, "-p"), !jet_argv.contains("--show-default"), color, &notices)
         if resolved == {
@@ -1361,9 +1368,13 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
     // every package file. A workspace root tests each member that can run `jet test`,
     // as its own child `jet test <member>`; its own test.jet declares only the code
     // suites its test profiles run (TestProfile.jet), as `jet test <root>/test.jet`.
+    // `jet test <root>/workspace.jet` tests the workspace, as `jet test <root>` does.
+    if positionals.len() > 0 && jet_cli_file_name(positionals[0]) == JET_CLI_WORKSPACE_FILE && cli_files.is_file(positionals[0]) {
+        positionals[0] = jet_cli_parent(positionals[0]) ?? "."
+    }
     if positionals.len() == 0 || cli_files.is_dir(positionals[0]) {
         directory :: if positionals.len() == 0 -> cli_files.cwd() ?? "." else -> positionals[0]
-        if positionals.len() == 0 && !jet_cli_has_manifest_above(directory) {
+        if positionals.len() == 0 && !jet_cli_has_manifest_above(directory) && !jet_cli_workspace_present(jet_cli_workspace_source(directory, color)) {
             return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet test <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
         }
         workspace_notices := [String]{}

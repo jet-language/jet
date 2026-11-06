@@ -1367,6 +1367,8 @@ fn jet_cli_compile_target(file: String, name: String, source: String, generated:
 fn jet_cli_compile_build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     members :: jet_cli_build_workspace_members(file, color, options, threads, trace_sink)
     if members.exit_code != JET_DRIVER_EXIT_OK -> return members
+    // A workspace index without its own `fn run` is built once its members are.
+    if jet_cli_top_level_function_lines(source, "run").len() == 0 && jet_cli_workspace_index_of(file, color) != None -> return members
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled := jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
     if ^compiled == {
