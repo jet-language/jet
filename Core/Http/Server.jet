@@ -650,7 +650,16 @@ fn __with_request_id(mux: HTTPMux, request: HTTPRequest) -> HTTPRequest Never! {
     out
 }
 
-fn __select(mux: HTTPMux, request: HTTPRequest) -> HTTPResponse HTTPError! {
+// The route a request selects, or the answer it gets without one: OPTIONS *,
+// 400, 404 or 405. `index` is the selected route's position in `routes`.
+struct __HTTPPick {
+    answer: HTTPResponse?
+    index: Int
+    request: HTTPRequest
+    routes: [__HTTPRoute]
+}
+
+fn __pick(mux: HTTPMux, request: HTTPRequest) -> __HTTPPick Never! {
     routes :: __mux_routes(mux)
     if request.method == "OPTIONS" && request.path == "*" {
         everything := [String]{}
@@ -659,9 +668,9 @@ fn __select(mux: HTTPMux, request: HTTPRequest) -> HTTPResponse HTTPError! {
         }
         allowed := __empty_response(204)
         allowed.headers = http.headers_set(allowed.headers, "Allow", __allow_value(everything))
-        return Ok(allowed)
+        return __HTTPPick{answer: Val(allowed), index: -1, request: request, routes: routes}
     }
-    segments :: __path_segments(access_log_path(request.path)) ?? return Ok(response(400, "400 Bad Request"))
+    segments :: __path_segments(access_log_path(request.path)) ?? return __HTTPPick{answer: Val(response(400, "400 Bad Request")), index: -1, request: request, routes: routes}
     best := -1
     matched := [String]{}
     loop index in 0..<routes.len() {
@@ -672,16 +681,21 @@ fn __select(mux: HTTPMux, request: HTTPRequest) -> HTTPResponse HTTPError! {
         if best < 0 || __route_better(route.segments, routes[best].segments) -> best = index
     }
     if best < 0 {
-        if matched.len() == 0 -> return Ok(response(404, "404 Not Found"))
+        if matched.len() == 0 -> return __HTTPPick{answer: Val(response(404, "404 Not Found")), index: -1, request: request, routes: routes}
         refused := response(405, "405 Method Not Allowed")
         refused.headers = http.headers_set(refused.headers, "Allow", __allow_value(matched))
-        return Ok(refused)
+        return __HTTPPick{answer: Val(refused), index: -1, request: request, routes: routes}
     }
-    chosen :: routes[best]
     routed := request.copy()
-    routed.__params = __route_params(chosen.segments, segments)
-    routed.__route_template = Val(chosen.pattern)
-    chosen.handler.handle(routed)
+    routed.__params = __route_params(routes[best].segments, segments)
+    routed.__route_template = Val(routes[best].pattern)
+    __HTTPPick{answer: None, index: best, request: routed, routes: routes}
+}
+
+fn __select(mux: HTTPMux, request: HTTPRequest) -> HTTPResponse HTTPError! {
+    pick :: __pick(mux, request)
+    if pick.answer == .Val(answer) -> return Ok(answer)
+    pick.routes[pick.index].handler.handle(pick.request)
 }
 
 // Sorted methods, HEAD wherever GET is served, then OPTIONS.

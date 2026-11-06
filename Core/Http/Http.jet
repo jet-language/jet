@@ -563,22 +563,48 @@ fn headers_set_raw(h: Headers, name: String, value: String) -> Headers Never! {
 /// A checked route table answered in process: `router.get(pattern, handler)`
 /// and its sibling verbs register typed handlers, `dispatch` answers a
 /// request without a listener, and `web.openapi(router)` renders the same
-/// routes. Copies share the one route table; routing is the mux's.
+/// routes. Copies share the one route table; routes match as a mux's do.
 struct HTTPRouter {
     __mux: HTTPMux
+    __state: Shared<__HTTPRouterState>
+}
+
+// A router's handlers, in registration order: the `index`th is the handler
+// of the mux's `index`th route.
+struct __HTTPRouterState {
+    handlers: [__HTTPRouterHandler]
+}
+
+struct __HTTPRouterHandler {
+    call: fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!
 }
 
 impl HTTPRouter {
     // `router.get(pattern, handler)` and its sibling verbs land here with the
-    // route's checked contract (sema sema_call_try_http_router), as a mux
-    // registration does.
-    fn __route(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
-        self.__mux.__route(method, pattern, ^handler, contract)
+    // route's checked contract (sema sema_call_try_http_router). The route
+    // registers on the router's mux, so duplicates, matching and
+    // `web.openapi` are the mux's; the handler keeps its `Net`-only type.
+    fn __route(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
+        state :: self.__state
+        index :: __router_handler_count(self.__state)
+        self.__mux.__route(method, pattern, ^(request: HTTPRequest) -> __router_call(state, index, request), contract)
+        guard := self.__state.guard_edit()
+        &guard.value.handlers.push(__HTTPRouterHandler{call: ^handler})
     }
 }
 
+fn __router_handler_count(state: Shared<__HTTPRouterState>) -> Int Never! {
+    guard :: state.guard_read()
+    guard.value.handlers.len()
+}
+
+fn __router_call(state: Shared<__HTTPRouterState>, index: Int, request: HTTPRequest) -[Net]> HTTPResponse HTTPError! {
+    guard :: state.guard_read()
+    guard.value.handlers[index].call(request)
+}
+
 fn router() -> HTTPRouter Never! {
-    HTTPRouter{__mux: routes.__mux_new()}
+    HTTPRouter{__mux: routes.__mux_new(), __state: shared __HTTPRouterState{handlers: [__HTTPRouterHandler]{}}}
 }
 
 // The router's route table, for `web.openapi(router)`.
@@ -597,7 +623,9 @@ fn parse(raw: String) -> HTTPRequest Never! {
 // A request routed as a mux routes it, with no middleware or request id; a
 // handler's error is the dispatch error.
 fn dispatch(router: HTTPRouter, request: HTTPRequest) -> HTTPResponse HTTPError! {
-    routes.__select(router.__mux, request)
+    pick :: routes.__pick(router.__mux, request)
+    if pick.answer == .Val(answer) -> return Ok(answer)
+    __router_call(router.__state, pick.index, pick.request)
 }
 
 fn method_parse(token: String) -> Method Never! {
