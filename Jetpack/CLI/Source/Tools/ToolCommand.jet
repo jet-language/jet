@@ -326,7 +326,7 @@ fn cli_update_user_tools_locked(verification: &StoreVerification, theme: Theme, 
 
 fn cli_tool_install(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     raw :: parsed.positional.get(1) ?? {
-        theme.error("`jetpack tool install` needs a package ref", "persistent install realizes one `package@source` ref and projects its bins onto `~/.jet/bin` as a tool generation.", "try `jetpack tool install ripgrep@nixpkgs`.")
+        theme.error("`jetpack tool install` needs a package ref", "persistent install realizes one `package@source` ref and projects its bins onto `~/.jet/bin` as a tool generation.", "try `jetpack tool install ripgrep@jetpack`.")
         return EXIT_USAGE
     }
     channel_policy :: pkg_policy_for_ref(raw)
@@ -441,8 +441,8 @@ fn cli_reject_unavailable_provider(theme: Theme, raw: String) -[IO, Time.Wait]> 
     theme.error_coded(
         TOOL_DIAG_PROVIDER,
         "tool provider `{source}` isn't available yet",
-        "the package shell spans built-in providers, but `…@{source}` has no hangar realization path yet (JPK-TOOL-PROVIDER). Built-in providers that work today: nixpkgs, github, and bare local paths.",
-        "use a built-in ref (`…@nixpkgs`, `…@github`, or a bare local path), or wait for the `{source}` provider to land."
+        "the package shell spans built-in providers, but `…@{source}` has no hangar realization path yet (JPK-TOOL-PROVIDER). Built-in providers that work today: jetpack, github, and bare local paths.",
+        "use a built-in ref (`…@jetpack`, `…@github`, or a bare local path), or wait for the `{source}` provider to land."
     )
     Val(EXIT_USAGE)
 }
@@ -571,13 +571,13 @@ fn cli_check_user_tools_drift(verification: &StoreVerification, theme: Theme, pa
         }
         tool :: found ?? next
         recorded :: if entry.tier == ChannelPolicy.Pinned -> entry.reference else -> entry.resolved
-        if cli_canonical_tool_reference(recorded) == cli_canonical_tool_reference(tool.reference) -> next
+        if recorded == tool.reference -> next
         installed_version :: if tool.version == "" -> cli_tool_reference_version(tool.reference) else -> tool.version
         &drifts.push(ToolDrift{
             name: entry.name,
-            installed_reference: cli_canonical_tool_reference(tool.reference),
+            installed_reference: tool.reference,
             installed_version: installed_version,
-            pinned_reference: cli_canonical_tool_reference(recorded),
+            pinned_reference: recorded,
             pinned_version: cli_tool_reference_version(recorded)
         })
     }

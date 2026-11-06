@@ -97,21 +97,23 @@ fn cli_tools_test_replace_first(text: String, from: String, to: String) -> Strin
     assert(ToolProfilePointer.parse(pointer.trim_end()) == .Err(_))
 }
 
-#Test("tool ref writeback migrates legacy spellings") {
-    legacy :: "#auto can1357/oh-my-pi#v18.0.4@github"
-    raw :: cli_json_quote(legacy)
-    text :: "{{\n  \"profile\":\"tools\",\n  \"schema\":\"jet-user-tools-v1\",\n  \"sources\":[{{\"name\":\"releases\",\"policy\":\"#auto\",\"provider\":\"jetpackage\",\"raw\":{raw},\"upstream\":\"github:can1357/oh-my-pi#v18.0.4\"}}],\n  \"tools\":[{{\"bins\":[\"omp\"],\"members\":[\"omp\"],\"name\":\"omp\",\"reference\":{raw},\"resolved\":\"can1357/oh-my-pi#v18.0.4@github\",\"tier\":\"#auto\"}}]\n}}"
-    manifest :: ToolManifest.parse(text) ?? panic("legacy tool manifest parses")
+#Test("tool manifest round-trips canonical refs") {
+    reference :: "can1357/oh-my-pi@github#auto"
+    resolved :: "can1357/oh-my-pi@github#v18.0.4"
+    text :: "{{\n  \"profile\":\"tools\",\n  \"schema\":\"jet-user-tools-v1\",\n  \"sources\":[{{\"name\":\"releases\",\"policy\":\"pinned\",\"provider\":\"jetpackage\",\"raw\":{cli_json_quote(reference)},\"upstream\":\"github:can1357/oh-my-pi#v18.0.4\"}}],\n  \"tools\":[{{\"bins\":[\"omp\"],\"members\":[\"omp\"],\"name\":\"omp\",\"reference\":{cli_json_quote(reference)},\"resolved\":{cli_json_quote(resolved)},\"tier\":\"pinned\"}}]\n}}"
+    manifest :: ToolManifest.parse(text) ?? panic("tool manifest parses")
+    assert_eq(manifest.sources[0].policy, ChannelPolicy.Automatic)
+    assert_eq(manifest.tools[0].tier, ChannelPolicy.Automatic)
+    assert_eq(manifest.tools[0].reference, reference)
+    assert_eq(manifest.tools[0].resolved, resolved)
     formatted :: manifest.format()
-    assert(formatted.contains("can1357/oh-my-pi@github#v18.0.4"))
-    assert(!formatted.contains(legacy))
-    assert(!formatted.contains("can1357/oh-my-pi#v18.0.4@github"))
+    assert(formatted.contains("\"reference\":{cli_json_quote(reference)}"))
+    assert_eq((ToolManifest.parse(formatted) ?? panic("formatted manifest parses")).format(), formatted)
 
-    installed := cli_tools_test_tool("omp", legacy, "omp", "omp")
+    installed := cli_tools_test_tool("omp", resolved, "omp", "omp")
     installed.version = "18.0.4"
     installed.source = "github"
     installed.output_hash = cli_tools_test_digest("f")
     metadata :: cli_format_tool_generation_meta(7, [InstalledUserTool]{installed}) ?? panic("generation metadata formats")
-    assert(metadata.contains("can1357/oh-my-pi@github#v18.0.4"))
-    assert(!metadata.contains(legacy))
+    assert(metadata.contains(resolved))
 }

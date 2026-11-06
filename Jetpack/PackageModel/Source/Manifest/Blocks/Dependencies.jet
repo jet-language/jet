@@ -73,12 +73,7 @@ fn pkg_bad_dep_value(name: String, value: String) -> PackageParseError Never! {
 }
 
 fn pkg_dep_ref_error(name: String, error: RefError) -> PackageParseError Never! {
-    if error == {
-        .ProviderFirst(raw, replacement) -> PackageParseError.Composition("dependency `{name}` puts the provider first in `{raw}`; write `{replacement}`")
-        .RetiredNixpkgs(raw, replacement) -> PackageParseError.Composition("dependency `{name}` names `nixpkgs` as its source in `{raw}`; write `{replacement}`")
-        .PathProviderRetired(raw, path) -> PackageParseError.Composition("dependency `{name}` uses a path-provider ref `{raw}`; write the bare path `{path}`")
-        else -> PackageParseError.Composition("dependency `{name}`'s ref is invalid: {pkg_ref_error_debug(error)}")
-    }
+    PackageParseError.Composition("dependency `{name}`'s ref is invalid: {pkg_ref_error_debug(error)}")
 }
 
 // The Rust `Debug` spelling of a `RefError`.
@@ -86,10 +81,7 @@ fn pkg_ref_error_debug(error: RefError) -> String Never! {
     if error == {
         .MissingSeparator(raw) -> "MissingSeparator({pkg_debug_str(raw)})"
         .EmptyHalf(raw) -> "EmptyHalf({pkg_debug_str(raw)})"
-        .ProviderFirst(raw, replacement) -> "ProviderFirst {{ raw: {pkg_debug_str(raw)}, replacement: {pkg_debug_str(replacement)} }}"
-        .NonCanonical(raw, replacement) -> "NonCanonical {{ raw: {pkg_debug_str(raw)}, replacement: {pkg_debug_str(replacement)} }}"
-        .RetiredNixpkgs(raw, replacement) -> "RetiredNixpkgs {{ raw: {pkg_debug_str(raw)}, replacement: {pkg_debug_str(replacement)} }}"
-        .PathProviderRetired(raw, path) -> "PathProviderRetired {{ raw: {pkg_debug_str(raw)}, path: {pkg_debug_str(path)} }}"
+        .Malformed(raw) -> "Malformed({pkg_debug_str(raw)})"
         .UnknownSource(source, raw, declared) -> "UnknownSource {{ source: {pkg_debug_str(source)}, raw: {pkg_debug_str(raw)}, declared: {pkg_debug_str_list(declared)} }}"
         .AmbiguousBare(raw) -> "AmbiguousBare({pkg_debug_str(raw)})"
         .AmbiguousMember(query, candidates) -> "AmbiguousMember {{ query: {pkg_debug_str(query)}, candidates: {pkg_debug_str_list(candidates)} }}"

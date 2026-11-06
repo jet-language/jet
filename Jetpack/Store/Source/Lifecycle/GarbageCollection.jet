@@ -14,6 +14,18 @@ STORE_ACTIVE_TMP_MARKER :: ".active"
 STORE_ACTIVE_TMP_GRACE_SECONDS :: 86400
 STORE_NANOS_PER_SECOND :: 1000000000
 
+// Rust `node_metadata` / `symlink_metadata` with NotFound as None: the
+// node's own metadata (never through a final link), or None when absent.
+fn store_node_stat(path: String) -[FS]> Stat? StoreError! {
+    if files.stat(path) == {
+        .Ok(info) -> Ok(Val(info))
+        .Err(error) -> {
+            if store_io_is_not_found(error) -> return Ok(None)
+            Err(StoreError.IO(error))
+        }
+    }
+}
+
 // The project and Hangar locks one clean holds, released at scope exit.
 struct CleanLocks {
     project: RuntimeLock?

@@ -3,7 +3,7 @@
 // A ref reads like an address: the package, its source, then its version or
 // channel. Bare `./`, `../`, and `/` paths need no provider word.
 // Examples:
-//   `fastfetch@nixpkgs`
+//   `fastfetch@jetpack`
 //   `owner/my-fastfetch-jet-config@github`
 //   `./my-env`
 use jetpack_foundation.[
@@ -80,20 +80,20 @@ enum RefSource {
         REF_SOURCE_PROVIDERS.contains(name)
     }
 
-    // Resolve the source half of a `package@source` ref: a built-in, a
-    // declared named source, or a teaching error.
-    fn resolve(source: String, package: String, raw: String, table: SourceTable) -> RefSource RefError! {
+    // Resolve the source half of a `package@source` ref: a public built-in or
+    // a declared named source. `path` and `nixpkgs` are internal source
+    // words, so a ref naming either is malformed.
+    fn resolve(source: String, raw: String, table: SourceTable) -> RefSource RefError! {
         if RefSource.builtin(source) == {
             .Val(builtin) -> {
                 if builtin == {
-                    .Path -> return Err(RefError.PathProviderRetired{raw: raw, path: package})
+                    .Path | .Nixpkgs -> return Err(RefError.Malformed(raw))
                     else -> return Ok(builtin)
                 }
             }
             .None -> {}
         }
         if table.upstream(source) != None -> return Ok(RefSource.Named(source))
-        if RefSource.is_builtin(package) -> return Err(pkg_ref_provider_first(package, source, raw))
         Err(RefError.UnknownSource{source: source, raw: raw, declared: table.declared_names()})
     }
 
@@ -270,7 +270,7 @@ struct SourceTable {
     priv named: [String: SourceTableEntry]
 
     // A table with no declared sources: only the built-ins resolve. This is
-    // the table for direct CLI refs (`jetpack use fastfetch@nixpkgs`).
+    // the table for direct CLI refs (`jetpack use fastfetch@jetpack`).
     fn empty() -> SourceTable Never! {
         SourceTable{named: [String: SourceTableEntry]{}}
     }
@@ -379,18 +379,15 @@ struct RefSpec {
     // package name.
     fn classify_in(input: String, table: SourceTable) -> RefSpec RefError! {
         raw :: input.trim()
-        if pkg_ref_noncanonical_input_error(raw) == {
-            .Val(error) -> return Err(error)
-            .None -> {}
-        }
         if pkg_is_bare_path(raw) && !raw.contains(REF_PROVIDER_AT) -> return Ok(RefSpec{source: RefSource.Path, package: raw, raw: raw})
         if raw.cut_last(REF_PROVIDER_AT) == {
             .Val(halves) -> {
                 package :: halves.before
                 if halves.after == "" || package == "" -> return Err(RefError.EmptyHalf(raw))
+                if !pkg_ref_valid_target(package) -> return Err(RefError.Malformed(raw))
                 split :: pkg_ref_split_selector(halves.after)
-                if split.empty_half -> return Err(RefError.EmptyHalf(raw))
-                source :: RefSource.resolve(split.source, package, raw, table)
+                if split.empty_half || !pkg_ref_valid_source(split.source) -> return Err(RefError.Malformed(raw))
+                source :: RefSource.resolve(split.source, raw, table)
                 if split.selector == {
                     .Val(selector) -> return Ok(RefSpec{source: source, package: "{package}{REF_CHANNEL_MARKER}{selector}", raw: raw})
                     .None -> return Ok(RefSpec{source: source, package: package, raw: raw})
@@ -464,21 +461,18 @@ struct RefSpec {
 }
 
 // Why a ref string could not be classified. Each variant maps to a friendly
-// diagnostic.
+// diagnostic; the three shape failures share E1358, which lists the legal
+// ref forms.
 #Error
 enum RefError {
     // No `@` separator at all, e.g. `fastfetch`.
     MissingSeparator(String)
-    // An empty source or package half, e.g. `@nixpkgs` or `fastfetch@`.
+    // An empty source or package half, e.g. `@jetpack` or `fastfetch@`.
     EmptyHalf(String)
-    // A retired provider-first ref that must be flipped, never reinterpreted.
-    ProviderFirst(raw: String, replacement: String)
-    // A package ref uses one of the retired selector positions.
-    NonCanonical(raw: String, replacement: String)
-    // The public `nixpkgs` source spelling retired; use `jetpack` exactly.
-    RetiredNixpkgs(raw: String, replacement: String)
-    // The `path` provider word retired; local paths are bare.
-    PathProviderRetired(raw: String, path: String)
+    // Neither a `package@source[#version]` ref nor a bare local path: a `#`
+    // or whitespace before `@`, or an internal source word (`path`,
+    // `nixpkgs`) after it.
+    Malformed(String)
     // The source suffix is neither a built-in nor a declared named source.
     // `declared` lists the pack's named sources so the message can help.
     UnknownSource(source: String, raw: String, declared: [String])
@@ -495,7 +489,7 @@ enum RefError {
     // The registered diagnostic code for the errors that carry one.
     fn code(self) -> String? Never! {
         if self == {
-            .ProviderFirst(_, _) | .NonCanonical(_, _) | .RetiredNixpkgs(_, _) | .PathProviderRetired(_, _) -> Val("E1317")
+            .MissingSeparator(_) | .EmptyHalf(_) | .Malformed(_) -> Val("E1358")
             .AmbiguousMember(_, _) -> Val("E1230")
             .UnknownMember(_, _) -> Val("E1231")
             else -> None
@@ -614,9 +608,27 @@ fn pkg_with_default_source(input: String) -> String Never! {
     "{raw}{REF_PROVIDER_AT}{REF_SOURCE_JETPACK}"
 }
 
-fn pkg_ref_provider_first(provider: String, target: String, raw: String) -> RefError Never! {
-    replacement :: if provider == REF_SOURCE_PATH -> target else -> "{target}{REF_PROVIDER_AT}{provider}"
-    RefError.ProviderFirst{raw: raw, replacement: replacement}
+// Whether `target`, the half before `@`, is a package or upstream target: no
+// whitespace or control byte and no `#`, since a version or channel follows
+// the source.
+fn pkg_ref_valid_target(target: String) -> Bool Never! {
+    if target.contains(REF_CHANNEL_MARKER) -> return false
+    loop byte in target.bytes() {
+        if Int.from_u8(byte) <= 32 -> return false
+    }
+    true
+}
+
+// Whether `source`, the half after `@` and before `#`, is a source name:
+// ASCII letters, digits, `-`, `_` and `.`. A path or `owner/repo` after `@`
+// is a provider-first ref, not a source.
+fn pkg_ref_valid_source(source: String) -> Bool Never! {
+    loop byte in source.bytes() {
+        code :: Int.from_u8(byte)
+        allowed :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95 || code == 46
+        if !allowed -> return false
+    }
+    true
 }
 
 // Split `source#selector`. `empty_half` reports a present `#` with an empty
@@ -748,21 +760,17 @@ struct ProviderRef {
     // Classify a `target@provider[#selector]` source ref or a bare local path.
     fn classify(input: String) -> ProviderRef RefError! {
         raw :: input.trim()
-        if pkg_ref_noncanonical_input_error(raw) == {
-            .Val(error) -> return Err(error)
-            .None -> {}
-        }
         if pkg_is_bare_path(raw) && !raw.contains(REF_PROVIDER_AT) {
             return Ok(ProviderRef{provider: RefSource.Path, target: raw, channel: None, policy: ChannelPolicy.Pinned, raw: raw})
         }
         halves :: raw.cut_last(REF_PROVIDER_AT) ?? return Err(RefError.MissingSeparator(raw))
         if halves.after == "" || halves.before == "" -> return Err(RefError.EmptyHalf(raw))
-        if RefSource.is_builtin(halves.before) -> return Err(pkg_ref_provider_first(halves.before, halves.after, raw))
+        if !pkg_ref_valid_target(halves.before) -> return Err(RefError.Malformed(raw))
         split :: pkg_ref_split_selector(halves.after)
-        if split.empty_half -> return Err(RefError.EmptyHalf(raw))
+        if split.empty_half || !pkg_ref_valid_source(split.source) -> return Err(RefError.Malformed(raw))
         provider :: RefSource.builtin(split.source) ?? return Err(RefError.UnknownSource{source: split.source, raw: raw, declared: [String]{}})
         if provider == {
-            .Path -> return Err(RefError.PathProviderRetired{raw: raw, path: halves.before})
+            .Path | .Nixpkgs -> return Err(RefError.Malformed(raw))
             else -> {}
         }
         tracked :: ProviderRef.track(halves.before, split.selector)
@@ -784,5 +792,37 @@ struct ProviderRef {
                 }
             }
         }
+    }
+}
+
+// Canonical ref used in lock and receipt identity. The Nix compatibility
+// provider records `@nixpkgs` provenance; it shares the `@jetpack` key so one
+// package never gets a second lock entry.
+fn pkg_canonical_locked_ref(raw: String) -> String Never! {
+    canonical :: raw.trim()
+    halves :: canonical.cut_last(REF_PROVIDER_AT) ?? return canonical
+    source :: pkg_ref_split_selector(halves.after)
+    if source.source != REF_SOURCE_NIXPKGS && source.source != REF_SOURCE_JETPACK -> return canonical
+    suffix :: if source.selector == {
+        .Val(selector) -> "{REF_CHANNEL_MARKER}{selector}"
+        .None -> ""
+    }
+    "{halves.before}{REF_PROVIDER_AT}{REF_SOURCE_JETPACK}{suffix}"
+}
+
+// The policy encoded in a canonical ref's source selector.
+fn pkg_policy_for_ref(raw: String) -> ChannelPolicy Never! {
+    source :: raw.trim().cut_last(REF_PROVIDER_AT)?.after ?? return ChannelPolicy.Pinned
+    selector :: source.cut_last(REF_CHANNEL_MARKER)?.after ?? return ChannelPolicy.Pinned
+    ChannelPolicy.for_selector(selector) ?? ChannelPolicy.Pinned
+}
+
+// Split an internal provider-first target at its last `#` when that selector
+// is a channel. Exact selectors such as `#v1.2.3` are left untouched.
+fn pkg_split_channel_ref(text: String) -> (base: String, channel: ChannelRef?) Never! {
+    halves :: text.cut_last("#") ?? return (base: text, channel: None)
+    if ChannelRef.parse_selector(halves.after) == {
+        .Val(channel) -> (base: halves.before, channel: Val(channel))
+        .None -> (base: text, channel: None)
     }
 }

@@ -99,17 +99,15 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
 }
 
 // Jet teaches no foreign or retired spelling, so no Active row is named for
-// one. The FFI rows name the foreign-function boundary itself. The Jetpack
-// row is retired with Jetpack's generic ref error.
+// one. The FFI rows name the foreign-function boundary itself.
 REGISTRY_COVERAGE_FFI_ROWS :: [String]{"E0064", "E0704", "E0705", "E3014", "E3215", "E3216", "E3220", "E3222"}
-REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS :: [String]{"E1317"}
 
 #Test("no_active_row_teaches_a_foreign_or_retired_spelling") {
     teaching := [String]{}
     loop row in diagnostic_registry_rows() {
         if row.status != DiagnosticRegistryStatus.Active -> next
         if !row.name.starts_with("jet.Foreign") && !row.name.starts_with("jet.Retired") -> next
-        if registry_coverage_has(REGISTRY_COVERAGE_FFI_ROWS, row.code) || registry_coverage_has(REGISTRY_COVERAGE_JETPACK_FOLLOW_UP_ROWS, row.code) -> next
+        if registry_coverage_has(REGISTRY_COVERAGE_FFI_ROWS, row.code) -> next
         &teaching.push("{row.code} {row.name}")
     }
     assert_eq(teaching.join("\n"), "")

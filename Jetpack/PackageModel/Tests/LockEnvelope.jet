@@ -135,23 +135,19 @@ fn pkg_lock_test_project(label: String) -[FS]> TempDir Never! {
     assert_eq(back.packages[0], package)
 }
 
-#Test("lock writer migrates legacy ref spellings") {
-    legacy :: "#auto can1357/oh-my-pi#v18.0.4@github"
+#Test("lock writer keeps canonical refs verbatim") {
+    canonical :: "can1357/oh-my-pi@github#v18.0.4"
     package := pkg_lock_test_pkg("omp", None)
-    package.source = LockSource.Nix{reference: legacy, output: pkg_lock_test_nix_digest("a")}
+    package.source = LockSource.Nix{reference: canonical, output: pkg_lock_test_nix_digest("a")}
     package.nix_closure = Val(pkg_lock_test_nix_closure(pkg_lock_test_nix_digest("a")))
     lock := pkg_lock_test_base_lock([LockedPackage]{package}, [LockedToolchain]{})
-    &lock.source_channels.push(LockedSourceChannel{name: "releases", channel: "latest", exact: legacy})
-    text :: pkg_lock_write(lock)
-    assert(text.contains("can1357/oh-my-pi@github#v18.0.4"))
-    assert(!text.contains(legacy))
-    assert(!text.contains("can1357/oh-my-pi#v18.0.4@github"))
-    back :: pkg_lock_parse(text) ?? panic("migrated lock parses")
+    &lock.source_channels.push(LockedSourceChannel{name: "releases", channel: "latest", exact: canonical})
+    back :: pkg_lock_parse(pkg_lock_write(lock)) ?? panic("canonical lock parses")
     if back.packages[0].source == {
-        .Nix(reference, _) -> assert_eq(reference, "can1357/oh-my-pi@github#v18.0.4")
-        else -> panic("migrated package stays a Nix record")
+        .Nix(reference, _) -> assert_eq(reference, canonical)
+        else -> panic("package stays a Nix record")
     }
-    assert_eq(back.source_channels[0].exact, "can1357/oh-my-pi@github#v18.0.4")
+    assert_eq(back.source_channels[0].exact, canonical)
 }
 
 // `pkg_lock_record_envelope` backfills a realized object's envelope into an

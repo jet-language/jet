@@ -9964,6 +9964,21 @@ struct EnvironmentPreparationFailed {
     }
 }
 
+struct InvalidRef {
+    raw: String
+
+    impl Diagnostic {
+        code :: "E1358"
+        stage :: [.Jetpack]
+        meaning :: "A package ref matches none of the legal ref forms"
+        detail :: true
+        no_fix :: .Behavior
+        fn what(self) -> String { "`{self.raw}` is not a valid package ref" }
+        fn why(self) -> String { "A ref is `package@source`, optionally followed by `#version` or `#channel`, or a bare local path starting with `./`, `../`, or `/`." }
+        fn fix(self) -> String { "Write one of the legal forms: `ripgrep@jetpack`, `ripgrep@jetpack#14.1.0`, `owner/repo@github#v1.2`, or `./vendor/tool`." }
+    }
+}
+
 struct RetiredModelSignature {
     impl Diagnostic {
         code :: "E-MODEL-SIGNATURE"
@@ -10190,6 +10205,7 @@ struct MissingStoreRecord {
 
     impl Diagnostic {
         code :: "E1274"
+        stage :: [.Jetpack]
         meaning :: "No persisted Store record or build explanation exists for the requested package/ref (U27)"
         detail :: true
         no_fix :: .Behavior
@@ -10241,6 +10257,7 @@ struct RetiredJetosNamespace {
 struct IncompleteActivationProof {
     impl Diagnostic {
         code :: "E1278"
+        stage :: [.Jetpack]
         meaning :: "A jetos activation proof is incomplete"
         detail :: true
         no_fix :: .Behavior
@@ -10525,8 +10542,8 @@ struct ToolProviderUnavailable {
         no_fix :: .Behavior
         fix_next :: "Use a built-in provider or a local path until the requested provider is supported."
         fn what(self) -> String { "Tool provider `{self.source}` isn't available yet" }
-        fn why(self) -> String { "JPK-TOOL-PROVIDER: `jetpack tool` accepts external providers (`npm`, `pypi`, `cargo`, …) so the surface is discoverable, but that provider has no hangar realization path yet — Jet never silently skips. Built-ins that work today include `nixpkgs` and `github`; local paths are bare." }
-        fn fix(self) -> String { "Use a built-in ref (`name@nixpkgs`, `owner/repo@github`) or a bare local path, or wait for the `{self.source}` provider to land." }
+        fn why(self) -> String { "JPK-TOOL-PROVIDER: `jetpack tool` accepts external providers (`npm`, `pypi`, `cargo`, …) so the surface is discoverable, but that provider has no hangar realization path yet — Jet never silently skips. Built-ins that work today include `jetpack` and `github`; local paths are bare." }
+        fn fix(self) -> String { "Use a built-in ref (`name@jetpack`, `owner/repo@github`) or a bare local path, or wait for the `{self.source}` provider to land." }
     }
 }
 
@@ -10591,13 +10608,13 @@ struct AmbiguousPackageVariant {
 struct RetiredRefSpelling {
     impl Diagnostic {
         code :: "E1317"
-        stage :: [.Jetpack]
+        status :: .Retired
         meaning :: "A direct CLI ref puts the provider first, uses a `path@` prefix, or names `@nixpkgs` as its source"
         detail :: true
-        no_fix :: .Behavior
+        no_fix :: None
         fn what(self) -> String { "A Jetpack CLI ref puts the provider first, uses a path-provider prefix, or names `@nixpkgs` as its source." }
-        fn why(self) -> String { "Jet puts the package or upstream target before `@` and the source after it; Jetpack is public while retaining nixpkgs as lock and receipt provenance. A `jetpack env` run reports this provider-reference error." }
-        fn fix(self) -> String { "Write `target@provider`, a bare local path, or rewrite `package@nixpkgs` exactly as `package@jetpack`." }
+        fn why(self) -> String { "Every ref that matches no legal form now reports the generic invalid-ref error." }
+        fn fix(self) -> String { "See E1358 for the legal ref forms." }
     }
 }
 

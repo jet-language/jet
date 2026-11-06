@@ -1,4 +1,4 @@
-// Module-evaluation diagnostics (E0966-E0977, E1266-E1267, E1269, E1317, E3402)
+// Module-evaluation diagnostics (E0966-E0977, E1266-E1267, E1269, E3402)
 // plus the §6 merge-conflict wrapper. Each constructor carries its pinned
 // what/why/fix copy (I4); the registry row owns the protocol metadata.
 use {
@@ -36,10 +36,6 @@ fn envmodel_fleet_unknown_system(fleet: String, host: String, system: String, kn
 
 fn envmodel_bad_source_ref(ref_text: String, span: Span?) -> EnvModelEvalError Never! {
     envmodel_error("E0968", "`{ref_text}` isn't a `target@provider` source ref or bare path", "Jet puts the upstream target before `@` and its provider after it; local `./`, `../`, and `/` paths stay bare", "Write `NixOS/nixpkgs/nixos-24.05@github`, `nixos-unstable@jetpack`, or a bare path such as `../local`", span)
-}
-
-fn envmodel_retired_nixpkgs_source_ref(ref_text: String, replacement: String, span: Span?) -> EnvModelEvalError Never! {
-    envmodel_error("E1317", "`{ref_text}` names `@nixpkgs` as its source", "Jet makes Jetpack the public package source; nixpkgs remains provenance in locks and receipts.", "write `{replacement}`.", span)
 }
 
 // E0969: an `imports:` discovery directive must be `find("<dir>")` with a

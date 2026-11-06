@@ -115,18 +115,6 @@ fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exe
     }
     read_only :: cli_read_only_command(verb, parsed)
     if !read_only {
-        if store_migrate_legacy_hangar(pkg_resolve_roots()) == .Err(error) {
-            store_report_integrity(theme, IntegrityFailure{
-                package: "Hangar path migration",
-                version: "legacy",
-                expected: "complete native per-user Hangar",
-                actual: error.message(),
-                reason: "reversible Hangar path migration",
-                disposition: "Jetpack stopped before reading or changing package state.",
-                fix_text: "Inspect the reported Hangar path and migration staging path; move unsafe nodes aside without deleting them, then retry the command.",
-            })
-            return EXIT_USAGE
-        }
         drift_code :: cli_check_user_tools_drift(&verification, theme, parsed)
         if drift_code != 0 -> return drift_code
     }
