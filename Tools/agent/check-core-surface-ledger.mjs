@@ -1537,7 +1537,7 @@ function coreCallSinkFor(moduleName, member) {
   return null;
 }
 
-function coreCallRecordNew(moduleName, member, symbol, prelude, borrowMask) {
+function coreCallRecordNew(moduleName, member, symbol, borrowMask) {
   const effectKind = coreCallEffectFor(moduleName, member);
   return {
     module_name: moduleName,
@@ -1553,7 +1553,7 @@ function coreCallRecordNew(moduleName, member, symbol, prelude, borrowMask) {
     effect_leaf: coreCallEffectLeafFor(moduleName, member),
     sink_class: coreCallSinkFor(moduleName, member),
     pure_route: "NoPureRoute",
-    symbol: { kind: prelude ? "Prelude" : "Rust", name: symbol },
+    symbol: { kind: "Prelude", name: symbol },
     source_target: null,
     coverage: CORE_CALL_COVERAGE.KNOWN,
     aot_direct: true,
@@ -1563,7 +1563,7 @@ function coreCallRecordNew(moduleName, member, symbol, prelude, borrowMask) {
   };
 }
 
-function coreCallRecordReceiver(receiverTypes, member, borrowMask) {
+function coreCallRecordReceiver(receiverTypes, member, symbol, borrowMask) {
   return {
     module_name: "",
     member: member,
@@ -1576,7 +1576,7 @@ function coreCallRecordReceiver(receiverTypes, member, borrowMask) {
     effect_leaf: null,
     sink_class: null,
     pure_route: "NoPureRoute",
-    symbol: { kind: "Rust", name: "" },
+    symbol: { kind: "Prelude", name: symbol },
     source_target: null,
     coverage: CORE_CALL_COVERAGE.KNOWN,
     aot_direct: false,
@@ -1596,7 +1596,7 @@ function coreCallConstructorRecord(name, args, context) {
   if (name === "CoreCallRecord::source_owned") {
     expectRustArgumentCount(name, args, 3, context);
     const member = rustStringValue(args[1], context);
-    const record = coreCallRecordNew(rustStringValue(args[0], context), member, member, false,
+    const record = coreCallRecordNew(rustStringValue(args[0], context), member, member,
       rustBoolSliceValue(args[2], context));
     coreCallMarkSourceOwned(record);
     return record;
@@ -1604,40 +1604,32 @@ function coreCallConstructorRecord(name, args, context) {
   if (name === "sema_web_call") {
     expectRustArgumentCount(name, args, 4, context);
     return coreCallRecordNew(rustStringValue(args[0], context), rustStringValue(args[1], context),
-      rustStringValue(args[2], context), true, rustBoolSliceValue(args[3], context));
+      rustStringValue(args[2], context), rustBoolSliceValue(args[3], context));
   }
   if (name === "CoreCallRecord::new" || name === "CoreCallRecord::new_with_coverage") {
     const withCoverage = name.endsWith("new_with_coverage");
     expectRustArgumentCount(name, args, withCoverage ? 6 : 5, context);
+    coreCallRequireJetRoute(args[3], context);
     const record = coreCallRecordNew(rustStringValue(args[0], context), rustStringValue(args[1], context),
-      rustStringValue(args[2], context), rustBoolValue(args[3], context), rustBoolSliceValue(args[4], context));
+      rustStringValue(args[2], context), rustBoolSliceValue(args[4], context));
     if (withCoverage) record.coverage = coreCoverageValue(args[5], context);
     return record;
   }
-  if (name === "CoreCallRecord::receiver" ||
-      name === "CoreCallRecord::receiver_with_symbol" ||
-      name === "CoreCallRecord::receiver_with_coverage") {
-    const withSymbol = name.endsWith("receiver_with_symbol");
-    const withCoverage = name.endsWith("receiver_with_coverage");
-    expectRustArgumentCount(name, args, withSymbol ? 5 : withCoverage ? 4 : 3, context);
-    const receiverTypes = rustStringSliceValue(args[0], context);
-    const member = rustStringValue(args[1], context);
-    if (withSymbol) {
-      const record = coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[4], context));
-      record.symbol = {
-        kind: rustBoolValue(args[3], context) ? "Prelude" : "Rust",
-        name: rustStringValue(args[2], context),
-      };
-      return record;
-    }
-    if (withCoverage) {
-      const record = coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[2], context));
-      record.coverage = coreCoverageValue(args[3], context);
-      return record;
-    }
-    return coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[2], context));
+  if (name === "CoreCallRecord::receiver_with_symbol") {
+    expectRustArgumentCount(name, args, 5, context);
+    coreCallRequireJetRoute(args[3], context);
+    return coreCallRecordReceiver(rustStringSliceValue(args[0], context), rustStringValue(args[1], context),
+      rustStringValue(args[2], context), rustBoolSliceValue(args[4], context));
   }
   throw new Error("unsupported CoreCallRecord constructor in " + context + ": " + name);
+}
+
+// Every executable Core row routes to the Jet runtime (CoreCallSymbol.Prelude);
+// the Rust-route form (`false`) was retired with the Rust runtime.
+function coreCallRequireJetRoute(argument, context) {
+  if (!rustBoolValue(argument, context)) {
+    throw new Error("CoreCallRecord in " + context + " names a retired Rust route; route it to its Jet runtime symbol (`true`)");
+  }
 }
 
 function applyCoreCallMethod(record, name, args, context) {
@@ -1787,7 +1779,7 @@ function coreCallReceiverTypes(argument, sourceLine) {
 
 function coreCallIdentity(expression, sourceLine) {
   const call = expression.match(
-    /^(?:(CoreCallRecord::(source_owned|new_with_coverage|new|receiver_with_coverage|receiver_with_symbol|receiver))|(sema_web_call))\s*\(/,
+    /^(?:(CoreCallRecord::(source_owned|new_with_coverage|new|receiver_with_symbol))|(sema_web_call))\s*\(/,
   );
   if (!call) {
     throw new Error("dispatcher row has no CoreCallRecord adapter at line " + sourceLine);
@@ -5158,14 +5150,18 @@ function hostileFixtures() {
       "dispatcher_row plain core.jobs queue | CoreCallRecord::new(\"core.jobs\", \"queue\", \"jet_job_queue_default\", true, &[])",
       "dispatcher_row plain core.jobs covered | CoreCallRecord::new_with_coverage(\"core.jobs\", \"covered\", \"jet_job_queue_default\", true, &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA))",
       "dispatcher_row adapter core.web form | sema_web_call(\"core.web\", \"form\", \"jet_web_forms_typed\", &[])",
-      "dispatcher_row receiver - Secret | CoreCallRecord::receiver(&[\"Signature\", \"Secret\"], \"bytes\", &[])",
       "dispatcher_row receiver - METHOD_RECEIPT_ATTACH | CoreCallRecord::receiver_with_symbol(&[INTERNAL_RECEIPT_HANDLE], METHOD_RECEIPT_ATTACH, \"jet_receipt_attach\", true, &[])",
-      "dispatcher_row receiver - LocalDate | CoreCallRecord::receiver(&[\"Date\", \"LocalDate\"], \"year\", &[])",
-      "dispatcher_row receiver - facts_json | CoreCallRecord::receiver_with_coverage(&[\"WebStore\"], \"facts_json\", &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA))",
+      "dispatcher_row receiver - collect | CoreCallRecord::receiver_with_symbol(&[\"Query\"], \"collect\", \"\", true, &[true]).with_source_owned().with_source_target(\"core.data.__query_collect\")",
     ].join("\n"));
-    if (declarations.dispatcherRows.length !== 7) {
+    if (declarations.dispatcherRows.length !== 5) {
       throw new Error("dispatcher identity parser lost a valid constructor or receiver form");
     }
+  }));
+
+  results.push(rejects("dispatcher row names a retired Rust route",
+    "names a retired Rust route", function () {
+    coreCallRecordFromRust("CoreCallRecord::new(\"core.mem\", \"volatile_read\", \"std::ptr::read_volatile\", false, &[false])",
+      "retired-route fixture");
   }));
 
   results.push(rejects("Core API workflow manifest drops a ledger row",

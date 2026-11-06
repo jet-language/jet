@@ -4366,12 +4366,14 @@ IR_ROUTES_NATIVE_INDEX :: comptime { [String]{"jet_bit_set_has", "jet_bitset_add
 
 // Whether the builder lowers a Core call of route `name` itself, with no
 // runtime or environment route: an inline or leaf route, a special of
-// ir_core_call (the raw List layout leaves, crypto.wipe, channels, event
-// policy, object entries), or an Iter route (BuildLazy.jet ir_lazy_symbol).
+// ir_core_call (the raw List layout leaves, crypto.wipe, volatile access and
+// stream stores, channels, event policy, object entries), or an Iter route
+// (BuildLazy.jet ir_lazy_symbol).
 // IR Lint's registry check (Lint.jet ir_lint_core_routes) reads it.
 fn ir_route_builder_lowered(name: String) -> Bool Never! {
     if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None -> return true
     if name == "jet_raw_list_capacity" || name == "jet_raw_list_reserve_exact" || name == "jet_raw_type_size" || name == "jet_raw_crypto_wipe" -> return true
+    if name == "jet_raw_volatile_read" || name == "jet_raw_volatile_write" || name == "jet_raw_stream_store" -> return true
     if name == "jet_std::channel" || name == "jet_std::channel_bounded" || name == "jet_std::JetEvent::with_policy" -> return true
     if name == "jet_raw_object_from_entries" || name == "jet_raw_object_entries_view" -> return true
     ir_lazy_symbol(name, Type.Apply{name: "Iter", args: [Type]{Type.Int}})
@@ -5067,7 +5069,6 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     }
     symbol :: if canonical.symbol == {
         .Prelude(name) -> name
-        .Rust(name) -> name
         .SourceOwned -> { return ir_fail_slot(&b, span, "source-owned Core call {canonical.module_name}.{canonical.member}") }
     }
     if p.comptime_values && b.impure == 0 {
