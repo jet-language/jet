@@ -18,13 +18,15 @@ s5_explain_token: fn(word: String) {
     assert(plain.contains("Example:"))
     bytes: plain.bytes()
     start := 0
+    // The scan walks bytes, so each word is cut from the bytes: an
+    // explanation may hold non-ASCII text such as `…`.
     loop index in 0..<bytes.len() {
         if !s5_explain_word(Int.from_u8(bytes[index])) {
-            s5_explain_token(plain.slice(start..<index))
+            s5_explain_token(String.from_bytes(bytes.slice(start, index)) ?? "")
             start = index + 1
         }
     }
-    s5_explain_token(plain.slice(start..<bytes.len()))
+    s5_explain_token(String.from_bytes(bytes.slice(start, bytes.len())) ?? "")
     positioned := 0
     examples := 0
     in_example := false
