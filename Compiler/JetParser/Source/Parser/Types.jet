@@ -423,6 +423,11 @@ parser_parse_tuple_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
 // labels and zones are part of callable identity, local names are not.
 parser_parse_function_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
     start: parser_bump(state)
+    parser_parse_function_type_from(state, depth, start.span)
+}
+
+// A function type from its `(` on; `start` is where the type began.
+parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: Span) -> ParsedType {
     parser_expect(state, TOKEN_LPAREN, "`(` after `fn` in a function type")
     params := [Type]{}
     names := [String]{}
@@ -537,7 +542,7 @@ parser_parse_function_type: fn(state: &JetParserState, depth: Int) -> ParsedType
     }
     end = parser_lookahead(state, -1).span
     ty: Type.Fn{params: params, ret: returned, effect_bound: effect_bound, param_contract: param_contract, call_metadata: None, return_view_provenance: return_view}
-    ParsedType{ty: ty, span: parser_cover(start.span, end)}
+    ParsedType{ty: ty, span: parser_cover(start, end)}
 }
 
 parser_has_type: fn(value: ParsedType?) -> Bool Never! {

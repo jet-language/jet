@@ -291,7 +291,16 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             return ParsedItemOrImport{item: Val(Item.Const{value: value}), handled: true}
         }
         token.kind == TOKEN_KW_FN -> {
+            saved_position: state.position
+            saved_diagnostics: state.diagnostics.len()
+            saved_blocks: state.block_spans.len()
+            saved_else_arms: state.else_arms.len()
             parsed: parser_parse_function(state, modifiers, true)
+            if parser_function_signature_only(state, parsed, modifiers, saved_diagnostics) {
+                parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+                value: parser_parse_function_type_alias(state, modifiers)
+                return ParsedItemOrImport{item: Val(Item.TypeAlias{value: value}), handled: true}
+            }
             return ParsedItemOrImport{item: Val(Item.Func{value: parsed.value}), handled: true}
         }
         token.kind == TOKEN_KW_STRUCT -> {
@@ -2441,6 +2450,28 @@ parser_parse_type_alias: fn(state: &JetParserState, modifiers: ParsedItemModifie
     }
     parser_finish_statement(state)
     TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: type_params.move(), target: target.ty, target_span: target.span, span: parser_cover(name.span, target.span)}
+}
+
+// D-DECL-COLON1=A: at file and module scope an unmarked `name: fn(…)` with no
+// body names a function type, as `Name: Type` names any other type. The item
+// parse reads it as a function first; a lone E0081 there means the signature
+// had no body, and the same tokens then reparse as the alias.
+parser_function_signature_only: fn(state: JetParserState, parsed: ParsedFunction, modifiers: ParsedItemModifiers, diagnostics_before: Int) -> Bool Never! {
+    if parsed.has_body || modifiers.markers.len() > 0 || modifiers.is_comptime -> return false
+    // A head pattern stays allowed: `(Int)` reads as a unit variant head until
+    // the reparse reads it as the parameter type it is.
+    if parsed.value.type_params.len() > 0 || parsed.value.external_type != None -> return false
+    state.diagnostics.len() == diagnostics_before + 1 && state.diagnostics[diagnostics_before].code == "E0081"
+}
+
+// `name: fn(…) -> R` without a body, from its moved `fn` keyword: the alias of
+// that function type.
+parser_parse_function_type_alias: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> TypeAliasDef {
+    keyword: parser_bump(state)
+    name: parser_bump(state)
+    target: parser_parse_function_type_from(state, 0, keyword.span)
+    parser_finish_statement(state)
+    TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: [TypeParam]{}, target: target.ty, target_span: target.span, span: parser_cover(name.span, target.span)}
 }
 
 parser_apply_type_markers: fn(value: &StructDef, markers: [Marker]) Never! {

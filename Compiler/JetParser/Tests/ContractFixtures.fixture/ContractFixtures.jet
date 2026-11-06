@@ -68,13 +68,13 @@ pc_module_markers: fn() {
 }
 
 // Rust `trait_method_sig`: an effect arrow with no result ends a trait slot
-// (no body); a free function in that shape still has no body (E0081).
+// (no body); an impl method in that shape still has no body (E0081).
 pc_trait_effect_slots: fn() {
     slots: parse_source("Sink: trait {{\n    begin: fn(self, name: String) Never! -[FS]>\n    end: fn(self) Never! -[FS]>\n    functions: fn(self) -[]> Bool Never!\n}}\n".bytes())
     pc_require(slots.diagnostics.len() == 0, "effect-arrow trait slots have no body")
     pc_require(if slots.program.items[0] == .Trait(value) -> value.methods.len() == 3 && value.methods[0].default_body == None && value.methods[1].default_body == None else -> false, "effect-arrow trait slots stay requirements")
-    free: parse_source("begin: fn(name: String) Never! -[FS]>\nrun: fn() {{}}\n".bytes())
-    pc_require(free.diagnostics.len() == 1 && free.diagnostics[0].code == "E0081", "a free effect-arrow function without a body is E0081")
+    free: parse_source("Sink: struct {{}}\nimpl Sink {{\n    begin: fn(self, name: String) Never! -[FS]>\n}}\nrun: fn() {{}}\n".bytes())
+    pc_require(free.diagnostics.len() == 1 && free.diagnostics[0].code == "E0081", "an effect-arrow impl method without a body is E0081")
     // The unit error contract precedes effects.
     once: jet_format_source("save: fn(path: String) IOError! {{}}\nsync: fn() Err! {{}}\nbounded: fn() IOError! -[FS]> {{}}\npure: fn() Never! -[]> {{}}\nSink: trait {{ save: fn(self) IOError! -[FS]> }}\n", false)
     pc_require(once.ok, "unit-fallible signatures format")
