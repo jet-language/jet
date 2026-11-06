@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6610,
-    "rev": 93525,
+    "rev": 93550,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26194,6 +26194,11 @@
       "assignee": "Main",
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the AGENTS.md Performance gate (Jet/peer < 1.00 with no Rust band, then the asm-parity ceiling)."
+        },
+        {
           "at": "2026-10-30",
           "by": "Main",
           "text": "Progress, landed e021b801d7 (IrTypes-c6r: OptScalar, OptSimplify, Opt, OptStops): nbody at 5M steps drops from 27.12G to 14.99G instructions with identical output. C6 stays open: about 5-7x slower than C (0.28 s) and Rust (0.17 s); closing it needs float register allocation across loops and f64 lanes (#5984)."
@@ -26322,7 +26327,7 @@
         },
         {
           "n": 6,
-          "text": "[#2874] nbody default AOT Jet/{C,Zig} < 1.00 and Jet/Rust <= 1.05. jet-expert versus c-expert < 1.00 and versus rust-expert <= 1.05. Vectorized f64 lanes appear in the default profile with output identical to #Scalar.",
+          "text": "[#2874] nbody default O2 Jet/{C,Zig,Rust} < 1.00. jet-expert versus c-expert and versus rust-expert < 1.00. Vectorized f64 lanes appear in the default profile with output identical to #Scalar.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -26374,9 +26379,9 @@
       "parentId": "c0i42tsl",
       "needsAcceptance": false,
       "created": "2026-09-10T23:23:09.423Z",
-      "updated": "2026-10-30T02:14:10.392Z",
+      "updated": "2026-11-06T18:41:47.433Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-10-30T02:14:10.392Z",
+      "claimedAt": "2026-11-06T18:41:47.433Z",
       "goals": [
         "G11"
       ]
@@ -41557,13 +41562,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "## Goal\nLand the working-tree fixes for project jobs (`use core.process`, the `after:` job graph, scalar job parameters, bare `#Job`, job argument rows, and AOT record decode). Then prove `jetpack_tasks` and AOT job-dispatch parity.\n\n## Current state\n- The fixes are uncommitted in the working tree, touching `Core/process/process.jet`, `Source/Interpreter.rs`, `crates/jet-codegen/src/Codegen/mod.rs`, `crates/jet-foundation/src/CoreModuleExports.rs` and `tests/jetpack_tasks.rs`.\n- `Source/Interpreter.rs:749` `run_job_graph` hands the Prelude `jet_job_dispatch_specs` one row per MIR job.\n- `crates/jet-codegen/src/Codegen/mod.rs:1953, 3582` `strip_source_shared_interop_jit` removes the AOT `::jet_jit::SourceSharedInterop` ICE region.\n- `tests/jetpack_tasks.rs:201` `jet_jobs_after_runs_predecessors_and_scalar_args` exists. Criteria 1-3 are met.\n- Rust job lowering: `crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1136` `lower_job`, `TIR/mir.rs:2452` `lower_job_argument`, and `MIRRust.rs:10746` `emit_jobs`.\n- The Jet compiler still has fix 5's bug. `Compiler/JetCodegen/Source/Codegen/JobTestArtifacts.jet:31-48` `jet_codegen_lower_job_argument` re-spells the type as `Type.Named(argument.ty)` and emits empty `help`. `:102` `jet_codegen_lower_job_fact` needs checking for the bare `#Job` default-metadata case (fix 4).\n- Also noticed and not owned here: the stale embedded `core.reactive` and `core.web.table` rows in `CoreModuleExports.rs`, and `crates/jet-foundation/build.rs` hashing only `Core.jet`.\n\n## Changes\n1. Integrate the working-tree fix as one commit, owned only by this card's paths.\n2. Jet compiler mirror, in `JobTestArtifacts.jet`: argument rows take the lowered parameter type and `#CLI` field shape/help. A single `#CLI` record parameter uses the record's field inputs. A bare `#Job` produces a job row with default metadata.\n3. AOT: `MIRRust::emit_jobs` passes `record_inputs` for a single `#CLI` record parameter, as already in the tree.\n4. `tests/jetpack_tasks.rs`: add `jet_build_job_dispatch_matches_default_and_interpreter`. Build the `after:` + scalar-parameter fixture with `jet build`, then dispatch `seed` through the binary's emitted job entry. Its output must match `jet jobs seed` and `jet run --interpret -- seed`. It covers three cases: predecessor order, stop on a failing predecessor, and E1331 with exit 2 for a bad root argument before any predecessor runs.\n\n## Proof\n- `Tools/agent/jet-env cargo test --test jetpack_tasks` passes all tests (criterion 4).\n- `Tools/agent/jet-env cargo test --test jetpack_tasks -- jet_build_job_dispatch_matches_default_and_interpreter` passes (criterion 5).\n\n## Batch\n`batch-host-runtime`: host job dispatch plus AOT/run/interpreter parity.\n\n## Dependencies\nNone open.\n",
+      "plan": "## Goal\nLand the working-tree fixes for project jobs (`use core.process`, the `after:` job graph, scalar job parameters, bare `#Job`, job argument rows, and AOT record decode). Then prove `jetpack_tasks` and AOT job-dispatch parity.\n\n## Current state\n- The fixes are uncommitted in the working tree, touching `Core/process/process.jet`, `Source/Interpreter.rs`, `crates/jet-codegen/src/Codegen/mod.rs`, `crates/jet-foundation/src/CoreModuleExports.rs` and `tests/jetpack_tasks.rs`.\n- `Source/Interpreter.rs:749` `run_job_graph` hands the Prelude `jet_job_dispatch_specs` one row per MIR job.\n- `crates/jet-codegen/src/Codegen/mod.rs:1953, 3582` `strip_source_shared_interop_jit` removes the AOT `::jet_jit::SourceSharedInterop` ICE region.\n- `tests/jetpack_tasks.rs:201` `jet_jobs_after_runs_predecessors_and_scalar_args` exists. Criteria 1-3 are met.\n- Rust job lowering: `crates/jet-codegen/src/Codegen/TIR/artifact_plan.rs:1136` `lower_job`, `TIR/mir.rs:2452` `lower_job_argument`, and `MIRRust.rs:10746` `emit_jobs`.\n- The Jet compiler still has fix 5's bug. `Compiler/JetCodegen/Source/Codegen/JobTestArtifacts.jet:31-48` `jet_codegen_lower_job_argument` re-spells the type as `Type.Named(argument.ty)` and emits empty `help`. `:102` `jet_codegen_lower_job_fact` needs checking for the bare `#Job` default-metadata case (fix 4).\n- Also noticed and not owned here: the stale embedded `core.reactive` and `core.web.table` rows in `CoreModuleExports.rs`, and `crates/jet-foundation/build.rs` hashing only `Core.jet`.\n\n## Changes\n1. Integrate the working-tree fix as one commit, owned only by this card's paths.\n2. Jet compiler mirror, in `JobTestArtifacts.jet`: argument rows take the lowered parameter type and `#CLI` field shape/help. A single `#CLI` record parameter uses the record's field inputs. A bare `#Job` produces a job row with default metadata.\n3. AOT: `MIRRust::emit_jobs` passes `record_inputs` for a single `#CLI` record parameter, as already in the tree.\n4. `tests/jetpack_tasks.rs`: add `jet_build_job_dispatch_matches_default_and_interpreter`. Build the `after:` + scalar-parameter fixture with `jet build`, then dispatch `seed` through the binary's emitted job entry. Its output must match `jet jobs seed` and `jet run --interpret -- seed`. It covers three cases: predecessor order, stop on a failing predecessor, and E1331 with exit 2 for a bad root argument before any predecessor runs.\n\n## Proof\n- `jet test Compiler --profile cases jetpack_tasks/` passes all tests (criterion 4).\n- `jet test Compiler --profile cases jetpack_tasks/jet_build_job_dispatch_matches_default_and_interpreter` passes (criterion 5).\n\n## Batch\n`batch-host-runtime`: host job dispatch plus AOT/run/interpreter parity.\n\n## Dependencies\nNone open.\n",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -41660,7 +41670,7 @@
         },
         {
           "n": 4,
-          "text": "[retarget] Jet-side proof (Rust freeze 2026-10-01): the behavior the replaced Rust test checks holds on the Jet compiler or the Jet-hosted tool, shown by an equivalent test against the Jet implementation; no new Rust test and no Rust compiler change. Replaces the Rust-compiler proof: \"`cargo test --test jetpack_tasks` passes.\"",
+          "text": "[retarget] Jet-side proof (Rust freeze 2026-10-01): the behavior the replaced Rust test checks holds on the Jet compiler or the Jet-hosted tool, shown by an equivalent test against the Jet implementation; no new Rust test and no Rust compiler change. Replaces the Rust-compiler proof: \"`jet test Compiler --profile cases jetpack_tasks/` passes.\"",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -41678,7 +41688,7 @@
         },
         {
           "n": 6,
-          "text": "[retarget] Jet-side proof (Rust freeze 2026-10-01): the behavior the replaced Rust test checks holds on the Jet compiler or the Jet-hosted tool, shown by an equivalent test against the Jet implementation; no new Rust test and no Rust compiler change. Replaces the Rust-compiler proof: \"`Tools/agent/jet-env cargo test --test jetpack_tasks -- jet_build_job_dispatch_matches_default_and_interpreter` passes: the AOT binary runs `after:` predecessors in order, stops on a failing predecessor, rejects a bad root argument with E1331/exit 2 before any predecessor, and prints byte-identical output to `jet jobs` and `jet run --interpret --`.\"",
+          "text": "[retarget] Jet-side proof (Rust freeze 2026-10-01): the behavior the replaced Rust test checks holds on the Jet compiler or the Jet-hosted tool, shown by an equivalent test against the Jet implementation; no new Rust test and no Rust compiler change. Replaces the Rust-compiler proof: \"`jet test Compiler --profile cases jetpack_tasks/jet_build_job_dispatch_matches_default_and_interpreter` passes: the AOT binary runs `after:` predecessors in order, stops on a failing predecessor, rejects a bad root argument with E1331/exit 2 before any predecessor, and prints byte-identical output to `jet jobs` and `jet run --interpret --`.\"",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -41750,7 +41760,7 @@
         },
         {
           "n": 14,
-          "text": "(was #2442 c1) Source implementation is complete for this contract: D-DX-GENERATE1 records the owner-selected generation policy and the command help describes an explicit invocation, preview mode, authority requirements, and receipt output. Deferred runtime proof (#2919): `tests/systems_source_generation_cli.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2442 c1) Source implementation is complete for this contract: D-DX-GENERATE1 records the owner-selected generation policy and the command help describes an explicit invocation, preview mode, authority requirements, and receipt output. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/systems_source_generation_cli.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -41759,7 +41769,7 @@
         },
         {
           "n": 15,
-          "text": "(was #2442 c2) Source implementation is complete for this contract: An explicit generation run writes the declared outputs in deterministic order and records generator identity, source location, inputs, outputs, package authority, and toolchain provenance. Deferred runtime proof (#2919): `tests/systems_source_generation_audit.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2442 c2) Source implementation is complete for this contract: An explicit generation run writes the declared outputs in deterministic order and records generator identity, source location, inputs, outputs, package authority, and toolchain provenance. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/systems_source_generation_audit.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -41768,7 +41778,7 @@
         },
         {
           "n": 16,
-          "text": "(was #2442 c3) Source implementation is complete for this contract: Repeated generation with unchanged inputs is reproducible and does not rewrite equivalent outputs, while changed inputs produce a receipt that identifies the affected outputs. Deferred runtime proof (#2919): `tests/systems_source_generation_repro.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2442 c3) Source implementation is complete for this contract: Repeated generation with unchanged inputs is reproducible and does not rewrite equivalent outputs, while changed inputs produce a receipt that identifies the affected outputs. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/systems_source_generation_repro.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -41777,7 +41787,7 @@
         },
         {
           "n": 17,
-          "text": "(was #2442 c4) Source implementation is complete for this contract: Build and test do not invoke source generation implicitly, and a missing or stale generated input is reported as an actionable source-local diagnostic rather than silently repaired. Deferred runtime proof (#2919): `tests/systems_source_generation_no_implicit.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2442 c4) Source implementation is complete for this contract: Build and test do not invoke source generation implicitly, and a missing or stale generated input is reported as an actionable source-local diagnostic rather than silently repaired. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/systems_source_generation_no_implicit.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -41786,7 +41796,7 @@
         },
         {
           "n": 18,
-          "text": "(was #2442 c5) Source implementation is complete for this contract: A generator failure leaves no partial outputs and the audit trail records the failed command, authority decision, and source context without exposing unauthorized environment data. Deferred runtime proof (#2919): `tests/systems_source_generation_failure.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2442 c5) Source implementation is complete for this contract: A generator failure leaves no partial outputs and the audit trail records the failed command, authority decision, and source context without exposing unauthorized environment data. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/systems_source_generation_failure.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -41817,7 +41827,7 @@
       "parentId": "c0a59ow3",
       "needsAcceptance": false,
       "created": "2026-09-28T15:53:06.743Z",
-      "updated": "2026-11-04T23:46:25.762Z",
+      "updated": "2026-11-06T18:41:17.469Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -53077,6 +53087,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
           "at": "2026-10-07",
           "by": "Pip",
           "text": "D-STR-ESCAPE1=A ratified; application contract updated. No implementation/build/test or closure receipt claimed. Owners: unowned lexer/formatter; RtL6 (current live Display owner, RuntimeJet2 confirmed); RuntimeJet2 reviewer; RtText1 does NOT own Debug policy. Latest owner #29 permits only minimal port seams both halves, dies at cutover; #31 requires actual Jet ports."
@@ -53139,7 +53154,7 @@
         },
         {
           "n": 7,
-          "text": "Syntax.rs entry updated",
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -53199,7 +53214,7 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:52.711Z",
-      "updated": "2026-10-31T14:19:47.964Z",
+      "updated": "2026-11-06T18:41:20.192Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -57421,6 +57436,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
           "at": "2026-10-23",
           "by": "agent",
           "text": "Board burndown 2026-10-22: re-phased (no building work logged since before 2026-10-20)."
@@ -57461,7 +57481,7 @@
         },
         {
           "n": 4,
-          "text": "Syntax.rs entry updated",
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -57508,7 +57528,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-08T16:24:44.155Z",
-      "updated": "2026-10-28T11:28:56.796Z",
+      "updated": "2026-11-06T18:41:23.057Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -59358,6 +59378,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
           "at": "2026-10-23",
           "by": "agent",
           "text": "Board burndown 2026-10-22: ratified D-JAI-SITE1 already decides the code-site facts; implementation remains."
@@ -59371,7 +59396,7 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Spec and registry agree: either Syntax.rs registers the caller-location value with its decision ID, an example logger prints its caller's file and line, and the diagnostic snapshots exist, or every mention of #Caller() is removed in one cutover.",
+          "text": "Spec and registry agree: either the syntax registry (Compiler/JetFoundation/Data/Syntax) registers the caller-location value with its decision ID, an example logger prints its caller's file and line, and the diagnostic snapshots exist, or every mention of #Caller() is removed in one cutover.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -59380,7 +59405,7 @@
         },
         {
           "n": 2,
-          "text": "Syntax.rs entry updated",
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -59437,7 +59462,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:50:00.588Z",
-      "updated": "2026-10-30T18:56:01.872Z",
+      "updated": "2026-11-06T18:41:25.804Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -59932,11 +59957,17 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "Syntax.rs entry updated",
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -59987,7 +60018,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:41.365Z",
-      "updated": "2026-10-28T11:32:25.616Z",
+      "updated": "2026-11-06T18:41:28.425Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -60277,6 +60308,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 1 criteria from archived #2887: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -60290,7 +60326,7 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Syntax.rs entry updated",
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -60350,7 +60386,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:45.128Z",
-      "updated": "2026-11-04T23:50:56.908Z",
+      "updated": "2026-11-06T18:41:31.097Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -60371,11 +60407,17 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
-          "text": "Syntax.rs entry updated",
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -60425,7 +60467,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:46.152Z",
-      "updated": "2026-10-28T11:32:32.962Z",
+      "updated": "2026-11-06T18:41:33.704Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -60448,6 +60490,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
           "at": "2026-10-23",
           "by": "agent",
           "text": "Board burndown 2026-10-22: ratified D-JAI-COMPTIME1 already decides mutable globals computed while compiling; implementation remains."
@@ -60456,7 +60503,7 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Syntax.rs entry updated",
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -60515,7 +60562,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:47.130Z",
-      "updated": "2026-11-05T14:36:17.332Z",
+      "updated": "2026-11-06T18:41:36.385Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -68567,6 +68614,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Owner ratified D-ONEAPP-MODEL1=A, D-RUN-DEVICE1=A, D-SERVER-FN1=A, D-SYNC2=A, D-A11Y-EXPORT1=B, D-MOBILE-UNDEFER1=B, D-VIEW-SET1=C; implementation criteria added here."
         },
         {
@@ -68615,7 +68667,7 @@
         },
         {
           "n": 4,
-          "text": "(was #2446 c1) Source implementation is complete for this contract: The selected local-app command starts a loopback server for a notebook and renders executable-cell outputs, layouts, and controls without copying evaluation into a second runtime. Deferred runtime proof (#2919): tests/notebook_app.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2446 c1) Source implementation is complete for this contract: The selected local-app command starts a loopback server for a notebook and renders executable-cell outputs, layouts, and controls without copying evaluation into a second runtime. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/notebook_app.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -68624,7 +68676,7 @@
         },
         {
           "n": 5,
-          "text": "(was #2446 c2) Source implementation is complete for this contract: A typed function's supported arguments and return values become validated controls and typed output views; unsupported or unsafe mappings produce structured diagnostics before launch. Deferred runtime proof (#2919): tests/notebook_app.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2446 c2) Source implementation is complete for this contract: A typed function's supported arguments and return values become validated controls and typed output views; unsupported or unsafe mappings produce structured diagnostics before launch. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/notebook_app.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -68633,7 +68685,7 @@
         },
         {
           "n": 6,
-          "text": "(was #2446 c3) Source implementation is complete for this contract: Two browser tabs receive isolated typed session state, deterministic callback ordering, and independent reset/reconnect behavior; one tab cannot read or mutate the other tab's state. Deferred runtime proof (#2919): tests/notebook_app.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2446 c3) Source implementation is complete for this contract: Two browser tabs receive isolated typed session state, deterministic callback ordering, and independent reset/reconnect behavior; one tab cannot read or mutate the other tab's state. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/notebook_app.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -68642,7 +68694,7 @@
         },
         {
           "n": 7,
-          "text": "(was #2446 c4) Source implementation is complete for this contract: Editing the notebook or typed function through `jet dev` updates the local app, preserves compatible state, and reports any reset reason or stale output. Deferred runtime proof (#2919): tests/notebook_app.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2446 c4) Source implementation is complete for this contract: Editing the notebook or typed function through `jet dev` updates the local app, preserves compatible state, and reports any reset reason or stale output. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/notebook_app.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -68651,7 +68703,7 @@
         },
         {
           "n": 8,
-          "text": "(was #2446 c5) Source implementation is complete for this contract: Local bind, optional sharing, data movement, and trust grants are shown in a machine-readable receipt, with no public exposure unless explicitly authorized. Deferred runtime proof (#2919): tests/notebook_app.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2446 c5) Source implementation is complete for this contract: Local bind, optional sharing, data movement, and trust grants are shown in a machine-readable receipt, with no public exposure unless explicitly authorized. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/notebook_app.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -68982,7 +69034,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:19:21.465Z",
-      "updated": "2026-11-06T17:17:45.418Z",
+      "updated": "2026-11-06T18:41:39.051Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -83389,6 +83441,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 85 criteria from archived #88, #182, #272, #274, #277, #278, #280, #284, #285, #287, #311, #316, #318, #319, #364, #365, #372, #373, #374, #489, #582, #800, #867, #1053, #1709, #2169, #2170, #2174, #2243, #2370, #2463, #2464, #2486, #2497, #2902, #2947, #3064, #3183, #3184, #3927, #3928, #3929, #3930, #3946, #4017: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -84153,7 +84210,7 @@
         },
         {
           "n": 80,
-          "text": "(was #2464 c1) Source implementation is complete for this contract: D-DX-PREVIEW1 records the declaration, variant, and shared-context rules without adding an unratified syntax spelling. Deferred runtime proof (#2919): `cargo test --test canvas` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2464 c1) Source implementation is complete for this contract: D-DX-PREVIEW1 records the declaration, variant, and shared-context rules without adding an unratified syntax spelling. Deferred runtime proof (#2919): tests/cases rows that replace the Rust-era canvas tests [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -84162,7 +84219,7 @@
         },
         {
           "n": 81,
-          "text": "(was #2464 c2) Source implementation is complete for this contract: A source file renders two named variants in Canvas, and switching variants does not restart the full app or alter another variant's output. Deferred runtime proof (#2919): `tests/canvas_scenarios.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2464 c2) Source implementation is complete for this contract: A source file renders two named variants in Canvas, and switching variants does not restart the full app or alter another variant's output. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/canvas_scenarios.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -84171,7 +84228,7 @@
         },
         {
           "n": 82,
-          "text": "(was #2464 c3) Source implementation is complete for this contract: Expensive fixture setup runs once for multiple variants, and changing one preview does not leak mutable state to another. Deferred runtime proof (#2919): `tests/canvas_scenarios.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2464 c3) Source implementation is complete for this contract: Expensive fixture setup runs once for multiple variants, and changing one preview does not leak mutable state to another. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/canvas_scenarios.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -84180,7 +84237,7 @@
         },
         {
           "n": 83,
-          "text": "(was #2464 c4) Source implementation is complete for this contract: A malformed preview reports source diagnostics while keeping the last-good preview visible. Deferred runtime proof (#2919): `tests/canvas.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2464 c4) Source implementation is complete for this contract: A malformed preview reports source diagnostics while keeping the last-good preview visible. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/canvas.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -84189,7 +84246,7 @@
         },
         {
           "n": 84,
-          "text": "(was #2464 c5) Source implementation is complete for this contract: A playground path runs the same checked source through Canvas and `jet dev`, with output and console diagnostics tied to the source revision. Deferred runtime proof (#2919): `cargo test --test canvas --test canvas_scenarios` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2464 c5) Source implementation is complete for this contract: A playground path runs the same checked source through Canvas and `jet dev`, with output and console diagnostics tied to the source revision. Deferred runtime proof (#2919): tests/cases rows that replace the Rust-era canvas and canvas_scenarios tests [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -84378,7 +84435,7 @@
         },
         {
           "n": 105,
-          "text": "(was #4017 c2) `keyword_spelling(&TokKind::KwYield)` returns `yield`, and LSP completion offers it [precut audit: failing on 9c7ddf1359: C:lsp/c40_is_keyword_real_keywords_recognized KNOWN-FAILING #6386 unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:): stdout ended before recv was satisfied; stdout s (known-failing #6386:…]",
+          "text": "(was #4017 c2) The keyword table (Compiler/JetLexer/Data/Lexer/Keywords.jet) spells `KwYield` as `yield`, and LSP completion offers it [precut audit: failing on 9c7ddf1359: C:lsp/c40_is_keyword_real_keywords_recognized KNOWN-FAILING #6386 unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:): stdout ended before recv was satisfied; stdout s (known-failing #6386:…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -84394,7 +84451,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T20:11:53.653Z",
-      "updated": "2026-11-04T23:34:58.852Z",
+      "updated": "2026-11-06T18:41:41.715Z",
       "updatedBy": "Main"
     },
     {
@@ -84498,7 +84555,7 @@
         },
         {
           "n": 3,
-          "text": "A benchmark of 10^7 short foreign calls (a C function that returns its argument) stays within 5% of the pre-change commit; the numbers are logged on this card.",
+          "text": "A benchmark of 10^7 short foreign calls (a C function that returns its argument) is no slower than the pre-change commit on the same run (ratio at most 1.00, no band); the numbers are logged on this card.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -84548,7 +84605,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T21:41:14.674Z",
-      "updated": "2026-10-31T01:16:37.788Z",
+      "updated": "2026-11-06T18:41:50.440Z",
       "updatedBy": "Main"
     },
     {
@@ -88287,6 +88344,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 7 criteria from archived #2467, #2470: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -88304,7 +88366,7 @@
         },
         {
           "n": 2,
-          "text": "(was #2467 c1) Source implementation is complete for this contract: A Jet program declares a typed model, routes keyboard, resize, timer, and I/O events through Update, runs asynchronous commands, and renders a View without blocking redraw. Deferred runtime proof (#2919): `tests/cli_parts/tui_loop.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2467 c1) Source implementation is complete for this contract: A Jet program declares a typed model, routes keyboard, resize, timer, and I/O events through Update, runs asynchronous commands, and renders a View without blocking redraw. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/cli_parts/tui_loop.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -88313,7 +88375,7 @@
         },
         {
           "n": 3,
-          "text": "(was #2467 c2) Source implementation is complete for this contract: A Widget and StatefulWidget-style render unit receives typed geometry and state, and nested constraints produce deterministic layouts at narrow and wide terminal sizes. Deferred runtime proof (#2919): `tests/cli_parts/tui_widgets.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2467 c2) Source implementation is complete for this contract: A Widget and StatefulWidget-style render unit receives typed geometry and state, and nested constraints produce deterministic layouts at narrow and wide terminal sizes. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/cli_parts/tui_widgets.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -88322,7 +88384,7 @@
         },
         {
           "n": 4,
-          "text": "(was #2467 c3) Source implementation is complete for this contract: The same `core.ui` tree renders through TuiBackend in the `jet dev` terminal host and in a user TUI, with no duplicate widget implementation. Deferred runtime proof (#2919): `tests/cli_parts/tui_host.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2467 c3) Source implementation is complete for this contract: The same `core.ui` tree renders through TuiBackend in the `jet dev` terminal host and in a user TUI, with no duplicate widget implementation. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/cli_parts/tui_host.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -88331,7 +88393,7 @@
         },
         {
           "n": 5,
-          "text": "(was #2467 c4) Source implementation is complete for this contract: Styles choose ANSI16, ANSI256, truecolor, or ASCII behavior from terminal capability, and visible-width measurement keeps Unicode blocks aligned while NO_COLOR stays plain. Deferred runtime proof (#2919): `tests/cli_parts/tui_styles.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2467 c4) Source implementation is complete for this contract: Styles choose ANSI16, ANSI256, truecolor, or ASCII behavior from terminal capability, and visible-width measurement keeps Unicode blocks aligned while NO_COLOR stays plain. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/cli_parts/tui_styles.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -88340,7 +88402,7 @@
         },
         {
           "n": 6,
-          "text": "(was #2467 c5) Source implementation is complete for this contract: Normal return, error propagation, panic, and interrupted input restore terminal state and leave no raw-mode residue. Deferred runtime proof (#2919): `tests/cli_parts/tui_lifecycle.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2467 c5) Source implementation is complete for this contract: Normal return, error propagation, panic, and interrupted input restore terminal state and leave no raw-mode residue. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/cli_parts/tui_lifecycle.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -88349,7 +88411,7 @@
         },
         {
           "n": 7,
-          "text": "(was #2467 c6) Source implementation is complete for this contract: Remapped key bindings drive dispatch and generated help from one typed declaration, including a narrow-terminal help layout. Deferred runtime proof (#2919): `tests/cli_parts/tui_bindings.rs` [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2467 c6) Source implementation is complete for this contract: Remapped key bindings drive dispatch and generated help from one typed declaration, including a narrow-terminal help layout. Deferred runtime proof (#2919): a tests/cases row that replaces the Rust-era tests/cli_parts/tui_bindings.rs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -88372,7 +88434,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T14:11:03.846Z",
-      "updated": "2026-11-04T23:47:34.126Z",
+      "updated": "2026-11-06T18:41:44.736Z",
       "updatedBy": "Main"
     },
     {
@@ -183218,6 +183280,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T18:41:50.440Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ih6z1d",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:41:47.433Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01k5lts",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:41:46.624Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01k5lts",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:41:44.736Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0isxyo3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:41:43.936Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0isxyo3",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:41:41.715Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ozzmvc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:41:40.898Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ozzmvc",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:41:39.051Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0u5tm84",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:41:38.219Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0u5tm84",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:41:36.385Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06y0cef",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:41:35.566Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06y0cef",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:41:33.704Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qrom2s",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:41:32.892Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qrom2s",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:41:31.097Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09uai16",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:41:30.242Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09uai16",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:41:28.425Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jlyc69",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:41:27.626Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jlyc69",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:41:25.804Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dvyqnu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:41:24.951Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dvyqnu",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:41:23.057Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00hgc5h",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:41:22.198Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00hgc5h",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:41:20.192Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m1e5o0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:41:19.369Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m1e5o0",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:41:17.469Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c077ihdp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:41:16.677Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c077ihdp",
+      "note": "criteria,plan"
+    },
     {
       "at": "2026-11-06T18:41:14.469Z",
       "by": "Main",
