@@ -1,0 +1,550 @@
+// `jet self devtools grammars` (D-HL1): rewrite the generated lexical section
+// of each editor grammar from the Syntax registry text in the toolchain tree.
+// Data/Syntax/Highlights.jet (JET_HIGHLIGHT_TOKENS), Data/Syntax/Markers.jet
+// (MARKER_INBODY_SEPARATOR) and Prelude/Markers.jet (its marker structs) are
+// the authority; there is no second token inventory. Which words tree-sitter
+// parses as anonymous literals comes from its generated src/node-types.json.
+// The targets are rewritten relative to the current directory, from the start
+// marker's line through the end marker's line. Every section renders before
+// any file is written.
+use {
+    cli_files :: core.files
+    cli_grammar_json :: core.encoding.json
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[foundation_json_quote]
+}
+
+JET_CLI_GRAMMAR_SYNTAX_DIR :: "Compiler/JetFoundation/Data/Syntax"
+JET_CLI_GRAMMAR_HIGHLIGHTS :: "Compiler/JetFoundation/Data/Syntax/Highlights.jet"
+JET_CLI_GRAMMAR_MARKERS :: "Compiler/Prelude/Markers.jet"
+JET_CLI_GRAMMAR_NODE_TYPES :: "Tools/editors/tree-sitter/src/node-types.json"
+JET_CLI_GRAMMAR_START :: "BEGIN GENERATED JET SYNTAX HIGHLIGHTS"
+JET_CLI_GRAMMAR_END :: "END GENERATED JET SYNTAX HIGHLIGHTS"
+JET_CLI_GRAMMAR_VSCODE :: "Tools/editors/vscode/syntaxes/jet.tmLanguage.json"
+JET_CLI_GRAMMAR_TEXTMATE :: "Tools/editors/jet.tmGrammar"
+JET_CLI_GRAMMAR_TREE_SITTER :: "Tools/editors/tree-sitter/grammar.js"
+JET_CLI_GRAMMAR_ZED :: "Tools/editors/zed/languages/jet/highlights.scm"
+
+// One HighlightClass, in emission order: sigils before operators so a
+// sigil wins over an operator it starts with.
+struct JetCLIGrammarClass {
+    name: String
+    textmate: String
+    zed: String
+    label: String
+    tree_sitter: String
+    keyword: Bool
+}
+
+JET_CLI_GRAMMAR_CLASSES :: [JetCLIGrammarClass]{
+    {name: "KeywordControl", textmate: "keyword.control.jet", zed: "@keyword.control", label: "keyword.control", tree_sitter: "JET_HIGHLIGHT_KEYWORD_CONTROL", keyword: true},
+    {name: "KeywordDeclaration", textmate: "keyword.declaration.jet", zed: "@keyword", label: "keyword.declaration", tree_sitter: "JET_HIGHLIGHT_KEYWORD_DECLARATION", keyword: true},
+    {name: "KeywordOwnership", textmate: "keyword.other.ownership.jet", zed: "@keyword", label: "keyword.ownership", tree_sitter: "JET_HIGHLIGHT_KEYWORD_OWNERSHIP", keyword: true},
+    {name: "KeywordOther", textmate: "keyword.other.jet", zed: "@keyword", label: "keyword.other", tree_sitter: "JET_HIGHLIGHT_KEYWORD_OTHER", keyword: true},
+    {name: "Literal", textmate: "constant.language.jet", zed: "@constant.builtin", label: "literal", tree_sitter: "JET_HIGHLIGHT_LITERAL", keyword: false},
+    {name: "TypeBuiltin", textmate: "storage.type.builtin.jet", zed: "@type.builtin", label: "type.builtin", tree_sitter: "JET_HIGHLIGHT_TYPE_BUILTIN", keyword: false},
+    {name: "Builtin", textmate: "support.function.builtin.jet", zed: "@function.builtin", label: "builtin", tree_sitter: "JET_HIGHLIGHT_BUILTIN", keyword: false},
+    {name: "MarkerRule", textmate: "entity.name.tag.rule.jet", zed: "@attribute", label: "marker.rule", tree_sitter: "JET_HIGHLIGHT_MARKER_RULE", keyword: false},
+    {name: "Sigil", textmate: "keyword.operator.sigil.jet", zed: "@operator", label: "sigil", tree_sitter: "JET_HIGHLIGHT_SIGIL", keyword: false},
+    {name: "Operator", textmate: "keyword.operator.jet", zed: "@operator", label: "operator", tree_sitter: "JET_HIGHLIGHT_OPERATOR", keyword: false},
+}
+
+JET_CLI_GRAMMAR_BRACKETS :: [String]{"{{", "}}", "[", "]", "(", ")"}
+
+// Lexer-reserved words stay global. Identifier-like declaration words
+// (`add`, `client`, `as`, ...) are colored only in declaration-shaped positions.
+JET_CLI_GRAMMAR_GLOBAL_KEYWORDS :: [String]{
+    "fn", "pub", "priv", "if", "else", "in", "break", "true", "false", "mutate", "move", "copy",
+    "struct", "enum", "impl", "trait", "tag", "effect", "derive", "self", "it", "null", "const",
+    "comptime", "return", "loop", "yield", "use", "extern", "module",
+}
+
+struct JetCLIGrammarToken {
+    text: String
+    class: String
+}
+
+struct JetCLIGrammarConstant {
+    name: String
+    path: String
+    value: String
+}
+
+struct JetCLIGrammarInputs {
+    tokens: [JetCLIGrammarToken]
+    anonymous: [String]
+    separator: String
+}
+
+fn jet_cli_devtools_grammars(quiet: Bool, color: Bool) -[FS, Env]> JetCLIPlan Never! {
+    root :: if jet_cli_toolchain_root(cli_files.cwd() ?? ".") == {
+        .Found(found) -> found
+        .Missing(what, fix) -> { return jet_cli_fail("E2105", what, jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR) }
+    }
+    inputs :: jet_cli_grammar_inputs(root) ?? return jet_cli_grammar_fail(err.message, color)
+    targets :: [String]{JET_CLI_GRAMMAR_VSCODE, JET_CLI_GRAMMAR_TEXTMATE, JET_CLI_GRAMMAR_TREE_SITTER, JET_CLI_GRAMMAR_ZED}
+    sections :: [String]{
+        jet_cli_grammar_render_vscode(inputs.tokens),
+        jet_cli_grammar_render_vscode(inputs.tokens),
+        jet_cli_grammar_render_tree_sitter(inputs.tokens, inputs.separator),
+        jet_cli_grammar_render_zed(inputs.tokens, inputs.anonymous),
+    }
+    rewritten := [String]{}
+    loop (index, path) in targets {
+        text :: cli_files.read(path) ?? return jet_cli_grammar_fail("couldn't read `{path}`: {jet_cli_io_error_text(err)}", color)
+        &rewritten.push(jet_cli_grammar_replace_section(text, sections[index], path) ?? return jet_cli_grammar_fail(err.message, color))
+    }
+    out := ""
+    loop (index, path) in targets {
+        cli_files.write(path, rewritten[index]) ?? return jet_cli_grammar_fail("couldn't write `{path}`: {jet_cli_io_error_text(err)}", color)
+        // The files are always written; `--quiet` only mutes the confirmations.
+        if !quiet -> out = "{out}wrote {path}\n"
+    }
+    if !quiet -> out = "{out}regenerated editor grammar sections\n"
+    jet_cli_done(out, "", JET_DRIVER_EXIT_OK)
+}
+
+fn jet_cli_grammar_fail(message: String, color: Bool) -> JetCLIPlan Never! {
+    jet_cli_fail("E2105", message, jet_cli_why("E2105"), "correct the named grammar or Syntax registry file, then run `jet self devtools grammars` again", color, JET_DRIVER_EXIT_USER_ERROR)
+}
+
+fn jet_cli_grammar_inputs(root: String) -[FS]> JetCLIGrammarInputs JetCLIReadError! {
+    constants :: jet_cli_grammar_constants(root)
+    tokens :: jet_cli_grammar_tokens(root, constants)
+    anonymous :: jet_cli_grammar_anonymous(root)
+    separator := ""
+    loop constant in constants {
+        if constant.name == "MARKER_INBODY_SEPARATOR" -> separator = constant.value.copy()
+    }
+    if separator == "" -> return Err(jet_cli_read_error("missing MARKER_INBODY_SEPARATOR in {JET_CLI_GRAMMAR_SYNTAX_DIR}"))
+    Ok(JetCLIGrammarInputs{tokens: tokens, anonymous: anonymous, separator: separator})
+}
+
+fn jet_cli_grammar_read(root: String, path: String) -[FS]> String JetCLIReadError! {
+    cli_files.read(cli_files.join(root, path)) ?? return Err(jet_cli_read_error("could not read {path}: {jet_cli_io_error_text(err)}"))
+}
+
+// `text[start..<end]` by byte offsets on UTF-8 boundaries.
+fn jet_cli_grammar_slice(text: String, start: Int, end: Int) -> String Never! {
+    if start >= end -> return ""
+    String.from_bytes(text.bytes()[start..(end - 1)]) ?? panic("editor grammar slices end on UTF-8 boundaries")
+}
+
+// The byte offset of the first `needle` at or after `from`, or -1.
+fn jet_cli_grammar_find(text: String, needle: String, from: Int) -> Int Never! {
+    raw :: text.bytes()
+    want :: needle.bytes()
+    at := from
+    loop at + want.len() <= raw.len() {
+        matched := true
+        loop (offset, byte) in want {
+            if raw[at + offset] != byte {
+                matched = false
+                break
+            }
+        }
+        if matched -> return at
+        at += 1
+    }
+    -1
+}
+
+fn jet_cli_grammar_is_ident_byte(byte: U8, first: Bool) -> Bool Never! {
+    letter :: (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{95})
+    letter || (!first && byte >= (U8{48}) && byte <= (U8{57}))
+}
+
+fn jet_cli_grammar_is_word(text: String) -> Bool Never! {
+    bytes :: text.bytes()
+    if bytes.len() == 0 -> return false
+    loop (index, byte) in bytes {
+        if !jet_cli_grammar_is_ident_byte(byte, index == 0) -> return false
+    }
+    true
+}
+
+fn jet_cli_grammar_is_space(byte: U8) -> Bool Never! {
+    byte == (U8{32}) || byte == (U8{9}) || byte == (U8{10}) || byte == (U8{13})
+}
+
+fn jet_cli_grammar_skip_space(raw: [U8], from: Int) -> Int Never! {
+    at := from
+    loop at < raw.len() && jet_cli_grammar_is_space(raw[at]) -> at += 1
+    at
+}
+
+// The end (exclusive) of the identifier starting at `from`, or `from`.
+fn jet_cli_grammar_ident_end(raw: [U8], from: Int) -> Int Never! {
+    at := from
+    loop at < raw.len() && jet_cli_grammar_is_ident_byte(raw[at], at == from) -> at += 1
+    at
+}
+
+// The end (exclusive, past the closing quote) of the string literal opening
+// at `from`, or -1.
+fn jet_cli_grammar_literal_end(raw: [U8], from: Int) -> Int Never! {
+    if from >= raw.len() || raw[from] != (U8{34}) -> return -1
+    at := from + 1
+    loop at < raw.len() {
+        if raw[at] == (U8{92}) {
+            at += 2
+        } else if raw[at] == (U8{34}) {
+            return at + 1
+        } else if raw[at] == (U8{10}) {
+            return -1
+        } else {
+            at += 1
+        }
+    }
+    -1
+}
+
+// A Jet string literal's text: `{{`/`}}` braces and the registry's escapes.
+// An interpolating literal is not a literal token.
+fn jet_cli_grammar_string(literal: String, field: String) -> String JetCLIReadError! {
+    body :: jet_cli_grammar_slice(literal, 1, literal.count_bytes() - 1)
+    stripped :: body.replace("{{{{", "").replace("}}}}", "")
+    if stripped.contains("{{") || stripped.contains("}}") {
+        return Err(jet_cli_read_error("{field} string literal {literal} interpolates; highlight tokens must be literal text"))
+    }
+    raw :: body.bytes()
+    out := [U8]{}
+    at := 0
+    loop at < raw.len() {
+        byte :: raw[at]
+        if byte == (U8{92}) && at + 1 < raw.len() {
+            escaped :: raw[at + 1]
+            decoded :: if {
+                escaped == (U8{110}) -> U8{10}
+                escaped == (U8{116}) -> U8{9}
+                escaped == (U8{114}) -> U8{13}
+                escaped == (U8{48}) -> U8{0}
+                escaped == (U8{92}) -> U8{92}
+                escaped == (U8{34}) -> U8{34}
+                else -> {
+                    return Err(jet_cli_read_error("unsupported escape \\{jet_cli_grammar_slice(body, at + 1, at + 2)} in {field} string literal {literal}"))
+                }
+            }
+            &out.push(decoded)
+            at += 2
+        } else if (byte == (U8{123}) || byte == (U8{125})) && at + 1 < raw.len() && raw[at + 1] == byte {
+            &out.push(byte)
+            at += 2
+        } else {
+            &out.push(byte)
+            at += 1
+        }
+    }
+    Ok(String.from_bytes(out) ?? panic("decoded registry literals stay UTF-8"))
+}
+
+// `NAME :: "literal"` (and `NAME: "literal"`) at the start of `line`, with
+// only an optional `//` comment after it.
+fn jet_cli_grammar_constant_line(line: String) -> (name: String, literal: String)? Never! {
+    raw :: line.bytes()
+    name_end :: jet_cli_grammar_ident_end(raw, 0)
+    if name_end == 0 -> return None
+    at := jet_cli_grammar_skip_space(raw, name_end)
+    if at < raw.len() && raw[at] == (U8{58}) {
+        at += 1
+        if at < raw.len() && raw[at] == (U8{58}) {
+            at += 1
+        } else if at != name_end + 1 {
+            return None
+        }
+    } else {
+        return None
+    }
+    at = jet_cli_grammar_skip_space(raw, at)
+    close :: jet_cli_grammar_literal_end(raw, at)
+    if close < 0 -> return None
+    tail :: jet_cli_grammar_slice(line, close, raw.len()).trim().copy()
+    if tail != "" && !tail.starts_with("//") -> return None
+    Val((name: jet_cli_grammar_slice(line, 0, name_end), literal: jet_cli_grammar_slice(line, at, close)))
+}
+
+// Every `NAME :: "literal"` constant in the syntax registry directory.
+fn jet_cli_grammar_constants(root: String) -[FS]> [JetCLIGrammarConstant] JetCLIReadError! {
+    directory :: cli_files.join(root, JET_CLI_GRAMMAR_SYNTAX_DIR)
+    names := cli_files.listdir(directory) ?? return Err(jet_cli_read_error("could not list {JET_CLI_GRAMMAR_SYNTAX_DIR}: {jet_cli_io_error_text(err)}"))
+    &names.sort()
+    constants := [JetCLIGrammarConstant]{}
+    loop entry in names {
+        if !entry.ends_with(".jet") -> next
+        path :: "{JET_CLI_GRAMMAR_SYNTAX_DIR}/{entry}"
+        loop line in jet_cli_grammar_read(root, path).split("\n") {
+            found :: jet_cli_grammar_constant_line(line.copy()) ?? next
+            value :: jet_cli_grammar_string(found.literal, found.name)
+            known := false
+            loop prior in constants {
+                if prior.name != found.name -> next
+                if prior.value != value -> return Err(jet_cli_read_error("conflicting constant {found.name} in {prior.path} and {path}"))
+                known = true
+            }
+            if !known -> &constants.push(JetCLIGrammarConstant{name: found.name, path: path, value: value})
+        }
+    }
+    Ok(constants)
+}
+
+// Active rule names: every top-level marker struct with an `impl Marker` block.
+fn jet_cli_grammar_markers(root: String) -[FS]> [String] JetCLIReadError! {
+    names := [String]{}
+    current := String?{None}
+    loop line in jet_cli_grammar_read(root, JET_CLI_GRAMMAR_MARKERS).split("\n") {
+        head :: jet_cli_grammar_marker_head(line.copy())
+        if head == .Val(name) {
+            if !line.contains("{{") -> return Err(jet_cli_read_error("marker struct without a body: {line}"))
+            current = Val(name)
+        } else if line.starts_with("}}") {
+            current = None
+        } else if current == .Val(open) && line.trim().starts_with("impl Marker") {
+            &names.push(open.copy())
+            current = None
+        }
+    }
+    if names.len() == 0 -> return Err(jet_cli_read_error("no marker structs in {JET_CLI_GRAMMAR_MARKERS}"))
+    Ok(names)
+}
+
+// The struct a `struct Name {` (or `Name: struct {`) line opens.
+fn jet_cli_grammar_marker_head(line: String) -> String? Never! {
+    if line.starts_with("struct ") {
+        open :: jet_cli_grammar_find(line, "{{", 0)
+        end :: if open < 0 -> line.count_bytes() else -> open
+        return Val(jet_cli_grammar_slice(line, 7, end).trim().copy())
+    }
+    raw :: line.bytes()
+    name_end :: jet_cli_grammar_ident_end(raw, 0)
+    if name_end == 0 -> return None
+    rest :: jet_cli_grammar_slice(line, name_end, raw.len())
+    if !rest.starts_with(": struct") -> return None
+    after :: rest.bytes()
+    if after.len() > 8 && jet_cli_grammar_is_ident_byte(after[8], false) -> return None
+    Val(jet_cli_grammar_slice(line, 0, name_end))
+}
+
+// The JET_HIGHLIGHT_TOKENS rows plus every active marker rule.
+fn jet_cli_grammar_tokens(root: String, constants: [JetCLIGrammarConstant]) -[FS]> [JetCLIGrammarToken] JetCLIReadError! {
+    source :: jet_cli_grammar_read(root, JET_CLI_GRAMMAR_HIGHLIGHTS)
+    start := -1
+    heads :: [String]{"JET_HIGHLIGHT_TOKENS :: [HighlightToken]{{", "JET_HIGHLIGHT_TOKENS: [HighlightToken]{{"}
+    loop head in heads {
+        if source.starts_with(head) -> start = 0
+        at :: jet_cli_grammar_find(source, "\n{head}", 0)
+        if start < 0 && at >= 0 -> start = at + 1
+    }
+    if start < 0 -> return Err(jet_cli_read_error("missing {JET_CLI_GRAMMAR_HIGHLIGHTS}::JET_HIGHLIGHT_TOKENS table"))
+    close :: jet_cli_grammar_find(source, "\n}}", start)
+    if close < 0 -> return Err(jet_cli_read_error("missing {JET_CLI_GRAMMAR_HIGHLIGHTS}::JET_HIGHLIGHT_TOKENS table"))
+    table :: jet_cli_grammar_slice(source, start, close + 2)
+    raw :: table.bytes()
+    tokens := [JetCLIGrammarToken]{}
+    written := 0
+    at := jet_cli_grammar_find(table, "text:", 0)
+    loop at >= 0 {
+        written += 1
+        if jet_cli_grammar_row(table, raw, at, constants) == .Val(token) -> &tokens.push(token)
+        at = jet_cli_grammar_find(table, "text:", at + 5)
+    }
+    if tokens.len() == 0 || tokens.len() != written {
+        return Err(jet_cli_read_error("could not parse every HighlightToken row in {JET_CLI_GRAMMAR_HIGHLIGHTS} (parsed {tokens.len()}, found {written})"))
+    }
+    loop name in jet_cli_grammar_markers(root) -> &tokens.push(JetCLIGrammarToken{text: name, class: "MarkerRule"})
+    Ok(tokens)
+}
+
+// One `{ text: X, class: HighlightClass.Y, }` row whose `text:` starts at
+// `at`; None when the row has another shape.
+fn jet_cli_grammar_row(table: String, raw: [U8], at: Int, constants: [JetCLIGrammarConstant]) -> JetCLIGrammarToken? JetCLIReadError! {
+    before := at - 1
+    loop before >= 0 && jet_cli_grammar_is_space(raw[before]) -> before -= 1
+    if before < 0 || raw[before] != (U8{123}) -> return Ok(None)
+    cursor := jet_cli_grammar_skip_space(raw, at + 5)
+    text := ""
+    if cursor < raw.len() && raw[cursor] == (U8{34}) {
+        end :: jet_cli_grammar_literal_end(raw, cursor)
+        if end < 0 -> return Ok(None)
+        text = jet_cli_grammar_string(jet_cli_grammar_slice(table, cursor, end), "text")
+        cursor = end
+    } else {
+        end :: jet_cli_grammar_ident_end(raw, cursor)
+        if end == cursor -> return Ok(None)
+        name :: jet_cli_grammar_slice(table, cursor, end)
+        found := String?{None}
+        loop constant in constants {
+            if constant.name == name -> found = Val(constant.value.copy())
+        }
+        text = found ?? return Err(jet_cli_read_error("unresolved highlight text constant {name} in {JET_CLI_GRAMMAR_SYNTAX_DIR}"))
+        cursor = end
+    }
+    cursor = jet_cli_grammar_skip_space(raw, cursor)
+    if cursor >= raw.len() || raw[cursor] != (U8{44}) -> return Ok(None)
+    cursor = jet_cli_grammar_skip_space(raw, cursor + 1)
+    prefix :: "class:"
+    if !jet_cli_grammar_slice(table, cursor, raw.len()).starts_with(prefix) -> return Ok(None)
+    cursor = jet_cli_grammar_skip_space(raw, cursor + 6)
+    enum_prefix :: "HighlightClass."
+    if !jet_cli_grammar_slice(table, cursor, raw.len()).starts_with(enum_prefix) -> return Ok(None)
+    cursor += 15
+    class_end :: jet_cli_grammar_ident_end(raw, cursor)
+    if class_end == cursor -> return Ok(None)
+    class :: jet_cli_grammar_slice(table, cursor, class_end)
+    cursor = jet_cli_grammar_skip_space(raw, class_end)
+    if cursor < raw.len() && raw[cursor] == (U8{44}) -> cursor = jet_cli_grammar_skip_space(raw, cursor + 1)
+    if cursor >= raw.len() || raw[cursor] != (U8{125}) -> return Ok(None)
+    known := false
+    loop entry in JET_CLI_GRAMMAR_CLASSES {
+        if entry.name == class -> known = true
+    }
+    if !known -> return Err(jet_cli_read_error("unknown HighlightClass.{class} in {JET_CLI_GRAMMAR_HIGHLIGHTS}"))
+    Ok(Val(JetCLIGrammarToken{text: text, class: class}))
+}
+
+// Zed validates query string literals against anonymous tree-sitter tokens;
+// a word parsed inside a named node would make the whole language fail to
+// load, so the anonymous node types tree-sitter generated from grammar.js are
+// the only words a Zed query may name.
+fn jet_cli_grammar_anonymous(root: String) -[FS]> [String] JetCLIReadError! {
+    text :: jet_cli_grammar_read(root, JET_CLI_GRAMMAR_NODE_TYPES)
+    value :: cli_grammar_json.parse(text) ?? return Err(jet_cli_read_error("could not parse {JET_CLI_GRAMMAR_NODE_TYPES}: {err.reason}"))
+    nodes :: if value == {
+        .Array(items) -> items
+        else -> { return Err(jet_cli_read_error("could not parse {JET_CLI_GRAMMAR_NODE_TYPES}: the node types are not an array")) }
+    }
+    anonymous := [String]{}
+    loop node in nodes {
+        if node == .Object(fields) {
+            kind := String?{None}
+            unnamed := false
+            loop field in fields {
+                if field.key == "type" && field.value == .Text(name) -> kind = Val(name.copy())
+                if field.key == "named" && field.value == .Bool(flag) -> unnamed = !flag
+            }
+            if unnamed && kind == .Val(name) && !anonymous.contains(name) -> &anonymous.push(name.copy())
+        }
+    }
+    if anonymous.len() == 0 -> return Err(jet_cli_read_error("no anonymous node types in {JET_CLI_GRAMMAR_NODE_TYPES}"))
+    Ok(anonymous)
+}
+
+// The distinct non-bracket texts of `class`, in text order.
+fn jet_cli_grammar_class_texts(tokens: [JetCLIGrammarToken], class: String) -> [String] Never! {
+    texts := [String]{}
+    loop token in tokens {
+        if token.class != class || JET_CLI_GRAMMAR_BRACKETS.contains(token.text) || texts.contains(token.text) -> next
+        &texts.push(token.text.copy())
+    }
+    &texts.sort()
+    texts
+}
+
+fn jet_cli_grammar_regex_escape(text: String) -> String Never! {
+    special :: "\\.+*?^$()[]{{}}|/-".bytes()
+    out := [U8]{}
+    loop byte in text.bytes() {
+        if special.contains(byte) -> &out.push(U8{92})
+        &out.push(byte)
+    }
+    String.from_bytes(out) ?? panic("regex escaping preserves UTF-8")
+}
+
+fn jet_cli_grammar_vscode_pattern(scope: String, pattern: String) -> String Never! {
+    "        {{\n          \"name\": \"{scope}\",\n          \"match\": {foundation_json_quote(pattern)}\n        }}"
+}
+
+fn jet_cli_grammar_render_vscode(tokens: [JetCLIGrammarToken]) -> String Never! {
+    patterns := [String]{}
+    loop class in JET_CLI_GRAMMAR_CLASSES {
+        texts :: jet_cli_grammar_class_texts(tokens, class.name)
+        words := [String]{}
+        symbols := [String]{}
+        loop text in texts {
+            if jet_cli_grammar_is_word(text) {
+                &words.push(jet_cli_grammar_regex_escape(text))
+            } else {
+                &symbols.push(jet_cli_grammar_regex_escape(text))
+            }
+        }
+        global := [String]{}
+        contextual := [String]{}
+        loop word in words {
+            if class.keyword && !JET_CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(word) {
+                &contextual.push(word)
+            } else {
+                &global.push(word)
+            }
+        }
+        scope :: class.textmate
+        if global.len() > 0 {
+            alternation :: global.join("|")
+            pattern :: if {
+                // Applied rules are `#Error` / `#[Codable]` / `@allow`, not bare names.
+                class.name == "MarkerRule" -> "#\\[?({alternation})\\b"
+                class.name == "Builtin" -> "(?<![.A-Za-z0-9_])({alternation})(?=\\s*\\()"
+                class.keyword -> "(?<![.A-Za-z0-9_])({alternation})(?![A-Za-z0-9_])"
+                else -> "\\b({alternation})\\b"
+            }
+            &patterns.push(jet_cli_grammar_vscode_pattern(scope, pattern))
+        }
+        if contextual.len() > 0 {
+            // Identifier-like keywords must not steal ordinary names; color
+            // only declaration shape.
+            if contextual.contains("as") {
+                &patterns.push(jet_cli_grammar_vscode_pattern(scope, "(?<![.A-Za-z0-9_])(as)(?=\\s+[A-Za-z_][A-Za-z0-9_]*)"))
+            }
+            rest := [String]{}
+            loop word in contextual {
+                if word != "as" -> &rest.push(word)
+            }
+            if rest.len() > 0 {
+                &patterns.push(jet_cli_grammar_vscode_pattern(scope, "(?<![.A-Za-z0-9_])({rest.join("|")})(?=\\s*(?:\\{{|[A-Za-z_][A-Za-z0-9_]*\\s*:))"))
+            }
+        }
+        if symbols.len() > 0 -> &patterns.push(jet_cli_grammar_vscode_pattern(scope, "({symbols.join("|")})"))
+    }
+    "      \"comment\": \"{JET_CLI_GRAMMAR_START}\",\n      \"patterns\": [\n{patterns.join(",\n")}\n      ],\n      \"endComment\": \"{JET_CLI_GRAMMAR_END}\"\n"
+}
+
+fn jet_cli_grammar_render_tree_sitter(tokens: [JetCLIGrammarToken], separator: String) -> String Never! {
+    out := "// {JET_CLI_GRAMMAR_START}\n"
+    loop class in JET_CLI_GRAMMAR_CLASSES {
+        quoted :: loop text in jet_cli_grammar_class_texts(tokens, class.name) -> foundation_json_quote(text)
+        out = "{out}const {class.tree_sitter} = [{quoted.join(", ")}];\n"
+    }
+    out = "{out}const JET_MARKER_INBODY_SEPARATOR = {foundation_json_quote(separator)};\n"
+    "{out}// {JET_CLI_GRAMMAR_END}\n"
+}
+
+fn jet_cli_grammar_render_zed(tokens: [JetCLIGrammarToken], anonymous: [String]) -> String Never! {
+    out := "; {JET_CLI_GRAMMAR_START}\n"
+    loop class in JET_CLI_GRAMMAR_CLASSES {
+        texts :: jet_cli_grammar_class_texts(tokens, class.name)
+        out = "{out}; {class.label}: {texts.join(" ")}\n"
+        if class.name == "MarkerRule" -> next
+        words := [String]{}
+        loop text in texts {
+            if !jet_cli_grammar_is_word(text) || !anonymous.contains(text) -> next
+            if class.keyword && !JET_CLI_GRAMMAR_GLOBAL_KEYWORDS.contains(text) -> next
+            &words.push("  {foundation_json_quote(text)}")
+        }
+        if words.len() > 0 -> out = "{out}[\n{words.join("\n")}\n] {class.zed}\n\n"
+    }
+    "{out}; {JET_CLI_GRAMMAR_END}\n"
+}
+
+// Replace from the start of the start marker's line through the end of the
+// end marker's line.
+fn jet_cli_grammar_replace_section(text: String, fresh: String, path: String) -> String JetCLIReadError! {
+    start :: jet_cli_grammar_find(text, JET_CLI_GRAMMAR_START, 0)
+    if start < 0 -> return Err(jet_cli_read_error("`{path}` has no `{JET_CLI_GRAMMAR_START}` marker"))
+    end :: jet_cli_grammar_find(text, JET_CLI_GRAMMAR_END, start)
+    if end < 0 -> return Err(jet_cli_read_error("`{path}` has no `{JET_CLI_GRAMMAR_END}` marker"))
+    raw :: text.bytes()
+    prefix_end := start
+    loop prefix_end > 0 && raw[prefix_end - 1] != (U8{10}) -> prefix_end -= 1
+    end_marker :: end + JET_CLI_GRAMMAR_END.count_bytes()
+    newline :: jet_cli_grammar_find(text, "\n", end_marker)
+    suffix_start :: if newline < 0 -> raw.len() else -> newline + 1
+    Ok("{jet_cli_grammar_slice(text, 0, prefix_end)}{fresh.trim_end()}\n{jet_cli_grammar_slice(text, suffix_start, raw.len())}")
+}

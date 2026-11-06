@@ -9,11 +9,13 @@ use {
 // is a provider of primitives only (`__capability`, `__clipboard_get`,
 // `__clipboard_set`, `__event_pop`, `__dialog_request`, `__dialog_result`). A
 // native build's provider is headless and reports every capability absent; a
-// web build's provider is the page's browser provider.
+// web build's provider is the page's browser provider (JetWeb Host.jet
+// `defaultUiProvider`, unless the page installs its own).
 //
 // Provider capability codes: FileDialog 0, Clipboard 1, IME 2, DragDrop 3,
-// Shortcuts 4, Accessibility 5, FontShaping 6. Provider text separates fields
-// with U+001F and items with U+001E.
+// Shortcuts 4, Accessibility 5, FontShaping 6. A multi-field provider text is
+// a record of length-prefixed fields (`<decimal UTF-8 byte length>:<bytes>`),
+// so any text, separators included, round-trips.
 
 enum UICapability {
     FileDialog
@@ -181,8 +183,36 @@ fn save_request(grant: UIFSGrant) -> UIFileDialogRequest Never! {
     UIFileDialogRequest{kind: .Save, title: "Save File", grant: grant, initial_directory: None, filters: [UIFileFilter]{}, allow_multiple: false}
 }
 
-fn provider_field_separator() -> String Never! { String.from_bytes([U8]{31}) ?? panic("U+001F is UTF-8") }
-fn provider_item_separator() -> String Never! { String.from_bytes([U8]{30}) ?? panic("U+001E is UTF-8") }
+// The provider record of `fields`.
+fn provider_record(fields: [String]) -> String Never! {
+    out := ""
+    loop field in fields -> out = "{out}{field.bytes().len()}:{field}"
+    out
+}
+
+// The fields of a provider record, or None when it is malformed.
+fn provider_record_fields(record: String) -> [String]? Never! {
+    raw :: record.bytes()
+    fields := [String]{}
+    at := 0
+    loop at < raw.len() {
+        length := 0
+        digits := 0
+        loop {
+            if at >= raw.len() -> return None
+            n :: Int.from_u8(raw[at])
+            at += 1
+            if n == 58 -> break
+            if n < 48 || n > 57 || digits == 18 -> return None
+            length = length * 10 + n - 48
+            digits += 1
+        }
+        if digits == 0 || length > raw.len() - at -> return None
+        &fields.push(String.from_bytes(raw.slice(at, at + length)) ?? return None)
+        at += length
+    }
+    Val(fields)
+}
 
 // One dialog: validate the request, ask the provider, then check that every
 // selected path lies inside the request's grant.
@@ -201,18 +231,15 @@ fn file_dialog(request: UIFileDialogRequest, kind: UIFileDialogKind) -> UIFileDi
         if initial.grant_root != request.grant.root || initial.access != access -> return Err(UIHostError.ResourceDenied("initial directory is outside the dialog grant"))
     }
     if !core.ui.host.__capability(0) -> return Err(UIHostError.CapabilityUnavailable{capability: "FileDialog"})
-    field :: provider_field_separator()
-    extensions := [String]{}
+    wire := [String]{request.title.copy(), request.grant.root.copy(), if request.allow_multiple -> "1" else -> "0"}
     loop filter in request.filters {
-        loop extension in filter.extensions -> &extensions.push(extension.copy())
+        loop extension in filter.extensions -> &wire.push(extension.copy())
     }
-    multiple :: if request.allow_multiple -> "1" else -> "0"
-    listed :: extensions.join(",")
-    wire :: "{request.title}{field}{request.grant.root}{field}{multiple}{field}{listed}"
-    token :: core.ui.host.__dialog_request(if opening -> 0 else -> 1, wire)
+    token :: core.ui.host.__dialog_request(if opening -> 0 else -> 1, provider_record(wire))
     if token < 0 -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider refused the dialog request"})
     answer :: core.ui.host.__dialog_result(token) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned no dialog result"})
-    items :: answer.split(provider_item_separator()).to_list()
+    items :: provider_record_fields(answer) ?? return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result is not a provider record"})
+    if items.len() == 0 -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider's dialog result has no status"})
     if items[0] == "cancelled" -> return Err(UIHostError.Cancelled(.User))
     if items[0] != "selected" -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider returned an unknown dialog status `{items[0]}`"})
     if items.len() < 2 -> return Err(UIHostError.InvalidRequest("a completed file dialog must select at least one file"))

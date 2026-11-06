@@ -129,6 +129,82 @@ function sleep(milliseconds) {
   }
 }
 
+// A core.ui.host provider record: each field is its UTF-8 byte length in
+// decimal, `:`, then its text, so any text survives (Core/Ui/Host.jet).
+function providerRecord(fields) {
+  return fields.map((field) => encoder.encode(field).length + ":" + field).join("");
+}
+
+// The page's default core.ui.host provider, installed when the page set none.
+// It forwards browser primitives only, raw event types and values included;
+// Core decodes and judges every answer. Composition events queue on 0 and
+// drag/drop events on 1 for event_pop, each in a host buffer of UI_QUEUE
+// records; a full buffer drops further events behind one empty record, which
+// Core reports as a full queue. The clipboard is the text this page last
+// observed through a paste, copy or cut, or its own write: a browser lends the
+// live clipboard only to a user gesture, and a write's later refusal by the
+// browser is not seen. File dialogs and font shaping are absent: a file input
+// answers later than the synchronous seam and gives no filesystem path.
+const UI_QUEUE = 256;
+
+function defaultUiProvider(doc) {
+  const queues = [[], []];
+  let clipboard = null;
+  const enqueue = (queue, fields) => {
+    const records = queues[queue];
+    if (records.length < UI_QUEUE) records.push(providerRecord(fields));
+    else if (records.at(-1) !== "") records.push("");
+  };
+  const target = (event) => String(event.target?.id ?? "");
+  // A composition reports no caret or marked range of its own.
+  const composition = (event) => enqueue(0, [target(event), event.type, event.data ?? "", "", "", "", ""]);
+  doc.addEventListener("compositionstart", composition);
+  doc.addEventListener("compositionupdate", composition);
+  doc.addEventListener("compositionend", composition);
+  // A page accepts a drop by cancelling dragover; the dropped data is
+  // readable only on drop.
+  const drag = (event) => {
+    if (event.type === "dragover" || event.type === "drop") event.preventDefault();
+    const data = event.dataTransfer;
+    const dropped = event.type === "drop" && data;
+    enqueue(1, [
+      target(event),
+      event.type,
+      data?.dropEffect ?? "none",
+      dropped ? data.getData("text/plain") : "",
+      dropped ? data.getData("text/uri-list") : "",
+    ]);
+  };
+  doc.addEventListener("dragenter", drag);
+  doc.addEventListener("dragover", drag);
+  doc.addEventListener("drop", drag);
+  doc.addEventListener("dragleave", drag);
+  // Paste carries the pasted text; copy and cut carry what the page set, else
+  // the selection the browser copies.
+  const observe = (event) => {
+    const text = event.clipboardData?.getData("text/plain") ?? "";
+    if (event.type === "paste" || text !== "") clipboard = text;
+    else if (!event.defaultPrevented) clipboard = String(doc.getSelection?.() ?? "");
+  };
+  doc.addEventListener("paste", observe);
+  doc.addEventListener("copy", observe);
+  doc.addEventListener("cut", observe);
+  return {
+    capability: (code) => code >= 1 && code <= 5,
+    clipboardGet: () => clipboard,
+    clipboardSet: (text) => {
+      const system = globalThis.navigator?.clipboard;
+      if (!system?.writeText) return false;
+      clipboard = text;
+      system.writeText(text).catch(() => {});
+      return true;
+    },
+    eventPop: (queue) => queues[queue]?.shift() ?? null,
+    dialogRequest: () => -1,
+    dialogResult: () => null,
+  };
+}
+
 function nowNanoseconds(clock) {
   if (clock === 0 || clock === 8 || clock === 11) {
     return BigInt(Date.now()) * 1000000n + BigInt(Math.floor((performance.now() % 1) * 1000000));
@@ -266,6 +342,10 @@ class Host {
   }
 
   static async open(url, args, environment) {
+    // A page gets the default core.ui.host provider unless it installed one.
+    if (globalThis.document?.addEventListener && globalThis.jetUiProvider === undefined) {
+      globalThis.jetUiProvider = defaultUiProvider(globalThis.document);
+    }
     const base = new URL(".", url);
     const manifest = JSON.parse(decoder.decode(await load(new URL("web.manifest.json", base))));
     const host = new Host(manifest);

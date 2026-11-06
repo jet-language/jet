@@ -11,6 +11,8 @@ env: JETPACK_ROOT={work}/jetpack-0
 env: JETPACK_ENV=1
 env: NO_COLOR=1
 exit: nonzero
-json: machine doc $.reports[0].code in ["E1334", "E1362"]
+# The authorized source snapshot refuses a linked file before any metadata is read.
+json: machine doc $.reports[0].code = "E2105"
+json: machine doc $.reports[0].what ~ "config.jet` is a symbolic link"
 file: outside-config.jet = "description: \"host-state\"\n"
 file: config.jet is-symlink

@@ -8,6 +8,7 @@ use {
         JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, jet_cli_closest_command, jet_cli_command_index,
         jet_cli_completions_bash, jet_cli_completions_fish, jet_cli_completions_powershell,
         jet_cli_completions_zsh, jet_cli_group_usage, jet_cli_handler_index,
+        jet_cli_flag_commands, jet_cli_flag_spec, jet_cli_flag_takes, jet_cli_flags_for_command,
         jet_cli_is_canonical_top_level, jet_cli_is_known_flag, jet_cli_man_page, jet_cli_moved_command,
         jet_cli_nested_command, jet_cli_rule_explanation, jet_cli_rule_named, jet_cli_syntax_lookup,
     ]
@@ -108,6 +109,25 @@ fn cli_registry_flag_copy() Never! {
     }
 }
 
+// #6603: a flag's registry row is the one place that says which commands take
+// it; the front's flag check and `jet help <command>` both read it.
+fn cli_registry_flag_scopes() Never! {
+    loop flag in JET_CLI_FLAGS {
+        commands :: jet_cli_flag_commands(flag.help) ?? next
+        cli_registry_require(commands.len() > 0, "the scope of {flag.long} names no jet command: {flag.help}")
+    }
+    check :: jet_cli_flag_spec("--check=x") ?? panic("--check is registered")
+    cli_registry_require((jet_cli_flag_commands(check.help) ?? [String]{}) == [String]{"fmt", "doc", "split", "fold"}, "--check belongs to fmt, doc, split and fold")
+    cli_registry_require(jet_cli_flag_takes(check, "fmt") && !jet_cli_flag_takes(check, "init"), "init does not take --check")
+    json :: jet_cli_flag_spec("--json") ?? panic("--json is registered")
+    cli_registry_require(jet_cli_flag_commands(json.help) == None && jet_cli_flag_takes(json, "init"), "--json goes with every command")
+    verbose :: jet_cli_flag_spec("--verbose") ?? panic("--verbose is registered")
+    cli_registry_require(jet_cli_flag_takes(verbose, "check") && jet_cli_flag_takes(verbose, "explain"), "every `with` clause of --verbose scopes it")
+    topic :: jet_cli_flag_spec("--topic") ?? panic("--topic is registered")
+    cli_registry_require(jet_cli_flag_takes(topic, "inspect") && !jet_cli_flag_takes(topic, "build"), "`inspect digest` scopes --topic to inspect")
+    cli_registry_require(jet_cli_flags_for_command("doc").any(row -> row.long == "--check"), "jet help doc lists --check")
+}
+
 // Prelude/Markers.jet marker types through the one rule explanation. A
 // comment, a variadic last field and a group exercise the reader's shape.
 fn cli_registry_explain_markers() Never! {
@@ -140,5 +160,6 @@ fn cli_registry_explain_markers() Never! {
     cli_registry_typo_suggestions()
     cli_registry_completions()
     cli_registry_flag_copy()
+    cli_registry_flag_scopes()
     cli_registry_explain_markers()
 }

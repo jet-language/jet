@@ -70,14 +70,27 @@ static void observe_free(void *p,int64_t size,int64_t align) {
         assert(size==watched[i].size && align==watched[i].align);assert(++watched[i].frees==1);
     }
 }
+// A block watched again before it is freed is another owner of the same
+// refcounted text: it stays one entry that must be freed exactly once.
 static void watch(void *p,int64_t size,int64_t align) {
-    assert(count<128);for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
+    assert(count<128);
+    for(size_t i=0;i<count;++i) if(watched[i].pointer==p) { assert(!watched[i].frees && size==watched[i].size && align==watched[i].align); return; }
     watched[count].pointer=p;watched[count].size=size;watched[count].align=align;watched[count++].frees=0;
 }
 static void freed(unsigned before) {
     assert(intercepted>before);for(size_t i=0;i<count;++i) assert(watched[i].frees==1);count=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
+static bool text_block(Text *t,void *p) { return p==(char *)t-8 || (t->capacity && p==t->data); }
+// An owned copy of t whose first byte differs: clones share t's bytes, so a
+// differing field is a different text, never a write through a shared one.
+static Text *flipped(Text *t) {
+    char bytes[64]; assert(t->length>0 && t->length<=64);
+    memcpy(bytes,t->data,(size_t)t->length); bytes[0]^=1;
+    return jet_rt_string_from_static(bytes,t->length);
+}
 static void watch_frame_fields(Frame *f) { watch_text(f->function);watch_text(f->component); }
 static void watch_fault(Fault *f) {
     watch(f,24,8);watch_text(f->export_name);watch_text(f->message);watch(f->frames,24,8);
@@ -89,18 +102,20 @@ static void expect(Text *t,const char *s) { assert(t->length==(int64_t)strlen(s)
 static void integer(int64_t x,int64_t value) { assert(jet_int_owned_to_i64(x)==value);jet_rt_int_drop(x); }
 static Frame *frame(int64_t offset) {
     Text *f=text("function"),*c=text("component");int64_t i=jet_int_owned_from_i64(offset);
-    Frame *result=jet_rt_record_new_plugin_frame(f,c,i);assert(result->function!=f && result->component!=c && result->offset==offset);
+    Frame *result=jet_rt_record_new_plugin_frame(f,c,i);assert(result->function==f && owners(f)==2 && result->component==c && owners(c)==2 && result->offset==offset);
     jet_rt_string_drop(f);jet_rt_string_drop(c);jet_rt_int_drop(i);return result;
 }
 static void frame_cases(void) {
     Frame *a=frame(INT64_MIN),*b=jet_rt_handle_clone_plugin_frame(a);
-    assert(a!=b && a->function!=b->function && a->component!=b->component && a->function->data!=b->function->data && a->component->data!=b->component->data);
+    // Records are reallocated; their texts are shared by owner count.
+    assert(a!=b && a->function==b->function && owners(a->function)==2 && a->component==b->component && owners(a->component)==2);
     Text *f=jet_rt_record_get_plugin_frame_function(a),*c=jet_rt_record_get_plugin_frame_component(a);
-    assert(f!=a->function && f->data!=a->function->data && c!=a->component && c->data!=a->component->data);
+    assert(f==a->function && owners(f)==3 && c==a->component && owners(c)==3);
     expect(f,"function");expect(c,"component");integer(jet_rt_record_get_plugin_frame_offset(a),INT64_MIN);
+    assert(owners(a->function)==2 && owners(a->component)==2);
     assert(jet_rt_handle_eq_plugin_frame(a,a) && jet_rt_handle_eq_plugin_frame(a,b));
-    b->function->data[0]='X';assert(!jet_rt_handle_eq_plugin_frame(a,b));b->function->data[0]='f';
-    b->component->data[0]='X';assert(!jet_rt_handle_eq_plugin_frame(a,b));b->component->data[0]='c';
+    Text *kept=b->function,*other=flipped(kept);b->function=other;assert(!jet_rt_handle_eq_plugin_frame(a,b));b->function=kept;jet_rt_string_drop(other);
+    kept=b->component;other=flipped(kept);b->component=other;assert(!jet_rt_handle_eq_plugin_frame(a,b));b->component=kept;jet_rt_string_drop(other);
     b->offset=0;assert(!jet_rt_handle_eq_plugin_frame(a,b));
     watch(a,24,8);watch(b,24,8);watch_frame_fields(a);watch_frame_fields(b);
     unsigned before=intercepted;jet_rt_handle_drop_plugin_frame(a);jet_rt_handle_drop_plugin_frame(b);freed(before);jet_rt_handle_drop_plugin_frame(NULL);
@@ -116,16 +131,16 @@ static void fault_cases(void) {
         for(int64_t i=0;i<n;++i) assert(jet_rt_record_seq_list_rec_plugin_frame_get(seq,i)==seq->data+i);
         Text *e=text("entry"),*m=text("message");Fault *a=jet_rt_record_new_plugin_fault(e,m,seq),*b=jet_rt_handle_clone_plugin_fault(a);
         assert(a->frames==seq && jet_rt_record_get_plugin_fault_frames(a)==seq && a!=b && a->frames!=b->frames);
-        assert(a->export_name!=e && a->message!=m && b->export_name!=a->export_name && b->message!=a->message);
+        assert(a->export_name==e && a->message==m && b->export_name==a->export_name && b->message==a->message && owners(e)==3 && owners(m)==3);
         jet_rt_string_drop(e);jet_rt_string_drop(m);
         Text *eg=jet_rt_record_get_plugin_fault_export(a),*mg=jet_rt_record_get_plugin_fault_message(a);
-        assert(eg!=a->export_name && eg->data!=a->export_name->data && mg!=a->message && mg->data!=a->message->data);
+        assert(eg==a->export_name && owners(eg)==3 && mg==a->message && owners(mg)==3);
         expect(eg,"entry");expect(mg,"message");assert(jet_rt_handle_eq_plugin_fault(a,a) && jet_rt_handle_eq_plugin_fault(a,b));
-        b->export_name->data[0]='X';assert(!jet_rt_handle_eq_plugin_fault(a,b));b->export_name->data[0]='e';
-        b->message->data[0]='X';assert(!jet_rt_handle_eq_plugin_fault(a,b));b->message->data[0]='m';
+        Text *kept=b->export_name,*other=flipped(kept);b->export_name=other;assert(!jet_rt_handle_eq_plugin_fault(a,b));b->export_name=kept;jet_rt_string_drop(other);
+        kept=b->message;other=flipped(kept);b->message=other;assert(!jet_rt_handle_eq_plugin_fault(a,b));b->message=kept;jet_rt_string_drop(other);
         if(n) {
             assert(a->frames->data!=b->frames->data);
-            for(int64_t i=0;i<n;++i) assert(a->frames->data[i].function!=b->frames->data[i].function && a->frames->data[i].function->data!=b->frames->data[i].function->data);
+            for(int64_t i=0;i<n;++i) assert(a->frames->data[i].function==b->frames->data[i].function && owners(a->frames->data[i].function)==2);
             b->frames->data[0].offset=0;assert(!jet_rt_handle_eq_plugin_fault(a,b));b->frames->data[0].offset=INT64_MAX;
             b->frames->length--;assert(!jet_rt_handle_eq_plugin_fault(a,b));b->frames->length++;
             Frame temp=b->frames->data[0];b->frames->data[0]=b->frames->data[1];b->frames->data[1]=temp;assert(!jet_rt_handle_eq_plugin_fault(a,b));
@@ -145,11 +160,14 @@ static void span_policy_cases(void) {
     const int64_t edges[]={INT64_MIN,0,INT64_MAX};
     for(size_t i=0;i<3;++i) {
         int64_t id=jet_int_owned_from_i64(edges[i]);Text *name=text("span");Span *a=jet_rt_record_new_log_span(id,name),*b=jet_rt_handle_clone_log_span(a);
-        jet_rt_int_drop(id);jet_rt_string_drop(name);assert(a!=b && a->id==edges[i] && a->name!=b->name && a->name->data!=b->name->data);
-        integer(jet_rt_record_get_log_span_id(a),edges[i]);Text *get=jet_rt_record_get_log_span_name(a);assert(get!=a->name && get->data!=a->name->data);
+        jet_rt_int_drop(id);jet_rt_string_drop(name);assert(a!=b && a->id==edges[i] && a->name==b->name && owners(a->name)==2);
+        integer(jet_rt_record_get_log_span_id(a),edges[i]);Text *get=jet_rt_record_get_log_span_name(a);assert(get==a->name && owners(get)==3);
         assert(jet_rt_handle_eq_log_span(a,a) && jet_rt_handle_eq_log_span(a,b));b->id^=1;assert(!jet_rt_handle_eq_log_span(a,b));b->id^=1;
-        b->name->data[0]='X';assert(!jet_rt_handle_eq_log_span(a,b));
-        watch(a,16,8);watch(b,16,8);watch_text(a->name);watch_text(b->name);unsigned before=intercepted;jet_rt_handle_drop_log_span(a);jet_rt_handle_drop_log_span(b);freed(before);expect(get,"span");
+        Text *kept=b->name,*other=flipped(kept);b->name=other;assert(!jet_rt_handle_eq_log_span(a,b));b->name=kept;jet_rt_string_drop(other);
+        watch(a,16,8);watch(b,16,8);watch_text(a->name);unsigned before=intercepted;jet_rt_handle_drop_log_span(a);jet_rt_handle_drop_log_span(b);
+        // The getter's owner keeps the shared name alive past both records.
+        assert(owners(get)==1);for(size_t j=0;j<count;++j) assert(watched[j].frees==(text_block(get,watched[j].pointer)?0u:1u));
+        expect(get,"span");freed(before);
         for(int64_t tag=0;tag<3;++tag) {
             int64_t capacity=jet_int_owned_from_i64(edges[i]);Policy *p=jet_rt_record_new_jet_async_policy(capacity,tag),*q=jet_rt_handle_clone_jet_async_policy(p);jet_rt_int_drop(capacity);
             assert(p!=q && p->capacity==edges[i] && q->capacity==edges[i] && q->overflow==tag);

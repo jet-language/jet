@@ -30,7 +30,9 @@ static void observe_free(void *p,int64_t n,int64_t a) {
 static void watch(void *p,int64_t n,int64_t a) {
     assert(p && count<20); watched[count].p=p; watched[count].n=n; watched[count].a=a; watched[count++].freed=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
 static void watch_proxy(Proxy *p) { watch(p,16,8); if(p->ordinal==2) watch_text(p->payload); }
 static void all_freed(void) { for(size_t i=0;i<count;i++) assert(watched[i].freed==1); count=0; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
@@ -39,10 +41,12 @@ static void url(const char *s) {
     Text *source=text(s); Proxy *p=jet_rt_record_new_jet_http_proxy_url(source),*copy=jet_rt_handle_clone_jet_http_proxy(p);
     Text *getter=jet_rt_record_get_jet_http_proxy_url(p);
     assert(jet_rt_record_tag_jet_http_proxy(p)==2 && p!=copy);
-    assert(source!=p->payload && p->payload!=copy->payload && getter!=p->payload && getter!=copy->payload);
+    // Constructor, clone and getter each take one more owner of the same text.
+    assert(source==p->payload && p->payload==copy->payload && getter==p->payload && owners(source)==4);
     text_is(source,s); text_is(p->payload,s); text_is(copy->payload,s); text_is(getter,s);
     watch_text(source); watch_proxy(p); watch_proxy(copy); watch_text(getter);
     jet_rt_string_drop(source); jet_rt_handle_drop_jet_http_proxy(p);
+    assert(owners(copy->payload)==2);
     text_is(copy->payload,s); text_is(getter,s); jet_rt_handle_drop_jet_http_proxy(copy); jet_rt_string_drop(getter); all_freed();
 }
 static void wrong_getter(int64_t ordinal) {

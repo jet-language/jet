@@ -1,5 +1,5 @@
 // Line-for-line semantic port of surface.rs:1291-1577 (real CLI callback, no synthetic provider).
-// The expected published status/report schemas are original v1/v2, never widened.
+// It reads the published status/report schemas: jet.status/v1 carrying jet.report/v3 rows.
 use {
     files :: core.files
     process :: core.process
@@ -33,8 +33,8 @@ fn s1_repair_array(value: encoding.Dyn) -> [encoding.Dyn] {
     }
 }
 fn s1_repair_parse_report(value: encoding.Dyn) -> S1RepairReport {
-    // surface.rs1327: exact original schema, even if the live head differs.
-    assert_eq(s1_repair_string(value, "schema"), "jet.report/v2")
+    // The live machine report schema: jet.report/v3 inside a jet.status/v1 envelope.
+    assert_eq(s1_repair_string(value, "schema"), "jet.report/v3")
     code :: s1_repair_string(value, "code")
     edits := [S1RepairEdit]{}
     loop edit in s1_repair_array(s1_repair_field(value, "fix_edits")) {
@@ -49,7 +49,6 @@ fn s1_repair_parse_report(value: encoding.Dyn) -> S1RepairReport {
 }
 fn s1_repair_parse_reports(status: encoding.Dyn) -> [S1RepairReport] {
     assert_eq(s1_repair_string(status, "schema"), "jet.status/v1")
-    assert_eq(s1_repair_string(status, "action"), "check")
     loop value in s1_repair_array(s1_repair_field(status, "reports")) -> s1_repair_parse_report(value)
 }
 fn s1_repair_check(dir: String, jet: String, state: [S1RepairFile]) -> [S1RepairReport] {
@@ -58,16 +57,17 @@ fn s1_repair_check(dir: String, jet: String, state: [S1RepairFile]) -> [S1Repair
     // state is in BTreeMap path order (helper.jet then run.jet).
     loop file in state {
         output :: process.cmd([String]{jet, "check", file.path, "--json"}).cwd(dir).env("NO_COLOR", "1").run() ?? panic("check spawn")
-        assert_eq(output.errors, "", "JSON check wrote stderr")
+        assert(output.errors == "", "JSON check wrote stderr")
         status :: json.parse(output.output.trim().copy()) ?? panic("JSON check must emit one status object")
         assert_eq(s1_repair_string(status, "schema"), "jet.status/v1")
-        assert_eq(s1_repair_string(status, "action"), "check")
         rows :: s1_repair_parse_reports(status)
         if output.success {
-            assert_eq(s1_repair_field(status, "ok"), encoding.Dyn.Bool(true))
-            assert_eq(rows.len(), 0, "clean check must have no reports")
+            assert_eq(s1_repair_string(status, "action"), "check")
+            assert(json.to_string(s1_repair_field(status, "ok")) == "true", "clean check must report ok")
+            assert(rows.len() == 0, "clean check must have no reports")
         } else {
-            assert_eq(output.code, 1, "check failed")
+            assert_eq(s1_repair_string(status, "action"), "diagnostics")
+            assert(output.code == 1, "check failed")
             loop row in rows -> &reports.push(row)
         }
     }
@@ -88,14 +88,16 @@ fn s1_repair_codes(reports: [S1RepairReport]) -> [String] Never! {
     &codes.sort()
     codes
 }
-fn s1_repair_apply(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1RepairFile] String! {
+#Error
+enum S1RepairError { Failed(String) }
+fn s1_repair_apply(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1RepairFile] S1RepairError! {
     // surface.rs1404-1453: group edits by file, reject untracked files, descending spans.
     paths := [String]{}
     loop file in state -> &paths.push(file.path)
     loop report in reports {
-        if report.edits.len() == 0 -> return Err("report {report.code} has no fix_edits")
+        if report.edits.len() == 0 -> return Err(S1RepairError.Failed("report {report.code} has no fix_edits"))
         loop edit in report.edits {
-            if !paths.contains(edit.file) -> return Err("fix_edit for {edit.code} names untracked file {edit.file}")
+            if !paths.contains(edit.file) -> return Err(S1RepairError.Failed("fix_edit for {edit.code} names untracked file {edit.file}"))
         }
     }
     next_state := [S1RepairFile]{}
@@ -113,20 +115,20 @@ fn s1_repair_apply(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1Repai
         })
         loop index in 1..<edits.len() {
             if edits[index - 1].start < edits[index].end {
-                return Err("overlapping fix_edits for {edits[index - 1].code} and {edits[index].code} in {file.path}")
+                return Err(S1RepairError.Failed("overlapping fix_edits for {edits[index - 1].code} and {edits[index].code} in {file.path}"))
             }
         }
         fixed := file.source.bytes()
         loop edit in edits {
             if edit.start > edit.end || edit.end > fixed.len() {
-                return Err("invalid span {edit.start}..{edit.end} for fix_edit {edit.code} in {file.path}")
+                return Err(S1RepairError.Failed("invalid span {edit.start}..{edit.end} for fix_edit {edit.code} in {file.path}"))
             }
             // String::get(start..end) rejects both non-UTF8 boundaries, even for an empty slice.
             if edit.start < fixed.len() && Int.from_u8(fixed[edit.start]).bit_and(192) == 128 {
-                return Err("invalid span {edit.start}..{edit.end} for fix_edit {edit.code} in {file.path}")
+                return Err(S1RepairError.Failed("invalid span {edit.start}..{edit.end} for fix_edit {edit.code} in {file.path}"))
             }
             if edit.end < fixed.len() && Int.from_u8(fixed[edit.end]).bit_and(192) == 128 {
-                return Err("invalid span {edit.start}..{edit.end} for fix_edit {edit.code} in {file.path}")
+                return Err(S1RepairError.Failed("invalid span {edit.start}..{edit.end} for fix_edit {edit.code} in {file.path}"))
             }
             replacement := fixed.slice(0, edit.start)
             loop byte in edit.new_text.bytes() -> &replacement.push(byte)
@@ -137,26 +139,26 @@ fn s1_repair_apply(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1Repai
     }
     Ok(next_state)
 }
-fn s1_repair_loop(initial: [S1RepairFile], max_rounds: Int, dir: String, jet: String) -> S1RepairDone String! {
+fn s1_repair_loop(initial: [S1RepairFile], max_rounds: Int, dir: String, jet: String) -> S1RepairDone S1RepairError! {
     state := initial
     seen := [[S1RepairFile]]{}
     previous_codes := [String]{}
     has_previous := false
     loop round in 0..max_rounds {
-        reports :: s1_repair_check(dir, jet, state)
+        reports :: s1_repair_check(dir, jet, state) ?? panic("repair check")
         if reports.len() == 0 -> return Ok(S1RepairDone{state: state, rounds: round})
         codes :: s1_repair_codes(reports)
         loop old in seen {
-            if s1_repair_same(old, state) -> return Err("repeated file state; offending code(s): {codes.join(", ")}")
+            if s1_repair_same(old, state) -> return Err(S1RepairError.Failed("repeated file state; offending code(s): {codes.join(", ")}"))
         }
         if has_previous {
             introduced := [String]{}
             loop code in codes {
                 if !previous_codes.contains(code) -> &introduced.push(code)
             }
-            if introduced.len() != 0 -> return Err("fix_edit regression introduced report code(s): {introduced.join(", ")}")
+            if introduced.len() != 0 -> return Err(S1RepairError.Failed("fix_edit regression introduced report code(s): {introduced.join(", ")}"))
         }
-        if round == max_rounds -> return Err("round bound {max_rounds} exceeded; offending code(s): {codes.join(", ")}")
+        if round == max_rounds -> return Err(S1RepairError.Failed("round bound {max_rounds} exceeded; offending code(s): {codes.join(", ")}"))
         &seen.push(state.copy())
         if s1_repair_apply(state, reports) == {
             .Ok(next_state) -> state = next_state
@@ -195,12 +197,14 @@ fn s1_repair_loop(initial: [S1RepairFile], max_rounds: Int, dir: String, jet: St
     assert(counts[1] >= 3, "run.jet needs several errors")
     assert(counts[0] >= 3, "helper.jet needs several errors")
     if s1_repair_loop(initial.copy(), 0, dir, jet) == {
-        .Err(error) -> assert(error.contains("round bound 0") && error.contains("E0102"), "bound failure must name offending code")
+        .Err(error) -> if error == {
+            .Failed(reason) -> assert(reason.contains("round bound 0") && reason.contains("E0102"), "bound failure must name offending code")
+        }
         .Ok(_) -> panic("expected bound failure")
     }
     result :: s1_repair_loop(initial, 4, dir, jet) ?? panic("repair loop failed")
     assert(result.rounds <= 4)
-    assert_eq(s1_repair_check(dir, jet, result.state).len(), 0, "final recheck was not clean")
+    assert(s1_repair_check(dir, jet, result.state).len() == 0, "final recheck was not clean")
     // surface.rs1557-1576: exact original final source bytes.
     assert_eq(result.state[1].source, files.read("run-fixed.bytes") ?? panic("run oracle"))
     assert_eq(result.state[0].source, files.read("helper-fixed.bytes") ?? panic("helper oracle"))

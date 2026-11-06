@@ -733,6 +733,7 @@ struct LiveRegistry {
     invalidations: Int
     changes: Int
     evictions: Int
+    ws_pushes: Int
     records: [LiveRecord]
 }
 
@@ -1356,12 +1357,11 @@ fn state<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loada
     Loadable.Loaded(value)
 }
 
-// No WebSocket transport feeds the registry yet (core.net.ws, #4957), so no
-// live result has been pushed over one. `changes` counts stored results that
-// differed from the one before.
+// `changes` counts stored results that differed from the one before;
+// `ws_pushes` counts the invalidations published to the WebSocket live hub.
 fn live_stats() -> String Never! {
     registry :: live_decode(live_cell_load()) ?? return "LiveStats(error=live registry unavailable)"
-    "LiveStats(queries={live_query_count(registry)}, limit={LIVE_MAX_QUERIES}, evictions={registry.evictions}, invalidations={registry.invalidations}, changes={registry.changes}, ws_pushes=0)"
+    "LiveStats(queries={live_query_count(registry)}, limit={LIVE_MAX_QUERIES}, evictions={registry.evictions}, invalidations={registry.invalidations}, changes={registry.changes}, ws_pushes={registry.ws_pushes})"
 }
 
 // The live bindings of `registry`; app.sync's session records are not queries.
@@ -1496,7 +1496,10 @@ fn live_store(id: Int, value: String, now: Int) {
     }
 }
 
-// Marks dirty every binding of `source`, or only the one whose key is `key`.
+// Marks dirty every binding of `source`, or only the one whose key is `key`,
+// then publishes the invalidation to the WebSocket live hub (D-LIVEQUERY1):
+// topic `live:<source>`, a JSON event every joined server connection receives
+// and a connection that joins later gets replayed as the topic's latest.
 fn live_invalidate(source: String, key: String?) {
     loop {
         seen :: live_cell_load()
@@ -1510,7 +1513,12 @@ fn live_invalidate(source: String, key: String?) {
         }
         if hit == 0 -> return
         registry.invalidations += hit
-        if live_cell_replace(seen, live_encode(registry)) -> return
+        registry.ws_pushes += 1
+        if live_cell_replace(seen, live_encode(registry)) {
+            key_json :: if key == .Val(only) -> __app_json_string(only) else -> "null"
+            core.web.__live_publish("live:{source}", "{{\"live\":\"invalidate\",\"source\":{__app_json_string(source)},\"key\":{key_json},\"invalidations\":{registry.invalidations}}}")
+            return
+        }
     }
 }
 
@@ -1522,13 +1530,15 @@ fn live_index(registry: LiveRegistry, id: Int) -> Int? {
 }
 
 // The cell holds the registry as length-prefixed fields: next id,
-// invalidations, changes, evictions, then seven fields per binding.
+// invalidations, changes, evictions, WebSocket pushes, then seven fields per
+// binding.
 fn live_encode(registry: LiveRegistry) -> [U8] {
     out := [U8]{}
     live_put(&out, "{registry.next_id}")
     live_put(&out, "{registry.invalidations}")
     live_put(&out, "{registry.changes}")
     live_put(&out, "{registry.evictions}")
+    live_put(&out, "{registry.ws_pushes}")
     loop record in registry.records {
         live_put(&out, "{record.id}")
         live_put(&out, record.source)
@@ -1548,15 +1558,16 @@ fn live_put(out: &[U8], text: String) {
 
 // An empty cell is the empty registry; None when the bytes are malformed.
 fn live_decode(raw: [U8]) -> LiveRegistry? {
-    if raw.len() == 0 -> return Val(LiveRegistry{next_id: 0, invalidations: 0, changes: 0, evictions: 0, records: [LiveRecord]{}})
+    if raw.len() == 0 -> return Val(LiveRegistry{next_id: 0, invalidations: 0, changes: 0, evictions: 0, ws_pushes: 0, records: [LiveRecord]{}})
     fields :: live_fields(raw) ?? return None
-    if fields.len() < 4 || (fields.len() - 4) % 7 != 0 -> return None
+    if fields.len() < 5 || (fields.len() - 5) % 7 != 0 -> return None
     next_id :: Int.parse(fields[0]) ?? return None
     invalidations :: Int.parse(fields[1]) ?? return None
     changes :: Int.parse(fields[2]) ?? return None
     evictions :: Int.parse(fields[3]) ?? return None
+    ws_pushes :: Int.parse(fields[4]) ?? return None
     records := [LiveRecord]{}
-    at := 4
+    at := 5
     loop at < fields.len() {
         id :: Int.parse(fields[at]) ?? return None
         every_ns :: Int.parse(fields[at + 5]) ?? return None
@@ -1564,7 +1575,7 @@ fn live_decode(raw: [U8]) -> LiveRegistry? {
         &records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", every_ns: every_ns, ran_ns: ran_ns})
         at += 7
     }
-    Val(LiveRegistry{next_id: next_id, invalidations: invalidations, changes: changes, evictions: evictions, records: records})
+    Val(LiveRegistry{next_id: next_id, invalidations: invalidations, changes: changes, evictions: evictions, ws_pushes: ws_pushes, records: records})
 }
 
 // The length-prefixed fields (`<decimal byte length>:<bytes>`) of `raw`.

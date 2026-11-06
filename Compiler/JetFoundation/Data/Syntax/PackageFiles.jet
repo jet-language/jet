@@ -353,11 +353,11 @@ DBG_FIX :: "fix" // Checked source repair
 SCHEMA_CACHE_SUBDIR :: "cache/schema"
 
 /// S2 (was c129): subdirectory under the project
-/// `.jet/` managed folder where public-fn signature snapshots are stored.
-/// Full path is `<project_root>/.jet/cache/api/<package>.api`. Written at
-/// `jet registry publish` time, unconditionally, for every library target; read by the
-/// local pre-publish SemVer gate (E1218). Committed — it is a durable
-/// interface contract, not a build artifact.
+/// `.jet/` managed folder where the package's public API snapshot is stored.
+/// Full path is `<project_root>/.jet/cache/api/<package>.api`. Written by
+/// every successful `jet registry publish` and committed with the package;
+/// the lock fingerprint reads it. The SemVer gate (E1218) compares against
+/// the registry's copy (`apis/<package>/<version>.api`), never this one.
 API_CACHE_SUBDIR :: "cache/api"
 
 /// (ratified = A): consumes a Task handle without joining

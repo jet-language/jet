@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-typedef struct { unsigned char *data; int64_t length,capacity; } Text;
+typedef struct { unsigned char *data; int64_t length,capacity,cache; } Text;
 typedef struct { int64_t seconds; uint64_t nanos,leap; } DateTime;
 typedef struct { int64_t first; uint64_t second; } Pair;
 typedef struct { int64_t length,capacity; Pair *data; } Rows;
@@ -18,8 +18,9 @@ _Static_assert(sizeof(Zoned)==16 && offsetof(Zoned,zone)==8,"Zoned16");
 _Static_assert(sizeof(Rows)==24 && sizeof(Pair)==16,"List24 pair16");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
+extern void jet_rt_free(void *,int64_t,int64_t);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
-extern Text *jet_rt_string_new(unsigned char *,int64_t);
+extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern Text *jet_rt_string_clone(Text *);
 extern void jet_rt_string_drop(Text *);
 #define API(type,name) \
@@ -29,7 +30,7 @@ extern bool jet_rt_handle_eq_##name(type *,type *); \
 extern Text *jet_rt_handle_show_##name(type *); \
 extern Text *jet_rt_handle_display_##name(type *); \
 extern Text *jet_rt_handle_debug_##name(type *)
-API(DateTime,JetDateTime); API(Zone,JetZone); API(Zoned,JetZonedDateTime);
+API(DateTime,jet_date_time); API(Zone,jet_zone); API(Zoned,jet_zoned_date_time);
 extern unsigned char *jet_rt_handle_field_jet_date_time_leap_second(DateTime *);
 extern void jet_rt_handle_field_jet_zone_name(Zone *,Text *);
 extern DateTime *jet_rt_handle_field_jet_zoned_date_time_instant(Zoned *);
@@ -45,17 +46,33 @@ static void observe_free(void *p,int64_t bytes,int64_t align) {
         assert(bytes==watched[i].bytes && align==watched[i].align); assert(++watched[i].frees==1);
     }
 }
+// Zone names are shared by refcount, so zones and their clones can name one
+// text block: it is watched once and must be freed exactly once.
 static void watch(void *p,int64_t bytes,int64_t align) {
-    assert(p && count<48); for(size_t i=0;i<count;++i) assert(watched[i].p!=p);
-    watched[count].p=p; watched[count].bytes=bytes; watched[count].align=align; watched[count++].frees=0;
+    assert(p); for(size_t i=0;i<count;++i) if(watched[i].p==p) { assert(watched[i].bytes==bytes && watched[i].align==align); return; }
+    assert(count<48); watched[count].p=p; watched[count].bytes=bytes; watched[count].align=align; watched[count++].frees=0;
 }
+static unsigned frees_of(void *p) { for(size_t i=0;i<count;++i) if(watched[i].p==p) return watched[i].frees; assert(!"not watched"); return 0; }
 static void done(void) { assert(intercepted); for(size_t i=0;i<count;++i) assert(watched[i].frees==1); count=0; }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+// Every watched block is freed exactly once except a still-owned text, which is untouched.
+static void done_except(Text *t) {
+    assert(intercepted);
+    for(size_t i=0;i<count;++i) assert(watched[i].frees==((watched[i].p==(char *)(t)-8 || (t->capacity && watched[i].p==t->data)) ? 0u : 1u));
+    count=0;
+}
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8) & 0x3fffffffffffffff; }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void watch_rows(Rows *r) { watch(r,24,8); if(r->capacity) watch(r->data,r->capacity*16,8); }
-static void watch_zone(Zone *z) { watch(z,24,8); watch_text(z->name); watch_rows(z->transitions); watch_rows(z->infos); }
-static void watch_zoned(Zoned *z) { watch(z,16,8); watch(z->instant,24,8); watch_zone(z->zone); }
+// A zone owns its record and rows; its name is freed only by the last owner.
+static void watch_zone(Zone *z,bool name) { watch(z,24,8); if(name) watch_text(z->name); watch_rows(z->transitions); watch_rows(z->infos); }
+static void watch_zoned(Zoned *z,bool name) { watch(z,16,8); watch(z->instant,24,8); watch_zone(z->zone,name); }
 static void text_is(Text *t,const char *s) { assert(t && t->length==(int64_t)strlen(s)); assert(!t->length || memcmp(t->data,s,(size_t)t->length)==0); }
-static Text *text(const char *s) { return jet_rt_string_new((unsigned char *)s,(int64_t)strlen(s)); }
+static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
+// An owned copy whose first byte differs, for inequality probes on shared names.
+static Text *flipped(Text *t) {
+    unsigned char b[16]; assert(t->length>0 && t->length<=16); memcpy(b,t->data,(size_t)t->length); b[0]^=1;
+    Text *c=jet_rt_string_from_static(b,t->length); assert(c!=t && c->length==t->length && memcmp(c->data,b,(size_t)t->length)==0 && owners(c)==1); return c;
+}
 static DateTime *datetime(int64_t seconds,uint64_t nanos,uint64_t leap) {
     DateTime *d=jet_rt_alloc(24,8); d->seconds=seconds; d->nanos=nanos; d->leap=leap; return d;
 }
@@ -88,13 +105,13 @@ static void date_render(int64_t seconds,uint64_t nanos,uint64_t leap,const char 
 }
 static void zoned_render(int64_t seconds,uint64_t nanos,uint64_t leap,const char *name,int64_t offset,const char *expected) {
     Zoned *a=zoned(seconds,nanos,leap,name,offset),*b=jet_rt_handle_clone_jet_zoned_date_time(a);
-    assert(a!=b && a->instant!=b->instant && a->zone!=b->zone && jet_rt_handle_eq_jet_zoned_date_time(a,b));
+    assert(a!=b && a->instant!=b->instant && a->zone!=b->zone && a->zone->name==b->zone->name && owners(a->zone->name)==2 && jet_rt_handle_eq_jet_zoned_date_time(a,b));
     assert(jet_rt_handle_field_jet_zoned_date_time_instant(a)==a->instant && jet_rt_handle_field_jet_zoned_date_time_zone(a)==a->zone);
     Text *s=jet_rt_handle_show_jet_zoned_date_time(a),*d=jet_rt_handle_display_jet_zoned_date_time(a),*g=jet_rt_handle_debug_jet_zoned_date_time(a);
-    watch_zoned(a); jet_rt_handle_drop_jet_zoned_date_time(a); done();
+    watch_zoned(a,true); jet_rt_handle_drop_jet_zoned_date_time(a); done_except(b->zone->name); assert(owners(b->zone->name)==1);
     Text *survivor=jet_rt_handle_show_jet_zoned_date_time(b); text_is(survivor,expected);
     watch_text(survivor); jet_rt_string_drop(survivor); done();
-    watch_zoned(b); jet_rt_handle_drop_jet_zoned_date_time(b); done(); check_texts(s,d,g,expected);
+    watch_zoned(b,true); jet_rt_handle_drop_jet_zoned_date_time(b); done(); check_texts(s,d,g,expected);
 }
 static void equality(void) {
     DateTime *a=datetime(1,UINT64_C(0xabcdef000000007b),UINT64_C(0xabcdef0000000080)),*b=jet_rt_handle_clone_jet_date_time(a);
@@ -107,22 +124,25 @@ static void equality(void) {
     Zoned *x=zoned(1,2,0,"same",20700),*y=jet_rt_handle_clone_jet_zoned_date_time(x);
     y->zone->infos->data[0].first=-12600;
     assert(!jet_rt_handle_eq_jet_zone(x->zone,y->zone) && jet_rt_handle_eq_jet_zoned_date_time(x,y));
-    y->zone->name->data[0]^=1; assert(!jet_rt_handle_eq_jet_zoned_date_time(x,y)); y->zone->name->data[0]^=1;
+    assert(x->zone->name==y->zone->name && owners(x->zone->name)==2);
+    Text *shared=y->zone->name; y->zone->name=flipped(shared); assert(!jet_rt_handle_eq_jet_zoned_date_time(x,y)); jet_rt_string_drop(y->zone->name); y->zone->name=shared;
     ++y->instant->seconds; assert(!jet_rt_handle_eq_jet_zoned_date_time(x,y)); --y->instant->seconds;
-    watch_zoned(x); watch_zoned(y); jet_rt_handle_drop_jet_zoned_date_time(x); jet_rt_handle_drop_jet_zoned_date_time(y); done();
+    watch_zoned(x,true); watch_zoned(y,true); jet_rt_handle_drop_jet_zoned_date_time(x); jet_rt_handle_drop_jet_zoned_date_time(y); done();
 }
 static void zones(void) {
     Zone *a=zone("\xcf\x80\n",0);
     Pair transitions[]={{0,1},{10,2},{10,0},{20,2}},infos[]={{0,0},{20700,UINT64_C(0xabcdef0000000080)},{-12600,1}};
     watch_rows(a->transitions); jet_rt_free(a->transitions,24,8); done(); a->transitions=rows(transitions,4,2);
     watch_rows(a->infos); jet_rt_free(a->infos->data,a->infos->capacity*16,8); jet_rt_free(a->infos,24,8); done(); a->infos=rows(infos,3,1);
-    Zone *b=jet_rt_handle_clone_jet_zone(a); assert(a!=b && a->name!=b->name && a->transitions!=b->transitions && a->infos!=b->infos);
+    Zone *b=jet_rt_handle_clone_jet_zone(a); assert(a!=b && a->name==b->name && owners(a->name)==2 && a->transitions!=b->transitions && a->infos!=b->infos);
     assert(a->transitions->data!=b->transitions->data && a->infos->data!=b->infos->data && b->infos->data[1].second==1);
     assert(jet_rt_handle_eq_jet_zone(a,b));
     Text field={0}; jet_rt_handle_field_jet_zone_name(a,&field);
-    assert(field.data==a->name->data && field.length==a->name->length && field.capacity==a->name->capacity);
-    Text *owned=jet_rt_string_clone(&field); assert(owned!=a->name && owned->data!=a->name->data);
+    assert(field.data==a->name->data && field.length==a->name->length && field.capacity==a->name->capacity && owners(a->name)==2);
+    // The lent header has no owner word of its own, so an owned name is a byte copy of the view.
+    Text *owned=jet_rt_string_from_static(field.data,field.length); assert(owned!=a->name && owned->data!=a->name->data && owners(owned)==1);
     Text *s=jet_rt_handle_show_jet_zone(a),*d=jet_rt_handle_display_jet_zone(a),*g=jet_rt_handle_debug_jet_zone(a);
+    assert(s==a->name && d==a->name && g==a->name && owners(a->name)==5);
     for(int64_t i=0;i<4;++i) {
         ++b->transitions->data[i].first; assert(!jet_rt_handle_eq_jet_zone(a,b)); --b->transitions->data[i].first;
         b->transitions->data[i].second^=1; assert(!jet_rt_handle_eq_jet_zone(a,b)); b->transitions->data[i].second^=1;
@@ -134,17 +154,20 @@ static void zones(void) {
     }
     --b->transitions->length; assert(!jet_rt_handle_eq_jet_zone(a,b)); ++b->transitions->length;
     --b->infos->length; assert(!jet_rt_handle_eq_jet_zone(a,b)); ++b->infos->length;
-    b->name->data[0]^=1; assert(!jet_rt_handle_eq_jet_zone(a,b)); b->name->data[0]^=1;
-    watch_zone(b); jet_rt_handle_drop_jet_zone(b); done();
+    Text *shared=b->name; b->name=flipped(shared); assert(!jet_rt_handle_eq_jet_zone(a,b)); jet_rt_string_drop(b->name); b->name=shared;
+    watch_zone(b,true); jet_rt_handle_drop_jet_zone(b); done_except(a->name); assert(owners(a->name)==4);
     const int64_t seconds[]={-1,0,9,10,19,20};
     const char *expected[]={"1969-12-31 23:59:59 \xcf\x80\n (+00:00)","1970-01-01 05:45:00 \xcf\x80\n (+05:45)","1970-01-01 05:45:09 \xcf\x80\n (+05:45)","1970-01-01 00:00:10 \xcf\x80\n (+00:00)","1970-01-01 00:00:19 \xcf\x80\n (+00:00)","1969-12-31 20:30:20 \xcf\x80\n (-03:30)"};
     for(size_t i=0;i<6;++i) {
-        Zoned *z=jet_rt_alloc(16,8); z->instant=datetime(seconds[i],123,0); z->zone=jet_rt_handle_clone_jet_zone(a);
+        Zoned *z=jet_rt_alloc(16,8); z->instant=datetime(seconds[i],123,0); z->zone=jet_rt_handle_clone_jet_zone(a); assert(z->zone->name==a->name && owners(a->name)==5);
         Text *render=jet_rt_handle_show_jet_zoned_date_time(z); text_is(render,expected[i]); watch_text(render); jet_rt_string_drop(render); done();
-        watch_zoned(z); jet_rt_handle_drop_jet_zoned_date_time(z); done();
+        watch_zoned(z,true); jet_rt_handle_drop_jet_zoned_date_time(z); done_except(a->name); assert(owners(a->name)==4);
     }
-    watch_zone(a); jet_rt_handle_drop_jet_zone(a); done();
-    text_is(owned,"\xcf\x80\n"); watch_text(owned); jet_rt_string_drop(owned); done(); check_texts(s,d,g,"\xcf\x80\n");
+    watch_zone(a,true); Text *name=a->name; jet_rt_handle_drop_jet_zone(a); done_except(name);
+    text_is(owned,"\xcf\x80\n"); watch_text(owned); jet_rt_string_drop(owned); done();
+    // Zone renders retain the name itself; the last of them frees it.
+    assert(s==name && d==name && g==name && owners(name)==3); text_is(name,"\xcf\x80\n");
+    watch_text(name); jet_rt_string_drop(s); jet_rt_string_drop(d); assert(owners(name)==1 && frees_of((char *)name-8)==0); jet_rt_string_drop(g); done();
 }
 int main(int argc,char **argv) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);

@@ -4390,11 +4390,11 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
         module_index += 1
     }
     sema_type_alias_cycles_check(&graph)
-    graph.complete = !sema_has_error_since(graph.diagnostics, 0)
+    graph.complete = !sema_registration_blocking_error(graph.diagnostics)
     // Generic-module aliases resolve and check their
     // arguments once every import is bound (Rust's expansion pre-pass).
     sema_generic_modules_check(&graph, written_inputs)
-    graph.complete = !sema_has_error_since(graph.diagnostics, 0)
+    graph.complete = !sema_registration_blocking_error(graph.diagnostics)
     // Rust erases templates and aliases once expanded: their symbols stay
     // registered, but no later pass sees an unexpanded body. They are removed
     // in place; every other item stays where it is, uncopied.

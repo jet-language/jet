@@ -159,6 +159,8 @@ export function parseDispositions(text) {
 }
 
 const good = status => status === 'PASS' || status === 'UNEXPECTED-PASS';
+// A failing row no known-failing line or refusal accounts for: nothing tracks it.
+const untracked = status => !good(status) && !['KNOWN-FAILING', 'REFUSED', 'SKIP-HOST', 'OPT-IN'].includes(status);
 const rowKey = row => `${row.suite}\t${row.case}\t${row.tier}`;
 
 // Per-row comparison of two testkit result lists over the same fixtures. `retry` holds the
@@ -167,7 +169,7 @@ export function compareSuites(release, candidate, retry = [], dispositions = [])
     const releaseRows = new Map(release.map(row => [rowKey(row), row]));
     const candidateRows = new Map(candidate.map(row => [rowKey(row), row]));
     const retryRows = new Map(retry.map(row => [rowKey(row), row]));
-    const result = { rows: 0, lost: [], gained: [], added: [], flaky: [] };
+    const result = { rows: 0, lost: [], gained: [], added: [], flaky: [], untracked: candidate.filter(row => untracked(row.status)), releaseUntracked: release.filter(row => untracked(row.status)).length };
     for (const [key, row] of releaseRows) {
         result.rows++;
         const now = candidateRows.get(key);
@@ -587,6 +589,9 @@ async function suitesStage(ctx, gate) {
         const summary = `${compared.rows} rows: ${compared.gained.length} gained, ${compared.lost.length} lost (${compared.lost.length - open.length} dispositioned), ${compared.added.length} new passing, ${compared.flaky.length} passed on retry`;
         if (open.length) gate.row(`suite:${suite}`, 'FAIL', `${summary}; lost without a disposition: ${open.slice(0, 6).map(row => `${row.case} ${row.tier} ${row.was}->${row.now}`).join(' | ')}`);
         else gate.row(`suite:${suite}`, 'PASS', summary);
+        // Untracked failures may only shrink: every one is listed in REPORT.md, and a release with more fails.
+        const count = compared.untracked.length, before = compared.releaseUntracked;
+        gate.row(`untracked:${suite}`, count > before ? 'FAIL' : 'PASS', `${count} failing row(s) with no known-failing line (release ${before}); full list in REPORT.md`);
     }
     const unused = ctx.dispositions.filter(d => !Object.values(ctx.suites).some(s => s.lost.some(row => row.disposition === d)));
     if (unused.length) gate.row('dispositions', 'NOTE', `${unused.length} disposition(s) match no lost row: ${unused.slice(0, 4).map(d => `${d.suite} ${d.case} ${d.tier} ${d.card}`).join(' | ')}`);
@@ -627,6 +632,7 @@ function report(ctx, gate, verdict, plan) {
     for (const [suite, s] of Object.entries(ctx.suites ?? {})) {
         if (s.gained.length) lines.push('', `## ${suite}: gained`, ...s.gained.slice(0, 200).map(row => `- ${row.case} ${row.tier}: ${row.was} -> ${row.status}`));
         if (s.lost.length) lines.push('', `## ${suite}: lost`, ...s.lost.map(row => `- ${row.case} ${row.tier}: ${row.was} -> ${row.now}${row.disposition ? ` (${row.disposition.card}: ${row.disposition.reason})` : ' (no disposition)'}`));
+        if (s.untracked?.length) lines.push('', `## ${suite}: untracked failures`, ...s.untracked.map(row => `- ${row.case} ${row.tier}: ${row.status} ${String(row.detail ?? '').split('\n')[0].slice(0, 160)}`));
     }
     if (ctx.jetpackFixed?.length) lines.push('', '## Jetpack census: fixed', ...ctx.jetpackFixed.slice(0, 200).map(key => `- ${key.replace('\t', ': ')}`));
     if (plan) {

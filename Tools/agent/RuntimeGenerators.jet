@@ -1223,21 +1223,43 @@ fn lifecycle_list(sources: [RuntimeSource]) -> String GeneratorError! {
     Ok("{lines.join("\n")}\n")
 }
 
-// The runtime sources sources.list names, in its order.
+// The runtime sources sources.list names, in its order. The manifest and the
+// source directory must agree: a Source/*.jet the manifest omits never reaches
+// the runtime object, so its exports, witnesses and route rows rot unseen.
 fn read_runtime_sources() -[FS]> [RuntimeSource] GeneratorError! {
     listing :: files.read(RUNTIME_SOURCES_PATH) ?? return Err(generator_fail("cannot read {RUNTIME_SOURCES_PATH}: {err}"))
+    listed :: files.list_dir(RUNTIME_SOURCE_DIRECTORY) ?? return Err(generator_fail("cannot list {RUNTIME_SOURCE_DIRECTORY}: {err}"))
+    names := [String]{}
+    loop entry in listed {
+        if entry.name.ends_with(".jet") -> &names.push(entry.name)
+    }
     sources := [RuntimeSource]{}
-    problems := [String]{}
+    problems := unlisted_runtime_sources(listing, names)
     loop raw in listing.split("\n") {
         path :: raw.trim()
         if path == "" || path.starts_with("#") -> next
         if files.read(path) == {
             .Ok(text) -> &sources.push(RuntimeSource{path: path, text: text})
-            .Err(error) -> &problems.push("cannot read {path}: {error}")
+            .Err(error) -> &problems.push("{RUNTIME_SOURCES_PATH} names {path}, which cannot be read: {error}")
         }
     }
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
     Ok(sources)
+}
+
+// The runtime source files (Source/*.jet names) no sources.list line names, as
+// one problem each in name order.
+fn unlisted_runtime_sources(listing: String, names: [String]) -> [String] Never! {
+    lines := [String]{}
+    loop raw in listing.split("\n") -> &lines.push(raw.trim())
+    sorted := names.copy()
+    &sorted.sort()
+    problems := [String]{}
+    loop name in sorted {
+        path :: "{RUNTIME_SOURCE_DIRECTORY}/{name}"
+        if !lines.contains(path) -> &problems.push("{path} is not in {RUNTIME_SOURCES_PATH}; list it or delete it")
+    }
+    problems
 }
 
 fn render_lifecycle_list() -[FS]> String GeneratorError! {
@@ -1275,6 +1297,13 @@ fn render_lifecycle_list() -[FS]> String GeneratorError! {
     assert_eq(runtime_exports(narrow, "M.jet").problems.len(), 0)
     open :: "#Export(c) fn jet_net_raw_resolve_ordered(host: I64, port: I64) -> I64 {{\n    port.bit_and(I64{{65535}})\n"
     assert_eq(runtime_exports(open, "M.jet").problems.join("|"), "M.jet: unterminated masked export jet_net_raw_resolve_ordered")
+}
+
+#Test("every runtime source file is in the manifest") {
+    listing :: "# comment\nCompiler/JetRuntime/Source/A.jet\n  Compiler/JetRuntime/Source/B.jet  \nCompiler/JetBackend/Source/Shared.jet\n"
+    assert_eq(unlisted_runtime_sources(listing, [String]{"B.jet", "A.jet"}).len(), 0)
+    found :: unlisted_runtime_sources(listing, [String]{"Z.jet", "A.jet", "Orphan.jet", "B.jet"})
+    assert_eq(found.join("|"), "Compiler/JetRuntime/Source/Orphan.jet is not in Compiler/JetRuntime/sources.list; list it or delete it|Compiler/JetRuntime/Source/Z.jet is not in Compiler/JetRuntime/sources.list; list it or delete it")
 }
 
 #Test("lifecycle rows report every bad export at once") {

@@ -15,7 +15,7 @@ _Static_assert(sizeof(Expr)==288 && sizeof(Handle)==16 && sizeof(TextList)==24,"
 extern void jet_rt_alloc_init(void),jet_rt_thread_init(void),jet_rt_thread_attach(void),jet_rt_thread_detach(void),jet_rt_layout_init(void),jet_rt_tls_reset_attempt(void);
 extern void jet_rt_free(void *,int64_t,int64_t);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
-extern Text *jet_rt_string_new(const unsigned char *,int64_t);
+extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern Handle *jet_rt_layout_new(Text *),*jet_rt_layout_compare(Expr *,Expr *,int64_t),*jet_rt_layout_strength(Handle *,int64_t);
 extern Expr *jet_rt_layout_variable(Handle *,Text *,Text *),*jet_rt_layout_constant(double),*jet_rt_layout_add(Expr *,Expr *),*jet_rt_layout_sub(Expr *,Expr *);
@@ -36,7 +36,7 @@ static void observe_free(void *p,int64_t bytes,int64_t align) {
     }
 }
 static void watch(Handle *h) { assert(watches<128); watched[watches++]=h->inner; }
-static Text *text(const char *s) { return jet_rt_string_new((const unsigned char *)s,(int64_t)strlen(s)); }
+static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
 static Expr *variable(Handle *h,int index) {
     char name[32]; snprintf(name,sizeof name,"v%d",index);
     Text *b=text(name),*a=text("width"); Expr *e=jet_rt_layout_variable(h,b,a);

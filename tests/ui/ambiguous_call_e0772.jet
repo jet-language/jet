@@ -1,6 +1,19 @@
-// @ambiguous_call
-// Synthetic UI fixture for the imported-overload seam. C++ candidate import
-// does not yet feed real candidate sets into sema.
+// Two traits each give `Store` a default `put` of the same shape, so a
+// positional call cannot choose one body.
+trait Named {
+    fn put(self, name: String, text: String) -> String { "{name}: {text}" }
+}
+
+trait Keyed {
+    fn put(self, key: String, id: String) -> String { "{key} = {id}" }
+}
+
+struct Store {
+    impl Named {}
+    impl Keyed {}
+}
+
 fn run() {
-    put("name", "text")
+    store :: Store{}
+    print(store.put("name", "text"))
 }

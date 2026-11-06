@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,9 +21,11 @@
 enum { PF_READ=1, PF_WRITE=2, PF_CREATE=4, PF_TRUNCATE=8, PF_APPEND=16,
        PF_EXCLUSIVE=32, PF_DIRECTORY=64, PF_NOFOLLOW=128 };
 typedef int64_t W;
-typedef struct { unsigned char *data; W len, cap; } Text;
+// A heap text is this 32-byte body behind its 8-byte owner word. Fixture paths
+// are immortal views: cap 0 over a real buffer, which no clone or drop touches.
+typedef struct { unsigned char *data; W len, cap, cache; } Text;
 typedef struct { W lock, fd, closed; Text *path; void *buffer; W cap, filled, pos, refs; } FD;
-_Static_assert(sizeof(FD)==72 && sizeof(Text)==24, "host carrier layout");
+_Static_assert(sizeof(FD)==72 && sizeof(Text)==32 && offsetof(Text,cap)==16, "host carrier layout");
 extern FD *jet_fd_open_raw(Text *, W, W, W *);
 extern FD *jet_fd_open_at_raw(FD *, Text *, W, W, W *);
 extern FD *jet_fd_adopt_raw(W, Text *, bool);
@@ -63,7 +66,7 @@ extern void jet_rt_string_drop(Text *);
 extern void jet_rt_host_program_start(void);
 static bool success(W *error) { return !error[0] && !error[1] && !error[2] && !error[3]; }
 static bool posix(W *error,W code) { return error[0]==1 && error[1]==code && error[2]==0 && error[3]==0; }
-static Text text(char *s) { return (Text){(unsigned char *)s,(W)strlen(s),0}; }
+static Text text(char *s) { return (Text){(unsigned char *)s,(W)strlen(s),0,0}; }
 typedef struct { FD *fd; W error[4],result; unsigned char byte; atomic_bool done; } ReadOnce;
 static void interrupted(int signal) { (void)signal; }
 static void *read_once(void *pointer) { ReadOnce *attempt=pointer;attempt->result=jet_fd_read_raw(attempt->fd,&attempt->byte,1,attempt->error);atomic_store(&attempt->done,true);return NULL; }

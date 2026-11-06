@@ -83,6 +83,9 @@ struct JetCLIReplSession {
     // What `:reset` returns to: the project's items and imports.
     baseline_imports: [String]
     baseline_items: [String]
+    // A turn the authority gate refused: the session then exits nonzero,
+    // so a piped session that was denied an effect never reads as success.
+    denied: Bool
 }
 
 // One value a turn shows: the binding (or the echo) and its checked type.
@@ -741,7 +744,10 @@ fn jet_cli_repl_stmts(session: &JetCLIReplSession, body: [Stmt], suppress: Bool,
             required = rights
         }
     }
-    if jet_cli_repl_refusal(session, required) == .Val(refusal) -> return JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: [Diagnostic]{refusal}, report: ""}
+    if jet_cli_repl_refusal(session, required) == .Val(refusal) {
+        session.denied = true
+        return JetCLIReplTurnResult.Failed{stdout: "", stderr: "", diagnostics: [Diagnostic]{refusal}, report: ""}
+    }
     echo_ty :: if echo -> jet_cli_repl_local_type(locals, echo_name) else -> Type?{None}
     // A Unit value (`print(...)`) has nothing to show.
     echo_reported :: echo && !jet_cli_repl_is_unit(echo_ty)
@@ -1147,7 +1153,7 @@ fn jet_cli_repl_session(project: String?, invocation: JetCLIInvocationAuthority?
         nonce: jet_cli_repl_nonce(), dir: dir, anchor: anchor, anchor_real: anchor_real, base_dir: base_dir,
         invocation: jet_cli_repl_rows(invocation), color: color, step: 0, imports: [String]{}, items: [String]{},
         statements: [String]{}, bindings: [JetCLIReplBinding]{}, turns: [JetCLIReplTurn]{}, noted_print: false,
-        baseline_imports: [String]{}, baseline_items: [String]{},
+        baseline_imports: [String]{}, baseline_items: [String]{}, denied: false,
     })
 }
 
@@ -1181,7 +1187,7 @@ fn jet_cli_repl(project: String?, preload: String?, invocation: JetCLIInvocation
         if !jet_cli_repl_line(&session, text) -> break
     }
     repl_files.remove_all(session.dir).drop("the session directory is private to this REPL")
-    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: if session.denied -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK}
 }
 
 // `jet repl ...`: console forms are not built; the first positional is the

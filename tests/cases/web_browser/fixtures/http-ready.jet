@@ -1,8 +1,12 @@
 // SETUP-PORT of web_browser.rs222-237/282-309 and notebook.rs537-558.
 // Raw HTTP bytes only; no test assertions live here.
-use net :: core.net
-fn run(args: [String]) {
-    stream :: net.tcp_connect(args[0]) ?? return
+use {
+    net :: core.net
+    process :: core.process
+}
+fn run() {
+    args :: process.args()
+    stream := net.tcp_connect(args[0]) ?? return
     net.set_read_timeout(&stream, 250) ?? return
     crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
     auth := ""

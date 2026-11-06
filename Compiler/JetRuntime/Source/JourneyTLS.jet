@@ -103,7 +103,7 @@ fn journey_stderr_columns(tty: Bool) -> I64 {
             valid = false
             break
         }
-        columns = wrapping(columns * I64{10} + digit)
+        columns = wrapping(wrapping(columns * I64{10}) + digit)
         at += I64{1}
     }
     jet_rt_string_drop(trimmed)
@@ -141,34 +141,21 @@ fn journey_trim_newlines(text: I64) -> I64 {
     jet_rt_native_journey_drop(journey)
     report
 }
-#Export(c) fn jet_journey_report(text: I64) -> I64 {
-    trimmed :: journey_trim_newlines(text)
-    if (sync_load(journey_report_wire_word) != I64{0}) {
-        error :: jet_err_from_message(trimmed)
-        report :: jet_error_report(error)
-        jet_rt_handle_drop_jet_err(error)
-        jet_rt_string_drop(trimmed)
-        return report
-    }
-    journey :: jet_journey_take_hops()
-    rt_text_push_scalar(trimmed, I64{10})
-    tty :: host_is_tty(I64{2})
-    trail :: jet_journey_render_styled(journey, journey_auto_color(tty), journey_stderr_columns(tty))
-    err_append(trimmed, trail)
-    jet_rt_string_drop(trail)
-    jet_rt_native_journey_drop(journey)
-    trimmed
-}
+// An unhandled entry error is a process stop with status 1 (spec.md, Cleanup
+// at a process stop): the exit handlers run before its first report byte.
+// Under the process root (jet_rt_main) the rendered report is published to
+// the root, which leaves every frame, runs the handlers and then writes it
+// (Main.jet jet_rt_main_stopped), as a stop's captured report is. Any other
+// caller claims the process exit first, as Trap.jet trap_root_prepare does.
 fn journey_entry_write_take(report: I64) {
-    _ := host_stderr_write(rt_text_data(report), rt_text_len(report))
-    jet_rt_string_drop(report)
-    // Under the process root (jet_rt_main) the exit is a root stop: the
-    // root runs the exit handlers and exits 1 once every frame has left.
     if (jet_rt_stop_domain() == I64{1}) {
-        _ := jet_rt_root_publish_rendered(I64{0}, I64{0}, I64{1})
+        _ := scheduler_root_publish_owned(report, I64{1})
         return
     }
-    jet_rt_process_exit(I64{1})
+    jet_rt_process_exit_begin(I64{1})
+    _ := host_stderr_write(rt_text_data(report), rt_text_len(report))
+    jet_rt_string_drop(report)
+    jet_rt_process_exit_finish()
 }
 #Export(c) fn jet_entry_error_exit_jet(error: I64) {
     report :: jet_error_report(error)
@@ -176,4 +163,12 @@ fn journey_entry_write_take(report: I64) {
     journey_entry_write_take(report)
 }
 #Export(c) fn jet_rt_entry_error_exit_err(error: I64) { jet_entry_error_exit_jet(error) }
-#Export(c) fn jet_rt_entry_error_exit(text: I64) { journey_entry_write_take(jet_journey_report(text)) }
+// A non-default error's Printable text (or the runtime's own entry message)
+// is the message of a default error, so it reaches the process edge as the
+// same full report.
+#Export(c) fn jet_rt_entry_error_exit(text: I64) {
+    trimmed :: journey_trim_newlines(text)
+    error :: jet_err_from_message(trimmed)
+    jet_rt_string_drop(trimmed)
+    jet_entry_error_exit_jet(error)
+}

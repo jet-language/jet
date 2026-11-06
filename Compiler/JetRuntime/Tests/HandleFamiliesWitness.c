@@ -10,7 +10,7 @@
 #define WS_MESSAGE_U8_STRIDE 1
 #endif
 _Static_assert(WS_MESSAGE_U8_STRIDE==1 || WS_MESSAGE_U8_STRIDE==8,"native U8 stride");
-typedef struct { unsigned char *data; int64_t length,capacity; } Text;
+typedef struct { unsigned char *data; int64_t length,capacity,cache; } Text;
 typedef struct { int64_t length,capacity; unsigned char *data; } Bytes;
 typedef struct { int64_t kind,limit; Text *operation; } WsError;
 typedef struct { int64_t kind; union { Text *text; Bytes *bytes; int64_t code; } payload; Text *reason; } Message;
@@ -33,8 +33,8 @@ extern bool jet_rt_handle_eq_##T(int64_t *,int64_t *); \
 extern Text *jet_rt_handle_show_##T(int64_t *); \
 extern Text *jet_rt_handle_debug_##T(int64_t *); \
 extern Text *jet_rt_handle_display_##T(int64_t *);
-UNIT_DECL(EnvError)
-UNIT_DECL(JetTaskStatus)
+UNIT_DECL(env_error)
+UNIT_DECL(jet_task_status)
 extern WsError *jet_rt_handle_clone_jet_ws_error(WsError *);
 extern void jet_rt_handle_drop_jet_ws_error(WsError *);
 extern bool jet_rt_handle_eq_jet_ws_error(WsError *,WsError *);
@@ -70,10 +70,16 @@ static void observe_free(void *p,int64_t size,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].pointer==p) { assert(size==watched[i].size && align==watched[i].align);assert(++watched[i].frees==1); }
 }
-static void watch(void *p,int64_t size,int64_t align) { assert(count<32);for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);watched[count].pointer=p;watched[count].size=size;watched[count].align=align;watched[count++].frees=0; }
+// Texts are shared by refcount, so a value and its clone can name one text
+// block: it is watched once and must be freed exactly once.
+static void watch(void *p,int64_t size,int64_t align) { for(size_t i=0;i<count;++i) if(watched[i].pointer==p) { assert(watched[i].size==size && watched[i].align==align);return; } assert(count<32);watched[count].pointer=p;watched[count].size=size;watched[count].align=align;watched[count++].frees=0; }
 static void freed(unsigned before) { assert(intercepted>before);for(size_t i=0;i<count;++i) assert(watched[i].frees==1);count=0; }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8);if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8);if(t->capacity) watch(t->data,t->capacity,1); }
+static void unfreed(Text *t) { for(size_t i=0;i<count;++i) if(watched[i].pointer==(char *)(t)-8) { assert(watched[i].frees==0);return; } assert(!"text not watched"); }
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8) & 0x3fffffffffffffff; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
+// An owned copy whose first byte differs, for inequality probes on shared texts.
+static Text *flipped(Text *t) { char b[32];assert(t->length>0 && t->length<=32);memcpy(b,t->data,(size_t)t->length);b[0]^=1;Text *c=jet_rt_string_from_static(b,t->length);assert(c!=t && c->length==t->length && memcmp(c->data,b,(size_t)t->length)==0 && owners(c)==1);return c; }
 static void expect_bytes(Text *t,const char *s,int64_t n) { assert(t->length==n);assert(memcmp(t->data,s,(size_t)n)==0);jet_rt_string_drop(t); }
 static void expect(Text *t,const char *s) { expect_bytes(t,s,(int64_t)strlen(s)); }
 static void unit_cases(const char *const *goldens,int64_t variants,int64_t *(*clone)(int64_t *),void (*drop)(int64_t *),bool (*eq)(int64_t *,int64_t *),Text *(*show)(int64_t *),Text *(*debug)(int64_t *),Text *(*display)(int64_t *)) {
@@ -90,11 +96,11 @@ static void ws_error_cases(void) {
     for(int64_t kind=0;kind<9;++kind) {
         WsError *a=jet_rt_alloc(24,8);a->kind=kind;a->limit=kind==3?INT64_MIN:0;a->operation=kind==4?text("read\"\n"):NULL;
         WsError *b=jet_rt_handle_clone_jet_ws_error(a);assert(a!=b && jet_rt_handle_eq_jet_ws_error(a,a) && jet_rt_handle_eq_jet_ws_error(a,b));
-        if(kind==4) assert(a->operation!=b->operation && a->operation->data!=b->operation->data);
+        if(kind==4) assert(a->operation==b->operation && owners(a->operation)==2);
         expect(jet_rt_handle_show_jet_ws_error(a),goldens[kind]);expect(jet_rt_handle_debug_jet_ws_error(a),goldens[kind]);expect(jet_rt_handle_display_jet_ws_error(a),goldens[kind]);
         b->kind=(kind+1)%9;assert(!jet_rt_handle_eq_jet_ws_error(a,b));b->kind=kind;
         if(kind==3) { b->limit=INT64_MAX;assert(!jet_rt_handle_eq_jet_ws_error(a,b));expect(jet_rt_handle_show_jet_ws_error(b),"websocket message exceeds 9223372036854775807 bytes"); }
-        if(kind==4) { b->operation->data[0]='X';assert(!jet_rt_handle_eq_jet_ws_error(a,b)); }
+        if(kind==4) { Text *shared=b->operation;b->operation=flipped(shared);assert(!jet_rt_handle_eq_jet_ws_error(a,b));jet_rt_string_drop(b->operation);b->operation=shared; }
         watch(a,24,8);watch(b,24,8);if(kind==4) { watch_text(a->operation);watch_text(b->operation); }
         unsigned before=intercepted;jet_rt_handle_drop_jet_ws_error(a);jet_rt_handle_drop_jet_ws_error(b);freed(before);
     }
@@ -113,7 +119,7 @@ static void ws_message_cases(void) {
         else if(kind==1) { const unsigned char data[]={0,128,255};a->payload.bytes=jet_rt_bytes_unpack(data,empty?0:3); }
         else { a->payload.code=INT64_MIN;a->reason=text(empty?"":"close reason"); }
         Message *b=jet_rt_handle_clone_jet_ws_message(a);assert(a!=b && jet_rt_handle_eq_jet_ws_message(a,a) && jet_rt_handle_eq_jet_ws_message(a,b));
-        if(kind==0) { assert(a->payload.text!=b->payload.text);if(!empty) { assert(a->payload.text->data!=b->payload.text->data);b->payload.text->data[0]='X';assert(!jet_rt_handle_eq_jet_ws_message(a,b)); } }
+        if(kind==0) { assert(a->payload.text==b->payload.text && owners(a->payload.text)==2);if(!empty) { Text *shared=b->payload.text;b->payload.text=flipped(shared);assert(!jet_rt_handle_eq_jet_ws_message(a,b));jet_rt_string_drop(b->payload.text);b->payload.text=shared; } }
         else if(kind==1) {
             assert(a->payload.bytes!=b->payload.bytes);if(!empty) {
                 assert(a->payload.bytes->data!=b->payload.bytes->data);
@@ -121,7 +127,7 @@ static void ws_message_cases(void) {
                 b->payload.bytes->data[WS_MESSAGE_U8_STRIDE]=7;assert(!jet_rt_handle_eq_jet_ws_message(a,b));b->payload.bytes->data[WS_MESSAGE_U8_STRIDE]=128;
                 b->payload.bytes->length=2;assert(!jet_rt_handle_eq_jet_ws_message(a,b));b->payload.bytes->length=3;
             }
-        } else { assert(a->reason!=b->reason);b->payload.code=INT64_MAX;assert(!jet_rt_handle_eq_jet_ws_message(a,b));b->payload.code=INT64_MIN;if(!empty) { assert(a->reason->data!=b->reason->data);b->reason->data[0]='X';assert(!jet_rt_handle_eq_jet_ws_message(a,b)); } }
+        } else { assert(a->reason==b->reason && owners(a->reason)==2);b->payload.code=INT64_MAX;assert(!jet_rt_handle_eq_jet_ws_message(a,b));b->payload.code=INT64_MIN;if(!empty) { Text *shared=b->reason;b->reason=flipped(shared);assert(!jet_rt_handle_eq_jet_ws_message(a,b));jet_rt_string_drop(b->reason);b->reason=shared; } }
         b->kind=(kind+1)%3;assert(!jet_rt_handle_eq_jet_ws_message(a,b));b->kind=kind;
         watch_message(a);watch_message(b);unsigned before=intercepted;jet_rt_handle_drop_jet_ws_message(a);jet_rt_handle_drop_jet_ws_message(b);freed(before);
     }
@@ -135,13 +141,15 @@ static void failure_cases(void) {
         assert(a!=b && jet_rt_record_tag_jet_task_failure(a)==kind && jet_rt_handle_eq_jet_task_failure(a,a) && jet_rt_handle_eq_jet_task_failure(a,b));
         Text *getter=NULL;
         if(kind==2) {
-            assert(a->reason!=input && b->reason!=a->reason && b->reason->data!=a->reason->data);getter=jet_rt_record_get_jet_task_failure_panicked(a);assert(getter!=a->reason && getter->data!=a->reason->data);
+            assert(a->reason==input && b->reason==input && owners(input)==3);getter=jet_rt_record_get_jet_task_failure_panicked(a);assert(getter==input && owners(input)==4);
             expect_bytes(jet_rt_handle_show_jet_task_failure(a),raw,(int64_t)sizeof(raw)-1);expect_bytes(jet_rt_handle_display_jet_task_failure(a),raw,(int64_t)sizeof(raw)-1);
-            expect(jet_rt_handle_debug_jet_task_failure(a),"Panicked(\"\\u{301}panic \\\"x\\\"\\n\\0\")");b->reason->data[0]='X';assert(!jet_rt_handle_eq_jet_task_failure(a,b));
+            expect(jet_rt_handle_debug_jet_task_failure(a),"Panicked(\"\\u{301}panic \\\"x\\\"\\n\\0\")");Text *shared=b->reason;b->reason=flipped(shared);assert(!jet_rt_handle_eq_jet_task_failure(a,b));jet_rt_string_drop(b->reason);b->reason=shared;
         } else { const char *s=kind==0?"Cancelled":"DeadlineBlown";expect(jet_rt_handle_show_jet_task_failure(a),s);expect(jet_rt_handle_debug_jet_task_failure(a),s);expect(jet_rt_handle_display_jet_task_failure(a),s); }
         jet_rt_string_drop(input);b->kind=(kind+1)%3;assert(!jet_rt_handle_eq_jet_task_failure(a,b));b->kind=kind;
-        watch(a,16,8);watch(b,16,8);if(kind==2) {watch_text(a->reason);watch_text(b->reason);}
-        unsigned before=intercepted;jet_rt_handle_drop_jet_task_failure(a);jet_rt_handle_drop_jet_task_failure(b);freed(before);if(getter) expect_bytes(getter,reason,(int64_t)sizeof(reason)-1);
+        watch(a,16,8);watch(b,16,8);if(kind==2) {watch_text(a->reason);watch_text(b->reason);assert(owners(getter)==3);}
+        unsigned before=intercepted;jet_rt_handle_drop_jet_task_failure(a);jet_rt_handle_drop_jet_task_failure(b);
+        if(getter) { assert(owners(getter)==1);unfreed(getter);expect_bytes(getter,reason,(int64_t)sizeof(reason)-1); }
+        freed(before);
     }
     jet_rt_handle_drop_jet_task_failure(NULL);
 }

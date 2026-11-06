@@ -21,19 +21,15 @@ function command(bin, args, options = {}) {
 if (mode === 'assemble') {
   command(process.execPath, [join(root, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), dir, '--assemble-only', '--test', 'Test']);
   mkdirSync(join(dir, 'Source'), { recursive: true });
-  writeFileSync(join(dir, 'Source/Fixture.jet'), readFileSync(join(dir, 'unit.jet'), 'utf8'));
-  const entries = new Map(readFileSync(join(root, 'Compiler/JetRuntime/exports.list'), 'utf8').split('\n')
-    .filter(x => x && !x.startsWith('#')).map(x => [x.split(/\s+/)[0], x]));
-  // Scratch-only export admission for the held witness; never edit the frozen
-  // runtime manifest. Once regenerated, the same rows are merely reused.
-  for (const path of ['Source/TestSuite.jet', 'Tests/Fragments.fixture/TestSuiteTests.jet']) {
-    const source = readFileSync(join(root, 'Compiler/JetRuntime', path), 'utf8');
-    for (const match of source.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)) {
-      const name = match[1];
-      entries.set(name, name === 'jet_rt_test_suite_init' ? `${name} init 3` : name);
-    }
-  }
-  writeFileSync(join(dir, 'exports.list'), [...entries.values()].sort().join('\n') + '\n');
+  const unit = readFileSync(join(dir, 'unit.jet'), 'utf8');
+  writeFileSync(join(dir, 'Source/Fixture.jet'), unit);
+  // The runtime's own exports and the fixture's, as run-residue-fixtures.mjs
+  // derives them from the same assembled sources.
+  const names = [...unit.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map(match => match[1]);
+  if (new Set(names).size !== names.length) throw Error('duplicate fixture export');
+  const init = new Map([...unit.matchAll(/^\/\/ runtime-init: (\d+)(?: when \S+)?\n#Export\(c\) fn (\w+)/gm)].map(match => [match[2], match[1]]));
+  init.set('jet_rt_alloc_init', '0');
+  writeFileSync(join(dir, 'exports.list'), names.sort().map(name => name === 'jet_rt_panic_list_bounds' ? `${name} int-index-seam` : init.has(name) ? `${name} init ${init.get(name)}` : name).join('\n') + '\n');
 } else if (mode === 'lower') {
   const prefix = join(dir, 'fixture');
   const {problem} = runNativeLibrary({jet:candidateJetc0(),file:join(dir,'Source/Fixture.jet'),prefix,exports:join(dir,'exports.list'),env:{...process.env,JET_TOOLCHAIN_ROOT:root,JET_STORE_DIR:join(out,'store')}});

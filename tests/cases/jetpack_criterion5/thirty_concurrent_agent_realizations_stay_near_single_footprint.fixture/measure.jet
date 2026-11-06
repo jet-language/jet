@@ -11,7 +11,7 @@ fn s1_criterion_measured_bytes(path: String, seen: &[files.FileID]) -> Int {
     &seen.push(metadata.id)
     total := metadata.size_on_disk
     if metadata.is_dir {
-        loop entry in files.read_dir(path) ?? panic("entries {path}") {
+        loop entry in files.list_dir(path) ?? panic("entries {path}") {
             total += s1_criterion_measured_bytes(entry.path, &seen)
         }
     }
@@ -19,7 +19,7 @@ fn s1_criterion_measured_bytes(path: String, seen: &[files.FileID]) -> Int {
 }
 fn run() {
     payload := ""
-    loop entry in files.read_dir("agent-0/hangar/objects") ?? panic("objects") {
+    loop entry in files.list_dir("agent-0/hangar/objects") ?? panic("objects") {
         if files.is_dir(entry.path) {
             payload = "{entry.path}/payload"
             break

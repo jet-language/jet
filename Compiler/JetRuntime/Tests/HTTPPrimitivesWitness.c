@@ -8,9 +8,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
-typedef struct { unsigned char *data; int64_t length, capacity; } Text;
+typedef struct { unsigned char *data; int64_t length, capacity, cache; } Text;
 typedef struct { int64_t word; } Word;
-_Static_assert(sizeof(Text)==24 && offsetof(Text,capacity)==16,"E4 text24");
+_Static_assert(sizeof(Text)==32 && offsetof(Text,capacity)==16,"refcounted text body32 behind its owner word");
 _Static_assert(sizeof(Word)==8,"EncodingABI word8");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
@@ -22,16 +22,16 @@ extern Text *jet_rt_handle_clone_##T(Text *); \
 extern void jet_rt_handle_drop_##T(Text *); \
 extern bool jet_rt_handle_eq_##T(Text *,Text *); \
 extern Text *jet_rt_handle_show_##T(Text *);
-DECLARE_TEXT(JetHTTPMethod)
-DECLARE_TEXT(JetHTTPHeaderName)
-DECLARE_TEXT(JetHTTPHeaderValue)
+DECLARE_TEXT(jet_http_method)
+DECLARE_TEXT(jet_http_header_name)
+DECLARE_TEXT(jet_http_header_value)
 #define DECLARE_WORD(T) \
 extern Word *jet_rt_handle_clone_##T(Word *); \
 extern void jet_rt_handle_drop_##T(Word *); \
 extern bool jet_rt_handle_eq_##T(Word *,Word *); \
 extern Text *jet_rt_handle_show_##T(Word *);
-DECLARE_WORD(JetHTTPStatus)
-DECLARE_WORD(JetHTTPVersion)
+DECLARE_WORD(jet_http_status)
+DECLARE_WORD(jet_http_version)
 static struct { void *p; int64_t n,a; unsigned freed; } watched[16];
 static size_t count;
 // The checked heap reports every free it accepts here, the runtime's own
@@ -47,17 +47,20 @@ static void watch(void *p,int64_t n,int64_t a) {
     watched[count].p=p; watched[count].n=n; watched[count].a=a;
     watched[count++].freed=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void all_freed(void) { for(size_t i=0;i<count;i++) assert(watched[i].freed==1); count=0; }
+static void none_freed(void) { for(size_t i=0;i<count;i++) assert(watched[i].freed==0); }
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8) & 0x3fffffffffffffff; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
 static void text_is(Text *t,const char *s) { assert(t->length==(int64_t)strlen(s)); assert(!memcmp(t->data,s,(size_t)t->length)); }
+// Text handles share one refcounted block: clone and show retain the same text.
 static void text_case(const char *s,Text *(*clone)(Text *),void (*drop)(Text *),bool (*eq)(Text *,Text *),Text *(*show)(Text *)) {
     Text *a=text(s),*b=clone(a),*c=show(a),*d=text("different");
-    assert(a!=b && a!=c && b!=c); text_is(b,s); text_is(c,s);
-    if(a->length) assert(a->data!=b->data && a->data!=c->data);
+    assert(a==b && a==c && owners(a)==3 && owners(d)==1); text_is(a,s);
     assert(eq(a,b) && eq(b,a) && !eq(a,d) && !eq(d,a));
-    watch_text(a); watch_text(b); watch_text(c); watch_text(d);
-    drop(a); text_is(b,s); text_is(c,s); drop(b); jet_rt_string_drop(c); drop(d); drop(NULL); all_freed();
+    watch_text(a); watch_text(d);
+    drop(a); assert(owners(b)==2); text_is(b,s); drop(b); assert(owners(c)==1); text_is(c,s); none_freed();
+    jet_rt_string_drop(c); drop(d); drop(NULL); all_freed();
 }
 static void word_case(int64_t n,const char *s,Word *(*clone)(Word *),void (*drop)(Word *),bool (*eq)(Word *,Word *),Text *(*show)(Word *)) {
     Word *a=jet_rt_alloc(8,8); a->word=n;
@@ -84,11 +87,11 @@ static void invalid_version(void) {
 int main(void) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
-    TEXT_CASE(JetHTTPMethod,"GET"); TEXT_CASE(JetHTTPMethod,"PURGE");
-    TEXT_CASE(JetHTTPHeaderName,"X-Mixed-Case");
-    TEXT_CASE(JetHTTPHeaderValue,""); TEXT_CASE(JetHTTPHeaderValue,"caf\xc3\xa9\tvalue");
-    WORD_CASE(JetHTTPStatus,100,"100"); WORD_CASE(JetHTTPStatus,599,"599");
-    WORD_CASE(JetHTTPVersion,0,"HTTP/1.0"); WORD_CASE(JetHTTPVersion,1,"HTTP/1.1"); WORD_CASE(JetHTTPVersion,2,"HTTP/2");
+    TEXT_CASE(jet_http_method,"GET"); TEXT_CASE(jet_http_method,"PURGE");
+    TEXT_CASE(jet_http_header_name,"X-Mixed-Case");
+    TEXT_CASE(jet_http_header_value,""); TEXT_CASE(jet_http_header_value,"caf\xc3\xa9\tvalue");
+    WORD_CASE(jet_http_status,100,"100"); WORD_CASE(jet_http_status,599,"599");
+    WORD_CASE(jet_http_version,0,"HTTP/1.0"); WORD_CASE(jet_http_version,1,"HTTP/1.1"); WORD_CASE(jet_http_version,2,"HTTP/2");
     invalid_version();
     puts("http primitives: clone/drop/eq/show + invalid tag ok");
     return 0;

@@ -1,0 +1,18 @@
+# D-LIVEQUERY1 (#1158): a DBScope.live invalidation is published to the
+# WebSocket live hub. A server connection upgraded after the write is replayed
+# the topic's latest event, a later write reaches it live, and a reconnect after
+# writes made while no client was connected gets only the latest event; the
+# registry counts each publish as a ws push. Same output on o0/o1/o2.
+fixture: db_scope_live_invalidation_reaches_ws_clients_and_reconnect_replays_latest.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = db_scope_live_invalidation_reaches_ws_clients_and_reconnect_replays_latest.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default

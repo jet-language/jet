@@ -460,6 +460,13 @@ fn sema_effect_memory_executions(node: SemaEffectNode, span: Span) -> Int? {
     Val(1)
 }
 
+fn sema_effect_has_memory_call(node: SemaEffectNode, callee: String, span: Span) -> Bool {
+    loop call in node.memory_calls {
+        if call.callee == callee && call.span.start == span.start && call.span.end == span.end -> return true
+    }
+    false
+}
+
 fn sema_effect_push_memory_event(nodes: &[SemaEffectNode], node_index: Int, span: Span, operation: String, kind: String, bytes: Int?) {
     executions :: sema_effect_memory_executions(nodes[node_index], span)
     &nodes[node_index].memory_events.push(SemaMemoryEvent{span: span, operation: operation, kind: kind, bytes: bytes, executions: executions})
@@ -1266,11 +1273,18 @@ fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: NameRows, node
     callee_key :: fact.callee.map((callee) -> callee.key) ?? ""
     known_callee :: callee_key != "" && sema_effect_node_index(node_by_key, callee_key) != None
     if callee_key != "" -> sema_effect_node_add_edge(&nodes, node_index, callee_key)
-    if known_callee {
+    // One call site is one call: another body node with the call's span finds
+    // the same fact, and a second row would count the callee's arena bytes
+    // twice.
+    if known_callee && !sema_effect_has_memory_call(nodes[node_index], callee_key, fact.span) {
         executions :: sema_effect_memory_executions(nodes[node_index], fact.span)
         &nodes[node_index].memory_calls.push(SemaMemoryCall{callee: callee_key, span: fact.span, executions: executions})
     }
     row_known :: fact.facts.effect_bound != None
+    // D-EFFDBREAD1: the closed `core.db` table carries its declared leaves
+    // (`DB.Read` on queries, `DB.Write` on `execute`, the `DB` root on
+    // transaction control) even though its body reaches only intrinsics.
+    declared_row :: !known_callee || sema_effect_core_db_callee(callee_key)
     if fact.facts.effect_bound == .Val(effect_row) {
         loop entry in effect_row {
             raw :: entry.name
@@ -1279,7 +1293,7 @@ fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: NameRows, node
                 &diagnostics.push(sema_effect_unknown(raw, entry.span))
                 next
             }
-            if !known_callee -> sema_effect_node_add_direct(&nodes, node_index, effect_name, entry.span)
+            if declared_row -> sema_effect_node_add_direct(&nodes, node_index, effect_name, if known_callee -> fact.span else -> entry.span)
         }
     }
     if callee_key == "" && !row_known {
@@ -1292,6 +1306,12 @@ fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: NameRows, node
     if callee_key != "" && !known_callee && !row_known {
         sema_effect_record_memory_open(&nodes, node_index, fact.span, "callee body is unavailable and has no verified signed memory summary")
     }
+}
+
+// A callee declared in `core.db` (D-EFFDBREAD1). The key alone decides it
+// (`kind:module:owner:name`): a collecting thread holds only its own node.
+fn sema_effect_core_db_callee(callee_key: String) -> Bool Never! {
+    callee_key.contains(":<corelib>/core.db:") || callee_key.contains(":<corelib>/core.db.")
 }
 
 fn sema_effect_record_memory_open(nodes: &[SemaEffectNode], node_index: Int, span: Span, reason: String) Never! {
@@ -1491,14 +1511,15 @@ fn sema_effect_is_call(kind: NodeKind) -> Bool Never! {
 // numeric operations (`1 / 3` as an exact `Fraction`, Decimal and math-type
 // arithmetic, numeric casts), the ambient `close(^value)` / `drop(value)`
 // protocol sugar, and closure intrinsics (`scope.guard`, `on_commit`, task
-// spawn), whose lambda bodies the walk visits on their own. Rust records
-// their effects inline (`close`/`drop`/`scope.guard` record none) and forces
-// the maximal row only for opaque callees, so one with no recorded call fact
-// contributes no effect; it is not an unknown callee.
+// spawn), whose lambda bodies the walk visits on their own, and allocator
+// constructors (`mem.Arena.new`), whose storage the memory walk accounts.
+// Rust records their effects inline (`close`/`drop`/`scope.guard` record
+// none) and forces the maximal row only for opaque callees, so one with no
+// recorded call fact contributes no effect; it is not an unknown callee.
 fn sema_effect_is_compiler_intrinsic(kind: NodeKind) -> Bool Never! {
     if kind == {
         .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .HostCall(_) | .HandleMethod(_, _, _) -> true
-        .Close(_) | .Drop(_) | .CoreClosureCall(_) -> true
+        .Close(_) | .Drop(_) | .CoreClosureCall(_) | .AllocNew(_, _) -> true
         else -> false
     }
 }
@@ -1807,6 +1828,14 @@ fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: 
         .Clone(_, _) -> {
             ty :: body_type(tree, expression)
             if ty == .Shared(_) -> sema_effect_push_memory_event(&nodes, node_index, node.span, "implicit copy of `{type_name(ty)}` retains a shared reference", "rc", None)
+        }
+        // `shared x` (Rust `Shared.new`): new shared storage that every
+        // handle copy retains.
+        .StaticCall(owner, _, method, _, _) -> {
+            if owner == .Prelude(_, path, _) && path == "jet_std::JetShared" && method.name == "new" {
+                sema_effect_push_memory_event(&nodes, node_index, node.span, "`shared` allocates shared storage", "alloc", None)
+                sema_effect_push_memory_event(&nodes, node_index, node.span, "`shared` introduces reference-counted ownership", "rc", None)
+            }
         }
         else -> {}
     }

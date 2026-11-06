@@ -29,7 +29,9 @@ static void observe_free(void *p,int64_t n,int64_t a) {
 static void watch(void *p,int64_t n,int64_t a) {
     assert(p && count<48); watched[count].p=p; watched[count].n=n; watched[count].a=a; watched[count++].freed=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
 static void watch_headers(Headers *h) {
     watch(h,24,8); if(h->capacity) watch(h->data,h->capacity*16,8);
     for(int64_t i=0;i<h->length;i++) { watch_text(h->data[i].name); watch_text(h->data[i].value); }
@@ -56,7 +58,8 @@ int main(void) {
     Headers *b=jet_rt_handle_clone_jet_http_headers(a);
     assert(b!=a && b->data!=a->data && b->length==3 && b->capacity==3);
     assert(jet_rt_handle_eq_jet_http_headers(a,b) && jet_rt_handle_eq_jet_http_headers(b,a));
-    for(int i=0;i<3;i++) { assert(a->data[i].name!=b->data[i].name && a->data[i].value!=b->data[i].value); }
+    // The clone owns a new entry buffer whose names and values share a's texts.
+    for(int i=0;i<3;i++) { assert(a->data[i].name==b->data[i].name && owners(a->data[i].name)==2 && a->data[i].value==b->data[i].value && owners(a->data[i].value)==2); }
     Headers *different=headers(3); entry(different,"x-Repeat","first"); entry(different,"X-Repeat",""); entry(different,"Mixed-Case","caf\xc3\xa9");
     assert(!jet_rt_handle_eq_jet_http_headers(a,different));
     different->data[0].name->data[0]='X'; assert(jet_rt_handle_eq_jet_http_headers(a,different));

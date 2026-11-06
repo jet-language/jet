@@ -2251,6 +2251,9 @@ public `jet build main.jet --offline`, requires a nonzero refusal, and compares
 combined stdout/stderr. `@web_target` uses public
 `jet build FILE --target=web`, not an internal compiler hook. Target availability
 prerequisites do not substitute for a fixture's intended web semantic diagnostic.
+`@a11y_cli` uses public `jet lint --a11y FILE`, the only surface of the
+accessibility lints (E2930/E2931), requires a nonzero exit, and compares the
+rendered stderr with the accessibility summary line.
 
 Pending user-Rust interoperability acceptance rows use `PRODUCT INTEROP RED:`
 in the existing case-disposition table. They remain in the active testkit corpus

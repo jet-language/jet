@@ -4,10 +4,12 @@ use {
 }
 
 // core.ui.host.clipboard — typed UTF-8 clipboard over the host provider's
-// clipboard text primitives (capability code 1).
+// clipboard text primitives (capability code 1). On the web, read_text answers
+// the clipboard text the page last observed (a paste, copy or cut, or its own
+// write_text); a browser lends the live clipboard only to a user gesture.
 fn read_text() -[IO]> UIClipboardText UIHostError! {
     if !core.ui.host.__capability(1) -> return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
-    text :: core.ui.host.__clipboard_get() ?? return Err(UIHostError.HostFailure{service: "Clipboard", message: "the provider could not read the clipboard"})
+    text :: core.ui.host.__clipboard_get() ?? return Err(UIHostError.HostFailure{service: "Clipboard", message: "no clipboard text has been observed yet: the host has seen no paste, copy, cut or write"})
     Ok(UIClipboardText{text: text, selection: None})
 }
 

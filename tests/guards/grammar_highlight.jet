@@ -1,6 +1,6 @@
 // Ports of the highlight-registry gates from the deleted tests/grammar.rs
 // (#6096 grammar-highlight). The Rust gates read `jet::Syntax`; the Jet
-// registry is the Data/Syntax text that Tools/agent/editor-grammars.mjs renders
+// registry is the Data/Syntax text that `jet self devtools grammars` renders
 // from, so these read the same rows the generator reads.
 use gh_files :: core.files
 
@@ -63,7 +63,7 @@ fn gh_strip_comma(text: String) -> String {
 }
 
 // Every `NAME :: "literal"` constant in the syntax registry directory
-// (editor-grammars.mjs `readSyntaxConstants`).
+// (EditorGrammars.jet `jet_cli_grammar_constants`).
 fn gh_constants() -> [(name: String, value: String)] {
     constants := [(name: String, value: String)]{}
     loop child in (gh_files.list_dir(GH_SYNTAX_DIR) ?? panic("list {GH_SYNTAX_DIR}: {err}")) {
@@ -103,7 +103,7 @@ fn gh_resolve(constants: [(name: String, value: String)], written: String) -> St
     panic("unresolved highlight text constant {written} in {GH_SYNTAX_DIR}")
 }
 
-// Active marker rule names (editor-grammars.mjs `readActiveMarkers`): every
+// Active marker rule names (EditorGrammars.jet `jet_cli_grammar_markers`): every
 // top-level struct in the Prelude marker source with an `impl Marker` block.
 fn gh_active_markers() -> [String] {
     names := [String]{}

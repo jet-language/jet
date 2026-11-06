@@ -895,7 +895,7 @@ test('ratifying a syntax-group decision appends the standard chores to criteria'
   assert.deepEqual(texts, [
     'Data/Syntax registry entry updated',
     'syntax-decisions.md log entry',
-    'editor grammars regenerated (editor-grammars.mjs --write)',
+    'editor grammars regenerated (jet self devtools grammars)',
     'snapshots re-blessed',
   ]);
 });

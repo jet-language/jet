@@ -63,9 +63,11 @@ Repeat this sequence for each requested card or bounded slice:
    tree. Do not lose a coherent patch, overwrite another task's paths, or leave
    callers, tests, tools, docs, generated uses, environment variables, or CLI
    spellings on the obsolete contract.
-5. Run the one exact focused proof named by the card's observable criterion
-   against the integrated tree. A nearby suite, type-check, worker receipt, or
-   absence of an error is not a substitute.
+5. Run the exact focused proof named by each card's observable criterion
+   against the integrated tree, batched: one build and one collect-all run
+   cover every commit reported since the last batch. Group the failures by
+   root and return each owner's complete list in one message. A nearby suite,
+   type-check, worker receipt, or absence of an error is not a substitute.
 6. Record the command and its result as criteria evidence. Close immediately
    when the criteria are met, then query Tower again for `done`.
 7. Refill only after `done` is confirmed. Keep blockers, owner gates, and
@@ -100,14 +102,11 @@ and affected criteria: fix it in the named implementation slice, integrate the
 delta, run its affected focused proof, close the card, freeze the new source,
 and open a new token before resuming the composed sweep.
 
-## Conditional phase order and completion
+## Batched verification and completion
 
-The normal cadence proves each integrated card before closure. An explicit owner
-request for implementation-before-validation overrides that ordering for the
-requested implementation cards only. Do not activate that mode without the
-request, and do not let it turn source receipts into runtime proof. Once the
-owner-directed implementation phase ends, resume the exact criterion evidence
-and milestone sequence above.
+Verification follows the standing work order in [`../SKILL.md`](../SKILL.md):
+workers implement and commit; the orchestrator proves the batch. Source
+receipts never become runtime proof.
 
 Successful completion requires every requested path integrated, every
 applicable criterion evidenced, and Tower showing the true completed state.

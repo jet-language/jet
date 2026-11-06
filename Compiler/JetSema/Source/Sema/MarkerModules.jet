@@ -3,7 +3,7 @@
 // spelling of its import alias and module path (`use core.http.server as
 // server` gives `#Server.Get`); a lowercase library part is E0087.
 use {
-    jet_foundation.[Diagnostic, Func, Item, MARKER_SOURCE, Marker, MarkerDecl, Program, Span, TAppliedRule, TAppliedRuleArgumentMenu, TextEdit, diagnostic_with_edit, foundation_core_argument_menus, sema_casing_marker_qualifier]
+    jet_foundation.[Diagnostic, Func, Item, MARKER_SOURCE, Marker, MarkerDecl, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TextEdit, diagnostic_with_edit, foundation_core_argument_menus, owned_trait, owned_trait_auto_derive_marker, sema_casing_marker_qualifier]
     jet_parser.[parse_generated_source]
 }
 
@@ -501,6 +501,7 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleC
         }
         sema_marker_module_check_groups(graph, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program.items, "", true, catalog, &diagnostics)
         if !sema_module_is_core_source(graph.modules[module_row_index].module_identity) {
+            sema_marker_module_check_trait_collisions(catalog, graph.modules[module_row_index].program.items, &diagnostics)
             sema_marker_module_check_unbuilt_rules(catalog, graph.modules[module_row_index].program, &diagnostics)
             sema_marker_module_check_builtin_sites(catalog, graph.modules[module_row_index].program, &diagnostics)
             if !repeat_checked -> sema_marker_rules_validate_repeatability(catalog, graph.modules[module_row_index].program, &diagnostics)
@@ -510,6 +511,25 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleC
         &unknown_rules.push(^unknown)
     }
     diagnostics
+}
+
+// Compiler derive spellings that are not owned traits (Rust `DERIVE_RULES`
+// beyond the OWNED_TRAITS rows and families).
+SEMA_MARKER_COMPILER_DERIVES :: [String]{"CLI", "Patchable", "UnitFamily"}
+
+// A trait name becomes its `#Trait` derive spelling, so a trait may share a
+// name with a type-site marker only when that marker is the trait's derive
+// (`trait Equatable` → `#Equatable`). Any other type marker (`#Layout`) owns
+// its name: `trait Layout` is E0106 (Rust `register_trait`).
+fn sema_marker_module_check_trait_collisions(catalog: SemaScopeMembersMarkerRegistry, items: [Item], diagnostics: &[Diagnostic]) {
+    loop item in items {
+        if item == .Trait(definition) {
+            index :: sema_marker_rules_catalog_rule_index(catalog.applied_rules, definition.name) ?? next
+            if !catalog.applied_rules[index].sites.contains(sema_marker_rules_site_name(RuleSite.Type)) -> next
+            if owned_trait(definition.name) != None || owned_trait_auto_derive_marker(definition.name) || SEMA_MARKER_COMPILER_DERIVES.contains(definition.name) -> next
+            &diagnostics.push(sema_error("E0106", definition.name_span, "the name `{definition.name}` is a non-derive type marker", "trait names become their matching `#Trait` derive spelling, while this marker has different semantics", "choose a trait name that does not collide with a registered type marker"))
+        }
+    }
 }
 
 // An applied builtin rule the checker has no route for (sema_policy_

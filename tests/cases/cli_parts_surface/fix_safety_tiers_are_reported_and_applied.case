@@ -6,19 +6,22 @@ copy: immutable.jet immutable.bytes
 step: jet check {work}/formatting.jet --json
 env: NO_COLOR=1
 exit: 1
-json: stderr doc $ valid # original predicate: parses
-json: stderr doc $.applicability = "safe"
-json: stderr doc $.fix_edits : array # original pattern
-json: stderr doc $.fix_edits #= 1
-json: stderr doc $.fix_edits[0].safety = "formatting"
+json: stdout doc $ valid # original predicate: parses
+json: stdout doc $.reports[0].code = "E0373"
+json: stdout doc $.reports[0].applicability = "safe"
+json: stdout doc $.reports[0].fix_edits : array # original pattern
+json: stdout doc $.reports[0].fix_edits #= 1
+# The E0373 registry row ranks the semicolon repair behavior-preserving.
+json: stdout doc $.reports[0].fix_edits[0].safety = "behavior-preserving"
 step: jet check {work}/immutable.jet --json
 env: NO_COLOR=1
 exit: 1
-json: stderr doc $ valid # original predicate: parses
-json: stderr doc $.applicability = "suggested"
-json: stderr doc $.fix_edits : array # original pattern
-json: stderr doc $.fix_edits #= 1
-json: stderr doc $.fix_edits[0].safety = "api-changing"
+json: stdout doc $ valid # original predicate: parses
+json: stdout doc $.reports[0].code = "E0111"
+json: stdout doc $.reports[0].applicability = "suggested"
+json: stdout doc $.reports[0].fix_edits : array # original pattern
+json: stdout doc $.reports[0].fix_edits #= 1
+json: stdout doc $.reports[0].fix_edits[0].safety = "api-changing"
 step: jet fix {work}/typo.jet
 env: NO_COLOR=1
 exit: 0
@@ -26,12 +29,13 @@ file: typo.jet = safety-typo-fixed.bytes
 step: jet fix {work}/formatting.jet
 env: NO_COLOR=1
 exit: 0
-file: formatting.jet ~ "loop item in" # original predicate
+file: formatting.jet ~ "loop item in [1, 2, 3] { print(item) }\n" # the semicolon became a line break
+file: formatting.jet !~ ";"
 step: jet fix {work}/immutable.jet
 env: NO_COLOR=1
 exit: 0
 file: immutable.jet == immutable.bytes
-stdout: ~ "skipped 1 suggestion" # original predicate
+stderr: ~ "no changes made (1 suggestion need review)"
 step: jet fix {work}/immutable.jet --all
 env: NO_COLOR=1
 exit: 0

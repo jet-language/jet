@@ -170,6 +170,18 @@ fn publication_classify_bump(old: PublicationSemVer, new: PublicationSemVer) -> 
     PublicationBumpKind.Same
 }
 
+// Whether `new` may break the public API of `old`: it lies outside `^old`,
+// the range a caret dependent on `old` resolves. One rule with the resolver,
+// so pre-1.0 a minor bump may break (0.2.3 to 0.3.0) and in 0.0.x any bump.
+fn publication_release_may_break(old: PublicationSemVer, new: PublicationSemVer) -> Bool Never! {
+    range :: publication_expand_caret(PublicationPartial{major: Val(old.major), minor: Val(old.minor), patch: Val(old.patch), pre: None, build: None}) ?? return false
+    release :: publication_ver(new.major, new.minor, new.patch)
+    loop comparator in range {
+        if !publication_comparator_matches(comparator, release) -> return true
+    }
+    false
+}
+
 enum PublicationOp {
     Lt
     Lte

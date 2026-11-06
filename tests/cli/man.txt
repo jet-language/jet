@@ -460,7 +460,7 @@ With self-update: Public trust-key file
 With self-update/generate/new: Apply the verified artifact or planned source writes
 .TP
 .B --preview
-With new: Preview deterministic backend source writes without applying them
+With new/bind --update/build --import: Preview source writes, a binding plan, or an imported build graph without applying them
 .TP
 .B --remove
 With new: Remove only unchanged outputs recorded by the scaffold receipt
@@ -478,7 +478,7 @@ With new: Model name recorded beside the route source
 With self-update: Explicitly allow a local keyless channel
 .TP
 .B --check
-With fmt: Check without changing files (CI gate)
+With fmt/doc/split/fold: Check or preview without changing files (CI gate)
 .TP
 .B --lang
 With fmt: Delegate non-Jet files to the environment formatter for this language
@@ -508,7 +508,7 @@ With build: Emit the native Library and C header
 With build/run/dev/jobs/package: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)
 .TP
 .B --locked
-With build/fetch/jobs/run: Require locked dependency and provenance facts
+With build/fetch/jobs/run/inspect gates: Require locked dependency and provenance facts
 .TP
 .B --effect
 With find: Require an effect such as FS.Read
@@ -535,7 +535,7 @@ With run/dev/debug/check/build/jobs: Pick a workspace member by name
 With new: Include commented example deps
 .TP
 .B --force
-With publish: Bypass pre-publish gate (with warning)
+With publish/inspect gates: Bypass pre-publish gate (with warning)
 .TP
 .B --no-sign
 With publish: Skip the optional author signature (registry metadata is still signed)
@@ -556,7 +556,7 @@ With bind: Record the resolved binding plan in the project lock
 With bind: Binding policy: automatic or frozen
 .TP
 .B --accept
-With bind --update: Accept exactly this candidate plan digest
+With bind --update/build --import: Accept exactly this candidate plan digest
 .TP
 .B --import
 With build: Import and inspect an existing foreign build graph
@@ -595,13 +595,13 @@ With new: Start from a named template: cli, ui, web, or overrides
 With help: Order commands by use (frequency, the default), A to Z (az), or Z to A (za)
 .TP
 .B --online
-With doctor: Allow network checks
+With doctor/inspect gates: Allow network checks
 .TP
 .B --fix
 With doctor: Apply auto-fixable problems
 .TP
 .B --dry-run
-With package/rewrite commands/generate: Preview changes without writing
+With fix/fmt/package/rewrite commands/generate: Preview changes without writing
 .TP
 .B --entry
 With generate: Source file containing the generator job
@@ -619,7 +619,7 @@ With fix: Apply safety classes beyond formatting and behavior-preserving
 With fix: Move every marker set above its declaration or into its body --markers <inside|above>
 .TP
 .B --try-anyway
-With dev --canvas: Evaluate past unsupported features (no guarantees)
+With dev --canvas/inspect gates: Evaluate past unsupported features (no guarantees)
 .TP
 .B --restart
 With dev: Always rerun from scratch after a save
@@ -631,7 +631,7 @@ With dev: Hot-swap compatible edits and restart after type changes
 With explain: Explain the checked reload decision for a source or project path
 .TP
 .B --watch
-With run/dev/test/jobs: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once
+With run/dev/test/jobs/build: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once
 .TP
 .B --graph
 With jobs: Show the checked job dependency graph
@@ -697,19 +697,19 @@ With run: Refuse Jetpack project environment preparation
 With eval: Reject code with side effects
 .TP
 .B --allow
-With run/build/jobs/repl/db: Allow comma-separated effect roots or leaves as --allow=RIGHTS
+With run/build/jobs/repl/db/inspect gates: Allow comma-separated effect roots or leaves as --allow=RIGHTS
 .TP
 .B --allow-all
-With run/build: Allow every effect, as --allow with every right; --deny still wins. A file starting with a #!/ line runs this way
+With run/build/inspect gates: Allow every effect, as --allow with every right; --deny still wins. A file starting with a #!/ line runs this way
 .TP
 .B -A
 Short form of --allow-all
 .TP
 .B --deny
-With run/build/jobs/repl/db: Deny comma-separated effect roots or leaves as --deny=RIGHTS
+With run/build/jobs/repl/db/inspect gates: Deny comma-separated effect roots or leaves as --deny=RIGHTS
 .TP
 .B --offline
-With env/run/dev/test/cc/c++: Reuse only cached signed toolchain and package data
+With env/build/run/dev/test/cc/c++/inspect gates: Reuse only cached signed toolchain and package data
 .TP
 .B --fixtures
 With env/run/dev/test/cc/c++: Use an explicit fixture bundle
@@ -769,10 +769,10 @@ With cc/c++: Print the pinned compiler version
 With cc/c++: Print pinned toolchain details or compile verbosely
 .TP
 .B --gate
-With build/run/dev/jobs: Allow one audited gate as --gate name=allow
+With build/run/dev/jobs/check/inspect gates: Allow one audited gate as --gate name=allow
 .TP
 .B --target
-With build/run/dev/jobs/package/cc/c++/flash: Select a target (triple, board.<name>, or named database target)
+With build/run/dev/jobs/check/doctor/inspect/package/cc/c++/flash: Select a target (triple, board.<name>, or named database target)
 .TP
 .B --up
 With db migrate/new: Checked forward SQL
@@ -808,7 +808,7 @@ With db: Select machine-readable output
 With db: Select human-readable output
 .TP
 .B --no-color
-With db: Disable color in console output
+With db/run/test/help: Disable color in console output
 .TP
 .B --force-color
 With db: Force color in console output
@@ -1060,55 +1060,55 @@ With emit --ast/--ir: Print only the named function
 Short form of --update-snapshots
 .TP
 .B --release
-With build/run/dev/jobs/test: Optimize for release
+With build/run/dev/jobs/test/inspect: Optimize for release
 .TP
 .B --profile
-With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle
+With build/run/dev/jobs/package/test/check: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle
 .TP
 .B --optimize
-With build/run/dev/test: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level: none, basic or full; --optimize=none,full, `optimize: [none, full]`, `t.optimize(["none", "full"])`
+With build/run/dev/test/inspect: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level: none, basic or full; --optimize=none,full, `optimize: [none, full]`, `t.optimize(["none", "full"])`
 .TP
 .B --bounds
-With build/run/dev/test: What a failed bounds check does: fatal, report or off
+With build/run/dev/test/inspect: What a failed bounds check does: fatal, report or off
 .TP
 .B --debug-info
-With build/run/dev/test: Whether the image carries DWARF debug info: true, false or split
+With build/run/dev/test/inspect: Whether the image carries DWARF debug info: true, false or split
 .TP
 .B --small
-With build/run/dev/test: Favor a smaller binary by keeping inlining to the O1 limits: true or false
+With build/run/dev/test/inspect: Favor a smaller binary by keeping inlining to the O1 limits: true or false
 .TP
 .B --inline
-With build/run/dev/test: Which calls the optimizer inlines: auto, always_marked or off
+With build/run/dev/test/inspect: Which calls the optimizer inlines: auto, always_marked or off
 .TP
 .B --backtrace
-With build/run/dev/test: What a fault report shows of the stack: full, brief or off
+With build/run/dev/test/inspect: What a fault report shows of the stack: full, brief or off
 .TP
 .B --dead-code
-With build/run/dev/test: Whether the image keeps the package's unreached functions: remove or keep
+With build/run/dev/test/inspect: Whether the image keeps the package's unreached functions: remove or keep
 .TP
 .B --checked-alloc
-With build/run/dev/test: Build with the checked memory allocator, which stops at a bad free or a write after free: true or false
+With build/run/dev/test/inspect: Build with the checked memory allocator, which stops at a bad free or a write after free: true or false
 .TP
 .B --write-generated
-With build/run/dev/test: Whether fn build's generated sources are written to .jet/generated/: off or on
+With build/run/dev/test/inspect: Whether fn build's generated sources are written to .jet/generated/: off or on
 .TP
 .B --output-dir
-With build/run/dev/test: The directory jet build writes its executables to ("" is .jet/build)
+With build/run/dev/test/inspect: The directory jet build writes its executables to ("" is .jet/build)
 .TP
 .B --libs
-With build/run/dev/test: More C libraries the native link resolves foreign symbols against
+With build/run/dev/test/inspect: More C libraries the native link resolves foreign symbols against
 .TP
 .B --link-args
-With build/run/dev/test: More native link inputs: -L<dir>, -l<name> or a .a archive path
+With build/run/dev/test/inspect: More native link inputs: -L<dir>, -l<name> or a .a archive path
 .TP
 .B --os
-With build/run/dev/test: The operating system the image runs on: linux, macos, windows, web or freestanding
+With build/run/dev/test/inspect: The operating system the image runs on: linux, macos, windows, web or freestanding
 .TP
 .B --min-os
-With build/run/dev/test: The oldest OS version the image runs on ("" is none)
+With build/run/dev/test/inspect: The oldest OS version the image runs on ("" is none)
 .TP
 .B --set
-With build/run/dev/jobs/test: Set one declared package setting as key=value
+With build/run/dev/jobs/test/check: Set one declared package setting as key=value
 .TP
 .B --threads
 With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads

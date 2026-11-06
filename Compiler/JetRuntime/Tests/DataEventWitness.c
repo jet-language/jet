@@ -60,18 +60,25 @@ static void observe_free(void *pointer, int64_t size, int64_t align) {
         assert(++watched[i].frees == 1);
     }
 }
+// A block watched again before it is freed is another owner of the same
+// refcounted text: it stays one entry that must be freed exactly once.
 static void watch(void *pointer, int64_t size, int64_t align) {
     assert(watched_count < sizeof(watched) / sizeof(watched[0]));
-    for (size_t i = 0; i < watched_count; ++i) assert(watched[i].pointer != pointer);
+    for (size_t i = 0; i < watched_count; ++i) if (watched[i].pointer == pointer) {
+        assert(!watched[i].frees && size == watched[i].size && align == watched[i].align);
+        return;
+    }
     watched[watched_count].pointer = pointer;
     watched[watched_count].size = size;
     watched[watched_count].align = align;
     watched[watched_count++].frees = 0;
 }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *text) { return *(int64_t *)((char *)text - 8) & INT64_C(0x3fffffffffffffff); }
 static void watch_event(Event *event) {
     watch(event,16,8);
     if (event->tag == 4 || event->tag == 5 || event->tag == 10) {
-        Text *text = (Text *)event->payload; watch((char *)(text)-8,32,8);
+        Text *text = (Text *)event->payload; watch((char *)(text)-8,40,8);
         if (text->capacity) watch(text->data,text->capacity,1);
     } else if (event->tag == 6) {
         Sequence *seq = (Sequence *)event->payload; watch(seq,24,8);
@@ -135,14 +142,21 @@ static void text_cases(void) {
         Text *input = jet_rt_string_from_static(bytes,sizeof(bytes)-1);
         Event *a = ctors[i](input), *b = jet_rt_handle_clone_data_event(a);
         assert(jet_rt_record_tag_data_event(a) == tags[i]);
-        assert(a->payload != (uintptr_t)input && b->payload != a->payload);
+        // Events are reallocated; the payload text is shared by owner count.
+        assert(a != b && a->payload == (uintptr_t)input && b->payload == a->payload && owners(input) == 3);
         jet_rt_string_drop(input);
+        assert(owners(input) == 2);
         Text *got = getters[i](a);
-        assert((uintptr_t)got != a->payload && got->length == (int64_t)sizeof(bytes)-1);
+        assert((uintptr_t)got == a->payload && owners(got) == 3 && got->length == (int64_t)sizeof(bytes)-1);
         assert(memcmp(got->data,bytes,sizeof(bytes)-1) == 0);
-        got->data[0] = 'x'; jet_rt_string_drop(got);
+        jet_rt_string_drop(got); assert(owners(input) == 2);
         assert(jet_rt_handle_eq_data_event(a,b));
-        ((Text *)b->payload)->data[0] = 'x'; assert(!jet_rt_handle_eq_data_event(a,b)); drop_pair(a,b);
+        char changed[sizeof(bytes)]; memcpy(changed,bytes,sizeof(bytes)); changed[0] = 'x';
+        Text *other = jet_rt_string_from_static(changed,sizeof(changed)-1);
+        Event *c = ctors[i](other), *d = jet_rt_handle_clone_data_event(c);
+        jet_rt_string_drop(other);
+        assert(!jet_rt_handle_eq_data_event(a,c) && jet_rt_handle_eq_data_event(c,d));
+        drop_pair(a,b); drop_pair(c,d);
     }
 }
 static Sequence *sequence(int64_t length) {

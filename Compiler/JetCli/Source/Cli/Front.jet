@@ -524,7 +524,8 @@ fn jet_cli_positionals(jet_argv: [String]) -> [String] Never! {
     positionals
 }
 
-// `check_flags`: the first unknown `--flag` teaches E2102.
+// `check_flags`: the first unknown `--flag` teaches E2102, and so does the
+// first registered one whose registry row scopes it to other commands.
 fn jet_cli_check_flags(jet_argv: [String], command: String, color: Bool) -> JetCLIPlan? Never! {
     external_fmt := false
     if command == "fmt" {
@@ -534,9 +535,12 @@ fn jet_cli_check_flags(jet_argv: [String], command: String, color: Bool) -> JetC
     }
     loop argument in jet_argv {
         if !argument.starts_with("--") || argument == "--" -> next
-        if jet_cli_is_known_flag(argument) -> next
         head :: argument.split("=").to_list()[0]
         if external_fmt && JET_CLI_EXTERNAL_FMT_FLAGS.contains(head) -> next
+        if jet_cli_flag_spec(head) == .Val(spec) {
+            if jet_cli_flag_takes(spec, command) -> next
+            return Val(jet_cli_misplaced_flag(head, command, jet_cli_flag_commands(spec.help) ?? [String]{}, color))
+        }
         if build_option_flag_refusal(head) == .Val(refusal) -> return Val(jet_cli_fail("E2102", "`{head}` isn't a build option jet has", refusal.law, "drop `{head}`", color, JET_DRIVER_EXIT_USAGE))
         program :: command == "run" || command == "test"
         fix := ""
@@ -563,6 +567,16 @@ fn jet_cli_check_flags(jet_argv: [String], command: String, color: Bool) -> JetC
         ))
     }
     None
+}
+
+// E2102 for a registered flag the command does not take: names the commands
+// whose registry row takes it (the cli_registry test keeps that list nonempty).
+fn jet_cli_misplaced_flag(flag: String, command: String, takers: [String], color: Bool) -> JetCLIPlan Never! {
+    names := [String]{}
+    loop taker in takers -> &names.push("`jet {taker}`")
+    listed := names[0].copy()
+    if names.len() > 1 -> listed = "{jet_cli_prefix(names, names.len() - 1).join(", ")} or {names[names.len() - 1]}"
+    jet_cli_fail("E2102", "`{flag}` is only valid with {listed}", jet_cli_why("E2102"), "drop `{flag}` from `jet {command}`, or run `jet {takers[0]} {flag}`", color, JET_DRIVER_EXIT_USAGE)
 }
 
 // The directory part of `path`, as Rust `Path::parent` reads it.
@@ -2057,6 +2071,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "devtools" -> {
             tool :: if argv.len() > 1 -> argv[1] else -> ""
             if tool == {
+                "grammars" -> return jet_cli_devtools_grammars(quiet, color)
                 "new-example" -> return jet_cli_devtools_new_example(jet_cli_tail(argv, 2), color)
                 "new-ui" | "reduce" | "ice-report" -> return JetCLIPlan.Maintenance{action: tool, args: jet_cli_tail(argv, 2), color: color, json: json}
                 // Rust ignores extra words after `check-fixture-paths`.

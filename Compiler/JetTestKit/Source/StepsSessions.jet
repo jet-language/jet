@@ -292,6 +292,7 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
         policy :: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "invalid session policy")
         overlay :: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
         prepared :: kit_steps_prepare(step, context.env, context.work, context.scratch, context.snapshots, context.plan.fixture, state.built, overlay) ?? return kit_steps_action_error(state, "{err}")
+        if kit_exec_prepare(prepared.env, prepared.cwd, context.scratch, prepared.overlay) == .Val(stopped) -> return kit_steps_action_stopped(state, stopped)
         started :: time.instant()
         spec := kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay)
         if step.terminal == .Val(shape) {

@@ -65,14 +65,18 @@ static void observe_free(void *pointer, int64_t bytes, int64_t align) {
         assert(++watched[i].frees==1);
     }
 }
+// A block watched again before it is freed is another owner of the same
+// refcounted text: it stays one entry that must be freed exactly once.
 static void watch(void *pointer,int64_t bytes,int64_t align) {
     assert(pointer && watched_count<80);
-    for(size_t i=0;i<watched_count;++i) assert(watched[i].pointer!=pointer);
+    for(size_t i=0;i<watched_count;++i) if(watched[i].pointer==pointer) { assert(!watched[i].frees && watched[i].bytes==bytes && watched[i].align==align); return; }
     watched[watched_count].pointer=pointer;
     watched[watched_count].bytes=bytes;
     watched[watched_count++].align=align;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
 static void watch_cause(Cause *c) { watch(c,32,8); watch_text(c->kind); watch_text(c->message); }
 static void watch_error(Error *e) { watch(e,80,8); watch_text(e->path); watch_text(e->reason); if(e->cause) watch_cause(e->cause); }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
@@ -87,16 +91,23 @@ static void rendered(Error *e,const char *golden) {
 static Cause *cause(const char *kind,const int64_t *code,const char *message) {
     Text *a=text(kind), *b=text(message);
     Cause *c=jet_rt_record_new_encoding_cause(a,code,b);
-    assert(c->kind!=a && c->message!=b);
+    assert(c->kind==a && c->message==b && owners(a)==2 && owners(b)==2);
     jet_rt_string_drop(a); jet_rt_string_drop(b);
     return c;
 }
 static Error *error(int64_t format,int64_t kind,int64_t offset,const int64_t *line,const int64_t *column,const char *path,const char *reason,Cause *c) {
     Text *a=text(path), *b=text(reason);
     Error *e=jet_rt_record_new_encoding_error(format,kind,offset,line,column,a,b,c);
-    assert(e->path!=a && e->reason!=b && e->cause==c); // ctor consumes c, unlike text
+    assert(e->path==a && e->reason==b && owners(a)==2 && owners(b)==2 && e->cause==c); // ctor consumes c and shares the texts
     jet_rt_string_drop(a); jet_rt_string_drop(b);
     return e;
+}
+// An owned copy of t whose first byte differs: a clone shares t's bytes, so
+// a differing field is a different text, never a write through a shared one.
+static Text *flipped(Text *t) {
+    char bytes[64]; assert(t->length>0 && t->length<=64);
+    memcpy(bytes,t->data,(size_t)t->length); bytes[0]^=1;
+    return jet_rt_string_from_static(bytes,t->length);
 }
 static void enum_truth(void) {
     for(int64_t i=0;i<7;++i) {
@@ -121,13 +132,13 @@ static void equality(Error *a) {
     assert(jet_rt_handle_eq_encoding_error(a,a) && jet_rt_handle_eq_encoding_error(a,b));
     int64_t *fields[]={&b->format,&b->kind,&b->offset,&b->line_present,&b->line,&b->column_present,&b->column};
     for(size_t i=0;i<7;++i) { *fields[i]^=1; assert(!jet_rt_handle_eq_encoding_error(a,b)); *fields[i]^=1; }
-    b->path->data[0]^=1; assert(!jet_rt_handle_eq_encoding_error(a,b)); b->path->data[0]^=1;
-    b->reason->data[0]^=1; assert(!jet_rt_handle_eq_encoding_error(a,b)); b->reason->data[0]^=1;
+    Text *kept=b->path, *other=flipped(kept); b->path=other; assert(!jet_rt_handle_eq_encoding_error(a,b)); b->path=kept; jet_rt_string_drop(other);
+    kept=b->reason; other=flipped(kept); b->reason=other; assert(!jet_rt_handle_eq_encoding_error(a,b)); b->reason=kept; jet_rt_string_drop(other);
     Cause *saved=b->cause; b->cause=NULL; assert(!jet_rt_handle_eq_encoding_error(a,b)); b->cause=saved;
-    saved->kind->data[0]^=1; assert(!jet_rt_handle_eq_encoding_cause(a->cause,saved)); assert(!jet_rt_handle_eq_encoding_error(a,b)); saved->kind->data[0]^=1;
+    kept=saved->kind; other=flipped(kept); saved->kind=other; assert(!jet_rt_handle_eq_encoding_cause(a->cause,saved)); assert(!jet_rt_handle_eq_encoding_error(a,b)); saved->kind=kept; jet_rt_string_drop(other);
     saved->present^=1; assert(!jet_rt_handle_eq_encoding_cause(a->cause,saved)); saved->present^=1;
     saved->code^=1; assert(!jet_rt_handle_eq_encoding_cause(a->cause,saved)); saved->code^=1;
-    saved->message->data[0]^=1; assert(!jet_rt_handle_eq_encoding_cause(a->cause,saved)); saved->message->data[0]^=1;
+    kept=saved->message; other=flipped(kept); saved->message=other; assert(!jet_rt_handle_eq_encoding_cause(a->cause,saved)); saved->message=kept; jet_rt_string_drop(other);
     assert(jet_rt_handle_eq_encoding_error(a,b)); jet_rt_handle_drop_encoding_error(b);
     int64_t zero=jet_int_owned_from_i64(0);
     Cause *abs=cause("IO",NULL,"x"), *present=cause("IO",&zero,"x");
@@ -180,12 +191,14 @@ int main(int argc,char **argv) {
     rendered(a,"JSON IO at byte -9223372036854775808, line 0, column 9223372036854775807, path $.name: bad UTF-8");
     equality(a);
     Error *b=jet_rt_handle_clone_encoding_error(a);
-    assert(a!=b && a->path!=b->path && a->path->data!=b->path->data && a->reason!=b->reason && a->cause!=b->cause);
-    assert(a->cause->kind!=b->cause->kind && a->cause->message->data!=b->cause->message->data);
+    // Records are reallocated; their texts are shared by owner count.
+    assert(a!=b && a->path==b->path && owners(a->path)==2 && a->reason==b->reason && owners(a->reason)==2 && a->cause!=b->cause);
+    assert(a->cause->kind==b->cause->kind && owners(a->cause->kind)==2 && a->cause->message==b->cause->message && owners(a->cause->message)==2);
     Cause *g=NULL; assert(jet_rt_record_get_encoding_error_cause(a,&g)==1 && g!=a->cause && jet_rt_handle_eq_encoding_cause(g,a->cause));
     Text *path=jet_rt_record_get_encoding_error_path(a), *reason=jet_rt_record_get_encoding_error_reason(a);
     Text *kind=jet_rt_record_get_encoding_cause_kind(g), *message=jet_rt_record_get_encoding_cause_message(g);
-    assert(path!=a->path && reason!=a->reason && kind!=g->kind && message!=g->message);
+    assert(path==a->path && owners(path)==3 && reason==a->reason && owners(reason)==3);
+    assert(g->kind==a->cause->kind && kind==g->kind && owners(kind)==4 && g->message==a->cause->message && message==g->message && owners(message)==4);
     int64_t offset=jet_rt_record_get_encoding_error_byte_offset(a), offset2=jet_rt_record_get_encoding_error_byte_offset(a), line=0,column=0,code=0;
     assert(offset!=offset2 && jet_int_owned_to_i64(offset)==INT64_MIN && jet_int_owned_to_i64(offset2)==INT64_MIN);
     assert(jet_rt_record_get_encoding_error_line(a,&line)==1 && jet_int_owned_to_i64(line)==0);

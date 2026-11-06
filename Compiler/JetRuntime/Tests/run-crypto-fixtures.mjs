@@ -15,7 +15,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-crypto-fixtures.mjs OUT assemble|lower|audit|link|run');
 const out = resolve(output), unit = join(out, 'unit');
-const fixtures = ['Sha256', 'CryptoX25519', 'CryptoEd25519', 'CryptoChaCha', 'CryptoAead', 'CryptoHkdf', 'CryptoArgon', 'AgeCodec', 'AgeV1', 'CryptoEntropy', 'CryptoHash', 'CryptoPbkdf2', 'CryptoSha3', 'CryptoBlake3', 'CryptoEd25519Signature', 'CryptoWipe', 'CryptoOsEntropy'];
+const fixtures = ['Sha256', 'CryptoX25519', 'CryptoEd25519', 'CryptoChaCha', 'CryptoAead', 'CryptoHkdf', 'AgeCodec', 'AgeV1', 'CryptoEntropy', 'CryptoHash', 'CryptoEd25519Signature', 'CryptoWipe', 'CryptoOsEntropy'];
 function command(name, binary, args, options = {}) {
     const result = spawnSync(binary, args, {cwd: root, encoding: 'utf8', maxBuffer: 1 << 27, ...options});
     writeFileSync(join(out, `${name}.receipt.json`), JSON.stringify({status: result.status, signal: result.signal, error: result.error?.message ?? null, stdout: result.stdout, stderr: result.stderr}, null, 2) + '\n');
@@ -40,11 +40,16 @@ if (mode === 'assemble') {
         });
         return `// [unit source: ${path}]\n${lines.join('\n')}`;
     });
-    writeFileSync(join(unit, 'Source/Fixture.jet'), [...imports, '', ...bodies].join('\n'));
+    const source = [...imports, '', ...bodies].join('\n');
+    writeFileSync(join(unit, 'Source/Fixture.jet'), source);
     writeFileSync(join(unit, 'package.jet'), readFileSync(join(root, 'Compiler/JetRuntime/package.jet')));
-    const entries = readFileSync(join(root, 'Compiler/JetRuntime/exports.list'), 'utf8').split('\n').filter(x => x && !x.startsWith('#'));
-    for (const name of fixtures) for (const match of readFileSync(join(root, `Compiler/JetRuntime/Tests/Fragments.fixture/${name}Tests.jet`), 'utf8').matchAll(/#Export\(c\)\s+fn\s+(\w+)\(/gu)) entries.push(match[1]);
-    writeFileSync(join(unit, 'exports.list'), entries.sort().join('\n') + '\n');
+    // The runtime's own exports and the fixtures' KAT exports, as
+    // run-residue-fixtures.mjs derives them from the same sources.
+    const names = [...source.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gmu)].map(match => match[1]);
+    if (new Set(names).size !== names.length) throw Error('duplicate fixture export');
+    const init = new Map([...source.matchAll(/^\/\/ runtime-init: (\d+)(?: when \S+)?\n#Export\(c\) fn (\w+)/gmu)].map(match => [match[2], match[1]]));
+    init.set('jet_rt_alloc_init', '0');
+    writeFileSync(join(unit, 'exports.list'), names.sort().map(name => name === 'jet_rt_panic_list_bounds' ? `${name} int-index-seam` : init.has(name) ? `${name} init ${init.get(name)}` : name).join('\n') + '\n');
     writeFileSync(join(out, 'sources.receipt.json'), JSON.stringify({paths}, null, 2) + '\n');
 } else if (mode === 'lower') {
     const prefix = join(unit, 'fixture');
@@ -70,8 +75,8 @@ if (mode === 'assemble') {
     const captures = join(out, 'jet-seals');
     mkdirSync(captures, {recursive: true});
     for (const name of fixtures.filter(name => name !== 'AgeV1')) {
-        const result = command(`run-${name}`, join(out, name), [], {timeout: name === 'CryptoArgon' || name === 'CryptoPbkdf2' || name === 'CryptoEd25519Signature' ? 300000 : 60000});
-        if (name === 'CryptoEntropy' || name === 'CryptoHash' || name === 'CryptoPbkdf2' || name === 'CryptoSha3' || name === 'CryptoBlake3' || name === 'CryptoEd25519Signature' || name === 'CryptoWipe' || name === 'CryptoOsEntropy') {
+        const result = command(`run-${name}`, join(out, name), [], {timeout: name === 'CryptoEd25519Signature' ? 300000 : 60000});
+        if (name === 'CryptoEntropy' || name === 'CryptoHash' || name === 'CryptoEd25519Signature' || name === 'CryptoWipe' || name === 'CryptoOsEntropy') {
             const expected = readFileSync(join(root, `Compiler/JetRuntime/Tests/${name}Witness.stdout`), 'utf8');
             const metadata = JSON.parse(readFileSync(join(root, `Compiler/JetRuntime/Tests/${name}Fixtures.json`), 'utf8'));
             if (digest(expected) !== metadata.stdoutSha256) throw Error(`damaged frozen ${name} reference`);

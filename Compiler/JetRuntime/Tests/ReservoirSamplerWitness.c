@@ -33,8 +33,10 @@ static void observe_free(void *p,int64_t bytes,int64_t align){
 static void watch(void *p,int64_t bytes,int64_t align){assert(nwatched<34);pointers[nwatched]=p;sizes[nwatched]=bytes;aligns[nwatched]=align;freed[nwatched++]=0;}
 static void watch_owner(Reservoir *r){
     watched=r;nwatched=0;watch(r,64,8);watch(r->items.data,r->items.capacity*8,8);
-    for(int64_t i=0;i<r->items.len;++i){Text *t=r->items.data[i];watch((char *)(t)-8,32,8);if(t->capacity)watch(t->data,t->capacity,1);}
+    for(int64_t i=0;i<r->items.len;++i){Text *t=r->items.data[i];watch((char *)(t)-8,40,8);if(t->capacity)watch(t->data,t->capacity,1);}
 }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(const Text *t){return *(const int64_t *)((const char *)t-8)&INT64_C(0x3fffffffffffffff);}
 static void expect(const Text *t,const char *s,int64_t len){assert(t->len==len && memcmp(t->data,s,(size_t)len)==0);}
 static void show(Reservoir *r,const char *s){Text *t=jet_rt_handle_show_jet_reservoir_sampler(r);expect(t,s,(int64_t)strlen(s));jet_rt_string_drop(t);}
 static void drop_list(List *list){for(int64_t i=0;i<list->len;++i)jet_rt_string_drop(list->data[i]);if(list->capacity)jet_rt_free(list->data,list->capacity*8,8);jet_rt_free(list,24,8);}
@@ -58,16 +60,19 @@ int main(int argc,char **argv){
         for(unsigned i=0;i<128;++i){char word[32];int n=snprintf(word,sizeof(word),"sample-%u",i);Text *text=jet_rt_string_from_static(word,n);jet_rt_native_reservoir_add(a,text);jet_rt_string_drop(text);memset(word,'?',(size_t)n);}
         assert(b->count==128 && b->rng==rng[c] && b->items.len==lengths[c]);show(b,"ReservoirSampler(n=128)");
         List *sample=jet_rt_native_reservoir_sample(b);assert(sample->len==lengths[c]);
-        for(unsigned i=0;i<lengths[c];++i){char word[32];int n=snprintf(word,sizeof(word),"sample-%u",indices[c][i]);expect(b->items.data[i],word,n);expect(sample->data[i],word,n);assert(sample->data[i]!=b->items.data[i] && sample->data[i]->data!=b->items.data[i]->data);}
+        // The sample is a new list whose slots share the stored texts by owner count.
+        assert(sample!=&b->items && sample->data!=b->items.data);
+        for(unsigned i=0;i<lengths[c];++i){char word[32];int n=snprintf(word,sizeof(word),"sample-%u",indices[c][i]);expect(b->items.data[i],word,n);expect(sample->data[i],word,n);assert(sample->data[i]==b->items.data[i] && owners(sample->data[i])==2);}
         watch_owner(r);
         jet_rt_handle_drop_jet_reservoir_sampler(r);assert(watched==a && a->refs==2);
         jet_rt_handle_drop_jet_reservoir_sampler(a);assert(b->refs==1);
         jet_rt_handle_drop_jet_reservoir_sampler(NULL);
         for(unsigned i=0;i<nwatched;++i)assert(freed[i]==0);
-        jet_rt_handle_drop_jet_reservoir_sampler(b);for(unsigned i=0;i<nwatched;++i)assert(freed[i]==1);
+        // The last handle frees the sampler and its slots; the sample still owns every text.
+        jet_rt_handle_drop_jet_reservoir_sampler(b);assert(freed[0]==1 && freed[1]==1);for(unsigned i=2;i<nwatched;++i)assert(freed[i]==0);
+        for(unsigned i=0;i<lengths[c];++i){char word[32];int n=snprintf(word,sizeof(word),"sample-%u",indices[c][i]);expect(sample->data[i],word,n);assert(owners(sample->data[i])==1);}
+        drop_list(sample);for(unsigned i=0;i<nwatched;++i)assert(freed[i]==1);
         watched=NULL;nwatched=0;
-        for(unsigned i=0;i<lengths[c];++i){char word[32];int n=snprintf(word,sizeof(word),"sample-%u",indices[c][i]);expect(sample->data[i],word,n);}
-        drop_list(sample);
     }
     Reservoir *raw=jet_reservoir_sampler_new(INT64_MAX); // Seed allocates lazily, not a capacity-sized eager allocation.
     char unicode[]={ 's',0,(char)0xe9,(char)0x9b,(char)0xaa };Text *text=jet_rt_string_from_static(unicode,5);Text empty={"",0,0};

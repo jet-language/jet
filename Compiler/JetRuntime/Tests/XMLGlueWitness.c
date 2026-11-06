@@ -66,14 +66,30 @@ static void observe_free(void *p,int64_t bytes,int64_t align) {
         assert(++watched[i].frees==1);
     }
 }
+// A block watched again before it is freed is another owner of the same
+// refcounted text: it stays one entry that must be freed exactly once.
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(p && count<64);
-    for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
+    for(size_t i=0;i<count;++i) if(watched[i].pointer==p) { assert(!watched[i].frees && bytes==watched[i].bytes && align==watched[i].align); return; }
     watched[count].pointer=p; watched[count].bytes=bytes;
     watched[count].align=align; watched[count++].frees=0;
 }
-static void watch_text(Text *t) { watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void watch_error(Error *e) { watch(e,72,8); watch_text(e->path); watch_text(e->reason); }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
+static bool text_block(Text *t,void *p) { return p==(char *)t-8 || (t->capacity && p==t->data); }
+// Every watched block is freed once except the texts the getters still own.
+static void held(Text *p,Text *r) {
+    for(size_t i=0;i<count;++i) assert(watched[i].frees==((text_block(p,watched[i].pointer)||text_block(r,watched[i].pointer))?0u:1u));
+}
+// An owned copy of t whose first byte differs: clones share t's bytes, so a
+// differing field is a different text, never a write through a shared one.
+static Text *flipped(Text *t) {
+    char raw[64]; assert(t->length>0 && t->length<=64);
+    memcpy(raw,t->data,(size_t)t->length); raw[0]^=1;
+    return jet_rt_string_from_static(raw,t->length);
+}
 static void done(void) {
     assert(intercepted>0);
     for(size_t i=0;i<count;++i) assert(watched[i].frees==1);
@@ -87,7 +103,7 @@ static void text_is(Text *t,const char *s) {
 static Error *error(int64_t kind,const int64_t *offset,const int64_t *line,const int64_t *column,const char *path,const char *reason) {
     Text *p=text(path), *r=text(reason);
     Error *e=jet_rt_record_new_xml_error(kind,offset,line,column,p,r);
-    assert(e->path!=p && e->reason!=r);
+    assert(e->path==p && e->reason==r && owners(p)==2 && owners(r)==2);
     jet_rt_string_drop(p); jet_rt_string_drop(r);
     return e;
 }
@@ -123,8 +139,8 @@ static void render_options(void) {
 static void error_cases(void) {
     int64_t hi=jet_int_owned_from_i64(INT64_MAX), lo=jet_int_owned_from_i64(INT64_MIN);
     Error *a=error(2,&hi,&lo,&hi,"/\xcf\x80","oops"), *b=jet_rt_handle_clone_xml_error(a);
-    assert(a!=b && a->path!=b->path && a->reason!=b->reason);
-    assert(a->path->data!=b->path->data && a->reason->data!=b->reason->data);
+    // Records are reallocated; constructor and clone share the texts by owner count.
+    assert(a!=b && a->path==b->path && a->reason==b->reason && owners(a->path)==2 && owners(a->reason)==2);
     assert(jet_rt_handle_eq_xml_error(a,a) && jet_rt_handle_eq_xml_error(a,b));
     assert(a->byte_offset==INT64_MAX && a->line==INT64_MIN && a->column==INT64_MAX);
     int64_t out1, out2, line, column;
@@ -139,13 +155,15 @@ static void error_cases(void) {
     jet_rt_int_drop(out1); jet_rt_int_drop(out2); jet_rt_int_drop(line); jet_rt_int_drop(column);
     assert(jet_rt_record_get_xml_error_kind(a)==2);
     Text *p=jet_rt_record_get_xml_error_path(a), *r=jet_rt_record_get_xml_error_reason(a);
-    assert(p!=a->path && p!=b->path && r!=a->reason && r!=b->reason);
+    assert(p==a->path && p==b->path && r==a->reason && r==b->reason && owners(p)==3 && owners(r)==3);
     int64_t *fields[]={&b->kind,&b->byte_present,&b->byte_offset,&b->line_present,&b->line,&b->column_present,&b->column};
     for(size_t i=0;i<7;++i) { *fields[i]^=1; assert(!jet_rt_handle_eq_xml_error(a,b)); *fields[i]^=1; }
-    b->path->data[0]^=1; assert(!jet_rt_handle_eq_xml_error(a,b)); b->path->data[0]^=1;
-    b->reason->data[0]^=1; assert(!jet_rt_handle_eq_xml_error(a,b)); b->reason->data[0]^=1;
+    Text *kept=b->path,*other=flipped(kept); b->path=other; assert(!jet_rt_handle_eq_xml_error(a,b)); b->path=kept; jet_rt_string_drop(other);
+    kept=b->reason; other=flipped(kept); b->reason=other; assert(!jet_rt_handle_eq_xml_error(a,b)); b->reason=kept; jet_rt_string_drop(other);
     rendered(a,"XML MismatchedTag at byte 9223372036854775807, line -9223372036854775808, column 9223372036854775807, path /\xcf\x80: oops");
-    watch_error(a); watch_error(b); jet_rt_handle_drop_xml_error(a); jet_rt_handle_drop_xml_error(b); done();
+    watch_error(a); watch_error(b); jet_rt_handle_drop_xml_error(a); jet_rt_handle_drop_xml_error(b);
+    // The getters' owners keep the shared texts alive past both records.
+    held(p,r); assert(owners(p)==1 && owners(r)==1);
     text_is(p,"/\xcf\x80"); text_is(r,"oops");
     watch_text(p); watch_text(r); jet_rt_string_drop(p); jet_rt_string_drop(r); done();
     int64_t zero=0;

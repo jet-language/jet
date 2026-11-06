@@ -2193,6 +2193,7 @@ fn sema_derive_expand_builtin_items(items: &[Item], diagnostics: &[Diagnostic]) 
     // Each item is read in place; an expanded declaration gains its derived
     // trait impls in place.
     loop index in 0..<items.len() {
+        sema_derive_float_comparable(items[index], &diagnostics)
         blocks :: sema_derive_builtin_blocks(items[index], facts, auto_equatable, auto_comparable, &providers, &generated, &diagnostics)
         if blocks.len() == 0 -> next
         if &items[index] == .Struct(definition) {
@@ -2203,6 +2204,73 @@ fn sema_derive_expand_builtin_items(items: &[Item], diagnostics: &[Diagnostic]) 
         }
     }
     loop item in generated -> &items.push(item)
+}
+
+// `Float` has no total order (NaN), so it is never `Comparable`: an explicit
+// `#Comparable` over a type that holds a `Float` (a field, a variant payload,
+// or a distinct's base, through lists, options, results, tuples and unions)
+// is E0905 at the marker.
+fn sema_derive_float_comparable(item: Item, diagnostics: &[Diagnostic]) {
+    marker :: if item == {
+        .Struct(definition) -> sema_derive_comparable_marker(definition.derives) ?? return
+        .Enum(definition) -> sema_derive_comparable_marker(definition.derives) ?? return
+        .Distinct(definition) -> sema_derive_comparable_marker(definition.derives) ?? return
+        else -> { return }
+    }
+    holds_float :: if item == {
+        .Struct(definition) -> {
+            loop field in definition.fields {
+                if field.computed == None && sema_derive_holds_float(field.ty) -> break true
+            } ?? false
+        }
+        .Enum(definition) -> {
+            loop variant in definition.variants {
+                found :: if variant.payload == {
+                    .Unit -> false
+                    .Single(ty, _) -> sema_derive_holds_float(ty)
+                    .Named(named) -> {
+                        loop field in named {
+                            if sema_derive_holds_float(field.ty) -> break true
+                        } ?? false
+                    }
+                }
+                if found -> break true
+            } ?? false
+        }
+        .Distinct(definition) -> sema_derive_holds_float(definition.base)
+        else -> false
+    }
+    if !holds_float -> return
+    row :: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
+    &diagnostics.push(sema_error("E0905", marker, row.what.replace("{{type}}", "Float").replace("{{bound}}", "Comparable"), row.why.replace("{{why_text}}", "`Float` would need to implement `Comparable` before it can be used here"), row.fix.replace("{{fix_text}}", "use explicit Float comparisons or sort by a total key that handles NaN")))
+}
+
+fn sema_derive_comparable_marker(derives: [NamedSpan]) -> Span? Never! {
+    loop derived in derives {
+        if derived.name == "Comparable" -> return Val(derived.span)
+    }
+    None
+}
+
+fn sema_derive_holds_float(ty: Type) -> Bool Never! {
+    if ty == {
+        .Float | .Float32 -> true
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_derive_holds_float(inner)
+        .Result(ok, err) -> sema_derive_holds_float(ok) || sema_derive_holds_float(err)
+        .Tuple(members) -> {
+            loop member in members {
+                if sema_derive_holds_float(member.ty) -> return true
+            }
+            false
+        }
+        .Union(members) -> {
+            loop member in members {
+                if sema_derive_holds_float(member) -> return true
+            }
+            false
+        }
+        else -> false
+    }
 }
 
 // The generated getter a computed field `name: T -> formula` reads through.

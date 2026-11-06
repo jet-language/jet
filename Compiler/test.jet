@@ -1,0 +1,310 @@
+// The compiler workspace's code suites (D-TEST-SUITE2=A), run by the test
+// profiles of package.jet: `jet test Compiler --profile jetpack`, `selfhost`
+// or `perf`. Each runs in its own child, where JET names the jet under test
+// and JET_TEST_SUITE_ROOT this package's directory; the checkout is its
+// parent. A row is one check; the profile compares the rows with
+// `.jet/test/<profile>/<suite>.rows`.
+use {
+    crypto :: core.crypto
+    files :: core.files
+    process :: core.process
+    sys :: core.sys
+}
+
+// The Jetpack packages a `jetpack` run tests at once.
+JETPACK_JOBS :: 4
+
+// What the compiler's deepest recursion needs, as the bootstrap chain gives it.
+BUILD_STACK :: 1073741824
+
+// Where `jet build Compiler` leaves the `jet` executable, from the checkout.
+BUILD_OUTPUT :: "Compiler/JetCli/.jet/build"
+
+// Held for each suite's builds: selfhost and perf share BUILD_OUTPUT, and
+// `full` runs them side by side.
+BUILD_LOCK :: "Compiler/JetCli/.jet/test-build.lock"
+
+// The SPEED-500K milestone column the self-compile is held to.
+PERF_COLUMN :: "225K"
+
+fn test(t: Test) -> Int {
+    t.suite("jetpack", jetpack_rows)
+    t.suite("selfhost", selfhost_rows)
+    t.suite("perf", perf_rows)
+    t.run()
+}
+
+// The jet under test, the checkout, and the `name@version` its builds stamp
+// on their identities (as the bootstrap chain does), or a failing `setup` row.
+struct SuiteSetup {
+    jet: String
+    checkout: String
+    version: String
+}
+
+fn suite_setup(rows: TestRows) -> SuiteSetup? {
+    jet :: sys.get("JET") ?? ""
+    root :: sys.get("JET_TEST_SUITE_ROOT") ?? ""
+    if jet == "" || root == "" {
+        rows.fail("setup", "JET or JET_TEST_SUITE_ROOT is unset: run the suite through `jet test Compiler --profile <profile>`")
+        return None
+    }
+    identity :: sys.get("JET_COMPILER_IDENTITY") ?? ""
+    version :: identity.split("#").to_list()[0].copy()
+    if !version.contains("@") {
+        rows.fail("setup", "JET_COMPILER_IDENTITY `{identity}` names no `name@version`: set the jet under test's identity")
+        return None
+    }
+    absolute :: files.absolute(root) ?? {
+        rows.fail("setup", "couldn't resolve `{root}`: {err}")
+        return None
+    }
+    Val(SuiteSetup{jet: jet, checkout: files.dirname(absolute), version: version})
+}
+
+// A child jet in the checkout, without the profile run's own settings, so a
+// child `jet test` runs its own tests and writes its own evidence.
+fn jet_command(setup: SuiteSetup, jet: String, args: [String]) -> ProcessSpec {
+    argv := [String]{jet}
+    loop arg in args -> &argv.push(arg)
+    spec := process.cmd(argv).cwd(setup.checkout).env("JET_TOOLCHAIN_ROOT", setup.checkout)
+    names :: sys.vars() ?? [String]{}
+    loop name in names {
+        if name.starts_with("JET_TEST_") || name.starts_with("JET_NATIVE_TEST_") || name.starts_with("JET_EVIDENCE_") {
+            spec = spec.env_remove(name)
+        }
+    }
+    spec
+}
+
+// A child's output reduced to a failing row's detail: its first `Error`
+// line (a jet diagnostic's header), else its last non-blank line.
+fn failure_line(text: String) -> String {
+    found := ""
+    loop line in text.split("\n") {
+        if line.starts_with("Error") -> return line.trim()
+        if line.trim() != "" -> found = line.trim()
+    }
+    found
+}
+
+// ---------------------------------------------------------------------------
+// jetpack: one row per #Test of each Jetpack package, `<package>: <test>`,
+// from `jet test Jetpack/<package>`; the packages are each area and its
+// `Tests` package. A package whose tests didn't run is the failing row
+// `<package>`.
+fn jetpack_rows(rows: TestRows) {
+    setup :: suite_setup(rows) ?? return
+    listed :: files.list_dir(files.join(setup.checkout, "Jetpack")) ?? {
+        rows.fail("Jetpack", "couldn't list `Jetpack`: {err}")
+        return
+    }
+    packages := [String]{}
+    loop entry in listed {
+        if !entry.is_dir -> next
+        if files.is_file(files.join(entry.path, "package.jet")) -> &packages.push(entry.name.copy())
+        if files.is_file(files.join(entry.path, "Tests/package.jet")) {
+            &packages.push("{entry.name}/Tests")
+        }
+    }
+    &packages.sort()
+    specs := [ProcessSpec]{}
+    loop package in packages {
+        &specs.push(jet_command(setup, setup.jet, [String]{"test", "Jetpack/{package}"}))
+    }
+    results :: process.run_all(specs, JETPACK_JOBS) ?? {
+        rows.fail("Jetpack", "couldn't start the package runs: {err}")
+        return
+    }
+    loop (index, package) in packages {
+        if results[index] == {
+            .Ok(receipt) -> { jetpack_package_rows(rows, package, receipt) }
+            .Err(error) -> rows.fail(package, "couldn't run `jet test Jetpack/{package}`: {error}")
+        }
+    }
+}
+
+// A package's rows from its `<test>: <verdict>` lines; a run that ended
+// without a summary, or failed with no failing test, is the row `<package>`;
+// a package with no #Test blocks is that row, skipped.
+fn jetpack_package_rows(rows: TestRows, package: String, receipt: ProcessReceipt) {
+    if receipt.errors.contains("[jet.NoTestsFound]") || receipt.output.contains("[jet.NoTestsFound]") {
+        rows.skip(package, "no #Test blocks")
+        return
+    }
+    summary := false
+    failed := false
+    loop line in receipt.output.split("\n") {
+        if line.contains(" passed, ") && line.contains(" failed, ") -> summary = true
+        at :: line.rfind(": ")
+        if at <= 0 -> next
+        name :: line.slice(0, at)
+        verdict :: line.slice(at + 2, line.len()).trim()
+        id :: "{package}: {name}"
+        if {
+            verdict == "pass" || verdict == "expected-fail" -> rows.pass(id)
+            verdict.starts_with("skip") -> rows.skip(id, verdict)
+            verdict.starts_with("FAIL") || verdict == "unexpected-pass" -> {
+                rows.fail(id, verdict)
+                failed = true
+            }
+            else -> {}
+        }
+    }
+    if !summary || (!receipt.success && !failed) {
+        detail :: failure_line(receipt.errors)
+        rows.fail(package, "`jet test Jetpack/{package}` exited {receipt.code}: {if detail == "" -> failure_line(receipt.output) else -> detail}")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// selfhost: the jet under test builds the compiler (s2), s2 builds it again
+// (s3), and s2 and s3 are the same bytes: the fixed point. Each stage gets
+// the runtime pack of the jet under test, so the two builds differ only in
+// the compiler that made them.
+fn selfhost_rows(rows: TestRows) {
+    setup :: suite_setup(rows) ?? return
+    _held :: build_lock(setup) ?? {
+        rows.fail("s2 builds", err.message)
+        return
+    }
+    scratch :: files.temp_dir("jet-selfhost") ?? {
+        rows.fail("s2 builds", "couldn't create a scratch directory: {err}")
+        return
+    }
+    pack :: files.join(files.dirname(setup.jet), "jet-runtime")
+    s2 :: compiler_stage(rows, setup, setup.jet, "s2", files.join(scratch.path, "s2"), pack) ?? return
+    rows.pass("s2 builds")
+    s3 :: compiler_stage(rows, setup, s2, "s3", files.join(scratch.path, "s3"), pack) ?? return
+    rows.pass("s3 builds")
+    if {
+        same_build(s2, s3) -> rows.pass("fixed point")
+        else -> rows.fail("fixed point", "s2 and s3 differ: s2 {digest(s2)}, s3 {digest(s3)}")
+    }
+}
+
+// The BUILD_LOCK, waited for.
+fn build_lock(setup: SuiteSetup) -> FileLock Err! {
+    path :: files.join(setup.checkout, BUILD_LOCK)
+    files.create_dir_all(files.dirname(path)) ?? return Err("couldn't create `{files.dirname(path)}`: {err}")
+    lock :: files.lock(path) ?? return Err("couldn't lock `{path}`: {err}")
+    Ok(lock)
+}
+
+// `builder` builds Compiler cold under its own identity, and the `jet` (and
+// `jet.o`) it built move to `directory`, beside the runtime `pack`. The new
+// jet's path, or a failing `<stage> builds` row.
+fn compiler_stage(rows: TestRows, setup: SuiteSetup, builder: String, stage: String, directory: String, pack: String) -> String? {
+    id :: "{stage} builds"
+    output :: files.join(setup.checkout, BUILD_OUTPUT)
+    receipt :: compiler_build(setup, builder, output, None) ?? {
+        rows.fail(id, err.message)
+        return None
+    }
+    if !receipt.success {
+        rows.fail(id, "`jet build Compiler` exited {receipt.code}: {failure_line(receipt.errors)}")
+        return None
+    }
+    stage_move(output, directory, pack) ?? {
+        rows.fail(id, err.message)
+        return None
+    }
+    Val(files.join(directory, "jet"))
+}
+
+// One cold `jet build Compiler` by `builder`, identified as the chain does
+// (`name@version#<sha256 of the builder>`), with
+// the trace written to `trace` when given.
+fn compiler_build(setup: SuiteSetup, builder: String, output: String, trace: String?) -> ProcessReceipt Err! {
+    bytes :: files.read_bytes(builder) ?? return Err("couldn't read `{builder}`: {err}")
+    if files.exists(output) {
+        files.remove_all(output) ?? return Err("couldn't clear `{output}`: {err}")
+    }
+    current :: sys.stack_limit() ?? return Err("couldn't read the stack limit: {err}")
+    sys.set_stack_limit(Val(BUILD_STACK), current.hard) ?? return Err("couldn't raise the stack limit: {err}")
+    spec := jet_command(setup, builder, [String]{"build", "Compiler"}).env("JET_COMPILER_IDENTITY", "{setup.version}#{crypto.sha256(bytes).hex()}")
+    if trace == .Val(path) -> spec = spec.env("JET_TRACE_FILE", path)
+    receipt :: spec.run() ?? return Err("couldn't run `{builder} build Compiler`: {err}")
+    Ok(receipt)
+}
+
+// Moves the built `jet` and `jet.o` from `output` into `directory` and links
+// the runtime `pack` beside them.
+fn stage_move(output: String, directory: String, pack: String) Err! {
+    files.create_dir_all(directory) ?? return Err("couldn't create `{directory}`: {err}")
+    loop name in ([String]{"jet", "jet.o"}) {
+        from :: files.join(output, name)
+        if name == "jet.o" && !files.is_file(from) -> next
+        files.rename(from, files.join(directory, name)) ?? return Err("couldn't move `{from}`: {err}")
+    }
+    files.symlink(pack, files.join(directory, "jet-runtime")) ?? return Err("couldn't link the runtime pack `{pack}`: {err}")
+    files.remove_all(output) ?? return Err("couldn't clear `{output}`: {err}")
+}
+
+// Two stages built the same compiler: the same `jet`, and the same `jet.o`
+// when they kept one.
+fn same_build(a: String, b: String) -> Bool {
+    if digest(a) != digest(b) -> return false
+    digest("{a}.o") == digest("{b}.o")
+}
+
+fn digest(path: String) -> String {
+    bytes :: files.read_bytes(path) ?? return "absent"
+    "{crypto.sha256(bytes)}"
+}
+
+// ---------------------------------------------------------------------------
+// perf: a cold self-compile by the jet under test, traced, held to the
+// PERF_COLUMN budget of Tools/perf/budget/Check.jet. One row per budget row
+// (`phase <id> <phase>`) and per counter row (`unit <id> <counter>`).
+fn perf_rows(rows: TestRows) {
+    setup :: suite_setup(rows) ?? return
+    _held :: build_lock(setup) ?? {
+        rows.fail("self-compile", err.message)
+        return
+    }
+    scratch :: files.temp_dir("jet-perf") ?? {
+        rows.fail("self-compile", "couldn't create a scratch directory: {err}")
+        return
+    }
+    trace :: files.join(scratch.path, "trace.jsonl")
+    output :: files.join(setup.checkout, BUILD_OUTPUT)
+    receipt :: compiler_build(setup, setup.jet, output, Val(trace)) ?? {
+        rows.fail("self-compile", err.message)
+        return
+    }
+    if !receipt.success {
+        rows.fail("self-compile", "`jet build Compiler` exited {receipt.code}: {failure_line(receipt.errors)}")
+        return
+    }
+    rows.pass("self-compile")
+    checked :: jet_command(setup, setup.jet, [String]{"run", "Tools/perf/budget/Check.jet", "--", trace, "--column", PERF_COLUMN}).run() ?? {
+        rows.fail("budget", "couldn't run Tools/perf/budget/Check.jet: {err}")
+        return
+    }
+    table := ""
+    count := 0
+    loop line in checked.output.split("\n") {
+        cells := [String]{}
+        loop cell in line.split("  ") {
+            if cell.trim() != "" -> &cells.push(cell.trim())
+        }
+        if cells.len() < 3 -> next
+        if cells[0] == "row" {
+            table = if cells[1] == "phase" -> "phase" else -> "unit"
+            next
+        }
+        status :: cells[cells.len() - 1]
+        id :: "{table} {cells[0]} {cells[1]}"
+        if {
+            status == "ok" -> rows.pass(id)
+            status == "OVER" -> rows.fail(id, "over the {PERF_COLUMN} budget: {cells.join(", ")}")
+            status == "absent" -> rows.skip(id, "the trace has none of its spans")
+            else -> next
+        }
+        count += 1
+    }
+    if count == 0 || (!checked.success && checked.code != 1) {
+        rows.fail("budget", "Check.jet exited {checked.code}: {failure_line(checked.output)} {failure_line(checked.errors)}")
+    }
+}

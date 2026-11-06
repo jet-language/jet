@@ -6,14 +6,14 @@
 #include <stdio.h>
 #include <string.h>
 typedef intptr_t W;
-typedef struct { char *data; W length, capacity; } Text;
+typedef struct { char *data; W length, capacity, cache; } Text;
 typedef struct { W length, capacity; void *data; } List;
 typedef struct { Text *text, *file; W line; } Context;
 typedef struct { Text *source, *target; } Conversion;
 typedef struct { Text *name, *value; } Field;
 typedef struct { Text *variant; List fields; W has_span, start, end; } Details;
 typedef struct Err { Text *message, *code; struct Err *cause; Text *identity; List context, conversions; Details *details; } Err;
-_Static_assert(sizeof(Err)==88 && sizeof(Details)==56 && sizeof(Context)==24 && sizeof(Conversion)==16 && sizeof(Field)==16,"canonical native error ABI");
+_Static_assert(sizeof(Text)==32 && sizeof(Err)==88 && sizeof(Details)==56 && sizeof(Context)==24 && sizeof(Conversion)==16 && sizeof(Field)==16,"canonical native error ABI");
 typedef struct { Text *function, *file; W line, column; Text *note; W count; Text *source; } Hop;
 typedef struct { Hop *origin; List hops; } Journey;
 _Static_assert(sizeof(Hop)==56 && sizeof(Journey)==32,"canonical native Journey ABI");
@@ -49,12 +49,13 @@ extern void jet_rt_program_allocator_configure(W,W);
 extern void jet_rt_program_allocator_restore(W,W);
 extern W jet_rt_program_allocator_fact(W);
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(W)strlen(s)); }
+static W owners(const Text *t) { return *(const W *)((const char *)t-8) & 0x3fffffffffffffff; }
 static void equal(Text *value,const char *expected) {
     assert(value->length==(W)strlen(expected));
     assert(!memcmp(value->data,expected,(size_t)value->length));
     jet_rt_string_drop(value);
 }
-static Text borrowed(char *value) { return (Text){value,(W)strlen(value),0}; }
+static Text borrowed(char *value) { return (Text){value,(W)strlen(value),0,0}; }
 static void journey_goldens(void) {
     // Literal bytes; no regenerated approximation.
     Text file=borrowed("Examples/features/errors/error_context.jet");
@@ -172,8 +173,10 @@ int main(void) {
     Text *message=text("outer"), *code=text("E42"), *cause_message=text("inner");
     Err *cause=jet_err_from_message(cause_message);
     jet_rt_string_drop(cause_message);
-    Err *value=jet_rt_record_new_jet_err(message,&code,cause); // cause TAKEN
-    assert(value->cause==cause && value->message!=message && value->code!=code);
+    // cause TAKEN; message and code are borrowed and shared by one more owner.
+    assert(owners(message)==1 && owners(code)==1);
+    Err *value=jet_rt_record_new_jet_err(message,&code,cause);
+    assert(value->cause==cause && value->message==message && value->code==code && owners(message)==2 && owners(code)==2);
     jet_rt_string_drop(message); jet_rt_string_drop(code);
     Text *source=text("Source"), *target=text("Target");
     Err *converted=jet_err_apply_conversion(value,source,target);
@@ -186,8 +189,11 @@ int main(void) {
     *field=(Field){text("n"),text("[1,{\"x\":true}]")};
     *details=(Details){text("Variant"),{1,1,field},1,10,20};
     converted->details=details;
+    // A clone is a fresh record over fresh rows; its texts are shared owners.
+    // The identity is also the conversion row's source, so the clone adds two.
+    W identity_owners=owners(converted->identity);
     Err *clone=jet_rt_handle_clone_jet_err(converted);
-    assert(clone!=converted && clone->cause!=converted->cause && clone->identity!=converted->identity);
+    assert(clone!=converted && clone->cause!=converted->cause && clone->identity==converted->identity && owners(clone->identity)==identity_owners+2);
     assert(clone->context.data!=converted->context.data && clone->conversions.data!=converted->conversions.data);
     assert(clone->details!=details && clone->details->fields.data!=details->fields.data);
     assert(jet_rt_handle_eq_jet_err(converted,clone));

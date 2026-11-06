@@ -1,14 +1,19 @@
 // SETUP-PORT jetpack_engine.rs:2559-2574; no assertions.
-use files :: core.files
+use {
+    files :: core.files
+    process :: core.process
+    sys :: core.sys
+}
 fn doctor_setup_writable(path: String) {
     info :: files.stat(path) ?? panic("metadata")
     if info.is_dir {
         entries :: files.list_dir(path) ?? panic("directory")
         loop entry in entries -> doctor_setup_writable(entry.path)
     }
-    if core.sys.is_unix() -> files.chmod(path, info.mode | 0o200) ?? panic("writable")
+    if sys.is_unix() -> files.chmod(path, info.mode.bit_or(0o200)) ?? panic("writable")
 }
-fn run(args: [String]) {
+fn run() {
+    args :: process.args()
     meta :: args[0]
     old_used :: args[1]
     output :: args[2]

@@ -1,26 +1,8 @@
-Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `[FieldError]` into `Err` — no declared conversion exists
-  --> tests/ui/env_config_decode_error.jet:11:19
-    |
- 11 |     failed :: env.decode<Settings>(prefix: "APP_", file: "", allow: ["APP_PORT"])
-    |                   ^^^^^^
- Why: Ordinary fallible calls propagate automatically; `[FieldError]` can reach `Err` only through `impl [FieldError] -> Err`
- Fix: Handle this call locally with `??`, add `impl [FieldError] -> Err { … }`, or change the return type
-More: jet-lang.dev/e/E2402
-
-Error [jet.UnknownName]: Nothing named `errors` exists here
-  --> tests/ui/env_config_decode_error.jet:14:43
-    |
- 14 |         .Err(errors) -> { panic("config: {errors}") }
-    |                                           ^^^^^^
- Why: A name must be declared before it's used
- Fix: Declare it first: `errors :: ...`
-More: jet-lang.dev/e/E0107
-
-Error [jet.InvalidStatement]: This `if` needs an `else` arm
-  --> tests/ui/env_config_decode_error.jet:12:5
-    |
- 12 |     if failed == {
-    |     ^^
- Why: Mixed condition arms (or non-pattern arms) must always have a fallback (D-IF1)
- Fix: Add `else -> { ... }` after the last arm
-More: jet-lang.dev/e/E0003
+Stop [E3001]: `panic: config: [at `port`: E2416: env var APP_PORT -> port: expected Int, found text "not-an-int"]`
+  --> env_config_decode_error.jet:15 in run
+     |
+15 |     settings :: env.decode<Settings>(prefix: "APP_", file: "", allow: ["APP_PORT"]) ?? panic("config: {err}")
+     |                                                                                        ^^^^^
+ Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed, a bounds/key check triggered at runtime, or another program-side stop. The shared report boundary owns the program-side stop; an unhandled entry error is a returned report, not E3001. Jet file and line are shown in Jet terms (I2).
+ Fix: Fix the logic that led to the failure. Program-side stops exit 70 through the shared boundary; unhandled entry errors print their report and exit 1; exit 101 is reserved for Jet defects.
+More: jet-lang.dev/e/E3001

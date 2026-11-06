@@ -510,7 +510,7 @@ fn vault_parse_uint(bytes: I64, length: I64, narrow: Bool, out: I64) -> Bool {
         if (byte < I64{48} || byte > I64{57}) -> return false
         digit :: byte - I64{48}
         if (value < I64{0} || value > limit || (value == limit && digit > I64{5})) -> return false
-        value = wrapping(value * I64{10} + digit)
+        value = wrapping(wrapping(value * I64{10}) + digit)
         at += I64{1}
     }
     rt_text_store(out, value)

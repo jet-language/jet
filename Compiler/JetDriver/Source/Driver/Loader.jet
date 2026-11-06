@@ -1250,8 +1250,16 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                     loop config_index in (list_open + 1)..<list_close {
                         config_token :: tokens[config_index]
                         if jet_driver_is_manifest_string(config_token.kind) {
-                            path :: jet_driver_file_import_path("package.jet", token_decoded(lexed.tables, config_token))
-                            if path.valid -> &configs.push(path.path)
+                            config_path :: token_decoded(lexed.tables, config_token)
+                            path :: jet_driver_file_import_path("package.jet", config_path)
+                            if path.valid {
+                                &configs.push(path.path)
+                            } else {
+                                // A configuration that leaves the package root is refused, never dropped:
+                                // an inline body reports its carrier row, package.jet its field row.
+                                escape_code :: if inline_carrier != None -> "E1362" else -> "E0003"
+                                &diagnostics.push(jet_driver_diagnostic(escape_code, config_token.span, "package configuration `{config_path}` is outside the package root", "configuration files are package inputs, so they resolve only below the package root", "move the configuration under the package root and list its relative path"))
+                            }
                         }
                     }
                     index = list_close
@@ -3112,7 +3120,7 @@ fn jet_driver_inline_package_failure(code: String, start: Int, end: Int) -> JetD
 fn jet_driver_inline_package_found(bytes: [U8], start: Int, open: Int, end: Int) -> JetDriverInlinePackage Never! {
     keyword_end :: start + "package".len()
     colon :: jet_driver_inline_trivia_end(bytes, keyword_end)
-    retired :: if colon >= 0 -> Diagnostic?{None} else -> Val(parser_colon_retired_diagnostic("package {{", "package: {{", TextEdit{span: Span{start: start, end: keyword_end}, new_text: "package:"}))
+    retired :: if jet_driver_inline_byte(bytes, colon) == 58 -> Diagnostic?{None} else -> Val(parser_colon_retired_diagnostic("package {{", "package: {{", TextEdit{span: Span{start: start, end: keyword_end}, new_text: "package:"}))
     JetDriverInlinePackage{found: true, start: start, end: end, body_start: open + 1, body_end: end - 1, error: None, retired: retired}
 }
 

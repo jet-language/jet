@@ -82,7 +82,7 @@ specs and `run_all`, `core.files` locks, `Path`, `core.crypto` hasher, JSON).
 | 44 | `$JET_STATE_ROOT/cheap.sh`, `cheap*.lock`, `cheap-heavy.pause` | check-runtime.mjs, safety-schedule.mjs: check slots | tooling | `Tools/agent/lane-check.sh` slots | STATE | — |
 | 45 | `$JET_SCRATCH_ROOT/held/<date>/…`, `held/LOG.tsv` | AGENTS.md "Never delete work" | evidence | `$JET_SCRATCH_ROOT/held` | SCRATCH | — |
 | 46 | `$JET_STATE_ROOT/proofq/{queue,PAUSE,bin/pq-preflight.mjs}` | safety-schedule, safety-gate-job, s5/make-jobs | tooling/state | `$JET_STATE_ROOT/proofq`; pq-preflight is the dead preflight family | STATE | — |
-| 47 | `$JET_STATE_ROOT/scratch/{RtPlot1b,RtL6b3,RtCrypto1}/…` frozen inputs | `Tools/agent/s5/stage-frozen-inputs.mjs` origins | evidence | recorded origins; the sha256 pins the bytes | — | — |
+| 47 | `$JET_STATE_ROOT/scratch/RtCrypto1/…` frozen inputs | `Tools/agent/s5/stage-frozen-inputs.mjs` origins | evidence | recorded origins; the sha256 pins the bytes (the char Debug and formatter goldens are tracked under `Compiler/JetRuntime/Tests`) | — | — |
 
 ## Committed files that hard-code a machine path
 

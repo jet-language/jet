@@ -249,7 +249,7 @@ fn vault_fixture_check(condition: Bool) {
 // buffer after wiping and before allocator release (not a parallel drop model).
 // out receives record, deep clone, and owned Debug text for the transport.
 #Export(c) fn stored_key_bytes_are_redacted_and_zeroized_on_drop(name: I64, bytes: I64, redacted: I64, forbidden: I64, out: I64) {
-    secret :: vault_secret_adopt(bytes)
+    secret :: jet_rt_secret_from_bytes(bytes)
     record :: vault_record_allocate(name, I64{2}, I64{1}, I64{1}, I64{2}, secret)
     at := I64{0}
     loop {
@@ -268,7 +268,7 @@ fn vault_fixture_check(condition: Bool) {
     vault_fixture_check(rt_text_find(shown, forbidden, I64{0}, false) < I64{0})
     clone :: vault_record_clone(record)
     vault_fixture_check(vault_record_equal(record, clone))
-    clone_secret :: vault_secret_bytes(rt_text_word(clone + VAULT_RECORD_SECRET))
+    clone_secret :: jet_rt_secret_bytes(rt_text_word(clone + VAULT_RECORD_SECRET))
     clone_data :: rt_text_word(clone_secret + DATA_SEQUENCE_DATA)
     first :: host_u8_get(clone_data, I64{0})
     host_u8_put(clone_data, I64{0}, first.bit_xor(I64{1}))
@@ -381,7 +381,7 @@ fn vault_fixture_opaque(record: I64, byte: I64, scratch: I64) {
     data :: rt_text_word(bytes + DATA_SEQUENCE_DATA)
     vault_fixture_check(rt_crypto_entropy_fill(data, I64{32}) == I64{0})
     rt_text_store(bytes + DATA_SEQUENCE_LENGTH, I64{32})
-    secret :: vault_secret_adopt(bytes)
+    secret :: jet_rt_secret_from_bytes(bytes)
     jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
     record :: vault_record_allocate(name, I64{1}, I64{1}, I64{1}, I64{2}, secret)
     origin :: vault_fixture_origin(source)
@@ -843,7 +843,7 @@ fn jet_rt_vault_lifecycle_strings_fixture(name: I64, rollback: I64, missing_root
         bytes :: data_sequence_new(I64{32}, RT_HOST_U8_STRIDE)
         thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), I64{32})
         rt_text_store(bytes + DATA_SEQUENCE_LENGTH, I64{32})
-        secret :: vault_secret_adopt(bytes)
+        secret :: jet_rt_secret_from_bytes(bytes)
         jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
         record :: vault_record_allocate(name, I64{1}, at + I64{1}, I64{2}, I64{1}, secret)
         rt_text_store(record + VAULT_RECORD_CREATED, if (at == I64{0}) -> I64{19} else -> I64{-1})
@@ -1038,7 +1038,7 @@ fn jet_rt_vault_commit_boundary_fixture(name: I64, empty: I64, retired: I64, rev
         rt_text_store(imported + DATA_SEQUENCE_LENGTH, I64{32})
         thread_zero(rt_text_word(imported + DATA_SEQUENCE_DATA), I64{32})
         rt_text_store(plan + VAULT_PLAN_IMPORTED, imported)
-        now :: vault_host_monotonic_ns()
+        now :: jet_time_raw_host_monotonic_ns()
         rt_text_store(plan + VAULT_PLAN_ISSUED, now)
         rt_text_store(plan + VAULT_PLAN_DEADLINE, now + I64{300000000000})
         rt_text_store(write + VAULT_WRITE_DEADLINE, now + I64{300000000000})
@@ -1104,7 +1104,7 @@ fn vault_fixture_status(root: I64, reference: I64, expected: I64, slots: I64) {
 }
 fn vault_fixture_load(root: I64, reference: I64, slots: I64) {
     vault_fixture_check(vault_load_at_root(root, reference, I64{1}, slots) == I64{0})
-    vault_secret_drop(rt_text_word(slots))
+    jet_rt_secret_drop(rt_text_word(slots))
 }
 fn vault_fixture_decoded(root: I64, slots: I64) -> I64 {
     // This is the unrecovered reader: observe the installed ciphertext directly.
@@ -1172,7 +1172,7 @@ fn vault_fixture_decoded(root: I64, slots: I64) -> I64 {
     vault_fixture_status(root, first, I64{1}, slots)
     retired_load :: vault_load_at_root(root, first, I64{1}, slots)
     if (retired_load != I64{0}) -> panic("retired exact refs remain loadable")
-    vault_secret_drop(rt_text_word(slots))
+    jet_rt_secret_drop(rt_text_word(slots))
     revoke :: vault_fixture_prepare(root, name, I64{1}, I64{5}, vault_ref_clone(first), exposure, slots)
     revoke_write :: vault_fixture_authorize(revoke, I64{1}, incident, slots)
     vault_fixture_check(vault_commit_at_root(root, revoke, revoke_write, I64{5}, I64{1}, slots, slots + I64{8}) == I64{0})

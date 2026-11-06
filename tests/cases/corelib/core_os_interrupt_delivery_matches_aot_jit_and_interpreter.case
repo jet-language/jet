@@ -1,8 +1,9 @@
 # Port of tests/corelib_parts/compile.rs::core_os_interrupt_delivery_matches_aot_jit_and_interpreter; guest sources preserved verbatim.
+# The guests flush stdout after `ready`: a pipe stdout is written when its buffer fills (spec.md print).
 requires: os:unix
 # PENDING-GRAMMAR(batch-four): raw session + SIGINT +30s child liveness poll.
 fixture: fixtures/core_os_interrupt_delivery_matches_aot_jit_and_interpreter
-step: jet build fixture.jet
+step: jet build --allow=Env,Exec fixture.jet
 session aot raw: built
 recv aot until = "ready\n" within 30s
 stdout: = "ready\n"
@@ -13,7 +14,7 @@ close aot
 exit: 0
 stdout: = "first\nsecond\n"
 stderr: !~ "unsupported" # original tier refusal exclusion
-session jit raw: jet run fixture.jet
+session jit raw: jet run --allow=Env,Exec fixture.jet
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/run-cache-jit
 recv jit until = "ready\n" within 30s
@@ -25,7 +26,7 @@ close jit
 exit: 0
 stdout: = "first\nsecond\n"
 stderr: !~ "unsupported" # original tier refusal exclusion
-session interpret raw: jet run fixture.jet
+session interpret raw: jet run --allow=Env,Exec fixture.jet
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/run-cache-interpreter
 recv interpret until = "ready\n" within 30s

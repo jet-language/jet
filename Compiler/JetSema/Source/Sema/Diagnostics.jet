@@ -146,6 +146,16 @@ fn sema_has_error_since(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
     false
 }
 
+// Whether the registration graph holds an error that stops checking. An
+// identifier-casing error (E0357) is reported but never changes what a name
+// resolves to, so bodies are still checked beside it, as the Rust reference did.
+fn sema_registration_blocking_error(diagnostics: [Diagnostic]) -> Bool Never! {
+    loop diagnostic in diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.code != "E0357" -> return true
+    }
+    false
+}
+
 // Names the first error in `root_start..<start` as the cause of every report
 // from `start` on; nothing changes when that range has no error.
 fn sema_link_reports_to_first_error(diagnostics: &[Diagnostic], root_start: Int, start: Int) Never! {

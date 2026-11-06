@@ -15,10 +15,10 @@
 // killed when it runs out), call depth is the child's stack.
 //
 // One session holds two children: the comptime child, whose effects are
-// refused, and the runtime child of fn build and fn dev, which may write its
-// standard output. Each child is spawned on first use and again after it
-// ended; a batch whose child was replaced is loaded again at the same
-// addresses (each batch has its own, above the last one).
+// refused, and the runtime child of fn build, fn dev and `jet eval`, which
+// may write its standard output. Each child is spawned on first use and
+// again after it ended; a batch whose child was replaced is loaded again at
+// the same addresses (each batch has its own, above the last one).
 use {
     math :: core.math
     jet_foundation.[Span, TComptimeValue, compiler_take_rows, compiler_threads_single, diagnostic_from_registry, diagnostic_registry_row, diagnostic_with_rights, name_rows_set, name_rows_value]
@@ -85,8 +85,8 @@ JET_EVAL_NATIVE_MAX_PARAMS :: 4
 JET_EVAL_NATIVE_PREFIX :: "__jet_comptime_"
 
 // A compile's native children over the runtime image `image`: `sealed`
-// runs compile-time code (every effect refused), `runtime` fn build and
-// fn dev (standard output admitted).
+// runs compile-time code (every effect refused), `runtime` fn build, fn dev
+// and `jet eval` (standard output admitted).
 struct JetEvalNativeSession {
     image: Shared<JetEvalNativeImage>
     sealed: Shared<JetEvalNativeChild>
@@ -152,7 +152,8 @@ struct JetEvalIRState {
     stderr: String
     max_depth: Int
     runtime_execution: Bool
-    // config.eval_entry: ambient effects are refused as `jet eval` refuses them.
+    // config.eval_entry: ambient effects other than the runtime child's
+    // standard output are refused as `jet eval` refuses them.
     eval_entry: Bool
     // config.impure: a Tier-2 effect of an item inside `#Impure` is refused
     // for the missing invocation gate (E3411); config.impure_gate: the gate
@@ -745,12 +746,13 @@ fn jet_eval_native_stop(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, d
 }
 
 // System call `number` (first argument `first`) the filter refused. Runtime
-// execution has no host for it (unsupported). A comptime evaluation refuses
-// it as the effect it is: ambient time and randomness are E3403, any other
-// effect is observable outside the program, so folding it would bake one
-// build-time result into every run (E3410).
+// execution has no host for it (unsupported), except under `jet eval`, whose
+// evaluator mode refuses it as an ambient effect (E3401). A comptime
+// evaluation refuses it as the effect it is: ambient time and randomness are
+// E3403, any other effect is observable outside the program, so folding it
+// would bake one build-time result into every run (E3410).
 fn jet_eval_native_refused(s: &JetEvalIRState, number: Int, first: Int) {
-    if s.runtime_execution {
+    if s.runtime_execution && !s.eval_entry {
         jet_eval_ir_unsupported(&s, "system call {number}")
         return
     }

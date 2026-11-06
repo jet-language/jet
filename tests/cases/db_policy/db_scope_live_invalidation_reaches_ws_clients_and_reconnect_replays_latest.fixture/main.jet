@@ -1,0 +1,78 @@
+use {
+    db :: core.db
+    web :: core.web
+    net :: core.net
+    ws :: core.net.ws
+    server :: core.http.server
+    core.reactive.loadable.[Loadable]
+}
+
+// The server side of one connection: it joins the live hub on upgrade and
+// stays open until the client closes it.
+fn handle(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    sock :: ws.upgrade(req) ?? panic("upgrade")
+    loop {
+        message :: sock.recv() ?? break
+        if message.is_close() -> break
+    }
+    return Ok(server.response(500, "unused"))
+}
+
+fn next_text(client: WsConn) -> String {
+    loop {
+        message :: client.recv() ?? panic("client recv")
+        if message.is_text() -> return message.text() ?? panic("text")
+    }
+}
+
+fn titles(state: Loadable<[[String: db.DBValue]], db.DBError>) -> String {
+    if state == {
+        .Loaded(rows) -> {
+            out := [String]{}
+            loop row in rows -> &out.push(db.row_text(row, "title") ?? "?")
+            "loaded [{out.join(",")}]"
+        }
+        .Failed(reason) -> "failed {reason.message}"
+        else -> "pending"
+    }
+}
+
+fn insert(scope: db.DBScope, title: String) {
+    owner :: "alice"
+    _ :: scope.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {title})"}) ?? panic("insert")
+}
+
+fn run() {
+    conn :: db.open_memory()
+    policy :: db.policy("tasks", "owner == user") ?? panic("policy")
+    alice :: conn.with_policy(policy, "alice")
+    _ :: db.migrate(alice, "tasks-v1", [db.SQL]{SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}}) ?? panic("migrate")
+    mine :: alice.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("live")
+    print("bound {titles(web.state(mine))}")
+    insert(alice, "one")
+
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    addr :: listener.local_addr() ?? panic("address")
+    mux :: server.mux()
+    mux.get("/live", (req: HTTPRequest) -> handle(req))
+    serving :: task { server.serve_once_listener(listener, mux) ?? panic("serve") }
+    client :: ws.connect("ws://{addr}/live") ?? panic("connect")
+    print("replayed {next_text(client)}")
+    insert(alice, "two")
+    print("pushed {next_text(client)}")
+    client.close(1000, "") ?? panic("close")
+    ^serving.join() ?? panic("server join")
+
+    insert(alice, "three")
+    print("offline {titles(web.state(mine))}")
+    again_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen again")
+    again_addr :: again_listener.local_addr() ?? panic("address again")
+    again_mux :: server.mux()
+    again_mux.get("/live", (req: HTTPRequest) -> handle(req))
+    again_serving :: task { server.serve_once_listener(again_listener, again_mux) ?? panic("serve again") }
+    again :: ws.connect("ws://{again_addr}/live") ?? panic("reconnect")
+    print("reconnect replayed {next_text(again)}")
+    again.close(1000, "") ?? panic("close again")
+    ^again_serving.join() ?? panic("server join again")
+    print(web.live_stats())
+}

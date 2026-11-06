@@ -1,8 +1,8 @@
-Error [jet.FallbackTypeMismatch]: `?? return` can't return a value here
-  --> value_carrying_return_resultless.jet:11:24
+Error [jet.ValueThrownAway]: This Int value is thrown away
+  --> value_carrying_return_resultless.jet:14:5
     |
- 11 |     source() ?? return Err("resultless failure")
-    |                        ^^^
- Why: This function returns nothing, so `return` can't carry a value
- Fix: Drop the value, or add a return type before `->`
-More: jet-lang.dev/e/E0405
+ 14 |     source() ?? return Err("resultless failure")
+    |     ^^^^^^^^^^^^^^^^^^
+ Why: `helper` has no return type, so it returns nothing and the value of its last line is lost
+ Fix: If `helper` should return it, write `-> Int` after its parameter list; to discard it on purpose, write `.drop("reason")`
+More: jet-lang.dev/e/E0433

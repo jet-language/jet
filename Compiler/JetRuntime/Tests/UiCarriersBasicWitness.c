@@ -19,9 +19,9 @@ extern void jet_rt_int_drop(int64_t);
     extern int64_t jet_rt_handle_clone_##T(int64_t); \
     extern void jet_rt_handle_drop_##T(int64_t); \
     extern bool jet_rt_handle_eq_##T(int64_t, int64_t)
-DECLARE(TerminalMode); DECLARE(TextWidthAmbiguous); DECLARE(TextWidthControls);
-DECLARE(JetTuiDirection); DECLARE(TerminalSize); DECLARE(TerminalPolicy);
-DECLARE(TextWidth);
+DECLARE(terminal_mode); DECLARE(text_width_ambiguous); DECLARE(text_width_controls);
+DECLARE(jet_tui_direction); DECLARE(terminal_size); DECLARE(terminal_policy);
+DECLARE(text_width);
 extern int64_t jet_rt_record_new_terminal_size(int64_t, int64_t);
 extern int64_t jet_rt_record_get_terminal_size_cols(int64_t);
 extern int64_t jet_rt_record_get_terminal_size_rows(int64_t);

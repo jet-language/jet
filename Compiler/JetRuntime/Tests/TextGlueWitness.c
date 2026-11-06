@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-typedef struct { unsigned char *data; int64_t length,capacity; } Text;
+typedef struct { unsigned char *data; int64_t length,capacity,cache; } Text;
 typedef struct { Text *message; } Message;
 typedef struct { Text *path,*reason; } Field;
 typedef struct { int64_t insensitive,multiline,dotall; } Flags;
@@ -26,7 +26,7 @@ extern Text *jet_rt_record_get_##name##_##field(Message *); \
 extern Text *jet_rt_handle_show_##name(Message *); \
 extern Text *jet_rt_handle_display_##name(Message *); \
 extern Text *jet_rt_handle_debug_##name(Message *)
-MESSAGE_API(TextError,message); MESSAGE_API(UTF8Error,message); MESSAGE_API(RangeError,reason);
+MESSAGE_API(text_error,message); MESSAGE_API(utf8_error,message); MESSAGE_API(range_error,reason);
 extern Field *jet_rt_record_new_field_error(Text *,Text *);
 extern Field *jet_rt_handle_clone_field_error(Field *);
 extern void jet_rt_handle_drop_field_error(Field *);
@@ -55,14 +55,23 @@ static void observe_free(void *p,int64_t bytes,int64_t align) {
         assert(bytes==watched[i].bytes && align==watched[i].align); assert(++watched[i].frees==1);
     }
 }
+// Texts are shared by refcount, so carriers, clones, getters and renders can
+// name one text block: it is watched once and must be freed exactly once.
 static void watch(void *p,int64_t bytes,int64_t align) {
-    assert(p && count<40); for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
-    watched[count].pointer=p; watched[count].bytes=bytes; watched[count].align=align; watched[count++].frees=0;
+    assert(p); for(size_t i=0;i<count;++i) if(watched[i].pointer==p) { assert(watched[i].bytes==bytes && watched[i].align==align); return; }
+    assert(count<40); watched[count].pointer=p; watched[count].bytes=bytes; watched[count].align=align; watched[count++].frees=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static unsigned frees_of(void *p) { for(size_t i=0;i<count;++i) if(watched[i].pointer==p) return watched[i].frees; assert(!"not watched"); return 0; }
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8) & 0x3fffffffffffffff; }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void done(void) { assert(intercepted>0); for(size_t i=0;i<count;++i) assert(watched[i].frees==1); count=0; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
 static void text_is(Text *t,const char *s) { assert(t->length==(int64_t)strlen(s)); assert(memcmp(t->data,s,(size_t)t->length)==0); }
+// An owned copy whose first byte differs, for inequality probes on shared texts.
+static Text *flipped(Text *t) {
+    unsigned char b[32]; assert(t->length>0 && t->length<=32); memcpy(b,t->data,(size_t)t->length); b[0]^=1;
+    Text *c=jet_rt_string_from_static(b,t->length); assert(c!=t && c->length==t->length && memcmp(c->data,b,(size_t)t->length)==0 && owners(c)==1); return c;
+}
 typedef struct {
     Message *(*new_value)(Text *), *(*clone)(Message *);
     void (*drop)(Message *); bool (*eq)(Message *,Message *);
@@ -73,18 +82,17 @@ static void messages(MessageAPI api) {
     const char *goldens[]={"","plain","\xcf\x80\n`quoted`"};
     for(size_t i=0;i<3;++i) {
         Text *input=text(goldens[i]); Message *a=api.new_value(input), *b=api.clone(a);
-        assert(a!=b && a->message!=input && a->message!=b->message && api.eq(a,b) && api.eq(a,a));
-        if(input->length) assert(input->data!=a->message->data && a->message->data!=b->message->data);
+        assert(a!=b && a->message==input && b->message==input && owners(input)==3 && api.eq(a,b) && api.eq(a,a));
         jet_rt_string_drop(input);
         Text *g=api.get(a), *s=api.show(a), *d=api.display(a), *dbg=api.debug(a);
-        assert(g!=a->message && g!=b->message && s!=d && s!=dbg && d!=dbg);
-        text_is(g,goldens[i]); text_is(s,goldens[i]); text_is(d,goldens[i]); text_is(dbg,goldens[i]);
-        if(b->message->length) { b->message->data[0]^=1; assert(!api.eq(a,b)); b->message->data[0]^=1; }
+        assert(g==a->message && s==g && d==g && dbg==g && owners(g)==6);
+        text_is(g,goldens[i]);
+        if(b->message->length) { Text *shared=b->message; b->message=flipped(shared); assert(!api.eq(a,b)); jet_rt_string_drop(b->message); b->message=shared; }
         Text *saved=b->message; b->message=text("other"); assert(!api.eq(a,b)); jet_rt_string_drop(b->message); b->message=saved;
-        watch(a,8,8); watch_text(a->message); watch(b,8,8); watch_text(b->message);
-        api.drop(a); api.drop(b); done(); text_is(g,goldens[i]);
-        watch_text(g); watch_text(s); watch_text(d); watch_text(dbg);
-        jet_rt_string_drop(g); jet_rt_string_drop(s); jet_rt_string_drop(d); jet_rt_string_drop(dbg); done();
+        watch(a,8,8); watch(b,8,8); watch_text(g);
+        api.drop(a); api.drop(b); assert(frees_of(a)==1 && frees_of(b)==1 && frees_of((char *)g-8)==0 && owners(g)==4); text_is(g,goldens[i]);
+        jet_rt_string_drop(g); jet_rt_string_drop(s); jet_rt_string_drop(d); assert(owners(dbg)==1 && frees_of((char *)dbg-8)==0);
+        jet_rt_string_drop(dbg); done();
     }
     api.drop(NULL);
 }
@@ -93,18 +101,22 @@ static void fields(void) {
     const char *goldens[]={"bad","at `x.y`: bad","at `items[0]`: bad","at `\xcf\x80`\n`: bad"};
     for(size_t i=0;i<4;++i) {
         Text *p=text(paths[i]), *r=text("bad"); Field *a=jet_rt_record_new_field_error(p,r), *b=jet_rt_handle_clone_field_error(a);
-        assert(a!=b && a->path!=p && a->reason!=r && a->path!=b->path && a->reason!=b->reason);
+        assert(a!=b && a->path==p && b->path==p && a->reason==r && b->reason==r && owners(p)==3 && owners(r)==3);
         jet_rt_string_drop(p); jet_rt_string_drop(r); assert(jet_rt_handle_eq_field_error(a,b));
         Text *gp=jet_rt_record_get_field_error_path(a), *gr=jet_rt_record_get_field_error_reason(a);
-        assert(gp!=a->path && gr!=a->reason);
+        assert(gp==a->path && gr==a->reason && owners(gp)==3 && owners(gr)==3);
         Text *s=jet_rt_handle_show_field_error(a), *d=jet_rt_handle_display_field_error(a), *dbg=jet_rt_handle_debug_field_error(a);
-        assert(s!=d && s!=dbg && d!=dbg); text_is(s,goldens[i]); text_is(d,goldens[i]); text_is(dbg,goldens[i]);
+        // An empty path renders the reason itself; any other path builds a new text.
+        if(i==0) assert(s==gr && d==gr && dbg==gr && owners(gr)==6);
+        else assert(s!=d && s!=dbg && d!=dbg && s!=gr && d!=gr && dbg!=gr && owners(s)==1 && owners(d)==1 && owners(dbg)==1 && owners(gr)==3);
+        text_is(s,goldens[i]); text_is(d,goldens[i]); text_is(dbg,goldens[i]);
         Text *old=b->path; b->path=text("changed"); assert(!jet_rt_handle_eq_field_error(a,b)); jet_rt_string_drop(b->path); b->path=old;
-        b->reason->data[0]^=1; assert(!jet_rt_handle_eq_field_error(a,b)); b->reason->data[0]^=1;
-        watch(a,16,8); watch_text(a->path); watch_text(a->reason); watch(b,16,8); watch_text(b->path); watch_text(b->reason);
-        jet_rt_handle_drop_field_error(a); jet_rt_handle_drop_field_error(b); done();
+        old=b->reason; b->reason=flipped(old); assert(!jet_rt_handle_eq_field_error(a,b)); jet_rt_string_drop(b->reason); b->reason=old;
+        watch(a,16,8); watch(b,16,8); watch_text(gp); watch_text(gr); watch_text(s); watch_text(d); watch_text(dbg);
+        jet_rt_handle_drop_field_error(a); jet_rt_handle_drop_field_error(b);
+        assert(frees_of(a)==1 && frees_of(b)==1 && frees_of((char *)gp-8)==0 && frees_of((char *)gr-8)==0);
+        assert(owners(gp)==1 && owners(gr)==(i==0 ? 4 : 1));
         text_is(gp,paths[i]); text_is(gr,"bad");
-        watch_text(gp); watch_text(gr); watch_text(s); watch_text(d); watch_text(dbg);
         jet_rt_string_drop(gp); jet_rt_string_drop(gr); jet_rt_string_drop(s); jet_rt_string_drop(d); jet_rt_string_drop(dbg); done();
     }
     jet_rt_handle_drop_field_error(NULL);
@@ -132,7 +144,7 @@ static void flags(void) {
 int main(void) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
-    MessageAPI apis[]={API(TextError,message),API(UTF8Error,message),API(RangeError,reason)};
+    MessageAPI apis[]={API(text_error,message),API(utf8_error,message),API(range_error,reason)};
     for(size_t i=0;i<3;++i) messages(apis[i]);
     fields(); flags(); puts("TextGlue ownership/equality/render OK"); return 0;
 }

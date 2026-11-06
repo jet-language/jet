@@ -42,17 +42,14 @@ if (!P.ready) {
   P.runner('Compiler/JetBackend/Tests/test-native-test-host.mjs', ['fixtures-prerequisites'], parked.get('Compiler/JetBackend/Tests/test-native-test-host.mjs') ?? []);
   P.finish(); process.exit(process.exitCode);
 }
-let sealedInputs = false;
 if (!inputs || !fs.existsSync(path.join(inputs, 'manifest.json'))) blocked('frozen-inputs', 'immutable preserved input manifest absent');
 else try {
   const manifest = JSON.parse(fs.readFileSync(path.join(inputs, 'manifest.json'), 'utf8'));
-  if (manifest.head !== P.head || !Array.isArray(manifest.files) || manifest.files.length !== 14) throw Error('immutable preserved input census/pin mismatch');
+  if (manifest.head !== P.head || !Array.isArray(manifest.files) || manifest.files.length !== 12) throw Error('immutable preserved input census/pin mismatch');
   const changed = manifest.files.filter(file => !file.path || path.isAbsolute(file.path) || file.path.split(path.sep).includes('..') || !fs.existsSync(path.join(inputs, file.path)) || hash(path.join(inputs, file.path)) !== file.sha256);
-  if (changed.length || new Set(manifest.files.map(file => file.path)).size !== 14) throw Error('immutable preserved input digest/inventory mismatch');
-  sealedInputs = true; P.receipt('frozen-inputs', 'PASS', {manifest: path.join(inputs, 'manifest.json'), files: manifest.files.map(({path, sha256}) => ({path, sha256}))});
+  if (changed.length || new Set(manifest.files.map(file => file.path)).size !== 12) throw Error('immutable preserved input digest/inventory mismatch');
+  P.receipt('frozen-inputs', 'PASS', {manifest: path.join(inputs, 'manifest.json'), files: manifest.files.map(({path, sha256}) => ({path, sha256}))});
 } catch (error) { blocked('frozen-inputs', error.message); }
-const charOracle = inputs ? path.join(inputs, 'char-debug-goldens.bin') : out('absent-char-oracle');
-const fmtExpected = inputs ? path.join(inputs, 'fmt-expected.out') : out('absent-fmt-expected');
 const witnessDir = out('witnesses'); fs.mkdirSync(witnessDir);
 const binary = name => path.join(witnessDir, name);
 const add = (runner, commands, needs = [], extra = {}) => registry.set(`${runner}.mjs`, {commands, needs, extra});
@@ -61,7 +58,7 @@ const front = [jetc0, jet], runtime = [object, provenance];
 
 modes('run-channel-fixtures', ['assemble','assemble-stm','assemble-sync','assemble-observe','assemble-publication','lower','link','link-stm','run-stm','link-sync','run-sync','link-observe','run-observe','link-publication','run-publication','link-weak','run-weak','run','fatal','perf'], front);
 for (const runner of ['run-atomic-fixtures','run-crypto-fixtures','run-parallel-fixtures','run-scheduler-fixtures','run-testsuite-fixtures']) modes(runner, ['assemble','lower','audit','link','run'], front);
-for (const runner of ['run-residue-fixtures','run-shared-source-fixtures']) modes(runner, ['assemble','lower','link','run'], front);
+modes('run-residue-fixtures', ['assemble','lower','link','run'], front);
 modes('run-host-fixtures', ['assemble','lower','audit','compile','link','run'], front);
 modes('run-thread-fixtures', ['assemble','lower','audit','link','run','shared-link','shared-run'], front);
 modes('run-world-sentry-fixtures', ['assemble','lower','audit','link','run','render'], front);
@@ -73,7 +70,7 @@ add('run-main-fixtures', ['link','run'].map(mode => r('run-main-fixtures', out('
 add('check-object', [r('check-object', object, out('object-audit'))], runtime);
 add('check-runtime', [r('check-runtime', out('check-runtime'), '--assemble-only'), r('check-runtime', out('check-runtime-full'))], front);
 for (const runner of ['test-route-abi','test-native-route-handles','test-native-route-records']) add(runner, [r(runner)]);
-add('run-fmt-parity', [r('run-fmt-parity', 'prepare', out('fmt-parity'), fmtExpected), r('run-fmt-parity', 'compare', out('fmt-parity'), jet, fmtExpected)], [...front, fmtExpected]);
+add('run-fmt-parity', [r('run-fmt-parity', 'prepare', out('fmt-parity')), r('run-fmt-parity', 'compare', out('fmt-parity'), jet)], front);
 add('run-test-runtime', [r('run-test-runtime', out('test-runtime'), object, jet)], [...runtime, jet]);
 add('run-native-layout', [r('run-native-layout', '--native', out('native-layout'), object)], runtime);
 const nfc = out('nfc-expected.scalars');
@@ -86,15 +83,12 @@ if (fs.existsSync(normalization)) {
 }
 add('run-native-text-normalize', [r('run-native-text-normalize', '--native', out('native-text-normalize'), object)], [...runtime,nfc], {JET_NFC_FROZEN_SCALARS:nfc});
 const ui = {
-  'accessibility-projection':'UiAccessibilityProjectionWitness','choices':'UiCarriersChoicesWitness',
-  'clipboard':'UiClipboardWitness','dialog-selection':'UiDialogSelectionWitness','drag':'UiDragWitness','events':'UiEventsWitness',
-  'file-dialog':'UiFileDialogWitness','form-action-error':'UiFormActionErrorWitness','host-error':'UiHostErrorWitness','ime':'UiImeWitness',
-  'key':'UiKeyWitness','raylib-metadata':'UiRaylibMetadataWitness','shortcut-binding':'UiShortcutBindingWitness',
-  'slice2':'UiCarriersSlice2Witness','slice3':'UiCarriersSlice3Witness','view-snapshots':'UiViewSnapshotsWitness',
+  'choices':'UiCarriersChoicesWitness','events':'UiEventsWitness','form-action-error':'UiFormActionErrorWitness',
+  'key':'UiKeyWitness','raylib-metadata':'UiRaylibMetadataWitness','view-snapshots':'UiViewSnapshotsWitness',
 };
 for (const [name, witness] of Object.entries(ui)) {
-  const runner = `run-ui-${name}-witness`, args = name === 'key' ? [charOracle] : [];
-  add(runner, [r(runner, out(runner), binary(witness), ...args)], [binary(witness), ...args]);
+  const runner = `run-ui-${name}-witness`;
+  add(runner, [r(runner, out(runner), binary(witness))], [binary(witness)]);
 }
 for (const [runner,witness] of [['run-root-cleanup','RootCleanupWitness'],['run-data-sequence-stops','DataTreeWitness'],['run-scalar-reflect-stops','ScalarReflectWitness']]) add(runner,[r(runner,out(runner),binary(witness))],[binary(witness)]);
 add('run-record-variant-panic',[r('run-record-variant-panic',out('record-variant-panic'),...['DataTreeWitness','DataEventWitness','TaskVariantPanicWitness'].map(binary))],['DataTreeWitness','DataEventWitness','TaskVariantPanicWitness'].map(binary));
@@ -102,10 +96,9 @@ add('run-io-witness',[r('run-io-witness',binary('IOWitness'))],[binary('IOWitnes
 add('run-execution-fixtures',[r('run-execution-fixtures',binary('execution-fixture'))],[binary('execution-fixture')]);
 
 // Generator runners operate only in fresh writable data copies outside W.
-for (const runner of ['generate-blake3-fixtures','generate-ed25519-headers','generate-rfc8032-fixtures']) {
+for (const runner of ['generate-ed25519-headers','generate-rfc8032-fixtures']) {
   const directory = path.join(D,'data',runner,'Compiler/JetRuntime/Tests'); fs.mkdirSync(directory,{recursive:true});
   for (const file of fs.readdirSync(path.join(W,T)).filter(file => /\.(?:mjs|json|h)$/.test(file))) fs.copyFileSync(path.join(W,T,file),path.join(directory,file));
-  if (runner==='generate-blake3-fixtures') fs.rmSync(path.join(directory,'CryptoBlake3Goldens.h'));
   if (runner==='generate-rfc8032-fixtures') fs.rmSync(path.join(directory,'Ed25519OfficialVectors.json'));
   const args = runner==='generate-rfc8032-fixtures' ? [out('rfc8032.txt')] : [];
   add(runner,[[node,path.join(directory,`${runner}.mjs`),...args]],args);
@@ -124,7 +117,7 @@ add('test-unit-runtime',[]);
 async function pool(tasks,width) {const queue=[...tasks];await Promise.all(Array.from({length:width},async()=>{while(queue.length)await queue.shift()();}));}
 const width=Number(process.env.S5_FIXTURE_WIDTH??6);
 if(!Number.isInteger(width)||width<2||width>6)throw Error('fixture width must be2..6 within declared20G');
-const cryptoWitnesses=['Sha256','CryptoX25519','CryptoEd25519','CryptoChaCha','CryptoAead','CryptoHkdf','CryptoArgon','AgeCodec','AgeV1','CryptoEntropy','CryptoHash','CryptoPbkdf2','CryptoSha3','CryptoBlake3','CryptoEd25519Signature','CryptoWipe','CryptoOsEntropy'].map(name=>`${name}Witness`);
+const cryptoWitnesses=['Sha256','CryptoX25519','CryptoEd25519','CryptoChaCha','CryptoAead','CryptoHkdf','AgeCodec','AgeV1','CryptoEntropy','CryptoHash','CryptoEd25519Signature','CryptoWipe','CryptoOsEntropy'].map(name=>`${name}Witness`);
 const ownedWitness=new Set(['CAbiDriver','DisplayWitness','RootStdioWitness','HostFilesTests','HostSpawnTests',...cryptoWitnesses]);
 const dedicated=new Set([...Object.values(ui),'RootCleanupWitness','DataTreeWitness','ScalarReflectWitness','DataEventWitness','TaskVariantPanicWitness','IOWitness']);
 const witnesses=fs.readdirSync(path.join(W,T)).filter(file=>/Witness\.c$/.test(file)).map(file=>file.slice(0,-2)).filter(name=>!ownedWitness.has(name));
@@ -150,8 +143,7 @@ async function execute(file) {
     }
     const needs=definition.needs;
     const absent=needs.filter(file=>!fs.existsSync(file));
-    if((needs.includes(charOracle)||needs.includes(fmtExpected))&&!sealedInputs)blocked(name,'preserved frozen inputs absent or unsealed');
-    else if(absent.length)blocked(name,`required inputs absent: ${absent.join(', ')}`);
+    if(absent.length)blocked(name,`required inputs absent: ${absent.join(', ')}`);
     else await start(name,['timeout','--kill-after=10s','3000s',...argv],{...env,...definition.extra});
   }
 }

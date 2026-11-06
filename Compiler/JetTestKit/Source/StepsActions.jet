@@ -12,6 +12,11 @@ fn kit_steps_action_error(state: KitStepState, message: String) -> KitStepResult
     KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", message)}
 }
 
+// The step a refused or unprepared spawn stops (see kit_exec_prepare).
+fn kit_steps_action_stopped(state: KitStepState, stopped: KitRun) -> KitStepResult {
+    KitStepResult{state: state, verdict: kit_exec_process_failure(stopped) ?? kit_expect_verdict("ERROR", stopped.error)}
+}
+
 // A snapshot (write template, stdin, sent payload, or expected bytes) is
 // authored beside the case or inside the fixture it stages. One that exists
 // in neither place resolves beside the case, so a bless creates it there.
@@ -129,6 +134,7 @@ fn kit_steps_action(step: KitStep, context: KitStepCtx, previous: KitStepState) 
         policy :: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "invalid process policy")
         overlay :: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
         prepared :: kit_steps_prepare(step, context.env, context.work, context.scratch, context.snapshots, context.plan.fixture, state.built, overlay) ?? return kit_steps_action_error(state, "{err}")
+        if kit_exec_prepare(prepared.env, prepared.cwd, context.scratch, prepared.overlay) == .Val(stopped) -> return kit_steps_action_stopped(state, stopped)
         started :: time.instant()
         child := kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay).spawn() ?? return kit_steps_action_error(state, "spawn: {err}")
         input_error := ""

@@ -12,11 +12,13 @@
 // Obsolete Rust lowercase diagnostic goldens are read-only tandem markers;
 // these byte regressions exercise the canonical registry's sentence casing.
 use {
-    jet_foundation.[Diagnostic, DiagnosticMoment]
+    jet_foundation.[Diagnostic, DiagnosticMoment, PublicAPIItem]
+    jet_pkg_model.[pkg_capability_snapshot_parse]
     jetpack_publication.[
-        PublicAPIItem, PublicationBreakingChange, PublicationBumpKind, PublicationPrePublishGate,
-        PublicationSemVer, publication_classify_bump, publication_diff_public_api, publication_e1218,
-        publication_e2601, publication_parse_semver,
+        PublicationBreakingChange, PublicationBumpKind, PublicationIndexEntry, PublicationPrePublishGate,
+        PublicationSemVer, publication_api_baseline, publication_api_snapshot_items, publication_classify_bump,
+        publication_core_reviewed, publication_diff_public_api, publication_e1218,
+        publication_e2601, publication_parse_semver, publication_release_may_break,
     ]
 }
 
@@ -34,6 +36,9 @@ fn publication_diff_test_gate(build_ok: Bool, tests_ok: Bool, breaking: [Publica
 }
 fn publication_diff_test_semver(text: String) -> PublicationSemVer Never! {
     publication_parse_semver(text) ?? panic("invalid test version: {text}")
+}
+fn publication_diff_test_entry(version: String, yanked: Bool) -> PublicationIndexEntry Never! {
+    PublicationIndexEntry{name: "geo", version: version, content_hash: "sha256-tree", fingerprint: "sha256-fp", yanked: yanked, tier: .Core, gate_status: publication_core_reviewed(), public_key: "", signature: ""}
 }
 
 #Test("publication duplicate_legacy_names_match_as_signature_multisets") {
@@ -194,9 +199,10 @@ fn publication_diff_test_semver(text: String) -> PublicationSemVer Never! {
     assert_eq(registry.why, "1.2.0 is a minor bump, which promises no breaking changes. Callers pinned to ^1.0 would stop compiling.\n  fn `parse` was removed\n   | fn parse()\n   | (removed)")
     assert_eq(registry.fix, "Bump to 2.0.0, or restore `parse` (a deprecated shim counts). Use `jet registry publish --force` to override with a warning banner.")
     local :: publication_e1218("1.0.0", "1.2.0", .Minor, change, 2)
-    assert_eq(local.what, "Publishing 1.2.0 after 1.0.0 is a minor bump but breaks the public API")
-    assert_eq(local.why, "A minor bump promises callers no breaking changes, but the public API changed since 1.0.0:\n  fn `parse` was removed\n   | fn parse()\n   | (removed)")
-    assert_eq(local.fix, "Bump to 2.0.0 (a major release), or restore `parse` (a deprecated shim counts).")
+    assert_eq(local.what, "Publishing 1.2.0 after 1.0.0 is a minor bump but breaks the public API item `parse`")
+    assert_eq(local.why, "A minor bump promises callers no breaking changes, but the public API changed since 1.0.0")
+    assert_eq(local.fix, "Bump to 2.0.0 (a major release), or restore `parse` (a deprecated shim counts); `--force` publishes anyway with a warning banner.")
+    assert_eq(local.detail, Val("  fn `parse` was removed\n   | fn parse()\n   | (removed)"))
     diagnostics :: [Diagnostic]{registry, local}
     loop diagnostic in diagnostics {
         assert_eq(diagnostic.moment, DiagnosticMoment.Compile)
@@ -213,8 +219,9 @@ fn publication_diff_test_semver(text: String) -> PublicationSemVer Never! {
     registry_labels :: [String]{"non-breaking", "minor", "patch", "non-breaking"}
     loop index in 0..<bumps.len() {
         local :: publication_e1218("old", "new", bumps[index], change, 9)
-        assert_eq(local.what, "Publishing new after old is a {labels[index]} bump but breaks the public API")
-        assert_eq(local.why, "A {labels[index]} bump promises callers no breaking changes, but the public API changed since old:\n  changed")
+        assert_eq(local.what, "Publishing new after old is a {labels[index]} bump but breaks the public API item `f`")
+        assert_eq(local.why, "A {labels[index]} bump promises callers no breaking changes, but the public API changed since old")
+        assert_eq(local.detail, Val("  changed"))
         registry :: publication_e2601("v4.5.6", bumps[index], change, 9)
         assert(registry.why.contains("is a {registry_labels[index]} bump"))
         assert(registry.why.contains("^v4.0"))
@@ -237,4 +244,87 @@ fn publication_diff_test_semver(text: String) -> PublicationSemVer Never! {
         assert_eq(changes[index].item_name, old[index].name)
         assert_eq(changes[index].description, "public {old[index].kind} `{old[index].name}` changed signature\n   | was: {old[index].signature}\n   | now: {new[index].signature}")
     }
+}
+fn publication_diff_test_breaks(old: [PublicAPIItem], new: [PublicAPIItem]) -> [String] Never! {
+    loop change in publication_diff_public_api(old, new) -> change.item_name.copy()
+}
+#Test("publication api diff struct field additions break only an open literal") {
+    open :: publication_diff_test_item("struct", "Point", "struct Point")
+    sealed :: publication_diff_test_item("struct", "Point", "struct Point {{ .. }}")
+    x :: publication_diff_test_item("field", "Point.x", "field Point.x: Int")
+    required :: publication_diff_test_item("field", "Point.z", "field Point.z: Int")
+    defaulted :: publication_diff_test_item("field", "Point.z", "field Point.z: Int = _")
+    assert_eq(publication_diff_test_breaks([open, x], [open, x, required]), ["Point.z"])
+    assert_eq(publication_diff_test_breaks([open, x], [open, x, defaulted]).len(), 0)
+    assert_eq(publication_diff_test_breaks([sealed, x], [sealed, x, required]).len(), 0)
+    // An open struct that becomes sealed changes its own row.
+    assert_eq(publication_diff_test_breaks([open, x], [sealed, x]), ["Point"])
+    // Every member of a new struct is new API.
+    assert_eq(publication_diff_test_breaks([], [open, x, required]).len(), 0)
+    assert_eq(publication_diff_test_breaks([open, x], [open]), ["Point.x"])
+}
+#Test("publication api diff enum variant and trait member additions") {
+    shape :: publication_diff_test_item("enum", "Shape", "enum Shape")
+    circle :: publication_diff_test_item("variant", "Shape.Circle", "variant Shape.Circle(Float)")
+    square :: publication_diff_test_item("variant", "Shape.Square", "variant Shape.Square{{side: Float}}")
+    assert_eq(publication_diff_test_breaks([shape, circle], [shape, circle, square]), ["Shape.Square"])
+    assert_eq(publication_diff_test_breaks([], [shape, circle, square]).len(), 0)
+    draw :: publication_diff_test_item("trait", "Draw", "trait Draw")
+    paint :: publication_diff_test_item("require", "Draw.paint", "require Draw.paint(self) Int -[IO]>")
+    output :: publication_diff_test_item("require", "Draw.Output", "require Draw.Output: type")
+    describe :: publication_diff_test_item("fn", "Draw.describe", "fn Draw.describe(self) String -[]> = _")
+    assert_eq(publication_diff_test_breaks([draw, paint], [draw, paint, output]), ["Draw.Output"])
+    assert_eq(publication_diff_test_breaks([draw, paint], [draw, paint, describe]).len(), 0)
+    assert_eq(publication_diff_test_breaks([draw, paint, describe], [draw, paint]), ["Draw.describe"])
+    // A member added to a trait of the same name in another module is not a member.
+    assert_eq(publication_diff_test_breaks([draw], [draw, publication_diff_test_item("require", "Draw.inner.k", "require Draw.inner.k: Int")]).len(), 0)
+}
+#Test("publication api diff effect rows may narrow but never widen") {
+    io_net :: publication_diff_test_function("fetch", "fn fetch(url: String) String Never! -[IO, Net]>")
+    io :: publication_diff_test_function("fetch", "fn fetch(url: String) String Never! -[IO]>")
+    pure :: publication_diff_test_function("fetch", "fn fetch(url: String) String Never! -[]>")
+    open :: publication_diff_test_function("fetch", "fn fetch(url: String) String Never! -[*]>")
+    retyped :: publication_diff_test_function("fetch", "fn fetch(url: String) Int Never! -[IO]>")
+    assert_eq(publication_diff_test_breaks([io_net], [io]).len(), 0)
+    assert_eq(publication_diff_test_breaks([io_net], [pure]).len(), 0)
+    assert_eq(publication_diff_test_breaks([open], [io]).len(), 0)
+    assert_eq(publication_diff_test_breaks([io], [io_net]), ["fetch"])
+    assert_eq(publication_diff_test_breaks([io], [open]), ["fetch"])
+    assert_eq(publication_diff_test_breaks([io_net], [retyped]), ["fetch"])
+    // A defaulted trait method narrows like a fn.
+    assert_eq(publication_diff_test_breaks([publication_diff_test_item("fn", "Draw.m", "fn Draw.m(self) -[IO]> = _")], [publication_diff_test_item("fn", "Draw.m", "fn Draw.m(self) -[]> = _")]).len(), 0)
+}
+#Test("publication api diff distinct range and unit scale changes break") {
+    meters :: publication_diff_test_item("distinct", "Meters", "distinct Meters: Float in 0.0..1000.0")
+    wider :: publication_diff_test_item("distinct", "Meters", "distinct Meters: Float in 0.0..2000.0")
+    assert_eq(publication_diff_test_breaks([meters], [wider]), ["Meters"])
+    length :: publication_diff_test_item("unit", "Length", "unit Length[L] base m owner geo {{ m = 1/1, km = 1000/1 }}")
+    rescaled :: publication_diff_test_item("unit", "Length", "unit Length[L] base m owner geo {{ m = 1/1, km = 1024/1 }}")
+    assert_eq(publication_diff_test_breaks([length], [rescaled]), ["Length"])
+}
+#Test("publication api baseline is the highest published version below the release") {
+    entries :: [PublicationIndexEntry]{publication_diff_test_entry("1.0.0", false), publication_diff_test_entry("1.4.2", true), publication_diff_test_entry("2.0.0", false), publication_diff_test_entry("1.3.0", false)}
+    assert_eq((publication_api_baseline(entries, publication_diff_test_semver("1.5.0")) ?? panic("baseline")).version, "1.4.2")
+    assert_eq((publication_api_baseline(entries, publication_diff_test_semver("3.0.0")) ?? panic("baseline")).version, "2.0.0")
+    assert_eq((publication_api_baseline(entries, publication_diff_test_semver("1.3.1")) ?? panic("baseline")).version, "1.3.0")
+    assert_eq(publication_api_baseline(entries, publication_diff_test_semver("0.9.0")), None)
+    assert_eq(publication_api_baseline([PublicationIndexEntry]{}, publication_diff_test_semver("1.0.0")), None)
+}
+fn publication_diff_test_may_break(old: String, new: String) -> Bool Never! {
+    publication_release_may_break(publication_diff_test_semver(old), publication_diff_test_semver(new))
+}
+#Test("publication release may break exactly outside the caret range of the baseline") {
+    assert(publication_diff_test_may_break("1.0.0", "2.0.0"))
+    assert(!publication_diff_test_may_break("1.0.0", "1.1.0"))
+    assert(!publication_diff_test_may_break("1.0.0", "1.0.1"))
+    assert(publication_diff_test_may_break("0.2.3", "0.3.0"))
+    assert(!publication_diff_test_may_break("0.2.3", "0.2.4"))
+    assert(publication_diff_test_may_break("0.0.3", "0.0.4"))
+    assert(publication_diff_test_may_break("0.9.9", "1.0.0"))
+}
+#Test("publication api snapshot rows keep each line as its signature") {
+    snapshot :: pkg_capability_snapshot_parse("api_version = 4\npackage = geo\npublished_version = 1.0.0\nfn area(s: Shape) Float Never! -[]>\nfield Point.x: Int\nstruct Point<T: Ord> {{ .. }}\nvariant Shape.Circle(Float)\nrequire Draw.paint(self) Int -[IO]>\n") ?? panic("snapshot")
+    items :: publication_api_snapshot_items(snapshot)
+    assert_eq(loop item in items -> "{item.kind}|{item.name}", ["field|Point.x", "fn|area", "require|Draw.paint", "struct|Point", "variant|Shape.Circle"])
+    assert_eq(items[0].signature, "field Point.x: Int")
 }

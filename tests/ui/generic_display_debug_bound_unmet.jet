@@ -1,0 +1,20 @@
+// E0905: a `T: Display` or `T: Debug` bound is met only by a type that has the
+// trait. `Plain` interpolates through its derived Printable form but has no
+// Display, and `Callback` holds a function, so it derives no Debug.
+struct Plain {
+    value: Int
+}
+
+struct Callback {
+    run: fn(Int) -> Int
+}
+
+fn display_text<T: Display>(value: T) -> String { "{value}" }
+fn debug_text<T: Debug>(value: T) -> String { "{value:Debug}" }
+
+fn double(value: Int) -> Int { value * 2 }
+
+fn run() {
+    print(display_text(Plain{value: 1}))
+    print(debug_text(Callback{run: double}))
+}

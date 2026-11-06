@@ -4448,11 +4448,19 @@ fn sema_check_method_jobs(graph: SemaRegistrationGraph, source_module: SemaRegis
     }
     if derive_wave -> return jobs
     module_index :: name_rows_get_text(graph.module_rows, source_module.module_identity) ?? -1
+    // A top-level impl the orphan rule refuses (E0902) checks no body.
+    coherence := SemaCheckedCoherence?{None}
     loop (implementation_index, implementation) in source_module.impls {
         if codec_wave {
             if graph.codec_wave_rows.get("{module_index}:{implementation_index}") == None -> next
         } else if sema_codec_impl_pending(implementation) {
             next
+        }
+        if implementation.declaration.trait_name != None && implementation.target_module_identity == None {
+            if coherence == None -> coherence = Val(sema_checked_coherence_state(source_module))
+            if coherence == .Val(state) {
+                if sema_checked_impl_refused(graph, source_module, state, implementation) -> next
+            }
         }
         loop (method_index, method) in implementation.methods {
             if core_wave {

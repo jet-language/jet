@@ -48,7 +48,7 @@ extern Coord *jet_rt_record_get_jet_ray2_direction(Ray *);
 extern double *jet_rt_handle_clone_##name(double *); \
 extern void jet_rt_handle_drop_##name(double *); \
 extern bool jet_rt_handle_eq_##name(double *,double *)
-ARRAY_API(Vec2); ARRAY_API(Vec3); ARRAY_API(Vec4); ARRAY_API(Mat3); ARRAY_API(Mat4);
+ARRAY_API(vec2); ARRAY_API(vec3); ARRAY_API(vec4); ARRAY_API(mat3); ARRAY_API(mat4);
 static struct { void *pointer; int64_t bytes; unsigned frees; } watched[16];
 static size_t count;
 static unsigned intercepted;

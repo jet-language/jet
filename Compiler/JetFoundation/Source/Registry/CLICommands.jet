@@ -695,7 +695,7 @@ fn jet_cli_flag_rows() -> [JetCLIFlagSpec] Never! {
         if spec.long == "--profile" {
             loop option in JET_BUILD_OPTIONS {
                 flag :: build_option_flag(option.name)
-                help := "With build/run/dev/test: {option.help}"
+                help := "With build/run/dev/test/inspect: {option.help}"
                 if jet_cli_test_setting_of_flag(flag) == .Val(row) -> help = "{help}; with test: {jet_cli_test_setting_text(row)}"
                 &rows.push(JetCLIFlagSpec{long: flag, help: help})
             }
@@ -725,7 +725,7 @@ fn jet_cli_test_setting_of_flag(flag: String) -> TestSettingRow? Never! {
 #Test("--optimize is one flag row that says what it does for a build and for jet test") {
     rows :: JET_CLI_FLAGS.filter(row -> row.long == "--optimize")
     assert_eq(rows.len(), 1)
-    assert(rows[0].help.starts_with("With build/run/dev/test: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level"))
+    assert(rows[0].help.starts_with("With build/run/dev/test/inspect: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level"))
 }
 
 // A setting's help line: what it does and its three spellings.
@@ -766,13 +766,13 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     {long: "--platform", help: "With self-update: Toolchain target triple"},
     {long: "--trust-key", help: "With self-update: Public trust-key file"},
     {long: "--apply", help: "With self-update/generate/new: Apply the verified artifact or planned source writes"},
-    {long: "--preview", help: "With new: Preview deterministic backend source writes without applying them"},
+    {long: "--preview", help: "With new/bind --update/build --import: Preview source writes, a binding plan, or an imported build graph without applying them"},
     {long: "--remove", help: "With new: Remove only unchanged outputs recorded by the scaffold receipt"},
     {long: "--path", help: "With new: Route or output path, defaulting to `/<name>`"},
     {long: "--route", help: "With new: Alias for `--path`"},
     {long: "--model", help: "With new: Model name recorded beside the route source"},
     {long: "--allow-unofficial", help: "With self-update: Explicitly allow a local keyless channel"},
-    {long: "--check", help: "With fmt: Check without changing files (CI gate)"},
+    {long: "--check", help: "With fmt/doc/split/fold: Check or preview without changing files (CI gate)"},
     {long: "--lang", help: "With fmt: Delegate non-Jet files to the environment formatter for this language"},
     {long: "--diff", help: "With fmt --check: Also print unified diffs for each changed file"},
     {long: "--simplify", help: "With fmt: Rewrite to the simplest canonical spelling"},
@@ -782,7 +782,7 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     {long: "--stdin-path", help: "With fmt -: Path label used in diagnostics when reading from stdin"},
     {long: "--lib", help: "With build: Emit the native Library and C header"},
     {long: "--output", help: "With build/run/dev/jobs/package: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)"},
-    {long: "--locked", help: "With build/fetch/jobs/run: Require locked dependency and provenance facts"},
+    {long: "--locked", help: "With build/fetch/jobs/run/inspect gates: Require locked dependency and provenance facts"},
     {long: "--effect", help: "With find: Require an effect such as FS.Read"},
     {long: "--example", help: "With find: Search by input/output example"},
     // Script locking folds into `fetch`, not a separate verb.
@@ -793,7 +793,7 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     // Select one workspace member.
     {long: "-p", help: "With run/dev/debug/check/build/jobs: Pick a workspace member by name"},
     {long: "--annotated", help: "With new: Include commented example deps"},
-    {long: "--force", help: "With publish: Bypass pre-publish gate (with warning)"},
+    {long: "--force", help: "With publish/inspect gates: Bypass pre-publish gate (with warning)"},
     // #1659 criterion 1 (round 2): these 8 flags previously lived only in
     // usage-string prose (`NestedCommandSpec::usage`), invisible to
     // `is_known_flag`/`closest_flag` (E2102 "did you mean"), the man page,
@@ -804,7 +804,7 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     {long: "--shape", help: "With bind: Binding facade shape: automatic or native"},
     {long: "--freeze", help: "With bind: Record the resolved binding plan in the project lock"},
     {long: "--policy", help: "With bind: Binding policy: automatic or frozen"},
-    {long: "--accept", help: "With bind --update: Accept exactly this candidate plan digest"},
+    {long: "--accept", help: "With bind --update/build --import: Accept exactly this candidate plan digest"},
     {long: "--import", help: "With build: Import and inspect an existing foreign build graph"},
     {long: "--clang", help: "With bind cpp: Path to the clang binary used to parse the header"},
     {long: "--ar", help: "With bind cpp: Path to the ar archiver used to build the static library"},
@@ -817,19 +817,19 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     {long: "--verbose", help: "With build/jobs: Print the bridge steps; with check: print the status line, proof rows, and receipt notices; with run/dev/test: show advisory lints; with explain: show a syntax token's registry name and decision"},
     {long: "--template", help: "With new: Start from a named template: cli, ui, web, or overrides"},
     {long: "--sort", help: "With help: Order commands by use (frequency, the default), A to Z (az), or Z to A (za)"},
-    {long: "--online", help: "With doctor: Allow network checks"},
+    {long: "--online", help: "With doctor/inspect gates: Allow network checks"},
     {long: "--fix", help: "With doctor: Apply auto-fixable problems"},
-    {long: "--dry-run", help: "With package/rewrite commands/generate: Preview changes without writing"},
+    {long: "--dry-run", help: "With fix/fmt/package/rewrite commands/generate: Preview changes without writing"},
     {long: "--entry", help: "With generate: Source file containing the generator job"},
     {long: "--keep", help: "With try: Keep a clean speculative edit"},
     {long: "--edition", help: "With fix: Apply edition migration rewrites --edition=<year>"},
     {long: "--all", help: "With fix: Apply safety classes beyond formatting and behavior-preserving"},
     {long: "--markers", help: "With fix: Move every marker set above its declaration or into its body --markers <inside|above>"},
-    {long: "--try-anyway", help: "With dev --canvas: Evaluate past unsupported features (no guarantees)"},
+    {long: "--try-anyway", help: "With dev --canvas/inspect gates: Evaluate past unsupported features (no guarantees)"},
     {long: "--restart", help: "With dev: Always rerun from scratch after a save"},
     {long: "--swap", help: "With dev: Hot-swap compatible edits and restart after type changes"},
     {long: "--reload", help: "With explain: Explain the checked reload decision for a source or project path"},
-    {long: "--watch", help: "With run/dev/test/jobs: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once"},
+    {long: "--watch", help: "With run/dev/test/jobs/build: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once"},
     {long: "--graph", help: "With jobs: Show the checked job dependency graph"},
     {long: "--status", help: "With jobs: Show fresh or stale status for declared jobs"},
     {long: "--explain", help: "With jobs/package: Explain dependencies, phases, cache identity, and admission facts"},
@@ -856,11 +856,11 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     // to Jetpack unless the caller explicitly opts out.
     {long: "--no-prepare", help: "With run: Refuse Jetpack project environment preparation"},
     {long: "--pure", help: "With eval: Reject code with side effects"},
-    {long: "--allow", help: "With run/build/jobs/repl/db: Allow comma-separated effect roots or leaves as --allow=RIGHTS"},
-    {long: "--allow-all", help: "With run/build: Allow every effect, as --allow with every right; --deny still wins. A file starting with a #!/ line runs this way"},
+    {long: "--allow", help: "With run/build/jobs/repl/db/inspect gates: Allow comma-separated effect roots or leaves as --allow=RIGHTS"},
+    {long: "--allow-all", help: "With run/build/inspect gates: Allow every effect, as --allow with every right; --deny still wins. A file starting with a #!/ line runs this way"},
     {long: "-A", help: "Short form of --allow-all"},
-    {long: "--deny", help: "With run/build/jobs/repl/db: Deny comma-separated effect roots or leaves as --deny=RIGHTS"},
-    {long: "--offline", help: "With env/run/dev/test/cc/c++: Reuse only cached signed toolchain and package data"},
+    {long: "--deny", help: "With run/build/jobs/repl/db/inspect gates: Deny comma-separated effect roots or leaves as --deny=RIGHTS"},
+    {long: "--offline", help: "With env/build/run/dev/test/cc/c++/inspect gates: Reuse only cached signed toolchain and package data"},
     {long: "--fixtures", help: "With env/run/dev/test/cc/c++: Use an explicit fixture bundle"},
     {long: "--project-root", help: "With cc/c++: Scope source paths to a project directory"},
     {long: "--build-root", help: "With cc/c++: Scope output paths to a build directory"},
@@ -881,8 +881,8 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     {long: "-dumpversion", help: "With cc/c++: Print the pinned compiler version"},
     {long: "-v", help: "With cc/c++: Print pinned toolchain details or compile verbosely"},
     // One invocation gate surface covers every audited escape.
-    {long: "--gate", help: "With build/run/dev/jobs: Allow one audited gate as --gate name=allow"},
-    {long: "--target", help: "With build/run/dev/jobs/package/cc/c++/flash: Select a target (triple, board.<name>, or named database target)"},
+    {long: "--gate", help: "With build/run/dev/jobs/check/inspect gates: Allow one audited gate as --gate name=allow"},
+    {long: "--target", help: "With build/run/dev/jobs/check/doctor/inspect/package/cc/c++/flash: Select a target (triple, board.<name>, or named database target)"},
     {long: "--up", help: "With db migrate/new: Checked forward SQL"},
     {long: "--sql", help: "With db migrate/new: Alias for checked forward SQL"},
     {long: "--down", help: "With db migrate/new: Checked inverse SQL for rollback"},
@@ -896,7 +896,7 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     {long: "--jsonl", help: "With db: Emit one JSON value per row"},
     {long: "--machine", help: "With db: Select machine-readable output"},
     {long: "--human", help: "With db: Select human-readable output"},
-    {long: "--no-color", help: "With db: Disable color in console output"},
+    {long: "--no-color", help: "With db/run/test/help: Disable color in console output"},
     {long: "--force-color", help: "With db: Force color in console output"},
     {long: "--query", help: "With db: Execute one SQL query"},
     {long: "--script", help: "With db: Execute SQL from a script path"},
@@ -953,10 +953,10 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     {long: "--fn", help: "With emit --ast/--ir: Print only the named function"},
     {long: "-u", help: "Short form of --update-snapshots"},
     // (ratified 2026-06-25): named optimization bundles.
-    {long: "--release", help: "With build/run/dev/jobs/test: Optimize for release"},
-    {long: "--profile", help: "With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle"},
+    {long: "--release", help: "With build/run/dev/jobs/test/inspect: Optimize for release"},
+    {long: "--profile", help: "With build/run/dev/jobs/package/test/check: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle"},
     // Command-line contribution to one typed package setting.
-    {long: "--set", help: "With build/run/dev/jobs/test: Set one declared package setting as key=value"},
+    {long: "--set", help: "With build/run/dev/jobs/test/check: Set one declared package setting as key=value"},
     // The compiler's thread cap; never the program's own threads.
     {long: "--threads", help: "With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads"},
     // The compiler's streaming trace (owner-directed 2026-10-16), the flag

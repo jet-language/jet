@@ -361,7 +361,7 @@ ballot list, card panel, count, and Now view until they are marked ready.
 Ratifying a `group: "syntax"` decision auto-appends the standard
 post-ratification chores to the card's `criteria[]`: Data/Syntax registry
 entry updated, syntax-decisions.md log entry, editor grammars regenerated
-(`node Tools/agent/editor-grammars.mjs --write`), snapshots re-blessed.
+(`jet self devtools grammars`), snapshots re-blessed.
 
 `blockedBy` accepts a card ref or a decision id; an unratified decision id
 blocks the same as an unfinished card.

@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 // Copy only preserved data captures. Proof jobs never read their scratch origins.
+// The char Debug and formatter goldens are tracked under
+// Compiler/JetRuntime/Tests (CharDebugPlain.ranges, FmtParityExpected.out).
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -10,10 +12,7 @@ if (!/^[a-f0-9]{40}$/.test(head ?? '') || !source || !output || process.argv.len
 pinnedHead(source, head);
 const table = JSON.parse(fs.readFileSync(path.join(source, 'Compiler/JetRuntime/Tests/AgeV1Fixtures.json'), 'utf8'));
 const scratch = path.join(stateRoot(), 'scratch');
-const files = [
-  {path: 'char-debug-goldens.bin', origin: `${scratch}/RtPlot1b/char-debug-goldens.bin`, sha256: '72a498085e0dc43fc6f9b0bc6f29482738c01ab7a35c11d72a1cfaf2504807a5'},
-  {path: 'fmt-expected.out', origin: `${scratch}/RtL6b3/fmt-parity/expected.out`, sha256: 'f7c9a21168359f638c75fc031072856f283b5b5da6f9b93d55d618752cf1b54c'},
-];
+const files = [];
 for (const row of table.cases.filter(row => row.name.startsWith('rust-0.10.1-'))) {
   const length = row.name.slice('rust-0.10.1-'.length);
   for (const [extension, sha256] of [['age', row.cipherSha256], ['plain', row.plainSha256]]) {
@@ -21,7 +20,7 @@ for (const row of table.cases.filter(row => row.name.startsWith('rust-0.10.1-'))
     files.push({path: `age-rust/${file}`, origin: `${scratch}/RtCrypto1/frozen/${file}`, sha256});
   }
 }
-if (files.length !== 14 || files.some(file => !/^[a-f0-9]{64}$/.test(file.sha256))) throw Error('preserved input census or digest drift');
+if (files.length !== 12 || files.some(file => !/^[a-f0-9]{64}$/.test(file.sha256))) throw Error('preserved input census or digest drift');
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const destination = path.resolve(output);
 const manifest = {head, files, missing: [{runner: 'freeze-age-fixtures.mjs', inputs: ['age testkit/'], because: 'Rust-captured oracle not preserved'}]};

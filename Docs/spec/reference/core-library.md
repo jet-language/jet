@@ -1874,8 +1874,19 @@ whether the call goes through the module alias or a direct import:
 | `mkfifo(path, mode)` | `!IOError -[FS, Env]>` | Create a named pipe. |
 | `atexit(handler)` | `Unit` | Register a `fn()` handler that runs at the explicit process boundary after scope cleanup (D-FAIL-EXIT1). |
 
-The `core.sys` module does not export `on_interrupt`; use the process signal
-and task APIs for interrupt handling.
+`on_interrupt(handler)` (`Unit -[Env]>`) registers a `fn()` handler for SIGINT.
+Registration is additive and lasts for the process: it is
+live when the call returns, and nothing unregisters it. The first call installs
+the SIGINT handler, which only counts the signal (async-signal-safe), and starts
+the runtime's signal dispatcher thread. For every counted SIGINT the dispatcher
+runs every registered handler in registration order, each under its own stop
+boundary. A handler that stops (a panic, a deadline) has its report written to
+stderr, and the later handlers still run. After the last handler, the first
+stopped handler's exit code ends the process. `process.exit(code)` in a handler
+ends the process at once. A handler runs on the dispatcher thread, concurrently
+with the program. A program that never calls `on_interrupt` installs no SIGINT
+handler and links no handler runner. Registration fails with a panic when the
+host refuses the SIGINT handler or the dispatcher thread.
 
 Typed `sys.decode<T>()` keeps the existing `Dotenv` annotation and `Decode`
 protocol. Its source policy requires a project-relative file with no parent
@@ -3687,8 +3698,24 @@ UIAccessibility}` when the node carries metadata.
 `CapabilityUnavailable(capability: String)`, `CapabilityDenied(capability:
 UICapability)`, `InvalidRequest(String)`, `HostFailure(service: String,
 message: String)`, `ResourceDenied(String)`, `ShortcutConflict(shortcut:
-UIShortcut, existing_action: String)`, and `QueueFull(service: String)`; a
-headless host reports `Cancelled(.Headless)`.
+UIShortcut, existing_action: String)`, and `QueueFull(service: String)`.
+Every `core.ui.host` service answer is Core's: the host is a provider of
+primitives (capability flags, clipboard text, queued raw events, dialog
+tokens and results), and multi-field provider text is a record of
+length-prefixed fields (`<decimal UTF-8 byte length>:<bytes>`). A native
+build's provider is headless and reports every capability absent, so each
+service fails with `CapabilityUnavailable` after Core validates the request.
+On the web, a page that installs no `globalThis.jetUiProvider` gets the
+runtime's default browser provider, which forwards raw composition and
+drag/drop events (event type, data, drop effect) to `ime.poll` and
+`drag_drop.poll`; Core maps each event type to its phase (a `compositionend`
+with no text cancels), places an unreported IME caret after the composition
+text in characters, reads URI items from `text/uri-list` lines, and reports a
+host buffer overflow as `QueueFull`. Shortcuts and accessibility are
+available. `clipboard.read_text` answers the clipboard text the page last
+observed (a paste, copy or cut, or its own `write_text`), because a browser
+lends the live clipboard only to a user gesture; before any is observed it
+fails with `HostFailure`. File dialogs and font shaping are absent there.
 TUI capability selection, ASCII-only case folding, encoded-OS flag semantics,
 dimension parsing, and defaults are Jet policy. The private environment-byte
 leaf samples the same startup facts; the shared terminal leaf remains the
