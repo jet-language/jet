@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6610,
-    "rev": 93075,
+    "rev": 93100,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -68562,7 +68562,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:19:21.465Z",
-      "updated": "2026-11-06T14:25:39.863Z",
+      "updated": "2026-11-06T14:25:59.340Z",
       "updatedBy": "agent",
       "goals": []
     },
@@ -78285,7 +78285,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T20:27:37.698Z",
-      "updated": "2026-11-06T14:25:16.605Z",
+      "updated": "2026-11-06T14:26:10.443Z",
       "updatedBy": "agent"
     },
     {
@@ -176620,6 +176620,1996 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-06T14:25:39.049Z"
+    },
+    {
+      "id": "D-ONEAPP-WEBOUT1",
+      "cardId": "c0u5tm84",
+      "group": "web",
+      "title": "On the web, an app becomes real page elements, first painted by the server",
+      "situation": "Jet's browser host creates real elements at fixed pixel positions. Browsers can instead lay out semantic elements themselves, or display Jet-drawn pixels on a canvas. This vote chooses browser presentation and explicitly permits browser-owned layout and text shaping, while preserving shared application meaning. We recommend semantic elements with server first paint and resumable handlers, not a promise of identical native and browser pixels.",
+      "gist": "Should a Jet app on the web become real page elements, painted first by the server?",
+      "lesson": "Semantic elements reuse browser document features; canvas controls need extra integration. Every option retains server first paint and resumable handlers. A explicitly permits browser-owned layout and text presentation while shared application behavior remains unchanged.",
+      "explainer": "",
+      "story": "Marco puts his bakery's order app on the web. Customers find it from a search, read it in their own language with the browser's translate button, and their password manager fills the login. On a phone the layout must reflow to one column.",
+      "inWild": "Qwik serializes event handlers, component relationships and state from server rendering, then resumes without replaying initial component execution. Later state changes can still rerender affected components. Source: https://qwik.dev/docs/concepts/resumable/",
+      "detail": "WHAT THIS DECIDES\n\nBrowser presentation of the ui package's tree. D-UI-HOME1 keeps it outside Core; D-UI-VIEW1 keeps ui.app and ui.Node. All options retain D-RESUME1's resumable handlers and D-WEBBACKEND1/D-WASM1's effect-checked placement. This is not permission to reimplement shared policy in JavaScript. D-GAME-PLATFORM1 reserved browser canvas support; A authorizes video-backed canvas views, not canvas for every control.\n\nCHECKED SOURCE AND PROBE\n\nCompiler/JetWeb/Source/Web/Host.jet:451-492 deletes old children and creates absolutely positioned button, input, span or div elements. :495-510 dispatches clicks. These are source observations, not a browser receipt. SolBallotReview's ui_values.jet checked and ran the underlying tree; jet run --os=web gave E2104. No web build or browser suite ran during this review.\n\nEXPLICIT I9 PRESENTATION EXCEPTION\n\nBrowser CSS owns flex/grid, line breaking, glyph shaping and painting for semantic DOM nodes. Native targets use common Jet layout/text code. A asks for a narrow exception to I9's marshal-only rule for these presentation operations. It does not claim two engines have one executable implementation. State, validation, action meaning, focus intent and logical accessibility facts remain shared. D-LAYOUT2 depends on this exception for CSS output. Without approval, browser layout cannot silently replace the shared engine.\n\nServer output includes semantic HTML, resumable state and handler references. Resuming avoids replaying initial render, not later reactive updates. Static pages remain usable without client code. Canvas views project accessibility from the same logical tree.\n\nPresentation differences are not assumed small. Zoom, fallback fonts, language and text scaling can change whole line breaks. Per-target pixel fixtures and normalized semantic checks must show no lost text, hidden focused control or unreachable action. Correct tags help find, translation and autofill; they do not prove accessibility for free.\n\nFAIR ALTERNATIVES\n\nB retains semantic server first paint and resume, then activates canvas with synchronized accessibility. It favors controlled drawing but needs browser document integration. C retains server first paint and resume with Core-computed absolute geometry, recomputed on resize and zoom. Neither silently repeals D-RESUME1.\n\nResearch: https://qwik.dev/docs/concepts/resumable/ describes serialized handlers/state and lazy execution. No Jet startup or download advantage was measured.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Real page elements",
+          "detail": "Each view becomes its real page element, laid out with CSS flex and grid from the same layout rules. The server sends the first screen as HTML, and the page resumes on first interaction.",
+          "technical": "Same view tree; a DOM emitter replaces paintScene. Server render plus D-RESUME1 resume. A canvas view draws through video on one canvas element.",
+          "code": "use ui\norder_view: fn(saves: &ui.State<Int>) -> ui.Node {\n    ui.box([ui.text(\"Order\"), ui.button(\"Save\", on_click: fn() { saves += 1 })])\n}\nrun: fn() { ui.app(order_view, state: 0) }\n// Proposed: server HTML, then resumable handlers and reactive updates."
+        },
+        {
+          "key": "B",
+          "name": "Paint on a canvas",
+          "detail": "Server semantic HTML supplies first paint; resumable handlers activate canvas with accessibility projected from the same logical tree.",
+          "technical": "Retains D-RESUME1; browser document features need integration rather than being declared impossible.",
+          "code": "ui.button(\"Save\", on_click: fn() { saves += 1 })\n// Proposed: server first paint, then canvas plus accessible controls."
+        },
+        {
+          "key": "C",
+          "name": "Today's pinned elements",
+          "detail": "Use Core-computed geometry, including on resize, while retaining server HTML and resumable handlers.",
+          "technical": "Absolute boxes are a presentation choice, not permission to discard D-RESUME1.",
+          "code": "ui.button(\"Save\", on_click: fn() { saves += 1 })\n// Proposed: server HTML with computed boxes; resume updates them."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Semantic elements reuse browser document behavior and retain the approved resume model. Browser-owned presentation requires an explicit exception, not hidden semantic duplication.",
+        "gains": [
+          "Uses browser text, links and form controls.",
+          "Keeps server first paint and resume.",
+          "Preserves one logical view model."
+        ],
+        "losses": [
+          {
+            "loss": "Browser and native presentation can wrap and size text differently.",
+            "mitigation": "Check zoom, languages and fallback fonts for lost text, hidden focus and unreachable actions on each target."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It can be accessible, but browser find, selection and translation need separate integration."
+          },
+          {
+            "key": "C",
+            "reason": "It can adapt by recomputing boxes, but bypasses the browser's normal document layout."
+          }
+        ],
+        "tradeoff": "Web pages trade pixel-identical text for everything the browser gives real elements."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Removed the false claim that web output gets identical line breaks, adding a small text-wrapping loss instead. Checked browser-host source and UI probes; added the explicit presentation exception and restored resumability to every alternative."
+      },
+      "checkInstructions": "Read Compiler/JetWeb/Source/Web/Host.jet:451-498 and Docs/spec/reference/web-backend-wasm.md:6-10,34-38. Decisions: D-RESUME1, D-WEBBACKEND1, D-WASM1, D-PORTABLE-WEB1, D-GAME-PLATFORM1.",
+      "surface": {
+        "gist": "Should a Jet app on the web become real page elements, painted first by the server?",
+        "lesson": "Semantic elements reuse browser document features; canvas controls need extra integration. All options keep server first paint and resumable handlers. A explicitly permits browser-owned layout and text presentation; shared application behavior remains unchanged.",
+        "trio": {
+          "current": {
+            "note": "Today the page builder pins every element at a fixed pixel position after the program runs.",
+            "code": "// Compiler/JetWeb/Source/Web/Host.jet:480-485\nconst element = doc.createElement(tag);\nelement.style.position = \"absolute\";\nelement.style.left = x + \"px\";\nelement.style.top = y + \"px\";"
+          },
+          "wild": {
+            "lang": "Qwik",
+            "note": "Qwik sends server HTML and resumes it, so the page never re-runs to become clickable.",
+            "code": "// qwik.dev/docs/concepts/resumable\nexport default component$(() => {\n  const count = useSignal(0);\n  return <button onClick$={() => count.value++}>{count.value}</button>;\n});"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Real page elements",
+            "gist": "Views become real buttons, headings and inputs; the server paints the first screen.",
+            "gains": [
+              "Uses browser links, selection and form behavior.",
+              "Retains server first paint and resumable handlers."
+            ],
+            "losses": [
+              "Browser and native presentation can wrap and size text differently."
+            ],
+            "proposed": {
+              "code": "ui.button(\"Save\", on_click: fn() { saves += 1 })\n// browser gets: <button>Save</button>\n// first screen comes from the server\n// find, translate and autofill work"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Paint on a canvas",
+            "gist": "One canvas element; Jet paints every pixel, as on the desktop.",
+            "gains": [
+              "More direct control of drawn geometry."
+            ],
+            "losses": [
+              "Browser document features need explicit integration.",
+              "Canvas renderer must load before drawn interaction."
+            ],
+            "proposed": {
+              "code": "ui.button(\"Save\", on_click: fn() { saves += 1 })\n// Proposed: server HTML, then canvas with accessibility projection."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Today's pinned elements",
+            "gist": "Core computes element boxes; server first paint and resumable handlers stay.",
+            "gains": [
+              "Direct control of element boxes."
+            ],
+            "losses": [
+              "Resize and zoom need explicit box recomputation.",
+              "Browser document flow is bypassed."
+            ],
+            "proposed": {
+              "code": "ui.button(\"Save\", on_click: fn() { saves += 1 })\n// Proposed: server HTML with absolute boxes.\n// Resume recomputes boxes on relevant changes."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Semantic elements reuse browser document behavior and retain the approved resume model. Browser-owned presentation requires an explicit exception, not hidden semantic duplication.",
+          "gains": [
+            "Uses browser text, links and form controls.",
+            "Keeps server first paint and resume.",
+            "Preserves one logical view model."
+          ],
+          "losses": [
+            {
+              "loss": "Browser and native presentation can wrap and size text differently.",
+              "mitigation": "Check zoom, languages and fallback fonts for lost text, hidden focus and unreachable actions on each target."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It can be accessible, but browser find, selection and translation need separate integration."
+            },
+            {
+              "key": "C",
+              "reason": "It can adapt by recomputing boxes, but bypasses the browser's normal document layout."
+            }
+          ],
+          "tradeoff": "Web pages trade pixel-identical text for everything the browser gives real elements."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Browser text wrapping and box sizes can differ from drawn apps.",
+          "attempts": [
+            "Paint text onto a canvas inside real elements: rejected, it breaks selection, find and translate.",
+            "Shared font inputs help consistency but do not guarantee small differences; test localization and zoom explicitly."
+          ],
+          "result": "Explicit presentation exception: require functional equivalence under zoom and localization, not an unspecified pixel tolerance."
+        },
+        {
+          "loss": "Two outputs, drawn and page elements, could drift in structure (removed as a loss).",
+          "attempts": [
+            "Require identical boxes from both outputs: rejected, browsers lay out text themselves, so boxes cannot match exactly.",
+            "Require normalized logical accessibility structure and actions across outputs; native wrapper nodes may differ."
+          ],
+          "result": "Acceptance requirement: checks must name structural drift; no parity suite was run for this proposed design."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:41.745Z"
+    },
+    {
+      "id": "D-OTA1",
+      "cardId": "c0u5tm84",
+      "group": "tooling",
+      "title": "Signed content updates and channel-approved compiled app updates",
+      "situation": "A shipped app may need new content or a code fix before its next store release. Store rules restrict downloaded code, and even data or feature switches cannot bypass review requirements. Jet currently refuses the ship command, so this is a new delivery policy rather than a working update feature. We recommend signed data updates, and compiled code updates only on channels that allow them. Every option leaves store client code fixes to store review, because store rules require it.",
+      "gist": "Should Jet deliver signed content updates, with compiled code updates restricted by distribution channel?",
+      "lesson": "Content is data consumed by already reviewed code, not a downloaded program. Distribution channel matters as much as operating system. Store restrictions also apply to test distribution and desktop stores where relevant; calling a file content or a build test does not grant permission.",
+      "explainer": "",
+      "story": "Dana needs to correct a clinic address immediately and later repair a client bug. She must know which change can be published directly and which must pass through the store.",
+      "inWild": "Apple App Review Guideline 2.5.2 restricts downloaded code changing features. Google Play's Device and Network Abuse policy restricts self-updates and downloaded executable code, with a bounded VM/interpreter exception. Sources: https://developer.apple.com/app-store/review/guidelines/ and https://support.google.com/googleplay/android-developer/answer/9888379",
+      "detail": "OWNER GATE\n\nChoose one first-party app update policy and extend the ratified jet ship command. jet update already names package/tool updating in Compiler/JetCli/Source/Cli/Front.jet:2165-2168, so this ballot must not claim to add a new top-level command with that name. Proposed app publishing is jet ship update. D-NATIVEUI3=A retains local signing and store submission.\n\nCHECKED TODAY\n\nSolBallotReview invoked jet ship and observed E2101. That proves the command is absent from this seed, not every possible custom update implementation. No store submission or update engine was exercised.\n\nPOLICY EVIDENCE\n\nApple 2.5.2 prohibits downloaded code introducing or changing features, with limited educational exceptions. Guideline 2.3.1 requires disclosure of functionality, and 2.5.19 forbids hidden dormant features. Mac App Store rule 2.4.5(vii) requires store updates and (ix) requires bundled language/localization support. Google Play prohibits self-update outside Play and downloaded dex/JAR/shared-library code; its interpreter exception is not blanket permission for any patch. Therefore neither A nor B promises zero rejection risk, content updates everywhere, or feature switches immune from review.\n\nNO INTERPRETER OPTION\n\nThe earlier B invented a Jet interpreter tier. I9 expressly forbids an interpreter or second code generator; the resident device dev host does not authorize one. Remove that option rather than silently breaking I9. Supporting an interpreted patch engine would need an explicit invariant exception and its own complete design, not this update ballot.\n\nA'S CONTRACT\n\nContent updates are signed, schema-checked data for a named build and channel. They cannot contain executable expressions or expose undisclosed dormant features. Channels may require bundled translations or assets; that restriction wins. Direct-download channels may receive compiled replacement apps only where permitted, never a second execution tier. Test builds use their channel's permitted workflow, not arbitrary downloaded execution. Store client code goes through store release. Server deployment and ordinary web publication are unchanged.\n\nActivation verifies app identity, signing authority, target build, schema and version, and commits atomically. A failed download leaves the installed version usable. Keep a signed recovery path and user-visible channel/version; a signature alone does not establish store compliance. Existing data must remain readable or have a checked migration.\n\nHONEST REMAINING LOSS\n\nA store client bug may still wait for review and may affect an offline app before any remote mitigation arrives. Server fixes and an app-authored emergency switch can reduce damage when online; they cannot repair arbitrary client code or guarantee essential screens remain available. Never silently add a remote off-switch for every route. This is a material residual, not a negligible loss engineered away. \n\nB supplies only permitted data updates and leaves direct compiled app updates to ordinary releases. C supplies no in-app update engine. These are genuine alternatives without an invented interpreter.\n\nSHARED CONSTRAINT\n\nNo store-compliant option avoids store review of client code. An interpreted patch tier would avoid it, but it breaks I9 and is not offered. So the review delay is a constraint every option shares, not a cost of A.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Content and permitted compiled updates",
+          "detail": "Publish signed data where channel rules allow, and compiled replacement apps on approved direct-download channels. Store client code remains a store release.",
+          "technical": "One ship update workflow with channel-enforced content/code policy; no I9 execution exception.",
+          "code": "$ jet ship update --target=ios --kind=content\n# Proposed: checks the selected store channel's data rules.\n$ jet ship update --target=ios --kind=code\n# Store channel: publish a store release instead."
+        },
+        {
+          "key": "B",
+          "name": "Content updates only",
+          "detail": "The same signed data workflow, but every compiled app change uses a normal full release on every channel.",
+          "technical": "No direct executable updater; existing web/server deployment remains available.",
+          "code": "$ jet ship update --target=ios --kind=content\n# Proposed: permitted data only.\n# Every client code change: normal release."
+        },
+        {
+          "key": "C",
+          "name": "No in-app update engine",
+          "detail": "All bundled content and client code change through full releases; server content remains ordinary server data.",
+          "technical": "No ship update operation.",
+          "code": "$ jet ship ios\n# Content and client code changes use a full release."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "One signed workflow respects each channel without adding another execution engine. Store review of client code binds every option equally, so it is a shared constraint rather than a cost of A.",
+        "gains": [
+          "One channel-aware publication workflow.",
+          "No interpreter or second execution meaning.",
+          "Direct-download channels can replace compiled apps."
+        ],
+        "losses": [
+          {
+            "loss": "A store client code fix waits for review, as under every option.",
+            "mitigation": "Ship urgent fixes as server changes or through reviewed in-app switches, and request Apple's expedited review for critical bugs."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It is simpler but leaves direct-download app updates outside the first-party workflow."
+          },
+          {
+            "key": "C",
+            "reason": "Even channel-permitted bundled data corrections require a full release."
+          }
+        ],
+        "tradeoff": "One channel-aware workflow and no second execution engine; store review still governs store client code, as it does under every option."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Checked ship refusal and store policies; removed the forbidden interpreter, existing-command collision and zero-policy-risk guarantees, adding a genuine content-only alternative. Main then recast store review as a constraint every option shares, with server fixes and expedited review as mitigations."
+      },
+      "checkInstructions": "SolBallotReview observed ship E2101, read the existing update dispatch in Compiler/JetCli/Source/Cli/Front.jet and checked Apple and Play policy. No build or store submission ran.",
+      "surface": {
+        "gist": "Should Jet deliver signed content updates, with compiled code updates restricted by distribution channel?",
+        "lesson": "Store policy depends on behavior and channel, not a file's label. Content and feature switches still face review rules. No interpreter is proposed. Store client fixes remain store releases, including when remote mitigation cannot reach an offline device.",
+        "trio": {
+          "current": {
+            "note": "The current seed has no ship command.",
+            "code": "$ jet ship\nError [jet.UnknownCommand]: `ship` isn't a jet command.\nMore: jet-lang.dev/e/E2101"
+          },
+          "wild": {
+            "lang": "Store policy",
+            "note": "Apple and Play restrict downloaded executable changes; neither grants blanket safety to feature flags.",
+            "code": "# Apple App Review 2.5.2, 2.3.1 and 2.5.19\n# Play Device and Network Abuse policy\n# Downloaded data must not disguise forbidden code or features."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Content and permitted compiled updates",
+            "gist": "Use one signed workflow, restricted by distribution channel.",
+            "gains": [
+              "Direct-download apps can update compiled code.",
+              "No second execution engine."
+            ],
+            "losses": [
+              "Store client fixes still wait for a release."
+            ],
+            "proposed": {
+              "code": "$ jet ship update --target=ios --kind=content\n# Proposed: permitted data for the selected channel.\n# Store code changes use a store release."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Content updates only",
+            "gist": "Update permitted data; release compiled client code normally.",
+            "gains": [
+              "No executable updater."
+            ],
+            "losses": [
+              "Direct-download client fixes still need normal releases."
+            ],
+            "proposed": {
+              "code": "$ jet ship update --target=ios --kind=content\n# Proposed: data only; all code uses full releases."
+            }
+          },
+          {
+            "key": "C",
+            "name": "No in-app update engine",
+            "gist": "Bundle changes into normal releases.",
+            "gains": [
+              "No additional app updater."
+            ],
+            "losses": [
+              "Bundled content corrections need full releases."
+            ],
+            "proposed": {
+              "code": "$ jet ship ios\n# Every bundled change uses a full release."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One signed workflow respects each channel without adding another execution engine. Store review of client code binds every option equally, so it is a shared constraint rather than a cost of A.",
+          "gains": [
+            "One channel-aware publication workflow.",
+            "No interpreter or second execution meaning.",
+            "Direct-download channels can replace compiled apps."
+          ],
+          "losses": [
+            {
+              "loss": "A store client code fix waits for review, as under every option.",
+              "mitigation": "Ship urgent fixes as server changes or through reviewed in-app switches, and request Apple's expedited review for critical bugs."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It is simpler but leaves direct-download app updates outside the first-party workflow."
+            },
+            {
+              "key": "C",
+              "reason": "Even channel-permitted bundled data corrections require a full release."
+            }
+          ],
+          "tradeoff": "One channel-aware workflow and no second execution engine; store review still governs store client code, as it does under every option."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Store review delays arbitrary client code fixes.",
+          "attempts": [
+            "An interpreted patch tier avoids review but breaks I9, so it is not offered.",
+            "Server fixes, reviewed in-app switches and expedited review cover urgent cases."
+          ],
+          "result": "Shared constraint: every store-compliant option waits for review, so A loses nothing to B or C here. Residual: an offline device waits for the store release."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:44.290Z"
+    },
+    {
+      "id": "D-PLATFORM-OVERRIDE1",
+      "cardId": "c0u5tm84",
+      "group": "gui",
+      "title": "One app file does per-system work with the ratified build-fact branch, and ui.native embeds a real system view",
+      "situation": "The approved compile-time target branch already handles per-system code, although the seed still expects an older build-fact spelling. What remains undecided is how a Jet screen contains a real system-owned map, camera or other view. We recommend one explicit host-view embedding function, without new platform markers or file-selection rules. The host view must join layout, ownership, focus and accessibility through the same UI model.",
+      "gist": "Should ui.native embed a system-owned view while existing target branches handle platform-specific code?",
+      "lesson": "A compile-time branch keeps only the code for the system being built; the other arms are dropped. An embedded system view is a real control from the system, such as Apple's map, shown inside a Jet screen. Today the branch works with an older spelling a later ruling dropped, and nothing embeds a system view.",
+      "explainer": "",
+      "story": "Lena's running app shows routes on a map. On iPhones she wants Apple's own map with its gestures; elsewhere a Jet map view is fine. She wants one file, not three.",
+      "inWild": "Flutter embeds UIKit views inside its hierarchy and documents transforms, clipping, ownership of hosting controllers and hybrid composition. Source: https://docs.flutter.dev/platform-integration/ios/platform-views",
+      "detail": "NARROW OWNER GATE\n\nPer-system selection is settled: D-BUILD-FACT3=A supplies the target fact, D-COMPTIME-WORD1=A selects comptime, and D-META-HASH1=A spells reads build.target.os without dollars. The seed's refusal is a defect, not a vote to restore prep or dollars. This ballot decides embedding only. Parallel #Platform declarations and filename replacement are removed as unnecessary alternate selectors.\n\nCHECKED TODAY\n\nSolBallotReview's os.jet checked and ran comptime if $build.os with statement arms. os_plain.jet gave OsDispatchSubjectMismatch for build.target.os; os_prep.jet gave E0003. ui_missing.jet gave E1004 listing core.ui items without native. Proposed examples use ratified plain facts, not the seed's older spelling.\n\nA'S CONTRACT\n\nui.native takes a typed target-specific host-view handle and returns ui.Node. Target and lifetime remain checked. Mounting retains the handle; unmount cancels callbacks and releases resources exactly once. UI-thread access uses the ordinary provider boundary. D-UI-HOME1 puts the adapter in ui and system services in core.ui.host; D-CORE-PROVIDER1 supplies one provider contract. D-UI-VIEW1 retains state/mount identity.\n\nD-NATIVEUI3 and D-NATIVEUI-ANDROID1 supply bindings, not proof that every control embeds. Each target declares supported host views. Imported names remain resolvable for name checking even in eliminated branches. Missing reachable support is a checked refusal, never a blank rectangle. Web host views are checked DOM handles, not arbitrary untrusted markup.\n\nLayout supplies host geometry. Focus, traversal, hit testing, pointer capture and accessibility subtree identity join the parent without duplicate logical nodes. Test overlays, scrolling, clipping, resize, high-DPI scaling, restore and disposal. Some surfaces cannot support every transform, opacity or overlay. Reject unsupported combinations before presentation and suggest a dedicated screen; never silently ignore effects.\n\nEmbedding can add composition work. It is expert opt-in, not a free mitigation for all styling differences. No frame-time or universal composition result is claimed. Flutter documents this model at https://docs.flutter.dev/platform-integration/ios/platform-views.\n\nB opens a separate system screen with a typed result, avoiding mixed composition but interrupting inline layout. C keeps drawn views and external system intents. Every option retains the same approved target branch.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Embed a typed host view",
+          "detail": "Place an owned system view in ui layout, with checked capabilities and joined focus/accessibility.",
+          "technical": "No new selector syntax; one provider contract, target-tagged handle and checked lifecycle.",
+          "code": "route_map: fn(route: Route) -> ui.Node {\n    comptime if build.target.os == {\n        .IOS -> { return ui.native(mapkit.map(center: route.start)) }\n        else -> { return map.view(route) }\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Open a host screen",
+          "detail": "The system view occupies a separate host screen and returns a typed result, rather than sharing inline layout.",
+          "technical": "Explicit host presentation with the same provider ownership and target checks.",
+          "code": "host.present(mapkit.map(center: route.start))\n// Proposed: separate system screen, not an inline map."
+        },
+        {
+          "key": "C",
+          "name": "No inline host views",
+          "detail": "Keep drawn screens and ordinary system intents for external apps; no native SDK view enters the tree.",
+          "technical": "No ui.native API; target selection is unchanged.",
+          "code": "route_map: fn(route: Route) -> ui.Node { map.view(route) }\n// System map opens outside this tree."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "The ratified branch already handles per-system code in one file. Only embedding a system view is missing, and one function covers it.",
+        "gains": [
+          "One file per app.",
+          "No new syntax.",
+          "Real system views where they matter."
+        ],
+        "losses": [
+          {
+            "loss": "Some host surfaces cannot support every transform or overlay.",
+            "mitigation": "Reject unsupported combinations before drawing and suggest a dedicated host screen."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It avoids mixed composition but removes the native feature from the surrounding inline layout."
+          },
+          {
+            "key": "C",
+            "reason": "It keeps drawing uniform but cannot place required native SDK views inside a screen."
+          }
+        ],
+        "tradeoff": "Long per-system code sits in a branch, in exchange for one file and no new syntax."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Reversed a backwards spelling claim: comptime and build.target.os are ratified, and the seed's refusal is a lag. Reproduced the approved-fact spelling lag and rejected prep; narrowed the gate to embedding and added real separate-screen/no-embedding alternatives."
+      },
+      "checkInstructions": "Probe: comptime if $build.os with statement arms passes jet check and runs; prep if $build.os gives E0003. comptime if build.target.os gives OsDispatchSubjectMismatch. ui.application gives E1004 listing core.ui items, none named native. Decisions: D-BUILD-FACT3, D-COMPTIME-WORD1, D-META-HASH1, D-NATIVEUI3, D-NATIVEUI-ANDROID1, D-UI-HOME1.",
+      "surface": {
+        "gist": "Should ui.native embed a system-owned view while existing target branches handle platform-specific code?",
+        "lesson": "A compile-time branch keeps only the code for the system being built; the other arms are dropped. An embedded system view is a real control from the system, such as Apple's map, shown inside a Jet screen. Today the branch works with an older spelling a later ruling dropped, and nothing embeds a system view.",
+        "trio": {
+          "current": {
+            "note": "Today the branch works with the older dollar-sign build fact, and nothing embeds a system view.",
+            "code": "run: fn() {\n    comptime if $build.os == {\n        .Linux -> { print(\"linux\") }\n        else -> { print(\"other\") }\n    }\n}"
+          },
+          "wild": {
+            "lang": "Flutter",
+            "note": "Flutter checks the platform and embeds a real iOS view.",
+            "code": "// docs.flutter.dev/platform-integration/ios/platform-views\nif (Platform.isIOS) {\n  return UiKitView(viewType: 'map');\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Embed a typed host view",
+            "gist": "Place an owned system view inside the existing UI tree.",
+            "gains": [
+              "Native SDK views can sit inline.",
+              "No second platform-selection mechanism."
+            ],
+            "losses": [
+              "Some host surfaces cannot support every transform or overlay."
+            ],
+            "proposed": {
+              "code": "route_map: fn(route: Route) -> ui.Node {\n    comptime if build.target.os == {\n        .IOS -> { return ui.native(mapkit.map(center: route.start)) }\n        else -> { return map.view(route) }\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Open a host screen",
+            "gist": "Show the native feature in a separate system screen.",
+            "gains": [
+              "Avoids mixed-surface inline composition."
+            ],
+            "losses": [
+              "Interrupts the surrounding Jet screen layout."
+            ],
+            "proposed": {
+              "code": "host.present(mapkit.map(center: route.start))\n// Proposed: separate system screen with a typed result."
+            }
+          },
+          {
+            "key": "C",
+            "name": "No inline host views",
+            "gist": "Keep only drawn views inside Jet screens.",
+            "gains": [
+              "One drawn composition path."
+            ],
+            "losses": [
+              "Native SDK views cannot appear inline."
+            ],
+            "proposed": {
+              "code": "route_map: fn(route: Route) -> ui.Node { map.view(route) }\n// System map opens outside the Jet tree."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The ratified branch already handles per-system code in one file. Only embedding a system view is missing, and one function covers it.",
+          "gains": [
+            "One file per app.",
+            "No new syntax.",
+            "Real system views where they matter."
+          ],
+          "losses": [
+            {
+              "loss": "Some host surfaces cannot support every transform or overlay.",
+              "mitigation": "Reject unsupported combinations before drawing and suggest a dedicated host screen."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It avoids mixed composition but removes the native feature from the surrounding inline layout."
+            },
+            {
+              "key": "C",
+              "reason": "It keeps drawing uniform but cannot place required native SDK views inside a screen."
+            }
+          ],
+          "tradeoff": "Long per-system code sits in a branch, in exchange for one file and no new syntax."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A long per-system arm could crowd a view (removed).",
+          "attempts": [
+            "Allow per-system files for large cases: rejected, it adds a second mechanism.",
+            "Put the long arm in its own function and call it from the branch: adopted, no new rule needed."
+          ],
+          "result": "Removed: arms stay one call long."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:46.781Z"
+    },
+    {
+      "id": "D-RUN-DEVICE1",
+      "cardId": "c0u5tm84",
+      "group": "tooling",
+      "title": "One --target flag names the platform for run, dev, test and build, and --device picks a phone",
+      "situation": "Jet's command help exposes target and operating-system flags, while the current seed refuses web and phone runs. Earlier rulings already chose target names for phone builds and development. This vote extends one target selector across commands and adds an unambiguous device selector. We recommend retaining those names, retiring duplicate operating-system selection and refusing ambiguous device choices without starting a server or choosing a phone silently.",
+      "gist": "Should one --target flag name the platform for every command, with --device picking a phone?",
+      "lesson": "A platform is where an app runs: Linux, macOS, Windows, iOS, Android or the web. A device is one machine of that platform, such as your phone or a simulator. Earlier rulings spelled phone builds as jet build --target=ios and store upload as jet ship ios. Today the target flag mostly takes machine triples, and a second flag names the operating system.",
+      "explainer": "",
+      "story": "Priya edits her habit app on a laptop. She wants to see it on her own iPhone, then in a browser, then run its tests on Android, without learning a triple like aarch64-linux-android.",
+      "inWild": "Flutter's command-line guide exposes devices and emulators through one tool and uses a device selector on device-oriented commands. Source: https://docs.flutter.dev/reference/flutter-cli",
+      "detail": "OWNER GATE\n\nExtend D-NATIVEUI3's build target names and D-NATIVEUI-DEV1's development target names to run/test, with --device selecting a concrete execution destination. D-HOTSTATE1 retains state migration semantics; this vote does not redefine hot reload. D-GAME-PLATFORM1's headless twins prove device-free execution of that API, not universal UI accessibility testing already built today.\n\nCHECKED TODAY\n\nSolBallotReview ran run/dev/build --help: --target is documented for triples, boards or database targets; --os lists linux, macos, windows, web and freestanding. Running union.jet with --os=web gave E2104, Linux x86-64 ELF images only. ios/android runs gave E2104 and ship gave E2101. No build or test suite ran. Checking ios/android source succeeded, which does not establish device execution.\n\nA'S SELECTION RULE\n\n--target accepts platform shorthands, exact triples, board.<name> and existing named targets. A platform shorthand resolves a documented default architecture/profile and prints the resolved target; an incompatible --device is an error, not an implicit target rewrite. build needs no device. run/dev/test select exactly one matching device or browser. With none, report discovery/install guidance. With multiple matches, stop and list stable IDs; repeated friendly names never select arbitrarily. Noninteractive runs receive the same error, not a prompt or hang.\n\nRetire --os entirely, including freestanding. Boards and complete freestanding triples already belong in --target; keeping a special --os=freestanding would leave two selectors for one target fact. Source profiles use the same target value. Teach the old flag with an exact replacement, and migrate checked-in source profiles and launch scripts. Do not promise jet fix rewrites arbitrary shell command text.\n\nA web target launches the app host for that target; a browser selection chooses which browser receives it. Port/bind authority remains the approved development/server policy, not permission to expose a server publicly. Device tests use the same state/action acceptance, with physical input/accessibility checks when relevant. Existing jet ship ios remains; update publication belongs to the separately proposed ship update form.\n\nFAIR OPTIONS\n\nB makes individual jobs read naturally but introduces unrelated selector names. C groups device operations and can be clear for device administration; its cost is a second execution command family, not inherent unsafety. A changes existing --os callers, so the claim that no spelling changes was false.",
+      "options": [
+        {
+          "key": "A",
+          "name": "--target plus --device",
+          "detail": "--target takes linux, macos, windows, ios, android or web on run, dev, test and build. --device picks a phone, simulator or browser. jet ship ios stays as ratified.",
+          "technical": "Extends D-NATIVEUI3 and D-NATIVEUI-DEV1 spellings to run and test; adds one --device flag. Migrate --os invocations, including freestanding, to --target; do not promise arbitrary shell scripts are jet fix input.",
+          "code": "$ jet run club.jet --target=web\nserving http://127.0.0.1:8080\n$ jet dev club.jet --target=ios --device=\"Priya's iPhone\"\n$ jet test club.jet --target=android\n$ jet build club.jet --target=ios\n$ jet ship ios"
+        },
+        {
+          "key": "B",
+          "name": "A flag per job",
+          "detail": "jet run --web, jet run --on <device>, jet build --for ios and jet ship --to app-store.",
+          "technical": "Four new flags; renames D-NATIVEUI3's build and ship spellings.",
+          "code": "$ jet run club.jet --web\n$ jet run club.jet --on \"Priya's iPhone\"\n$ jet build club.jet --for ios\n$ jet ship club.jet --to app-store"
+        },
+        {
+          "key": "C",
+          "name": "A device command group",
+          "detail": "Desktop and web keep run and build; phones use jet device run, jet device test and jet device ship.",
+          "technical": "A new command group duplicating run, test and ship.",
+          "code": "$ jet run club.jet\n$ jet device run club.jet --name \"Priya's iPhone\"\n$ jet device ship club.jet ios"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "It keeps the spellings already ratified and adds one flag, so one idea has one name on every command.",
+        "gains": [
+          "One flag for every command and platform.",
+          "Keeps ratified phone target and ship names.",
+          "Adds one flag, not four."
+        ],
+        "losses": [
+          {
+            "loss": "Plain --target=ios picks the connected device for you.",
+            "mitigation": "Jet prints the device it chose; with several connected it lists them and asks for --device."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Four new flags for one idea, and it renames ratified spellings."
+          },
+          {
+            "key": "C",
+            "reason": "Two ways to run one app, and a new command group to learn."
+          }
+        ],
+        "tradeoff": "One general flag instead of English-like flags per job, in exchange for one name everywhere."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Verified that --target web already works beside --os=web, then made option A fold platform values of --os into --target with a jet fix rewrite, keeping --os only for freestanding builds. Checked command help and web/phone refusal; retired duplicate freestanding selection, added device ambiguity rules and removed claims of universal shell rewriting."
+      },
+      "checkInstructions": "SolBallotReview ran command help and observed web/phone run E2104 and ship E2101. No build ran. Require zero/one/many devices, duplicate names, stable IDs, target/device mismatch, noninteractive refusal and complete --os migration including freestanding.",
+      "surface": {
+        "gist": "Should one --target flag name the platform for every command, with --device picking a phone?",
+        "lesson": "A platform is where an app runs: Linux, macOS, Windows, iOS, Android or the web. A device is one machine of that platform, such as your phone or a simulator. Earlier rulings spelled phone builds as jet build --target=ios and store upload as jet ship ios. Today the target flag mostly takes machine triples, and a second flag names the operating system.",
+        "trio": {
+          "current": {
+            "note": "Today running for the web is refused, and phone builds are not built yet.",
+            "code": "$ jet run --os=web union.jet\n# E2104: jet run runs Linux x86-64 ELF images only\n$ jet run --target=ios union.jet\n# E2104: jet run --target is not built yet"
+          },
+          "wild": {
+            "lang": "Flutter",
+            "note": "Flutter uses one device flag for phones, simulators and browsers.",
+            "code": "# docs.flutter.dev/reference/flutter-cli\n$ flutter run -d chrome\n$ flutter run -d \"Priya's iPhone\""
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "--target plus --device",
+            "gist": "The ratified flag takes platform names everywhere; --device picks one phone.",
+            "gains": [
+              "One flag to learn for every command.",
+              "Keeps approved phone target and ship names."
+            ],
+            "losses": [
+              "Plain --target=ios picks the connected device for you."
+            ],
+            "proposed": {
+              "code": "$ jet run club.jet --target=web\n$ jet dev club.jet --target=ios --device=\"Priya's iPhone\"\n$ jet test club.jet --target=android\n$ jet ship ios"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A flag per job",
+            "gist": "The proposal's flags: --web, --on, --for and --to.",
+            "gains": [
+              "Each flag reads like English."
+            ],
+            "losses": [
+              "Four new flags for one idea.",
+              "Renames spellings already ratified."
+            ],
+            "proposed": {
+              "code": "$ jet run club.jet --web\n$ jet run club.jet --on \"Priya's iPhone\"\n$ jet build club.jet --for ios\n$ jet ship --to app-store"
+            }
+          },
+          {
+            "key": "C",
+            "name": "A device command group",
+            "gist": "A separate jet device command group for phones and simulators.",
+            "gains": [
+              "Phone commands sit together."
+            ],
+            "losses": [
+              "Two ways to run one app.",
+              "A new command group to learn."
+            ],
+            "proposed": {
+              "code": "$ jet run club.jet\n$ jet device run club.jet --name \"Priya's iPhone\"\n$ jet device ship ios"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It keeps the spellings already ratified and adds one flag, so one idea has one name on every command.",
+          "gains": [
+            "One flag for every command and platform.",
+            "Keeps ratified phone target and ship names.",
+            "Adds one flag, not four."
+          ],
+          "losses": [
+            {
+              "loss": "Plain --target=ios picks the connected device for you.",
+              "mitigation": "Jet prints the device it chose; with several connected it lists them and asks for --device."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Four new flags for one idea, and it renames ratified spellings."
+            },
+            {
+              "key": "C",
+              "reason": "Two ways to run one app, and a new command group to learn."
+            }
+          ],
+          "tradeoff": "One general flag instead of English-like flags per job, in exchange for one name everywhere."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Plain --target=ios picks the connected device for you.",
+          "attempts": [
+            "Always require --device: rejected, it adds typing in the common one-phone case.",
+            "Pick only when exactly one matches, print its name, and ask when several match: adopted."
+          ],
+          "result": "Kept as one negligible loss: the choice is printed, and ambiguity is never guessed."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:49.153Z"
+    },
+    {
+      "id": "D-SERVER-FN1",
+      "cardId": "c0u5tm84",
+      "group": "web",
+      "title": "A #Server mark on a function makes it run on the server, called from any screen like a plain function",
+      "situation": "Jet web apps register action handlers by name, and screens need typed calls to those actions across the network. A function marker could derive registration and client stubs while preserving one route table. The vote chooses that declaration style, not whether network effects or authorization disappear. We recommend the marker with checked transport errors, shared form handling and narrowly eligible optimistic previews.",
+      "gist": "Should a #Server mark on a function make it run on the server, callable from any screen?",
+      "lesson": "Remote calls require serializable data, authorization and typed network failures. Both options generate typed clients from one action graph. A moves registration onto the function; eligible optimistic previews still obey the existing state-only rule.",
+      "explainer": "",
+      "story": "Lena's club app has an invite button. The invite must run on the server, where the mail key lives. She wants to write the function once and call it from the web page and the phone app the same way.",
+      "inWild": "React's use server marks remotely callable server functions, requires serializable arguments and warns authors to authorize every mutation. It also supports module-level placement. Source: https://react.dev/reference/rsc/use-server",
+      "detail": "OWNER GATE\n\nA adds a new bare #Server function marker, replaces action registration, and derives one action row and typed client stub. D-ROUTE-ONE1 keeps the single route table; D-SECRETEDGE1 checks client sinks. D-ROUTE-FILES2 introduced #Server.Get, but the later D-ROUTE-ONE1 text fixes route spelling to #server.Get. Examples still use the older uppercase route spelling. Do not present bare #Server as an already working route form.\n\nCHECKED TODAY\n\nExamples/features/web/app_hello.jet:15-16 and web/jet_web/run.jet:244 register actions. Core/Web/Web.jet:50-52 describes POST /actions/<name>; :472-508 checks Origin, and :503 accepts missing Origin. SolBallotReview checked and ran web_value.jet to inspect the app graph. That is not an end-to-end server-call or CSRF test. D-DX-SERVERFN1 also described typed action clients, but decision show reports it archived; do not silently treat its old awaiting syntax as current law.\n\nEXACT A CONTRACT\n\nA server-only effectful body stays server-side. Client projections carry Net plus structured transport, cancellation and uncertain-completion errors; normal server calls retain the body's own type. Higher-order references must preserve that distinction. Argument/result/error types must be serializable; secrets, handles and closures cannot cross. A transport failure after dispatch does not mean the mutation did not happen. No automatic retry of a possibly completed mutation is implied.\n\nD-OPTIMISTIC1 allows safe state-only action previews in clients. A therefore cannot promise that every marked body is absent from the client. Only bodies satisfying that existing eligibility rule may supply a preview, with server authority retained; anything reading secrets or having other effects stays server-only. #Server(optimistic: false) explicitly disables that preview. This is one action body and one route row, not a second hand-written client policy.\n\nEvery endpoint authorizes its caller using the auth package and validates untrusted arguments. Origin checking alone is not complete authentication or CSRF protection, especially when missing Origin passes. Keep checked request context, token/same-site protection for cookie-authenticated mutations and the same handler for scripted and progressive form POSTs. Server-only module placement is not an implicit authentication boundary.\n\nFAIR B\n\nRegistration can derive a typed client such as site.client(.invite); it need not force untyped string calls or late typo failures. B's cost is registration separated from its declaration, not absence of type safety. A replaces that registration rather than claiming it impossible.\n\nSURFACE\n\nOne new marker form must be counted under D-SURFACE-BUDGET1. Removing a library method does not cancel a marker count. D-CALLSITE-MARK2 concerns ownership marks; it does not prove that every possible network operator is forbidden.",
+      "options": [
+        {
+          "key": "A",
+          "name": "#Server on the function",
+          "detail": "Mark the handler; derive one route row and typed client call. Effectful bodies stay server-only; eligible previews follow the existing optimistic rule.",
+          "technical": "One action graph, serializable boundary types, target-aware callable projections, and explicit authorization/CSRF acceptance.",
+          "code": "#Server\ninvite: fn(email: String) -[Net]> String MailError! {\n    mail.send(to: email, key: secrets.mail_key)\n}\n// Proposed screen call handles both MailError and transport failure.\n// Secret-using body is never sent to the client."
+        },
+        {
+          "key": "B",
+          "name": "Register by name, as today",
+          "detail": "Register the handler on the app and derive a typed client from that row. Phone, web and desktop screens share it.",
+          "technical": "One registered action generates validated endpoint and client types; no untyped name lookup is required.",
+          "code": "site: app.new(title: \"Club\").action(\"invite\", invite)\ncall_invite: site.client(.invite)\n// Proposed: typed call with transport effects and errors."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "The mark sits on the function, so where code runs is visible where it is written. Every target calls it as a typed function, not a text name.",
+        "gains": [
+          "Typed calls from every target.",
+          "One way to declare server code.",
+          "Derives endpoints beside their handlers."
+        ],
+        "losses": [
+          {
+            "loss": "A call looks local but crosses the network.",
+            "mitigation": "The mark adds Net and a network failure to its type, so callers must handle it; hover says it runs on the server."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It can be type-safe, but registration and server placement remain separate from the handler."
+          }
+        ],
+        "tradeoff": "A call reads like a local call, in exchange for writing server code once for every target."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Rewrote the code in ratified syntax with an effect arrow and typed error. Checked action source and rulings; repaired optimistic-preview secrecy, transport/security boundaries and marker counts, strengthened typed registration and removed the duplicate placement option."
+      },
+      "checkInstructions": "Read Examples/features/web/app_hello.jet:15-16, Examples/features/web/jet_web/run.jet:244 and Examples/features/net/http_routes.jet:17-26. Read Core/Web/Web.jet:50-52,472-508; a request with no Origin header passes at 500-503. Decisions: D-ROUTE-FILES2, D-ROUTE-ONE1, D-SECRETEDGE1, D-OPTIMISTIC1, D-CALLSITE-MARK2.",
+      "surface": {
+        "gist": "Should a #Server mark on a function make it run on the server, callable from any screen?",
+        "lesson": "Remote calls need serializable data, authorization and typed network failure. Both options generate typed clients from one action graph. A moves registration onto the function; eligible optimistic previews still obey the existing state-only rule.",
+        "trio": {
+          "current": {
+            "note": "Today a web app lists each server function by a text name.",
+            "code": "// Examples/features/web/app_hello.jet:15-16\n        .route(\"/\", home)\n        .action(\"save\", save)"
+          },
+          "wild": {
+            "lang": "React",
+            "note": "A \"use server\" function is called from a component like a plain function.",
+            "code": "// react.dev/reference/rsc/use-server\nasync function invite(email) {\n  'use server';\n  await mail.send(email);\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "#Server on the function",
+            "gist": "Mark the function; any screen calls it like a plain function.",
+            "gains": [
+              "One function, called the same way from every target.",
+              "Registration sits beside the handler."
+            ],
+            "losses": [
+              "A call looks local but crosses the network."
+            ],
+            "proposed": {
+              "code": "#Server\ninvite: fn(email: String) -[Net]> String MailError! { … }\n\nui.button(\"Invite\", on_click: fn() { invite(email) ?? retry() })\n// a screen's call also carries a network error"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Register by name, as today",
+            "gist": "Keep listing server functions on the app by a text name.",
+            "gains": [
+              "No new mark."
+            ],
+            "losses": [
+              "Registration stays separate from the handler.",
+              "Where code runs is far from the function."
+            ],
+            "proposed": {
+              "code": "site: app.new(title: \"Club\").action(\"invite\", invite)\ncall_invite: site.client(.invite)\n// Proposed: typed network call, not untyped string lookup."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The mark sits on the function, so where code runs is visible where it is written. Every target calls it as a typed function, not a text name.",
+          "gains": [
+            "Typed calls from every target.",
+            "One way to declare server code.",
+            "Derives endpoints beside their handlers."
+          ],
+          "losses": [
+            {
+              "loss": "A call looks local but crosses the network.",
+              "mitigation": "The mark adds Net and a network failure to its type, so callers must handle it; hover says it runs on the server."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It can be type-safe, but registration and server placement remain separate from the handler."
+            }
+          ],
+          "tradeoff": "A call reads like a local call, in exchange for writing server code once for every target."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A call looks local but crosses the network.",
+          "attempts": [
+            "Ownership call-mark removal does not decide remote-call syntax; compare typed registration fairly instead.",
+            "Put Net and a network failure in the function's type: adopted, so the checker forces handling."
+          ],
+          "result": "Cannot be removed, since the network is real. Minimized: unhandled failure is a compile error, and hover names the server."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:51.473Z"
+    },
+    {
+      "id": "D-SYNC2",
+      "cardId": "c0u5tm84",
+      "group": "web",
+      "title": "App data lives in typed local collections that work offline and sync with the server",
+      "situation": "Apps can lose their network while users are editing records. Jet's current sync API accepts display text, while the approved merge types do not yet provide a typed persistent collection. This vote chooses typed local collections over the same merge and transport mechanism, not a second sync engine. We recommend local persistence with explicit pending, rejected and conflicting states, preserving concurrent edits rather than silently replacing them.",
+      "gist": "Should app data live in typed local collections that work offline and sync when online?",
+      "lesson": "Local-first means the app saves changes on the device first, then sends them to the server when it can. A merge rule decides what happens when two devices change the same record. Jet already has merge types for shared text, lists and counters. Today an app has no typed offline store.",
+      "explainer": "",
+      "story": "Rui's crew-scheduling app is used in tunnels with no signal. Crews mark shifts done underground, and the office must see every change when they surface, with nothing lost.",
+      "inWild": "Replicache persists a browser-side local copy, queues offline changes and reconciles with server authority. It is now in maintenance mode; its site directs new work toward Zero. Source: https://replicache.dev/",
+      "detail": "OWNER GATE\n\nAdd typed persistent collections as a wrapper over D-SYNC1's merge documents and transport. D-INVALIDATE1 supplies read/write footprints; D-REACT-REF1 supplies notifications; D-OPTIMISTIC1 supplies pending/rejected reconciliation. Keep typed app.sync as the expert primitive. Replacing display-text shims is owed; replacing the ratified typed app.sync API with an unrelated collection engine is not a mere defect fix.\n\nCHECKED TODAY\n\nCore/App/App.jet:126 accepts doc_show and over as String. The public import is app, not core.app: SolBallotReview's app_sync.jet checked and ran, printing SyncError(invalid session) and x:y from core.web.sync. Core/Web/Web.jet:1336-1365 stores live results in a process registry; :1406-1408 concatenates sync strings. The failed core.app import is not evidence that the public app module is absent.\n\nA'S CONTRACT\n\nA collection has stable record IDs and durable per-user storage. Writes through collection.edit(id, fn(record) { ... }) operate on tracked persistent records; changing an arbitrary copied Shift does not secretly persist it. Local commit updates readers and marks a pending operation. Server authorization remains authoritative. Server queries expose read-only projections through the same observation API, not a promise that arbitrary remote queries become writable local tables.\n\nUse D-SYNC1 merge semantics for text, lists, maps and counters. Plain fields use causal versioned registers: sequential writes replace their predecessor; concurrent alternatives are retained until resolved. A deterministic display choice does not mean chronologically latest. Order causal versions and break concurrent ties by stable actor/op identity; do not claim a hybrid logical clock is immune to wall-clock skew. Retain losing concurrent values and surface a standard conflict state with a default resolution view. The author may select a merge type for domain-specific intent.\n\nREJECTION AND PRIVACY\n\nApply authorized server state, then rebase still-pending local operations; never undo a later edit by restoring an old snapshot. Deletes carry tombstones with causal versions so offline edits cannot silently resurrect deleted records. Access filters run on the server. Partition caches by account; logout removes that account's local credentials and cache. Offline revocation cannot erase copies already held by a disconnected device, and no option promises that.\n\nPERSISTENCE\n\nWrite schema versions into shipped manifests and stored data. check can compare a declared release baseline, not infer all historical schemas from current source. Require migrations for incompatible changes; test upgrades with old data and pending edits. Quota, corruption and unavailable storage return typed errors; a failed durable write must not be shown as saved. No browser or device database implementation was exercised here.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed local collections",
+          "detail": "Typed local collections wrap the ratified merge/transport primitives. Writes are pending until authorized, and concurrent alternatives remain recoverable.",
+          "technical": "One CRDT document/transport mechanism; causal registers for scalar fields, explicit persistent edits and account-isolated storage.",
+          "code": "use app\nshifts: app.collection<Shift>(\"shifts\", sync: .Server)\nmark_done: fn(id: String) {\n    shifts.edit(id, fn(shift) { shift.done = true })\n}\n// Proposed: durable local edit, then authorized sync."
+        },
+        {
+          "key": "B",
+          "name": "Server cache only",
+          "detail": "Keep live queries and actions as the data model. Offline, the app shows cached reads and refuses writes.",
+          "technical": "D-INVALIDATE1 and D-OPTIMISTIC1 as they stand; no device store.",
+          "code": "shifts: query.live(load_shifts)\n// mark_done uses the chosen server-function API.\n// Offline: cached reads; writes require the network."
+        },
+        {
+          "key": "C",
+          "name": "Merge documents by hand",
+          "detail": "Apps keep SyncMap and SyncList documents and call app.sync themselves, with no typed record store.",
+          "technical": "D-SYNC1 values only.",
+          "code": "shifts: SyncMap.new()\nshifts.set(\"s1\", \"done\")\napp.sync(shifts, over: session)"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Apps on phones must keep working offline. A typed collection gives that by default, building on the ratified merge types and live queries.",
+        "gains": [
+          "Offline by default.",
+          "Typed records, not display text.",
+          "One data model with live queries."
+        ],
+        "losses": [
+          {
+            "loss": "Concurrent scalar edits can require a user choice.",
+            "mitigation": "Retain both values and show the standard conflict view; merge types handle fields with known merge intent."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Writes fail offline, and every app builds its own queue."
+          },
+          {
+            "key": "C",
+            "reason": "It preserves low-level control, but each app must assemble persistence and collection observation."
+          }
+        ],
+        "tradeoff": "Offline changes remain pending until authorized; concurrent values stay recoverable rather than being silently discarded."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Verified the cited app source and added the edge cases option A must answer: clock ties, server-rejected writes, per-user filtering and record-type migrations. Ran the actual app import and sync calls; repaired clock-skew guarantees, persistent-edit boundaries, rejection rebasing, account isolation and the false typed-sync retirement."
+      },
+      "checkInstructions": "Read Core/App/App.jet:117-173 and Core/Web/Web.jet:1336-1365,1406-1408. Decisions: D-SYNC1, D-INVALIDATE1, D-OPTIMISTIC1, D-REACT-REF1.",
+      "surface": {
+        "gist": "Should app data live in typed local collections that work offline and sync when online?",
+        "lesson": "Local-first means the app saves changes on the device first, then sends them to the server when it can. A merge rule decides what happens when two devices change the same record. Jet already has merge types for shared text, lists and counters. Today an app has no typed offline store.",
+        "trio": {
+          "current": {
+            "note": "Today sync takes a merge document as display text and answers text.",
+            "code": "use app\nuse web: core.web\nrun: fn() {\n    print(app.sync(\"bad\", over: \"\"))\n    print(web.sync(\"x\", \"y\"))\n}"
+          },
+          "wild": {
+            "lang": "Replicache",
+            "note": "Replicache writes on the client at once and syncs in the background.",
+            "code": "// replicache.dev\nawait rep.mutate.markDone({ id: 's1' });\n// visible at once; pushed when online"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Typed local collections",
+            "gist": "Records save on the device at once and sync when online.",
+            "gains": [
+              "Apps work offline with no extra code.",
+              "Typed records instead of display text."
+            ],
+            "losses": [
+              "Concurrent scalar edits can require a user choice."
+            ],
+            "proposed": {
+              "code": "shifts: app.collection<Shift>(\"shifts\", sync: .Server)\nmark_done: fn(id: String) {\n    shifts.edit(id, fn(shift) { shift.done = true })\n}\n// Proposed: persist locally; sync when authorized."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Server cache only",
+            "gist": "Data lives on the server; the app caches reads, and writes need a network.",
+            "gains": [
+              "One source of truth on the server."
+            ],
+            "losses": [
+              "Writes fail offline.",
+              "Each app builds its own offline queue."
+            ],
+            "proposed": {
+              "code": "shifts: query.live(load_shifts)\n// offline: cached list; writes fail"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Merge documents by hand",
+            "gist": "Use the ratified merge types directly; each app stores and syncs them.",
+            "gains": [
+              "No new collection type."
+            ],
+            "losses": [
+              "Each app assembles typed records over merge documents.",
+              "Each app writes its own storage and queue."
+            ],
+            "proposed": {
+              "code": "shifts: SyncMap.new()\nshifts.set(\"s1\", \"done\")\napp.sync(shifts, over: session)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Apps on phones must keep working offline. A typed collection gives that by default, building on the ratified merge types and live queries.",
+          "gains": [
+            "Offline by default.",
+            "Typed records, not display text.",
+            "One data model with live queries."
+          ],
+          "losses": [
+            {
+              "loss": "Concurrent scalar edits can require a user choice.",
+              "mitigation": "Retain both values and show the standard conflict view; merge types handle fields with known merge intent."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Writes fail offline, and every app builds its own queue."
+            },
+            {
+              "key": "C",
+              "reason": "It preserves low-level control, but each app must assemble persistence and collection observation."
+            }
+          ],
+          "tradeoff": "Offline changes remain pending until authorized; concurrent values stay recoverable rather than being silently discarded."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Concurrent scalar changes could silently overwrite data.",
+          "attempts": [
+            "Clock-based latest-write order: rejected, skew can dominate and concurrency has no objective later edit.",
+            "Use causal registers over the same merge engine, retaining concurrent alternatives and a standard resolution view."
+          ],
+          "result": "No silent concurrent loss; a visible conflict can still need a choice."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:53.805Z"
+    },
+    {
+      "id": "D-THEME2",
+      "cardId": "c0u5tm84",
+      "group": "gui",
+      "title": "Apps get one Jet look on every system, with each system's own behavior for back, menus and scrolling",
+      "situation": "Jet currently offers a custom-node color and an editor choosing between two fixed backgrounds, not a general app theme. Drawn controls need a default design that works without styling every view. This vote chooses one Jet design or system-like designs; it does not approve a particular palette or mockup. We recommend one typed theme in ui, with runtime accessibility settings and platform interaction conventions preserved.",
+      "gist": "Should every Jet app share one Jet look, while back, menus and scrolling follow each system?",
+      "lesson": "A theme supplies colors, type and spacing; platform conventions guide interactions. One default design does not require identical text pixels across hosts. This vote chooses direction; mockups separately approve the palette, type scale and focus appearance.",
+      "explainer": "",
+      "story": "Ines ships a recipe app with her brand's green and rounded cards. She wants it to look like her brand on every phone and laptop, while iPhone users still swipe back and Windows users still get a title bar menu.",
+      "inWild": "Flutter's theme guide uses typed app-wide ThemeData and local Theme overrides to share colors and text styles. Source: https://docs.flutter.dev/cookbook/design/themes",
+      "detail": "OWNER GATE\n\nChoose visual direction, not final colors or a second style engine. This depends on drawn controls under D-ONEAPP-RENDER1, and stays in the ui package under D-UI-HOME1. D-UI-VIEW1's ui.app takes the typed theme; app.new forwards it as an optional routed wrapper. A one-screen UI does not require the app package.\n\nCHECKED TODAY\n\nCore/Ui/Ui.jet:222-224 accepts one color string for a custom node. Jetpack/Provider/Batteries/gui/gui.jet:460-465 chooses dark/light editor backgrounds. SolBallotReview's ui_values.jet checked and ran node_color construction. That is not a complete theme implementation.\n\nA'S CONTRACT\n\nOne design system with typed accent, typography, radii, spacing and density. Light/dark defaults follow live user preferences; experts can choose explicit values. High contrast, forced colors on the web, reduced motion and text scaling remain runtime inputs. Compile-time validation covers constant palettes; the same shared contrast checker validates dynamic colors when applied. Do not promise a build-time proof for values chosen after compilation.\n\nPlatform conventions determine available back commands, system menus, safe areas and window chrome. Do not impose Alt+Left on every desktop or claim all system behavior is supplied automatically. Navigation state and scroll meaning remain shared; providers report input and metrics. The theme changes appearance, not action meaning. Web rendering can differ in text/boxes under the explicit presentation exception in D-ONEAPP-WEBOUT1.\n\nTheme customization and composition are the first expert path. Embedding a real system control is a separate public host-view operation, not a negligible free way to restyle an entire app. Its lifecycle and compositing costs remain in D-PLATFORM-OVERRIDE1. B's system-like designs can be maintained well; lag is a risk, not an inevitable measured fact. C can be intentionally minimal without being inaccessible, but leaves app-specific visual work to users.\n\nOWNER VISUAL ACCEPTANCE\n\nThis vote approves direction only. Before final visual approval, show the same form/list/dialog in light, dark and high-contrast modes, at large text size, on native and web. The owner approves palette, type scale, spacing and focus appearance from mockups separately; machine contrast checks do not substitute for visual judgment.\n\nResearch: Flutter's theme guide documents app-wide typed theme values and local overrides: https://docs.flutter.dev/cookbook/design/themes.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One Jet look, native behavior",
+          "detail": "One theme with light and dark palettes from one accent. Behavior idioms come from the target.",
+          "technical": "Theme is a typed ui value passed to the app; idioms are a table per target profile.",
+          "code": "use app\nuse ui\n\nrun: fn() {\n    app.new(title: \"Recipes\", theme: ui.theme(accent: ui.hex(\"#2e7d32\"), radius: 12)).serve()\n}\n// Same green cards on every system, light and dark.\n// iPhone: swipe back. Android: system back. Mac: menu bar."
+        },
+        {
+          "key": "B",
+          "name": "Copy each system's look",
+          "detail": "Jet draws Cupertino-like controls on Apple systems, Material on Android and Fluent-like on Windows.",
+          "technical": "Three or more drawn control sets that track each system's design releases.",
+          "code": "app.new(title: \"Recipes\")\n// iPhone: Cupertino-style controls\n// Android: Material controls\n// Windows: Fluent-style controls"
+        },
+        {
+          "key": "C",
+          "name": "Unstyled views",
+          "detail": "Views draw with minimal default styling. Apps supply all colors, shapes and spacing.",
+          "technical": "No theme defaults beyond readable text and focus rings.",
+          "code": "app.new(title: \"Recipes\")\n// plain views: black text, thin borders\n// each app writes its own style for every view"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "One default design gives beginners finished controls without copying each system's appearance. Typed customization and live accessibility settings preserve user control.",
+        "gains": [
+          "The same app on every system.",
+          "System behavior users already know.",
+          "Light, dark and contrast handled by default."
+        ],
+        "losses": [
+          {
+            "loss": "Apps do not look exactly like each system's own apps.",
+            "mitigation": "Use typed theme values for branding; keep familiar platform actions without promising identical system control shapes."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It offers familiar shapes, but makes the default design vary by platform and require multiple style sets."
+          },
+          {
+            "key": "C",
+            "reason": "It supports custom design systems, but leaves more visual work before a beginner's first finished app."
+          }
+        ],
+        "tradeoff": "Apps trade a per-system look for one look of their own, while keeping system behavior."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Made the theme a typed ui value per the ratified ui-package ruling, and added the loss that apps do not look exactly like each system's own, consistent with the render ballot. Checked color/editor probes and theme research; repaired build-time contrast claims, runtime accessibility settings, universal keyboard assumptions and supposedly free host embedding."
+      },
+      "checkInstructions": "Read Core/Ui/Ui.jet:222-224 and Jetpack/Provider/Batteries/gui/gui.jet:460-461. Decision: D-UI-HOME1 (the theme lives in the ui package).",
+      "surface": {
+        "gist": "Should every Jet app share one Jet look, while back, menus and scrolling follow each system?",
+        "lesson": "Look means colors, type, shapes and spacing. Behavior means how back, menus, scrolling and title bars work. Copying each system's look gives native-looking apps that drift apart. One look keeps an app the same everywhere. This vote picks the direction; the actual palette and type come later from mockups.",
+        "trio": {
+          "current": {
+            "note": "Today a view can take one fixed color, and there is no theme.",
+            "code": "use ui: core.ui\nrun: fn() {\n    banner: ui.node_color(\"Recipes\", 20.0, 1.0, \"#2e7d32\")\n    print(banner.width)\n}\n// 20.0; no general theme is supplied by this call."
+          },
+          "wild": {
+            "lang": "Flutter",
+            "note": "Flutter apps often use one Material theme on every system, seeded from one color.",
+            "code": "// docs.flutter.dev/cookbook/design/themes\nMaterialApp(\n  theme: ThemeData(colorSchemeSeed: Colors.green),\n)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One Jet look, native behavior",
+            "gist": "One look everywhere, tuned per app; back, menus and scrolling follow each system.",
+            "gains": [
+              "An app looks the same on every system.",
+              "Users keep their system's back, menus and scrolling."
+            ],
+            "losses": [
+              "Apps do not look exactly like each system's own apps."
+            ],
+            "proposed": {
+              "code": "app.new(title: \"Recipes\", theme: ui.theme(accent: ui.hex(\"#2e7d32\"), radius: 12))\n// same look everywhere, light and dark\n// back, menus and scrolling follow each system"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Copy each system's look",
+            "gist": "Apple's look on Apple devices, Google's on Android, Fluent on Windows.",
+            "gains": [
+              "Closer to each system's own apps."
+            ],
+            "losses": [
+              "The same app looks different on each system.",
+              "Multiple style sets must follow platform changes."
+            ],
+            "proposed": {
+              "code": "app.new(title: \"Recipes\")\n// iPhone: Cupertino style; Android: Material\n// Windows: Fluent style"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Unstyled views",
+            "gist": "Ship plain views; every app styles everything itself.",
+            "gains": [
+              "No look imposed on any app."
+            ],
+            "losses": [
+              "Beginners get plain, unfinished-looking apps.",
+              "Dark mode and contrast are each app's job."
+            ],
+            "proposed": {
+              "code": "app.new(title: \"Recipes\")\n// plain black-and-white views\n// every app styles every view itself"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One default design gives beginners finished controls without copying each system's appearance. Typed customization and live accessibility settings preserve user control.",
+          "gains": [
+            "The same app on every system.",
+            "System behavior users already know.",
+            "Light, dark and contrast handled by default."
+          ],
+          "losses": [
+            {
+              "loss": "Apps do not look exactly like each system's own apps.",
+              "mitigation": "Use typed theme values for branding; keep familiar platform actions without promising identical system control shapes."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It offers familiar shapes, but makes the default design vary by platform and require multiple style sets."
+            },
+            {
+              "key": "C",
+              "reason": "It supports custom design systems, but leaves more visual work before a beginner's first finished app."
+            }
+          ],
+          "tradeoff": "Apps trade a per-system look for one look of their own, while keeping system behavior."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Does not look exactly like each system's own apps.",
+          "attempts": [
+            "An opt-in that switches control shapes per system: rejected, it brings back copied-look upkeep.",
+            "Use theme values and public composition for design variants; reserve system-view embedding for actual host controls."
+          ],
+          "result": "A visual-direction trade-off remains by design; embedding is not claimed to remove its costs."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:56.119Z"
+    },
+    {
+      "id": "D-VIEW-SET1",
+      "cardId": "c0u5tm84",
+      "group": "gui",
+      "title": "Jet ships a full standard set of about forty views, built only from public primitives",
+      "situation": "Jet's current view tree has five node kinds, while complete apps also need pickers, lists and overlays. A shipped control set can save beginners from selecting an outside kit. This vote chooses that first-party set and its package home, not another view or state system. We recommend standard controls in ui, built from public view, layout, text and host-service primitives.",
+      "gist": "Should Jet ship about forty standard views, built only from public primitives, instead of only the basics?",
+      "lesson": "Foundations compose into standard controls. All options retain one state-driven view model. A ships the set with ui; C ships it separately; B leaves kit selection to users. Five node kinds do not limit the number of composed views.",
+      "explainer": "",
+      "story": "Kofi writes a clinic booking app. He needs a date picker, a time picker, a list with search, tabs and a confirmation dialog. He wants all of them from Jet, matching each other, on every target.",
+      "inWild": "Compose Material 3 provides DatePicker, DatePickerDialog and DateRangePicker over typed picker state. Source: https://developer.android.com/develop/ui/compose/components/datepickers",
+      "detail": "OWNER GATE AND HOMES\n\nD-UI-HOME1=A already puts the node tree in the ui package; D-UI-VIEW1=A already chooses ui.app, ui.Node and state-driven views. A adds a shipped standard control set in that package, not a Core framework or rival gui tree. D-GAME-PLATFORM1's gui controls consume this set; independent editor helpers remain consumers. app is an optional routed wrapper, not required for one date picker. All alternatives keep the same view/state protocol.\n\nCHECKED TODAY\n\nCore/Ui/Ui.jet:46-52 lists Custom, Text, Box, Button and TextInput. Jetpack/Provider/Batteries/gui/gui.jet:424-475 contains editor-specific views, with host wrappers at :492-548. SolBallotReview's ui_values.jet checked and ran text/button/box construction. Five node kinds do not prove that only five public view constructors exist.\n\nA'S SET\n\nPublic foundations: text, box, button, image, canvas, text_input, row, column, grid, stack and scroll. Controls: link, text_area, checkbox, switch, radio_group, slider, stepper, select and search_field. Pickers/status: date_picker, time_picker, progress_bar, spinner, badge and avatar. Structure: list, table, tabs, toolbar, sidebar, split_view, card, divider and spacer. Overlays: sheet, dialog, alert, menu, context_menu, tooltip and toast. This is about forty views including foundations, not forty additional node kinds. Layout details depend on D-LAYOUT2; theme direction is D-THEME2.\n\nEvery standard view uses public composition and host-service APIs, never compiler privileges. Native system dialogs may be providers beneath public host primitives; do not pretend all services can be built from six visual nodes. Reorderable rows have stable keys under D-UI-VIEW1. Shared acceptance includes keyboard navigation, focus restoration for overlays, accessibility roles/actions, long text, locale-aware dates, text scaling, right-to-left layout and virtualization without losing focus.\n\nD-API-COMPOSE1 requires documented primitives and typed options rather than policy-only sibling names. Customize through theme values and composition first. Copying source remains an expert path, not a magic removal of maintenance: copied variants must adopt relevant upstream fixes.\n\nFAIR PACKAGING AND COUNTS\n\nC can keep versioned UI-independent kit dependencies separate; this is a real organization benefit even if linker reachability removes unused code. A chooses one shipped dependency for the beginner. Artifact-size equivalence must be proved, not asserted here. D-SURFACE-BUDGET1 counts library APIs without gating their count; no keyword/marker ceiling rises merely because a control function is added.\n\nResearch: Compose Material 3 documents DatePicker with DatePickerState at https://developer.android.com/develop/ui/compose/components/datepickers. No toolkit requires every app to use every control.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Primitives plus a full set",
+          "detail": "The ui package holds the primitives and about forty standard views, each written only with public primitives.",
+          "technical": "Primitives and views both in the ui package (D-UI-HOME1). Each view is plain Jet over public API (D-EXTEND-ARCH1); options per D-API-COMPOSE1.",
+          "code": "use ui\nuse time: core.time\nbooking: fn(day: &ui.State<time.LocalDate>) -> ui.Node {\n    ui.column([ui.date_picker(day, label: \"Day\"), ui.button(\"Book\", on_click: book)])\n}"
+        },
+        {
+          "key": "B",
+          "name": "Primitives only",
+          "detail": "The ui package ships primitives only. Date pickers, tabs and dialogs come from outside packages.",
+          "technical": "No first-party standard set.",
+          "code": "use ui\nuse kit\nuse time: core.time\nbooking: fn(day: &ui.State<time.LocalDate>) -> ui.Node {\n    ui.column([kit.date_picker(day), ui.button(\"Book\", on_click: book)])\n}"
+        },
+        {
+          "key": "C",
+          "name": "A separate kit package",
+          "detail": "The standard set ships with Jet in its own package, separate from the ui primitives.",
+          "technical": "A second first-party package, added with its own jet add.",
+          "code": "use ui\nuse kit\n\nui.column([kit.date_picker(day), ui.button(\"Book\", on_click: book)])"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Ship common controls over the same public primitives, so beginners start without selecting a kit and experts can customize without private hooks.",
+        "gains": [
+          "No outside kit to choose or audit.",
+          "One consistent look across views.",
+          "Copyable source for custom variants."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Every team rebuilds or audits the same common views, with mismatched looks."
+          },
+          {
+            "key": "C",
+            "reason": "It offers independent organization, but adds a package choice to the default beginner path."
+          }
+        ],
+        "tradeoff": "Jet maintains forty views, in exchange for apps that need no outside kit."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Moved the standard views into the ratified ui package, rewrote the code with ui.date_picker and a real LocalDate type, and linked the width classes to the layout ballot. Checked node kinds and editor composition; repaired package/state consistency, private host assumptions, copying costs and unfair separate-kit framing."
+      },
+      "checkInstructions": "SolBallotReview checked the node-kind/editor source and ran ui_values.jet. After implementation, require the same keyed view/state protocol, keyboard and accessibility actions, overlay focus, localized date behavior and unreachable-control artifact checks.",
+      "surface": {
+        "gist": "Should Jet ship about forty standard views, built only from public primitives, instead of only the basics?",
+        "lesson": "A small set of foundations can build a larger standard control set. All options retain the same state-driven view model. A ships the set with ui; C ships it separately; B leaves kit selection to users.",
+        "trio": {
+          "current": {
+            "note": "Today the view tree has five kinds of view.",
+            "code": "use ui: core.ui\nrun: fn() {\n    tree: ui.box([ui.text(\"Clicked 0 times\"), ui.button(\"Add one\")])\n    print(\"{tree.width} x {tree.height}\")\n}\n// Five node kinds; this tree measures 15.0 x 2.0."
+          },
+          "wild": {
+            "lang": "Jetpack Compose",
+            "note": "Compose Material 3 ships the date picker with the toolkit.",
+            "code": "// developer.android.com/develop/ui/compose/components/datepickers\nDatePicker(state = rememberDatePickerState())"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Primitives plus a full set",
+            "gist": "About forty standard views ship with Jet, built from public primitives.",
+            "gains": [
+              "Common views come with Jet and match each other.",
+              "Any view can be copied and changed."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "ui.column([\n    ui.date_picker(day, label: \"Day\"),\n    ui.button(\"Book\", on_click: book),\n])"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Primitives only",
+            "gist": "Jet ships the building blocks; outside packages provide the rest.",
+            "gains": [
+              "Smallest first-party surface."
+            ],
+            "losses": [
+              "Every team picks and audits an outside kit.",
+              "Kits look and behave differently from each other."
+            ],
+            "proposed": {
+              "code": "use kit // an outside package\nui.column([kit.date_picker(day), ui.button(\"Book\", on_click: book)])"
+            }
+          },
+          {
+            "key": "C",
+            "name": "A separate kit package",
+            "gist": "Ship the full set as a second first-party package beside the ui package.",
+            "gains": [
+              "Apps without standard views skip the package."
+            ],
+            "losses": [
+              "Two packages to add for one app.",
+              "The default app needs another dependency choice."
+            ],
+            "proposed": {
+              "code": "use ui\nuse kit // second first-party package\nui.column([kit.date_picker(day), ui.button(\"Book\", on_click: book)])"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Ship common controls over the same public primitives, so beginners start without selecting a kit and experts can customize without private hooks.",
+          "gains": [
+            "No outside kit to choose or audit.",
+            "One consistent look across views.",
+            "Copyable source for custom variants."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Every team rebuilds or audits the same common views, with mismatched looks."
+            },
+            {
+              "key": "C",
+              "reason": "It offers independent organization, but adds a package choice to the default beginner path."
+            }
+          ],
+          "tradeoff": "Jet maintains forty views, in exchange for apps that need no outside kit."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Apps carry views they never use (removed).",
+          "attempts": [
+            "Split the set into a separate package: rejected, it adds a second jet add with no size gain.",
+            "Drop unreached views from builds, as for all code: adopted."
+          ],
+          "result": "Require artifact reachability proof; no binary-size result is claimed by this ballot."
+        },
+        {
+          "loss": "A shipped view may not fit a design (removed).",
+          "attempts": [
+            "Add style hooks to every view: rejected, endless option growth.",
+            "Build every view from public primitives so its source can be copied and edited: adopted."
+          ],
+          "result": "Use themes/composition first; copied source remains possible but carries upstream-fix maintenance."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:58.471Z"
+    },
+    {
+      "id": "D-ALIAS-GENERIC1",
+      "cardId": "c0rqt0kq",
+      "group": "syntax",
+      "title": "A generic alias writes its type parameters on its name: Grid<T>: [[T]]",
+      "situation": "A generic alias gives one name to an existing shape, such as rows of any element type. The compiler accepts parameters on that name, while the declaration ruling puts parameters on a kind word such as struct. An alias has no kind word, leaving that rule incomplete. We recommend stating the exception explicitly: generic alias parameters go on the alias name, without introducing a keyword.",
+      "gist": "Should a generic alias write its type parameters on its name, since it has no kind word?",
+      "lesson": "A type parameter, such as T, stands for any type the user picks. A struct writes it on its kind word: Box: struct<T> { value: T }. A function writes it on fn. An alias has no kind word, because it only renames a type. Today the compiler accepts Pair<T>: (first: T, second: T).",
+      "explainer": "",
+      "story": "Ravi writes many functions over [[Float]] and [[String]] grids. He wants one name, Grid<T>, that means a list of rows of T and stays the same type as [[T]].",
+      "inWild": "TypeScript places generic parameters after the declared type name; its generic types preserve the selected element type. Source: https://www.typescriptlang.org/docs/handbook/2/generics.html",
+      "detail": "WHAT THIS DECIDES\n\nWhere a generic alias writes its type parameters, given that an alias has no kind word.\n\nTODAY\n\nA scratch file with Pair<T>: (first: T, second: T) and swap: fn(p: Pair<Int>) -> Pair<Int> passed jet check and ran. Another with Grid<T>: [[T]] and total(g: Grid<Float>) accepted a plain list of Float rows and printed 6.0. The parser takes parameters on the alias name (Declarations/Types.jet:51-57).\n\nD-DECL-COLON1=A says kind parameters go on the kind word, never on the name. Its table writes an alias as Meters: Int, with no keyword. That replaces the alias keyword D-ALIAS-BIND2=B had kept, so an alias has no kind word.\n\nD-GENERIC-TYPEFN1=A had made generic types and aliases into recipe functions and removed <>. It was archived on 2026-10-29, and D-DECL-COLON1's struct<T> and fn<T> use <> again.\n\nA separate lag: a plain alias such as Key: Int | String gave E0324 in a scratch run, an alias needs type parameters. D-DECL-COLON1 ratified plain aliases, so that refusal is a defect to fix under any option.\n\nOPTION A IN DETAIL\n\nThe law becomes: type parameters go on the kind word; an alias has no kind word, so its parameters go on its name. Grid<T>: [[T]] is the same type as [[T]] for each T. Writing <T> anywhere else on an alias gets an error with the fix.",
+      "options": [
+        {
+          "key": "A",
+          "name": "On the alias name",
+          "detail": "Type parameters go on the kind word, or on the name of an alias, which has none.",
+          "technical": "Amends D-DECL-COLON1's sentence with one stated case; matches Declarations/Types.jet:51-57.",
+          "code": "Grid<T>: [[T]]\ntotal: fn(g: Grid<Float>) -> Float {\n    sum := Float{0.0}\n    loop row in g { loop x in row -> sum += x }\n    sum\n}"
+        },
+        {
+          "key": "B",
+          "name": "Generic shapes need a struct",
+          "detail": "A reusable generic shape must be a struct, a new type with its own name.",
+          "technical": "Removes generic aliases from the parser.",
+          "code": "Grid: struct<T> { rows: [[T]] }\nrun: fn() { total(Grid{rows: [[1.0, 2.0], [3.0]]}) }"
+        },
+        {
+          "key": "C",
+          "name": "An alias kind word",
+          "detail": "Generic aliases take the alias word as their kind word, and carry their parameters on it.",
+          "technical": "Revives the alias word D-ALIAS-BIND2=B kept, for generic aliases only; plain aliases stay Meters: Int.",
+          "code": "Grid: alias<T> [[T]]\n\ntotal: fn(g: Grid<Float>) -> Float { … }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "An alias has no kind word, so its name is a clear place for parameters. This preserves transparent generic aliases without adding a keyword.",
+        "gains": [
+          "Familiar from peer languages.",
+          "No new keyword.",
+          "No code changes."
+        ],
+        "losses": [
+          {
+            "loss": "One stated case beside the kind-word rule.",
+            "mitigation": "The rule reads: on the kind word, or on an alias's name; <T> elsewhere gets an error with the fix."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A plain [[Float]] no longer passes, and every caller wraps its value."
+          },
+          {
+            "key": "C",
+            "reason": "A keyword only generic aliases use, so plain and generic aliases look different."
+          }
+        ],
+        "tradeoff": "One stated case in the parameter rule, in exchange for familiar generic aliases with no new keyword."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Corrected the generics-by-recipe ruling from retired to archived, and confirmed the colon ruling dropped the alias keyword. Checked generic and plain aliases with the seed and verified the declaration decisions; removed universal peer claims and repaired executable examples."
+      },
+      "checkInstructions": "Scratch probes with the current seed: Pair<T>: (first: T, second: T) passes jet check and runs; Key: Int | String gives E0324. Read Declarations/Types.jet:51-57 and the alias row in Docs/proposals/2026-11-06-colon-declarations.md:33. Decisions: D-DECL-COLON1, D-GENERIC-TYPEFN1 (archived), D-ALIAS-BIND2.",
+      "surface": {
+        "gist": "Should a generic alias write its type parameters on its name, since it has no kind word?",
+        "lesson": "A type parameter, such as T, stands for any type the user picks. A struct writes it on its kind word: Box: struct<T> { value: T }. A function writes it on fn. An alias has no kind word, because it only renames a type. Today the compiler accepts Pair<T>: (first: T, second: T).",
+        "trio": {
+          "current": {
+            "note": "Today the compiler accepts parameters on the alias name.",
+            "code": "Pair<T>: (first: T, second: T)\nswap: fn(p: Pair<Int>) -> Pair<Int> {\n    (first: p.second, second: p.first)\n}\nrun: fn() { print(swap((first: 1, second: 2)).first) }\n// 2"
+          },
+          "wild": {
+            "lang": "TypeScript",
+            "note": "TypeScript writes alias parameters on the alias name.",
+            "code": "// typescriptlang.org/docs/handbook/2/generics.html\ntype Grid<T> = T[][];\nfunction total(g: Grid<number>): number { … }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "On the alias name",
+            "gist": "Grid<T>: [[T]], as the compiler accepts today.",
+            "gains": [
+              "Familiar name-bound parameters.",
+              "No new keyword; works today."
+            ],
+            "losses": [
+              "One stated case beside the kind-word rule."
+            ],
+            "proposed": {
+              "code": "Grid<T>: [[T]]\nfirst: fn(g: Grid<Float>) -> Float { g[0][0] }\nrun: fn() { print(first([[1.0, 2.0], [3.0]])) }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Generic shapes need a struct",
+            "gist": "No generic aliases; declare a struct instead.",
+            "gains": [
+              "The kind-word rule has no extra case."
+            ],
+            "losses": [
+              "A plain [[Float]] no longer passes.",
+              "Every caller wraps its value."
+            ],
+            "proposed": {
+              "code": "Grid: struct<T> { rows: [[T]] }\n\ntotal(Grid{rows: [[1.0, 2.0], [3.0]]})"
+            }
+          },
+          {
+            "key": "C",
+            "name": "An alias kind word",
+            "gist": "Grid: alias<T> [[T]], with the parameters on an alias word.",
+            "gains": [
+              "The kind-word rule has no extra case."
+            ],
+            "losses": [
+              "A keyword only generic aliases use.",
+              "Plain aliases and generic aliases look different."
+            ],
+            "proposed": {
+              "code": "Grid: alias<T> [[T]]\n\ntotal: fn(g: Grid<Float>) -> Float { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "An alias has no kind word, so its name is a clear place for parameters. This preserves transparent generic aliases without adding a keyword.",
+          "gains": [
+            "Familiar from peer languages.",
+            "No new keyword.",
+            "No code changes."
+          ],
+          "losses": [
+            {
+              "loss": "One stated case beside the kind-word rule.",
+              "mitigation": "The rule reads: on the kind word, or on an alias's name; <T> elsewhere gets an error with the fix."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A plain [[Float]] no longer passes, and every caller wraps its value."
+            },
+            {
+              "key": "C",
+              "reason": "A keyword only generic aliases use, so plain and generic aliases look different."
+            }
+          ],
+          "tradeoff": "One stated case in the parameter rule, in exchange for familiar generic aliases with no new keyword."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "One stated case beside the kind-word rule.",
+          "attempts": [
+            "Put parameters after the colon, Grid: <T> [[T]]: rejected, it introduces a new anonymous generic binder rather than clarifying the existing alias form.",
+            "State the rule as kind word first, else the name: adopted, one sentence covers every declaration."
+          ],
+          "result": "Kept as one negligible loss: a one-sentence rule, enforced by an error with the fix."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:26:01.003Z"
+    },
+    {
+      "id": "D-ALT-CASES1",
+      "cardId": "c0rqt0kq",
+      "group": "syntax",
+      "title": "Unions and enums share one case grammar, and each case's form decides how it widens and encodes",
+      "situation": "A union accepts plain values of several types, while an enum requires named cases. Today two Float alternatives need an enum, and naming that alternative changes how callers construct it and how JSON represents it. This vote proposes shared case grammar, not removal of nominal type boundaries. We recommend behavior by case form, with explicit conversions out of enums and unchanged wire formats for existing type cases.",
+      "gist": "Should unions and enums share one case grammar, with each case's form deciding how it behaves?",
+      "lesson": "A type case is a plain type, such as Int; a plain value of that type is accepted. A labelled case has a name, such as .Celsius(Float), and you build it with that name. Encoding decides how a value is written as JSON. Today unions hold only type cases and enums hold only labelled cases.",
+      "explainer": "",
+      "story": "Yuki models a temperature as .Celsius(Float) or .Fahrenheit(Float) inside a settings record. A union cannot hold two Float cases, so she must declare an enum for one field. Naming it also changes its JSON.",
+      "inWild": "OCaml polymorphic variants use backquoted labelled alternatives without requiring a declared enum. Its manual also describes explicit coercion between closed variant sets and warns about weakly constrained tags. Source: https://ocaml.org/manual/5.2/polyvariant.html",
+      "detail": "WHAT THIS DECIDES\n\nAllow labelled structural alternatives and type cases inside enums. D-UNIONTYPE1=A currently requires explicit union-to-enum conversion; A amends incoming conversion for matching type cases only. Enums remain nominal. Adding a transparent alias changes no behavior; adding enum creates identity and an explicit outward conversion boundary. D-ALT-SUBSET1 decides subset conversions separately.\n\nCHECKED TODAY\n\nSolBallotReview compiled and ran union.jet and list_union.jet: 7 passes to Int | String, and a list passes to [String] | Int. plain_alias.jet gives E0324; plain aliases remain owed under D-DECL-COLON1. Compiler/JetFoundation/Source/Types/Types.jet:763-794 generates M__String_ and removes module qualifiers. Compiler/JetSema/Source/Sema/Registration/Items.jet:3590-3625 rejects unknown or overlapping decode shapes. Registration/SerdeItems.jet:988-1031 emits tagged enum payloads and string names for unit cases.\n\nA'S EXACT RULE\n\nEvery existing type case remains legal, including lists and maps, with its existing untagged encoding. A labelled case uses its name for construction and tagged encoding. Labels are optional for compound types, never a forced migration that changes their JSON. Existing compiler-generated pattern names remain available for unchanged type cases; authors wanting readable labels choose them explicitly and thereby choose tagged encoding.\n\nA body is a closed, flattened, duplicate-free case set. Type cases compare by resolved type identity; labelled cases compare by label and payload type. Different payloads with one label are errors. A plain value widens only to its exact type case, never by guessing among labelled cases sharing a payload. Qualified nominal types must remain distinguishable in patterns and diagnostics; a collision is an error requesting explicit labels, not arbitrary selection.\n\nDerived decode discriminates distinct labelled tags first: Celsius and Fahrenheit payload cases may both use objects, and distinct unit labels may both use strings. Untagged type cases retain the conservative disjoint outer-shape guard. A labelled unit case overlaps an untagged String case; a tagged payload overlaps an untagged object-shaped case. Reject those mixed combinations with a diagnostic naming both cases and suggesting a fully tagged enum. Non-serializable alternatives need no wire restriction. Existing #Untagged remains an explicit codec override, subject to ambiguity checks.\n\nDEPENDENCIES\n\nEnum type cases require D-ENUM-DOT1=A, so bare Int and labelled .Int cannot be confused. Do not silently narrow this vote if that dependency loses; revise the dependent enum clause before ratifying this ballot. Braces and commas in examples are conditional on the separate record and layout votes.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One grammar; form decides",
+          "detail": "Type cases accept exact plain values and retain untagged encoding. Labelled cases require their names and tagged encoding; enum identity still blocks outward implicit conversion.",
+          "technical": "Amends D-UNIONTYPE1's incoming enum conversion only; preserves all existing compound type cases and their wire formats.",
+          "code": "Temp: .Celsius(Float) | .Fahrenheit(Float)\nReading: enum {\n    Float\n    .Lines([String])\n}\nread: fn() -> Reading { 2.5 }"
+        },
+        {
+          "key": "B",
+          "name": "Keep them separate",
+          "detail": "Unions keep type cases only, untagged and widening. Enums keep labelled cases only, tagged and strict.",
+          "technical": "D-UNIONTYPE1 unchanged.",
+          "code": "Key: Int | String\nTemp: enum {\n    Celsius(Float)\n    Fahrenheit(Float)\n}"
+        },
+        {
+          "key": "C",
+          "name": "One grammar; the name decides",
+          "detail": "Unnamed alternatives widen and encode by shape; enums never widen and always tag. Naming adds #Untagged to keep the format.",
+          "technical": "One grammar, behavior keyed on the declaration.",
+          "code": "Key: Int | String          // show(7) works\nKeyEnum: enum { Int, String }\n// show_enum(7): error, write .Int(7)"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Case form can control construction and encoding without forcing existing compound unions to change their JSON. Enums still provide nominal isolation.",
+        "gains": [
+          "Structural alternatives can distinguish two Float cases.",
+          "Existing type cases keep their wire format.",
+          "Enums retain nominal identity."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It preserves nominal isolation but cannot express two labelled Float cases inline."
+          },
+          {
+            "key": "C",
+            "reason": "It preserves strict enum entry, but naming an alternative changes plain-value calls and default encoding."
+          }
+        ],
+        "tradeoff": "Enums retain nominal isolation; sharing grammar does not make every named type interchangeable."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Fixed the false claim that 7 passes as Json, and added the shape-guard rule: a payload-free labelled case encodes as its name, so it cannot sit beside a String case. Checked union entry and JSON encoding; repaired nominal boundaries, decode ambiguity and mandatory labels that would change existing compound unions' wire format."
+      },
+      "checkInstructions": "SolBallotReview probes: union.jet and list_union.jet passed check and run; plain_alias.jet gives E0324. After implementation, prove mixed-case decode ambiguity errors, exact type-case entry, nominal outward conversion refusal, and unchanged existing union JSON.",
+      "surface": {
+        "gist": "Should unions and enums share one case grammar, with each case's form deciding how it behaves?",
+        "lesson": "A type case is a plain type, such as Int; a plain value of that type is accepted. A labelled case has a name, such as .Celsius(Float), and you build it with that name. Encoding decides how a value is written as JSON. Today unions hold only type cases and enums hold only labelled cases.",
+        "trio": {
+          "current": {
+            "note": "Today a plain Int or a list passes to its matching union member.",
+            "code": "show: fn(key: Int | String) { print(key) }\ncount: fn(v: [String] | Int) { print(v) }\nrun: fn() {\n    show(7)\n    count([\"a\"])\n}"
+          },
+          "wild": {
+            "lang": "OCaml",
+            "note": "OCaml writes unnamed labelled alternatives inline.",
+            "code": "(* ocaml.org/manual/5.2/polyvariant.html *)\nlet t : [ `Celsius of float | `Fahrenheit of float ] =\n  `Celsius 21.5"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One grammar; form decides",
+            "gist": "Share case grammar while keeping enum identity and existing type-case encoding.",
+            "gains": [
+              "Two labelled cases may share a payload type.",
+              "Existing type cases keep their JSON.",
+              "Enums retain nominal isolation."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "Temp: .Celsius(Float) | .Fahrenheit(Float)\nReading: enum {\n    Float\n    .Lines([String])\n}\n// Plain Float enters Reading; leaving Reading needs conversion."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep them separate",
+            "gist": "Unions hold types; enums hold named cases, as today.",
+            "gains": [
+              "No change."
+            ],
+            "losses": [
+              "Two labelled Float cases need a declared enum."
+            ],
+            "proposed": {
+              "code": "Key: Int | String\nTemp: enum {\n    Celsius(Float)\n    Fahrenheit(Float)\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "One grammar; the name decides",
+            "gist": "Shared grammar, but named enums are always tagged and strict.",
+            "gains": [
+              "Named enums stay strict."
+            ],
+            "losses": [
+              "Naming breaks every call with a plain value.",
+              "Naming by hand changes the JSON."
+            ],
+            "proposed": {
+              "code": "Key: Int | String          // show(7) works\nKeyEnum: enum { Int, String }\n// show_enum(7): error"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Case form can control construction and encoding without forcing existing compound unions to change their JSON. Enums still provide nominal isolation.",
+          "gains": [
+            "Structural alternatives can distinguish two Float cases.",
+            "Existing type cases keep their wire format.",
+            "Enums retain nominal identity."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It preserves nominal isolation but cannot express two labelled Float cases inline."
+            },
+            {
+              "key": "C",
+              "reason": "It preserves strict enum entry, but naming an alternative changes plain-value calls and default encoding."
+            }
+          ],
+          "tradeoff": "Enums retain nominal isolation; sharing grammar does not make every named type interchangeable."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Mandatory labels would change existing compound unions' JSON.",
+          "attempts": [
+            "Keep every existing compound type case legal; make a readable labelled case an explicit tagged choice."
+          ],
+          "result": "Removed: no forced label or wire migration."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:26:03.511Z"
+    },
+    {
+      "id": "D-ALT-SUBSET1",
+      "cardId": "c0rqt0kq",
+      "group": "syntax",
+      "title": "A value of a smaller union passes where a larger union holding all its cases is expected",
+      "situation": "A plain Int passes to Int or String, but an Int-or-String value is refused by a helper accepting Int, String or Bool. Authors must match and rebuild values that already fit. The vote decides whether whole structural unions widen automatically, without widening mutable references or containers. We recommend exact subset widening; transparent aliases remain structural, while declared enums retain their outward conversion boundary.",
+      "gist": "Should a value of a smaller union pass where a larger union with all its cases is expected?",
+      "lesson": "A union type such as Int | String says a value is one of those types. Widening means a value fits a broader type with no conversion code. Today a plain Int widens into Int | String. A whole Int | String value does not widen into Int | String | Bool.",
+      "explainer": "",
+      "story": "Omar's parser returns Int | String for a cell. His table stores Int | String | Bool. Every cell needs a two-arm match that rebuilds the same value, just to satisfy the types.",
+      "inWild": "TypeScript accepts any member of a union and restricts operations to those valid for the possible members. Source: https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#union-types",
+      "detail": "WHAT THIS DECIDES\n\nExtend D-UNIONTYPE1=A's member conversion to structural subset values. SolBallotReview's union.jet passed check and run with 7; subset.jet gave E0112 at store(x).\n\nEXACT RULE\n\nAt value bindings, arguments, returns and failure propagation, every source case must occur unchanged in the target. Matching uses resolved type identity, not printed names. Preserve the active case and payload; remap its discriminant if necessary. Normal payload ownership costs remain; no hidden container-wide copy or allocation is permitted.\n\nA transparent alias is the same structural union on either side. A declared enum remains nominal and never widens outward into another type. Entry into an enum is allowed only if D-ALT-CASES1=A separately permits it; this vote alone does not amend D-UNIONTYPE1's explicit enum boundary. Exact labelled cases compare by label and payload type, never payload alone.\n\nLIMITS\n\nNo widening through editable or retained references, including & and &&. Otherwise a callee could write a Bool into storage declared Int | String. No recursive conversion inside lists, maps, records or function signatures. A collection must explicitly map its elements when a larger element type is needed. Exhaustive matching still covers every target case.\n\nChanging a transparent alias changes nothing; introducing enum creates nominal identity. Neither ballot promises that adding enum is behavior-free.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Widen automatically",
+          "detail": "A smaller unnamed union widens into a larger alternative at the places plain values already widen. Not through & parameters or inside lists.",
+          "technical": "Exact subset value conversion; no recursive variance or reference widening. Enum entry depends on D-ALT-CASES1; enum exit remains explicit.",
+          "code": "store: fn(cell: Int | String | Bool) { print(cell) }\nkeep: fn(cell: Int | String) { store(cell) }\nrun: fn() { keep(7) }\n// Proposed: whole-union widening."
+        },
+        {
+          "key": "B",
+          "name": "Rebuild by hand",
+          "detail": "A smaller union never widens; the author matches each case.",
+          "technical": "No change.",
+          "code": "keep: fn(cell: Int | String) {\n    if cell == {\n        .Int(n) -> store(n)\n        .String(s) -> store(s)\n    }\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Every value of the smaller union already fits the larger one, so the rebuild match adds nothing. Plain values already widen the same way.",
+        "gains": [
+          "No rebuild matches.",
+          "Same rule as plain values.",
+          "Declared enums stay separate."
+        ],
+        "losses": [
+          {
+            "loss": "A list of a smaller union does not widen into a larger list.",
+            "mitigation": "The error shows a one-line map that widens each element, so the copy stays visible."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Every call needs a match that rebuilds the same value."
+          }
+        ],
+        "tradeoff": "One more implicit widening, in exchange for no rebuild code."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Replaced the no-downside claim with soundness limits: no widening through & parameters or inside lists, and a constant-time retag. Reproduced subset refusal and ordinary member widening; aligned enum entry with the case ballot and removed unconditional constant-time claims."
+      },
+      "checkInstructions": "Scratch probes with the current seed: show(7) for Int | String runs; passing Int | String to Int | String | Bool gives E0112, ValueTypeMismatch. Decision: D-UNIONTYPE1. Cross-check the case-grammar ballot's rule that naming never changes calls.",
+      "surface": {
+        "gist": "Should a value of a smaller union pass where a larger union with all its cases is expected?",
+        "lesson": "A union type such as Int | String says a value is one of those types. Widening means a value fits a broader type with no conversion code. Today a plain Int widens into Int | String. A whole Int | String value does not widen into Int | String | Bool.",
+        "trio": {
+          "current": {
+            "note": "Today a smaller union is refused where a larger one is expected.",
+            "code": "store: fn(cell: Int | String | Bool) { print(cell) }\nkeep: fn(cell: Int | String) { store(cell) }\n// E0112: store wants Int | String | Bool, not Int | String."
+          },
+          "wild": {
+            "lang": "TypeScript",
+            "note": "TypeScript accepts a smaller union where a larger one is expected.",
+            "code": "// typescriptlang.org/docs/handbook/2/everyday-types.html\nfunction keep(cell: number | string) {\n  store(cell); // store(cell: number | string | boolean)\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Widen automatically",
+            "gist": "Int | String passes where Int | String | Bool is expected.",
+            "gains": [
+              "No rebuild code for a value that already fits.",
+              "Same rule as plain values."
+            ],
+            "losses": [
+              "A list of a smaller union does not widen into a larger list."
+            ],
+            "proposed": {
+              "code": "store: fn(cell: Int | String | Bool) { print(cell) }\nkeep: fn(cell: Int | String) { store(cell) }\nrun: fn() { keep(7) }\n// Proposed whole-union widening."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Rebuild by hand",
+            "gist": "Keep today's rule: match each case and pass it on.",
+            "gains": [
+              "No new conversion rule."
+            ],
+            "losses": [
+              "A match per call that rebuilds the same value."
+            ],
+            "proposed": {
+              "code": "keep: fn(cell: Int | String) {\n    if cell == {\n        .Int(n) -> store(n)\n        .String(s) -> store(s)\n    }\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Every value of the smaller union already fits the larger one, so the rebuild match adds nothing. Plain values already widen the same way.",
+          "gains": [
+            "No rebuild matches.",
+            "Same rule as plain values.",
+            "Declared enums stay separate."
+          ],
+          "losses": [
+            {
+              "loss": "A list of a smaller union does not widen into a larger list.",
+              "mitigation": "The error shows a one-line map that widens each element, so the copy stays visible."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Every call needs a match that rebuilds the same value."
+            }
+          ],
+          "tradeoff": "One more implicit widening, in exchange for no rebuild code."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Widening could hide a mistake or a cost.",
+          "attempts": [
+            "Widen into any union sharing one case: rejected, a value could land where some of its cases do not fit.",
+            "Widen only when the larger alternative holds every case, never out of a declared enum, never under & or inside containers: adopted."
+          ],
+          "result": "Only exact subset values widen. Normal payload ownership costs remain; container-wide conversion stays explicit."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:26:06.000Z"
+    },
+    {
+      "id": "D-BRACE-LAYOUT1",
+      "cardId": "c0rqt0kq",
+      "group": "syntax",
+      "title": "Brace lists share one layout: commas on one line, line breaks without commas across lines",
+      "situation": "Jet's formatter expands short struct bodies and writes trailing commas on multiline values. The same fields therefore look different in declarations and values. This vote chooses formatting and separators for brace lists, without changing function or control blocks. We recommend commas on one line and newlines across lines, with explicit fields retained wherever removing commas could change a record into code.",
+      "gist": "Should every brace list use commas on one line and plain line breaks across lines?",
+      "lesson": "A formatter rewrites code into one standard layout, so everyone's code looks alike. A brace list is anything inside braces that lists members: struct bodies, enum bodies and struct values. Today struct bodies always span lines without commas. Struct values spanning lines end each field with a comma.",
+      "explainer": "",
+      "story": "Hana declares Point: struct { x: Int, y: Int } on one line, as the ruling's example shows. The formatter spreads it over four lines. Her multi-line Point values, meanwhile, gain a comma after every field.",
+      "inWild": "Go separates struct declarations with statement boundaries but uses comma-separated composite literal elements, including a trailing comma before a multiline closer. Source: https://go.dev/ref/spec#Composite_literals",
+      "detail": "WHAT THIS DECIDES\n\nA public formatting direction and separator rule for brace lists. D-TRAILCOMMA1=A requires multiline trailing commas; A amends brace formatting only, retaining trailing-comma acceptance. Parentheses and square brackets keep their rule.\n\nCHECKED SOURCE AND PROBES\n\nCompiler/JetParser/Source/Formatter/Items.jet:2161-2190 expands struct bodies. Formatter/Expressions.jet:997-1028 emits multiline literal commas. Parser/Expressions.jet:1974-2012 accepts comma or statement terminator between fields. SolBallotReview's record_clean.jet checked and ran a one-line comma-separated struct. enum_comma.jet, collection_newline.jet and map_newline.jet produced E0003. The latter probes also contained an unrelated semicolon error; their first diagnostic identifies the missing separator.\n\nA'S RULE\n\nA brace list fits on one line with commas unless comments, markers or member bodies require lines. Otherwise write one entry per line without commas. This includes typed collection elements and map entries, not executable blocks. Accept existing trailing commas; formatting removes them under the new brace rule. Preserve comments and source-order evaluation.\n\nIf D-RECORD-BRACE1 passes, comma-free punned records retain an explicit colon field. {x, y} may wrap only with a field such as x: x, so it remains a record. A singleton pun writes {x: x}. Destructuring is identified by the following : or := and needs no such value disambiguation. Require parse-format-parse identity and idempotence.\n\nD-ENUM-DOT1 governs dots independently; this vote permits one-line enum commas with bare or dotted names. D-DECL-COLON1's one-line examples are not a formatter mandate. B is a valid status quo, not a breach of that ruling. C offers consistent punctuation; its cost is taste, not safety.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One brace-list layout",
+          "detail": "Struct bodies, enum bodies and struct values all follow it. Parenthesis and bracket lists keep trailing commas.",
+          "technical": "Formatter change; amends D-TRAILCOMMA1 for brace lists.",
+          "code": "Point: struct { x: Int, y: Int }\norigin: Point{x: 0, y: 0}\n\nServer: struct {\n    /// Port to listen on.\n    port: Int\n    host: String\n}\nedge: Server{\n    port: 8080\n    host: \"edge.local\"\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep today's layout",
+          "detail": "The formatter keeps its two styles.",
+          "technical": "No change.",
+          "code": "Point: struct {\n    x: Int\n    y: Int\n}\nedge: Server{\n    port: 8080,\n    host: \"edge.local\",\n}"
+        },
+        {
+          "key": "C",
+          "name": "Commas everywhere",
+          "detail": "Struct and enum bodies gain a comma after every field, as in Rust.",
+          "technical": "A declaration punctuation change; no unverified corpus count is used to rank it.",
+          "code": "Point: struct { x: Int, y: Int }\nServer: struct {\n    port: Int,\n    host: String,\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "One layout inside braces makes a declaration and its value look alike. Short structs sit on one line, as the ratified example shows.",
+        "gains": [
+          "Declarations and values look alike.",
+          "Short structs on one line.",
+          "Argument lists unchanged."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It preserves familiar output but keeps declarations and values visually different."
+          },
+          {
+            "key": "C",
+            "reason": "It is consistent, but adds punctuation to multiline declaration members."
+          }
+        ],
+        "tradeoff": "Braces and parentheses separate entries differently across lines, in exchange for one layout inside braces."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Fixed the parser citation and probed other brace lists: enum bodies refuse commas, and map and typed list literals refuse line breaks. Checked parser and formatter sources, reproduced separator failures, and repaired multiline pun formatting that could turn a record into code."
+      },
+      "checkInstructions": "Read Formatter/Items.jet:2161-2190, Formatter/Expressions.jet:997-1028 and Parser/Expressions.jet:1974-2012, separators at 1996-2007. Scratch probes: a one-line struct body with commas parses; Mode: enum { Fast, Safe } gives E0003 at the comma. Multi-line [Int]{ } and map literals without commas give E0003. Decisions: D-DECL-COLON1, D-TRAILCOMMA1.",
+      "surface": {
+        "gist": "Should every brace list use commas on one line and plain line breaks across lines?",
+        "lesson": "A formatter rewrites code into one standard layout, so everyone's code looks alike. A brace list is anything inside braces that lists members: struct bodies, enum bodies and struct values. Today struct bodies always span lines without commas. Struct values spanning lines end each field with a comma.",
+        "trio": {
+          "current": {
+            "note": "Today a short struct body is expanded, and multi-line values get commas.",
+            "code": "Point: struct {\n    x: Int\n}\norigin: Point{\n    x: 0,\n}"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "gofmt writes struct fields without commas but literal fields with them.",
+            "code": "// go.dev/ref/spec#Composite_literals\ntype Point struct { X int }\norigin := Point{\n    X: 0,\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One brace-list layout",
+            "gist": "One line with commas when it fits; otherwise one per line, no commas.",
+            "gains": [
+              "Declarations and values look alike.",
+              "Short structs fit on one line."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "Point: struct { x: Int }\norigin: Point{x: 0}\n// Wrapping uses line breaks, not commas."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep today's layout",
+            "gist": "Struct bodies always span lines; values use trailing commas.",
+            "gains": [
+              "No formatter change."
+            ],
+            "losses": [
+              "Declarations and values look different.",
+              "Short declarations cannot stay on one line."
+            ],
+            "proposed": {
+              "code": "Point: struct {\n    x: Int\n}\norigin: Point{\n    x: 0,\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Commas everywhere",
+            "gist": "Every brace list ends entries with commas, struct bodies included.",
+            "gains": [
+              "One separator everywhere."
+            ],
+            "losses": [
+              "Comma noise on every field line.",
+              "Methods inside bodies would need commas too."
+            ],
+            "proposed": {
+              "code": "Point: struct {\n    x: Int,\n}\norigin: Point{\n    x: 0,\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One layout inside braces makes a declaration and its value look alike. Short structs sit on one line, as the ratified example shows.",
+          "gains": [
+            "Declarations and values look alike.",
+            "Short structs on one line.",
+            "Argument lists unchanged."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It preserves familiar output but keeps declarations and values visually different."
+            },
+            {
+              "key": "C",
+              "reason": "It is consistent, but adds punctuation to multiline declaration members."
+            }
+          ],
+          "tradeoff": "Braces and parentheses separate entries differently across lines, in exchange for one layout inside braces."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Two separator styles, one for braces and one for parentheses (removed).",
+          "attempts": [
+            "Commas everywhere: rejected, it adds a comma to every field and method line.",
+            "Tie the style to the bracket, so each bracket has exactly one layout: adopted."
+          ],
+          "result": "Removed: a reader knows the layout from the bracket alone."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:26:08.386Z"
     }
   ],
   "questions": [
@@ -179497,6 +181487,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T14:26:10.443Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-ENUM-DOT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:26:09.182Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-BRACE-LAYOUT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:26:08.386Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-BRACE-LAYOUT1",
+      "note": "Brace lists share one layout: commas on one line, line breaks without commas across lines"
+    },
+    {
+      "at": "2026-11-06T14:26:06.834Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-ALT-SUBSET1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:26:06.000Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ALT-SUBSET1",
+      "note": "A value of a smaller union passes where a larger union holding all its cases is expected"
+    },
+    {
+      "at": "2026-11-06T14:26:04.348Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-ALT-CASES1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:26:03.511Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ALT-CASES1",
+      "note": "Unions and enums share one case grammar, and each case's form decides how it widens and encodes"
+    },
+    {
+      "at": "2026-11-06T14:26:01.865Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-ALIAS-GENERIC1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:26:01.003Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ALIAS-GENERIC1",
+      "note": "A generic alias writes its type parameters on its name: Grid<T>: [[T]]"
+    },
+    {
+      "at": "2026-11-06T14:25:59.340Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-VIEW-SET1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:58.471Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-VIEW-SET1",
+      "note": "Jet ships a full standard set of about forty views, built only from public primitives"
+    },
+    {
+      "at": "2026-11-06T14:25:56.909Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-THEME2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:56.119Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-THEME2",
+      "note": "Apps get one Jet look on every system, with each system's own behavior for back, menus and scrolling"
+    },
+    {
+      "at": "2026-11-06T14:25:54.610Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-SYNC2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:53.805Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SYNC2",
+      "note": "App data lives in typed local collections that work offline and sync with the server"
+    },
+    {
+      "at": "2026-11-06T14:25:52.306Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-SERVER-FN1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:51.473Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SERVER-FN1",
+      "note": "A #Server mark on a function makes it run on the server, called from any screen like a plain function"
+    },
+    {
+      "at": "2026-11-06T14:25:49.953Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-RUN-DEVICE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:49.153Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-RUN-DEVICE1",
+      "note": "One --target flag names the platform for run, dev, test and build, and --device picks a phone"
+    },
+    {
+      "at": "2026-11-06T14:25:47.581Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-PLATFORM-OVERRIDE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:46.781Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PLATFORM-OVERRIDE1",
+      "note": "One app file does per-system work with the ratified build-fact branch, and ui.native embeds a real system view"
+    },
+    {
+      "at": "2026-11-06T14:25:45.172Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-OTA1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:44.290Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-OTA1",
+      "note": "Signed content updates and channel-approved compiled app updates"
+    },
+    {
+      "at": "2026-11-06T14:25:42.573Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-ONEAPP-WEBOUT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:41.745Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ONEAPP-WEBOUT1",
+      "note": "On the web, an app becomes real page elements, first painted by the server"
+    },
     {
       "at": "2026-11-06T14:25:39.863Z",
       "by": "agent",
