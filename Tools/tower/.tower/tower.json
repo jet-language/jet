@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6617,
-    "rev": 93788,
+    "nextNum": 6618,
+    "rev": 93793,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -63767,11 +63767,11 @@
         {
           "n": 47,
           "text": "(was #1575 c4) Every in-repo use line is migrated in the same change [precut audit: failing on 9c7ddf1359: C:modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers KNOWN-FAILING #5454 jet build crashes: internal compiler error \"semantic declaration checking did not return a complete resolved package graph\" (#5507): interna (known-failing #5454: jet build crashes:…]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:35:27.908Z"
+          "evidence": "Main census on dev 837c152917 ($JET_SCRATCH_ROOT/lanes/Main/retired-census.mjs: the 28 retired Core namespaces from the retired_core_namespaces case fixture plus core.json, every .jet and .md file): 5 hits, every one intended (Docs/audits/syntax-law-source-status-matrix-2026-07-07.md and Docs/spec/syntax-decisions.md prose, the tests/guards/syntax_reconciliation.jet forbidden list, and the rejection snapshots tests/ui/core_json_is_not_a_module.jet and tests/ui/core_unknown_module.jet). The last live use lines (Compiler/JetDevserver/Tests/Canvas/EditActions.jet) moved to core.term, core.files and core.files.path in 837c152917.",
+          "at": "2026-11-06T22:40:53.557Z"
         },
         {
           "n": 48,
@@ -64206,7 +64206,7 @@
       "parentId": "c0rqi33c",
       "needsAcceptance": false,
       "created": "2026-10-23T06:35:31.835Z",
-      "updated": "2026-11-06T21:59:16.749Z",
+      "updated": "2026-11-06T22:40:53.557Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -96590,6 +96590,62 @@
       "needsAcceptance": false,
       "created": "2026-11-06T21:54:09.666Z",
       "updated": "2026-11-06T22:00:28.972Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0o2a99m",
+      "num": 6617,
+      "title": "Every --json command prints its machine envelope with the right exit status",
+      "body": "tests/cases/machine_output/every_json_report_door_uses_the_one_machine_envelope.case fails under a0_029 and every candidate since (vb8 on 690b182cb3, the e32b979063 release candidate) and has no known-failing line. TestSystemLead-2 ran each command by hand on s1 of dev 3e1b28f646 plus 976542d4b9: `jet build run.jet --json` (step build-effects) exits 0 with empty stdout and stderr where the case expects one {\"action\":\"build.effects\",...} status object; `jet budget check --json` exits 2 where the case expects 0; `jet inspect live 0 --json` exits 2 where it expects 1; hangar-generations exits 2 where it expects 0. Those three print a JSON report. perf-view and perf-export are unjudged. The other 31 commands are correct.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet build FILE --json prints exactly one build.effects status object in the machine envelope",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T22:42:09.610Z"
+        },
+        {
+          "n": 2,
+          "text": "jet budget check --json, jet inspect live N --json and hangar-generations --json exit with the status the case names, or the case is corrected with the reason the status is right",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T22:42:10.808Z"
+        },
+        {
+          "n": 3,
+          "text": "cases tests/cases/machine_output/every_json_report_door_uses_the_one_machine_envelope.case PASS on a Main verify run",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T22:42:11.878Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T22:42:08.389Z",
+      "updated": "2026-11-06T22:42:11.878Z",
       "updatedBy": "Main"
     }
   ],
@@ -185887,6 +185943,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T22:42:11.878Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0o2a99m",
+      "note": "#3 cases tests/cases/machine_output/every_json_report_door_uses"
+    },
+    {
+      "at": "2026-11-06T22:42:10.808Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0o2a99m",
+      "note": "#2 jet budget check --json, jet inspect live N --json and hanga"
+    },
+    {
+      "at": "2026-11-06T22:42:09.610Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0o2a99m",
+      "note": "#1 jet build FILE --json prints exactly one build.effects statu"
+    },
+    {
+      "at": "2026-11-06T22:42:08.389Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0o2a99m",
+      "note": "Every --json command prints its machine envelope with the right exit status"
+    },
+    {
+      "at": "2026-11-06T22:40:53.557Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h18kyi",
+      "note": "#47"
+    },
     {
       "at": "2026-11-06T22:29:42.338Z",
       "by": "Main",
