@@ -1,15 +1,14 @@
-
+package: { name: "run", authority: { allow: [Env] } }
 use {
     files: core.files
-    path: core.files.path
     sys: core.sys
 }
 
 run: fn() {
     cwd: sys.current_dir() ?? panic("current_dir")
     print((files.absolute("/absent//a/../b") ?? panic("absolute")) == "/absent//a/../b")
-    print((files.absolute("./a//../b") ?? panic("relative")) == "{cwd}/./a//../b")
-    print((files.absolute("C:\\absent") ?? panic("drive text")) == "{cwd}/C:\\absent")
-    print((files.absolute("a\\b") ?? panic("backslash")) == "{cwd}/a\\b")
-    print((files.absolute(path.of("/absent/./child")) ?? panic("Path")) == "/absent/./child")
+    print((files.absolute("./a//../b") ?? panic("relative")) == ("{cwd}/./a//../b"))
+    print((files.absolute("C:\\absent") ?? panic("drive text")) == ("{cwd}/C:\\absent"))
+    print((files.absolute("a\\b") ?? panic("backslash")) == ("{cwd}/a\\b"))
+    print((files.absolute(Path.from("/absent/./child")) ?? panic("Path")) == "/absent/./child")
 }

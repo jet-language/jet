@@ -2,20 +2,21 @@
 use math: core.math
 
 run: fn() {
-    print(math.cmp(math.NAN, 1.0))
-    print(math.cmp(1.0, math.NAN))
+    print(math.cmp(math.NAN, Float{1.0}))
+    print(math.cmp(Float{1.0}, math.NAN))
     print(math.cmp(math.NAN, math.NAN))
-    print(math.cmp(-0.0, 0.0))
-    print(math.cmp(-2.0, -1.0))
-    print(math.cmp(math.INFINITY, 1.0))
+    print(math.cmp(Float{-0.0}, Float{0.0}))
+    print(math.cmp(Float{-2.0}, Float{-1.0}))
+    print(math.cmp(math.INFINITY, Float{1.0}))
     print(math.is_finite(math.NAN))
     print(math.is_finite(math.INFINITY))
     print(math.is_finite(math.from_bits(1)))
-    print(math.is_finite(-0.0))
-    print(math.to_bits(math.fabs(-0.0)))
-    print(math.fabs(-2.0))
+    print(math.is_finite(Float{-0.0}))
+    print(math.to_bits(math.fabs(Float{-0.0})))
+    print(math.fabs(Float{-2.0}))
     print(math.cmp(F32{-0.0}, F32{0.0}))
-    print(math.cmp(F32{math.NAN}, F32{1.0}))
-    print(math.is_finite(F32{math.INFINITY}))
+    // `F32{x}` refuses a NaN or infinite Float, so the F32 specials come from F32 arithmetic.
+    print(math.cmp(F32{0.0} / F32{0.0}, F32{1.0}))
+    print(math.is_finite(F32{1.0} / F32{0.0}))
     print(math.is_finite(F32{1.0}))
 }
