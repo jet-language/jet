@@ -132,7 +132,7 @@ pkg_parse_common: fn(text: String, origin: String, config: Bool) -> PackageFacts
             if field == MANIFEST_BLOCK_AUTHORITY -> return Err(PackageParseError.BadEffectsBlock("malformed `authority:` block: declared more than once"))
             return Err(PackageParseError.Composition("`{field}` is declared more than once"))
         }
-        seen.push(field)
+        seen.push(field.copy())
         if value.starts_with("Output.") {
             output: pkg_parse_output_value(field, value.removeprefix("Output.").trim())
             if facts.outputs.has_key(field) -> return Err(PackageParseError.Composition("output `{field}` is declared more than once"))

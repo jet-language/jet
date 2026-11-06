@@ -54,14 +54,14 @@ PackageIndexEntry: struct {
         }
         if self.docs == "" && other.docs != "" -> self.docs = other.docs
         loop platform in other.platforms {
-            if !self.platforms.contains(platform) -> self.platforms.push(platform)
+            if !self.platforms.contains(platform) -> self.platforms.push(platform.copy())
         }
         loop option in other.options {
             known := false
             loop existing in self.options {
                 if existing.name == option.name -> known = true
             }
-            if !known -> self.options.push(option)
+            if !known -> self.options.push(option.copy())
         }
     }
 }
@@ -87,7 +87,7 @@ PackageIndex: struct {
                 found = true
             }
         }
-        if !found -> self.packages.push(record)
+        if !found -> self.packages.push(record.copy())
         self.packages.sort_by((left: PackageIndexEntry, right: PackageIndexEntry) -> (left.source <=> right.source).then(left.name <=> right.name))
     }
 
@@ -119,7 +119,7 @@ PackageIndex: struct {
                 .Val(source) -> record.source == source && record.name == split.name
                 .None -> record.name == split.name || record.reference == query
             }
-            if matched -> matches.push(record)
+            if matched -> matches.push(record.copy())
         }
         if matches.len() == 1 -> return Val(matches[0])
         None

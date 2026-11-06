@@ -132,7 +132,7 @@ pattern_collect_binding_names: fn(pattern: Pattern, names: &[BindName]) Never! {
         }
         .List(items, rest, _) -> {
             loop item in items -> pattern_collect_slot_names(item, names)
-            if rest == .Val(tail) && tail.name == .Val(name) -> names.push(name)
+            if rest == .Val(tail) && tail.name == .Val(name) -> names.push(name.copy())
         }
         .Map(entries, _, _) -> loop entry in entries -> pattern_collect_slot_names(entry.slot, names)
         .StrMatch(parts, _) -> {

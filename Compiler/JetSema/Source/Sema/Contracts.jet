@@ -149,7 +149,7 @@ sema_contract_merge_context_delta: fn(source: SemaCheckContext, call_start: Int,
     // row it holds is this condition's; a condition left incomplete keeps why.
     loop index in 0..<source.typed_goals.len() -> destination.typed_goals.push(source.typed_goals[index])
     loop index in 0..<source.index_proofs.len() -> destination.index_proofs.push(source.index_proofs[index])
-    loop reason in source.incomplete_reasons -> destination.incomplete_reasons.push(reason)
+    loop reason in source.incomplete_reasons -> destination.incomplete_reasons.push(reason.copy())
     sema_check_context_merge_expr_ids(source, destination)
     if source.exact_int_reachable -> destination.exact_int_reachable = true
 }

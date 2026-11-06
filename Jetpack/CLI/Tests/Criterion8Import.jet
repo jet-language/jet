@@ -20,7 +20,7 @@ cli_test_criterion8_jetpack: fn(args: [String], cwd: String, env: [(name: String
 
 cli_test_criterion8_shell: fn(script: String, args: [String], cwd: String, env: [(name: String, value: String)]) -[Env, Exec]> ProcessReceipt {
     argv := [String]{"/bin/sh", "-c", script, "sh"}
-    argv.extend(args)
+    argv.extend(args.copy())
     spec := process.cmd(argv).stdout(.Capture).stderr(.Capture).cwd(cwd).env("JETPACK_BIN", cli_test_jetpack_bin()).env_remove("JETPACK_FIXTURES")
     loop pair in env -> spec = spec.env(pair.name, pair.value)
     spec.run() ?? panic("run sh -c {script}: {err}")

@@ -75,7 +75,7 @@ valid_formula: fn(formula: Formula, book: Book, visiting: &[String]) -> Bool {
 valid_cell: fn(name: String, book: Book, visiting: &[String]) -> Bool {
     if visiting.contains(name.copy()) -> return false
     formula: book.cells.get(name.copy()) ?? return false
-    visiting.push(name)
+    visiting.push(name.copy())
     result: valid_formula(formula.copy(), book.copy(), visiting)
     _: visiting.pop()
     return result
@@ -119,7 +119,7 @@ seen: &[String],
 ) -> Bool {
     if seen.contains(name.copy()) -> return false
     formula: book.cells.get(name.copy()) ?? return false
-    seen.push(name)
+    seen.push(name.copy())
     result: depends_on_formula(formula.copy(), target, book.copy(), seen)
     _: seen.pop()
     return result
@@ -144,7 +144,7 @@ visiting: &[String],
     if values.get(name.copy()) == .Val(cached) -> return Val(cached)
     if visiting.contains(name.copy()) -> return None
     formula: book.cells.get(name.copy()) ?? return None
-    visiting.push(name)
+    visiting.push(name.copy())
     value: if formula.kind == {
         0 -> Val(formula.value)
         3 -> resolve_operand(formula.left, book.copy(), values, visiting)
@@ -165,7 +165,7 @@ visiting: &[String],
         }
     }
     _: visiting.pop()
-    if value == .Val(result) -> values.add(name, result).drop("formula cache")
+    if value == .Val(result) -> values.add(name.copy(), result).drop("formula cache")
     return value
 }
 
@@ -183,7 +183,7 @@ new_value: Int,
         formula: book.cells.get(name.copy()) ?? return None
         seen := [String]{}
         affected: name == changed || depends_on_formula(formula.copy(), changed, book.copy(), seen)
-        dirty.add(name, affected).drop("dirty cell set")
+        dirty.add(name.copy(), affected).drop("dirty cell set")
     }
 
     values := [String:Int]{}
@@ -191,11 +191,11 @@ new_value: Int,
         is_dirty: dirty.get(name.copy()) ?? false
         if !is_dirty {
             if previous.get(name.copy()) == .Val(old) {
-                values.add(name, old).drop("previous formula value")
+                values.add(name.copy(), old).drop("previous formula value")
             }
         }
     }
-    values.add(changed, new_value).drop("changed formula value")
+    values.add(changed.copy(), new_value).drop("changed formula value")
 
     touched := [String]{}
     loop name in book.order {
@@ -203,7 +203,7 @@ new_value: Int,
         if is_dirty {
             visiting := [String]{}
             if eval_cell(name.copy(), book.copy(), values, visiting) == .None -> return None
-            touched.push(name)
+            touched.push(name.copy())
         }
     }
     Val(Recalc{values: values, touched: touched})

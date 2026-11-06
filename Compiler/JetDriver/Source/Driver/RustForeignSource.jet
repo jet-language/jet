@@ -163,7 +163,7 @@ jet_driver_rust_foreign_source: fn(facts: JetDriverRustForeignFacts) -> String N
     if has_trampoline -> out.push("#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_cabi_free(ptr: *mut u8, len: usize) {{\n    if ptr.is_null() {{ return; }}\n    let _ = Vec::from_raw_parts(ptr, len, len);\n}}\n")
     loop index in 0..<facts.entries.len() {
         out.push(jet_driver_rust_foreign_wrapper(facts.entries[index].declaration, names))
-        if trampolines[index] == .Val(source) -> out.push(source)
+        if trampolines[index] == .Val(source) -> out.push(source.copy())
         out.push("\n")
     }
     out.join("\n")

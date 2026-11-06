@@ -632,7 +632,7 @@ sema_services_worker_reaches: fn(start: String, target: String, modules: [SemaGr
         visited[current] = true
         if rows.get(current) == .Val(row) {
             loop edge in modules[row.module_index].functions[row.function_index].effects.call_edges {
-                if visited.get(edge) == None -> pending.push(edge)
+                if visited.get(edge) == None -> pending.push(edge.copy())
             }
         }
     }

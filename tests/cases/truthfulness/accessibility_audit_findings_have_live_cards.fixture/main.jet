@@ -122,7 +122,7 @@ run: fn() {
         unique_cards := [String]{}
         loop card in cards {
             assert(!unique_cards.contains(card), "accessibility finding {row[0]} must list each Tower card once: {card}")
-            unique_cards.push(card)
+            unique_cards.push(card.copy())
             // TOWER_DATA pins the lookup to this tree's board; left to itself,
             // Tower follows a linked worktree to the main checkout's live board.
             output: audit_process.cmd([String]{"node", "Tools/tower/tower.mjs", "card", "show", card, "--json"}).env("TOWER_DATA", "Tools/tower/.tower/tower.json").run() ?? panic("Tower card lookup must run")

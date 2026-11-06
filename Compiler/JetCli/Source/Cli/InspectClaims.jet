@@ -244,7 +244,7 @@ jet_cli_claim_validate_relation: fn(manifest: JetCLIStatusValue, relation: JetCL
         if id.trim() == "" || row_ids.contains(id) {
             errors.push("duplicate or empty row_id: {id}")
         }
-        if !row_ids.contains(id) -> row_ids.push(id)
+        if !row_ids.contains(id) -> row_ids.push(id.copy())
         capability: jet_cli_status_string(jet_cli_status_get(row, "capability_id"))
         mode: jet_cli_status_string(jet_cli_status_get(row, "mode"))
         if capability == .Val(capability_name) && mode == .Val(mode_name) {
@@ -266,7 +266,7 @@ jet_cli_claim_validate_relation: fn(manifest: JetCLIStatusValue, relation: JetCL
             if !JET_CLI_CLAIM_DISPOSITIONS.contains(disposition) {
                 errors.push("row has an invalid disposition: {id}")
             }
-            dispositions.push(disposition)
+            dispositions.push(disposition.copy())
             if jet_cli_status_string(jet_cli_status_get(row, "status")) != Val(disposition) {
                 errors.push("row status contradicts disposition: {id}")
             }

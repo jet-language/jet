@@ -62,7 +62,7 @@ store_plan_nix_downloads: fn(verification: &StoreVerification, roots: HangarRoot
     queue := Rank<String>.new()
     loop store_path in store_paths {
         store_nix_validate_store_path(store_path, store_dir)
-        queue.add(store_path)
+        queue.add(store_path.copy())
     }
     scheduled := queue.copy()
     checked := 0
@@ -82,7 +82,7 @@ store_plan_nix_downloads: fn(verification: &StoreVerification, roots: HangarRoot
                     plan.items.push(NixPlanItem{package: store_nix_store_name(store_path), state: .Cached, download_bytes: 0, disk_bytes: existing.unpacked_bytes})
                     loop reference in existing.references {
                         if !scheduled.has(reference) {
-                            scheduled.add(reference)
+                            scheduled.add(reference.copy())
                             queue.add(reference)
                         }
                     }
@@ -133,7 +133,7 @@ store_plan_nix_downloads: fn(verification: &StoreVerification, roots: HangarRoot
                 reference: "{store_dir}/{name}"
                 store_nix_validate_store_path(reference, store_dir)
                 if !scheduled.has(reference) {
-                    scheduled.add(reference)
+                    scheduled.add(reference.copy())
                     queue.add(reference)
                 }
             }
@@ -182,8 +182,8 @@ store_nix_expand_planned_closure: fn(queue: &Rank<String>, scheduled: &Rank<Stri
             reference: "{store_dir}/{name}"
             store_nix_validate_store_path(reference, store_dir)
             if !scheduled.has(reference) {
-                scheduled.add(reference)
-                queue.add(reference)
+                scheduled.add(reference.copy())
+                queue.add(reference.copy())
                 frontier.push(reference)
             }
         }

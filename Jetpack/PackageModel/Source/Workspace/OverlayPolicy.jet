@@ -247,7 +247,7 @@ PackageOverride: struct {
     absorb: fn(&self, incoming: PackageOverride) OverlayError! {
         self.merge_scalar(incoming, OverrideScalarField.Source)
         self.merge_scalar(incoming, OverrideScalarField.Version)
-        loop flag in incoming.flags -> self.flags.push(flag)
+        loop flag in incoming.flags -> self.flags.push(flag.copy())
         loop fact in incoming.env {
             field: "env.{fact.key}"
             incoming_priority: incoming.field_priority(field)
@@ -271,7 +271,7 @@ PackageOverride: struct {
                 }
             }
         }
-        loop patch in incoming.patches -> self.patches.push(patch)
+        loop patch in incoming.patches -> self.patches.push(patch.copy())
         if incoming.allow_unfree -> self.allow_unfree = true
         if incoming.priority > self.priority -> self.priority = incoming.priority
         loop entry in incoming.field_priorities -> self.raise_priority(entry.key, entry.value)

@@ -518,8 +518,8 @@ jet_cli_replay_encode: fn(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt:
         jet_cli_replay_put_le(frame, kinds[sequence], 2)
         jet_cli_replay_put_le(frame, sequence, 8)
         jet_cli_replay_put_le(frame, payload.len(), 4)
-        frame.extend(payload)
-        out.extend(frame)
+        frame.extend(payload.copy())
+        out.extend(frame.copy())
         out.extend(prove_crypto.sha256(frame).as_bytes())
         payload_bytes += payload.len()
     }
@@ -620,7 +620,7 @@ jet_cli_replay_net_request_fields: fn(hop: JetCLIReplayNetHop, call: Int, reques
 jet_cli_replay_net_digest: fn(domain: String, salt: [U8], parts: [[U8]]) -> String Never! {
     out := domain.bytes()
     out.push(U8{0})
-    out.extend(salt)
+    out.extend(salt.copy())
     loop part in parts {
         loop step in 0..<8 {
             shift: 7 - step
@@ -628,7 +628,7 @@ jet_cli_replay_net_digest: fn(domain: String, salt: [U8], parts: [[U8]]) -> Stri
             loop _ in 0..<shift -> rest = rest /% 256
             out.push(U8.from_int(rest %% 256) ?? panic("replay digest byte"))
         }
-        out.extend(part)
+        out.extend(part.copy())
     }
     prove_crypto.sha256(out).hex()
 }

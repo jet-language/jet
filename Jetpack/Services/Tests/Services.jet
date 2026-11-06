@@ -449,7 +449,7 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     // `run` owns `actions`, so liveness counts its own checks.
     checks := 0
     services_stop_process_with(42, Val(ShutdownPolicy.Term{grace_ms: 0}), 0, (action) -> {
-        actions.push(action)
+        actions.push(action.copy())
     }, () -> {
         checks += 1
         Ok(checks == 1)

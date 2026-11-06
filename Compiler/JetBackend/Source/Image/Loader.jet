@@ -626,7 +626,7 @@ loader_kept_word: fn(out: &[U8], value: Int) Never! {
 
 // `bytes`, then zeros up to the next word.
 loader_kept_run: fn(out: &[U8], bytes: [U8]) Never! {
-    out.extend(bytes)
+    out.extend(bytes.copy())
     end: out.len() + (8 - out.len() % 8) % 8
     link_pad_to(out, end, 0)
 }
@@ -1282,7 +1282,7 @@ x64_file_exec: fn(path: String, launch: X64Launch) -> String {
     environ: loader_environ(launch.env) ?? return "couldn't read /proc/self/environ"
     starts: loader_environ_starts(environ)
     texts := [String]{path}
-    loop argument in launch.argv -> texts.push(argument)
+    loop argument in launch.argv -> texts.push(argument.copy())
     bytes := 8 * (launch.argv.len() + starts.len() + 2) + 16 + environ.len()
     loop text in texts -> bytes += text.bytes().len() + 1
     size: os_page_round(bytes)

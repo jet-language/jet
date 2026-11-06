@@ -144,11 +144,13 @@ cli_schema_pe_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Metadata
         if raw.len() < 14 -> return Err(MetadataError.Malformed{why: "truncated PE metadata section"})
         payload_len: Int.from_u64(cli_schema_read_num(raw, 10, 4, true, maximum))
         record_len: cli_schema_size_add(46, payload_len, maximum) ?? return Err(MetadataError.Malformed{why: "record length overflow"})
-        record: cli_schema_bounds(raw, 0, record_len, maximum)
+        // The record is bounds-checked before the trailing bytes are sliced;
+        // the list keeps its own fresh view, which takes nothing from `bytes`.
+        _: cli_schema_bounds(raw, 0, record_len, maximum)
         trailing: raw[record_len..<raw.len()]
         if cli_schema_bytes_start(trailing, CLI_SCHEMA_MAGIC) -> return Err(MetadataError.Duplicate)
         loop byte in trailing { if byte != (U8{0}) -> return Err(MetadataError.Malformed{why: "nonzero bytes after PE metadata record"}) }
-        found.push(record)
+        found.push(cli_schema_bounds(raw, 0, record_len, maximum))
     }
     Ok(found)
 }

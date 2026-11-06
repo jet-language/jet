@@ -85,7 +85,7 @@ ClosureGraph: struct {
 
     closure: fn(self, digest: String) -> [String] Never! {
         members := self.transitive_references(digest)
-        members.push(digest)
+        members.push(digest.copy())
         store_sorted_unique(members)
     }
 
@@ -99,7 +99,7 @@ ClosureGraph: struct {
 
     reverse_closure: fn(self, digest: String) -> [String] Never! {
         members := self.transitive_referrers(digest)
-        members.push(digest)
+        members.push(digest.copy())
         store_sorted_unique(members)
     }
 
@@ -511,7 +511,7 @@ store_migrate_closure_graph_unlocked_ignoring: fn(verification: &StoreVerificati
     deleted := graph.deleted_records.copy()
     loop id in ignored {
         graph.records.remove(id).drop("an ignored id may have no record")
-        deleted.push(id)
+        deleted.push(id.copy())
     }
     graph.deleted_records = store_sorted_unique(deleted)
     entries := [StoreEntry]{}
@@ -550,7 +550,7 @@ store_migrate_closure_graph_from_entries: fn(verification: &StoreVerification, r
                 }
             }
         }
-        if graph.records.get(record.id) != Val(record) -> records.push(record)
+        if graph.records.get(record.id) != Val(record) -> records.push(record.copy())
     }
     if objects.len() == 0 && records.len() == 0 {
         // Steady state is exactly where an overgrown journal must fold into
@@ -653,7 +653,7 @@ store_register_entries_unlocked_with_mode: fn(verification: &StoreVerification, 
                 }
             }
         }
-        if graph.records.get(record.id) != Val(record) -> records.push(record)
+        if graph.records.get(record.id) != Val(record) -> records.push(record.copy())
     }
     if records.len() == 0 && object_map.len() == 0 -> return Ok(false)
     records.sort_by(record -> record.id)

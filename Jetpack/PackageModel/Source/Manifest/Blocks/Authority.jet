@@ -212,7 +212,7 @@ pkg_parse_provider_authority_body: fn(providers: String) -> [ProviderAuthority] 
     loop entry in pkg_authority_entries(providers) {
         provider: pkg_unquote(entry.key)
         if seen_providers.contains(provider) -> return Err(pkg_authority_bad("authority.providers.{provider} is declared more than once"))
-        seen_providers.push(provider)
+        seen_providers.push(provider.copy())
         body: pkg_authority_object_body(entry.value, "providers.{provider}")
         registry := String?{None}
         allow := [String]{}
@@ -274,7 +274,7 @@ pkg_parse_service_trust: fn(value: String) -> [ServiceTrust] PackageParseError! 
     loop entry in pkg_key_value_entries(body) {
         name: pkg_unquote(entry.key)
         if seen.contains(name) -> return Err(PackageParseError.Composition("authority.trust.services.{name} is declared more than once"))
-        seen.push(name)
+        seen.push(name.copy())
         services.push(ServiceTrust{service: name, decision: pkg_parse_trust_decision(entry.value)})
     }
     Ok(services)
@@ -297,7 +297,7 @@ pkg_parse_grants: fn(body: String) -> [PackageGrant] PackageParseError! {
     loop entry in pkg_key_value_entries(body) {
         dep: pkg_unquote(entry.key)
         if seen.contains(dep) -> return Err(PackageParseError.Composition("grant `{dep}` is declared more than once"))
-        seen.push(dep)
+        seen.push(dep.copy())
         out.push(PackageGrant{package: dep, rights: pkg_parse_effect_list(dep, entry.value.trim())})
     }
     Ok(out)

@@ -385,7 +385,7 @@ store_archive_build_unlocked: fn(verification: &StoreVerification, roots: Hangar
     graph: store_closure_graph_structure_unlocked(verification, roots)
     root_digest: entry.envelope.output_hash
     digests := if include_closure -> graph.closure(root_digest) else -> [String]{root_digest}
-    if digests.len() == 0 -> digests.push(root_digest)
+    if digests.len() == 0 -> digests.push(root_digest.copy())
     digests = store_archive_sorted_unique(digests)
 
     selected := [String: StoreEntry]{}
@@ -790,7 +790,7 @@ store_archive_write_nodes: fn(root: String, nodes: [HangarArchiveNode], root_mod
     }
     directories := [HangarArchiveNode]{}
     loop node in nodes {
-        if node.kind == HangarArchiveNodeKind.Directory -> directories.push(node)
+        if node.kind == HangarArchiveNodeKind.Directory -> directories.push(node.copy())
     }
     directories.sort_by(node -> 0 - store_archive_separator_count(node.path))
     loop node in directories -> store_archive_set_mode(files.join(root, node.path), node.mode)

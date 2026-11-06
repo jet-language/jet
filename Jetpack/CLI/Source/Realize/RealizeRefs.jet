@@ -152,7 +152,7 @@ cli_plan_downloads: fn(verification: &StoreVerification, theme: Theme, roots: Ha
         if cached || recorded_project_candidate {
             if store_find_by_reference_read_only(roots, spec.raw) == .Val(entry) -> plan.add_item(cli_cached_plan_item(spec, entry))
         } else {
-            pending.push(spec)
+            pending.push(spec.copy())
         }
     }
     if pending.len() == 0 -> return Ok(plan)

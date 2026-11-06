@@ -116,7 +116,7 @@ sema_function_memory_append_policy_unique: fn(values: &[PolicyDeclaration], decl
     loop existing in values {
         if sema_function_memory_policy_declaration_equal(existing, declaration) -> return
     }
-    values.push(declaration)
+    values.push(declaration.copy())
 }
 
 sema_function_memory_package_policies: fn(modules: [SemaFunctionMemoryModuleInput], package_identity: String) -> [PolicyDeclaration] Never! {
@@ -135,7 +135,7 @@ sema_function_memory_package_policies: fn(modules: [SemaFunctionMemoryModuleInpu
 sema_function_memory_function_policies: fn(outer: [PolicyDeclaration], declarations: [PolicyDeclaration], function: Func) -> [PolicyDeclaration] Never! {
     chain := outer
     loop declaration in declarations {
-        if declaration.key == PolicyKey.ScopedGC && declaration.scope == PolicyScope.Function && declaration.target == (Val(function.span)) -> chain.push(declaration)
+        if declaration.key == PolicyKey.ScopedGC && declaration.scope == PolicyScope.Function && declaration.target == (Val(function.span)) -> chain.push(declaration.copy())
     }
     chain
 }
@@ -160,7 +160,7 @@ sema_function_memory_resolve_policy: fn(declarations: [PolicyDeclaration], diagn
     ordered := [PolicyDeclaration]{}
     loop scope in ([PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block}) {
         loop declaration in declarations {
-            if declaration.key == PolicyKey.ScopedGC && declaration.scope == scope -> ordered.push(declaration)
+            if declaration.key == PolicyKey.ScopedGC && declaration.scope == scope -> ordered.push(declaration.copy())
         }
     }
     if ordered.len() == 0 -> return None
@@ -242,7 +242,7 @@ sema_function_memory_collect_items: fn(items: [Item], module_identity: String, t
 sema_function_memory_walk_module: fn(modules: [SemaFunctionMemoryModuleInput], package_identity: String, module_identity: String, declarations: [PolicyDeclaration], items: [Item], walk: &SemaFunctionMemoryWalk) -> Int Never! {
     outer := sema_function_memory_package_policies(modules, package_identity)
     loop declaration in declarations {
-        if declaration.key == PolicyKey.ScopedGC && declaration.scope == PolicyScope.Module -> outer.push(declaration)
+        if declaration.key == PolicyKey.ScopedGC && declaration.scope == PolicyScope.Module -> outer.push(declaration.copy())
     }
     sema_function_memory_collect_items(items, module_identity, true, outer, declarations, walk)
     items.len()
@@ -367,7 +367,7 @@ sema_function_memory_plan_finish: fn(plan: &SemaFunctionMemoryPlan, planned: &Se
                 if fetched.get(row) == .Val(declared) -> found = sema_function_memory_boundary_diagnostics(declared, planned.promoted)
             }
             loop diagnostic in found {
-                plan.functions[row].diagnostics.push(diagnostic)
+                plan.functions[row].diagnostics.push(diagnostic.copy())
                 plan.diagnostics.push(diagnostic)
                 plan.functions[row].complete = false
             }
@@ -682,7 +682,7 @@ sema_function_memory_contains_name: fn(names: [String], name: String) -> Bool Ne
 }
 
 sema_function_memory_append_name_unique: fn(names: &[String], name: String) Never! {
-    if !sema_function_memory_contains_name(names, name) -> names.push(name)
+    if !sema_function_memory_contains_name(names, name) -> names.push(name.copy())
 }
 
 sema_function_memory_returned_name: fn(expression: Expr) -> String? {
@@ -894,7 +894,7 @@ sema_function_memory_sort_and_deduplicate_edges: fn(edges: &[GCPromotionEdge]) N
     }
     unique := [GCPromotionEdge]{}
     loop edge in edges {
-        if unique.len() == 0 || !sema_function_memory_edge_equal(unique[unique.len() - 1], edge) -> unique.push(edge)
+        if unique.len() == 0 || !sema_function_memory_edge_equal(unique[unique.len() - 1], edge) -> unique.push(edge.copy())
     }
     loop edges.len() > 0 -> _ := edges.pop()
     loop edge in unique -> edges.push(edge)

@@ -36,7 +36,7 @@ pkg_data_bind_proto: fn(input: String, root_name: String?) -> SchemaBuilder Data
     ambiguous_enum_leaves := [String]{}
     loop enum_name in enum_names {
         leaf: pkg_data_proto_leaf(enum_name)
-        if enum_leaf_names.get(leaf) != None -> ambiguous_enum_leaves.push(leaf)
+        if enum_leaf_names.get(leaf) != None -> ambiguous_enum_leaves.push(leaf.copy())
         enum_leaf_names[leaf] = enum_name
     }
     loop index in 0..<messages.len() {
@@ -45,7 +45,7 @@ pkg_data_bind_proto: fn(input: String, root_name: String?) -> SchemaBuilder Data
         record: builder.begin_record(preferred)
         source_names[message.source_name] = record.name
         leaf: pkg_data_proto_leaf(message.source_name)
-        if leaf_names.get(leaf) != None -> ambiguous_leaves.push(leaf)
+        if leaf_names.get(leaf) != None -> ambiguous_leaves.push(leaf.copy())
         leaf_names[leaf] = record.name
     }
     loop index in 0..<messages.len() {
@@ -214,7 +214,7 @@ pkg_data_lex_proto_string: fn(chars: [String], open: Int) -> (value: String, nex
         }
         if current == "\n" || pkg_data_code(current) == 13 -> return Err(DataBindError{message: "proto string contains a newline"})
         if pkg_data_is_control(current) -> return Err(DataBindError{message: "proto string contains a control character"})
-        value.push(current)
+        value.push(current.copy())
         index += 1
     }
     Err(DataBindError{message: "proto string is not closed"})
@@ -703,12 +703,12 @@ ProtoParser: struct {
 
     declare_message: fn(&self, source_name: String) DataBindError! {
         if self.enum_names.contains(source_name) || self.message_names.contains(source_name) -> return Err(DataBindError{message: "proto has duplicate declaration {source_name}"})
-        self.message_names.push(source_name)
+        self.message_names.push(source_name.copy())
     }
 
     declare_enum: fn(&self, source_name: String) DataBindError! {
         if self.message_names.contains(source_name) || self.enum_names.contains(source_name) -> return Err(DataBindError{message: "proto has duplicate declaration {source_name}"})
-        self.enum_names.push(source_name)
+        self.enum_names.push(source_name.copy())
     }
 
     full_name: fn(self, parent: String?, short_name: String) -> String Never! {
@@ -846,7 +846,7 @@ ProtoParser: struct {
             value_name: self.take_word("an enum value name")
             if !pkg_data_is_proto_identifier(value_name) || pkg_data_is_proto_keyword(value_name) -> return Err(DataBindError{message: "proto enum value name {value_name} is invalid"})
             if value_name == short_name || names.contains(value_name) -> return Err(DataBindError{message: "proto enum has a duplicate or colliding value {value_name}"})
-            names.push(value_name)
+            names.push(value_name.copy())
             self.expect_symbol("=", "an enum value equals sign")
             number: self.parse_integer("an enum value number", true)
             if number < PROTO_INT32_MIN || number > PROTO_INT32_MAX -> return Err(DataBindError{message: "proto enum value number is out of int32 range"})

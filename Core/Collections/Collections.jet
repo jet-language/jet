@@ -59,7 +59,7 @@ Rows: struct<T> {
     __rows: [T]{[]}
 
     /// Appends `value` and returns its handle. Panics past 4294967295 rows.
-    add: fn(&self, value: T) -> Row<T> Never! {
+    add: fn(&self, value: &&T) -> Row<T> Never! {
         count: self.__rows.len()
         if count >= 4294967295 -> panic("Rows.add: a table holds at most 4294967295 rows")
         slot: U32.from_int(count) ?? panic("Rows.add: a table holds at most 4294967295 rows")

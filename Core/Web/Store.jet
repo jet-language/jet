@@ -286,7 +286,7 @@ record: fn<T>(store: &WebStore<T>, action: String, fields: [String], before: T) 
             store.transactions = entries
         }
         store.history.push(value<T>(store.copy()))
-        store.transactions.push(transaction)
+        store.transactions.push(transaction.copy())
         store.cursor = store.history.len()
         store.event_log.push(WebStoreEvent{kind: "commit", cursor: store.cursor, generation: store.generation, diff: diff, transaction: "{action}#{store.generation}"})
         trim<T>(store)

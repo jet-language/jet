@@ -585,9 +585,9 @@ SemaTypeAliasCycleRow: struct {
 
 sema_type_alias_references: fn(ty: Type, names: &[String]) Never! {
     if ty == {
-        .Named(name) -> { names.push(name) }
+        .Named(name) -> { names.push(name.copy()) }
         .Apply(name, args) -> {
-            names.push(name)
+            names.push(name.copy())
             loop arg in args -> sema_type_alias_references(arg, names)
         }
         .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> {

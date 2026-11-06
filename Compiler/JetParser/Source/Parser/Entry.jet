@@ -250,7 +250,7 @@ parser_parse_prepared: fn(input: &&ParserFenceExpansion, lexer_diagnostics: [Dia
     program.else_arms = state.else_arms
     loop declaration in state.block_policy_declarations -> program.policy_declarations.push(declaration)
     loop application in state.statement_rules {
-        program.applied_rules.push(application)
+        program.applied_rules.push(application.copy())
         program.rule_facts.push(application)
     }
     program.fenced_statements = prepared.fenced_statements
@@ -564,7 +564,7 @@ parser_parse_chunked: fn(input: &&ParserFenceExpansion, bounds: [Int], lexer_dia
     }
     program := ast_program()
     diagnostics := [Diagnostic]{}
-    loop diagnostic in lexer_diagnostics -> diagnostics.push(diagnostic)
+    loop diagnostic in lexer_diagnostics -> diagnostics.push(diagnostic.copy())
     block_spans := [Span]{}
     else_arms := [ElseArmSpan]{}
     block_policy_declarations := [PolicyDeclaration]{}
@@ -586,7 +586,7 @@ parser_parse_chunked: fn(input: &&ParserFenceExpansion, bounds: [Int], lexer_dia
     program.else_arms = else_arms.move()
     loop declaration in block_policy_declarations -> program.policy_declarations.push(declaration)
     loop application in statement_rules {
-        program.applied_rules.push(application)
+        program.applied_rules.push(application.copy())
         program.rule_facts.push(application)
     }
     program.fenced_statements = prepared.fenced_statements
@@ -653,8 +653,8 @@ parser_used_import_names: fn(tokens: [Token], tables: TokenTables, imports: [Imp
         if declaration.kind == {
             .Unqualified(module_alias, _, items, _, _) -> {
                 if used_names.get(module_alias) == None {
-                    used_names.add(module_alias, true).drop("checked absent above")
-                    used.push(module_alias)
+                    used_names.add(module_alias.copy(), true).drop("checked absent above")
+                    used.push(module_alias.copy())
                 }
                 loop item in items {
                     parts: item.original.split(".").to_list()
@@ -702,7 +702,7 @@ parser_collect_marker_import_names: fn(tokens: [Token], tables: TokenTables, can
     loop candidate in candidates {
         spelled: sema_casing_marker_qualifier(candidate)
         if spelled != candidate {
-            aliases.push(candidate)
+            aliases.push(candidate.copy())
             spellings.push(spelled)
         }
     }
@@ -1129,7 +1129,7 @@ parser_parse_file_directive: fn(state: &JetParserState, program: &Program) {
             bracket_chunks += 1
         } else {
             marker: parser_parse_marker(state)
-            markers.push(marker)
+            markers.push(marker.copy())
             sequence.end = marker.span.end
             parser_skip_semicolons(state)
         }

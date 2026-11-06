@@ -257,12 +257,12 @@ HangarArchive: struct {
             if meta != "" {
                 if pkg_parse_meta(meta) == None -> return Err(StoreError.InvalidData("archive contains malformed package metadata"))
                 if package_ids.contains(id) -> return Err(StoreError.InvalidData("archive contains duplicate package records"))
-                package_ids.push(id)
+                package_ids.push(id.copy())
             } else {
                 if id != digest || output_digests.contains(digest) {
                     return Err(StoreError.InvalidData("archive contains duplicate or mismatched output records"))
                 }
-                output_digests.push(digest)
+                output_digests.push(digest.copy())
             }
             root_mode: reader.u32()
             node_count: reader.u32()
@@ -445,7 +445,7 @@ store_archive_path_components: fn(path: String) -> [String] Never! {
         segment: segments[index]
         if segment == "" -> next
         if segment == "." && (index > 0 || path.starts_with("/")) -> next
-        components.push(segment)
+        components.push(segment.copy())
     }
     components
 }

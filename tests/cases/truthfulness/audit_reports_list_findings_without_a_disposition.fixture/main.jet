@@ -99,7 +99,7 @@ disp_board_limits: fn() -> disp_encoding.EncodingLimits {
 disp_tower_json: fn(root: String, words: [String]) -> Dyn {
     board: disp_files.join(root, "Tools/tower/.tower")
     command := [String]{"node", "Tools/tower/tower.mjs"}
-    loop word in words -> command.push(word)
+    loop word in words -> command.push(word.copy())
     live: disp_process.cmd(command).cwd(root).env("TOWER_DATA", disp_files.join(board, "tower.json")).stdout(.Capture).stderr(.Capture).run() ?? panic("run Tower projection")
     assert(live.success, "Tower projection failed: {live.errors}")
     disp_json.parse_with_limits(live.output, disp_board_limits()) ?? panic("parse live Tower JSON: {err.reason}")
@@ -224,7 +224,7 @@ disp_report: fn(relative: String, text: String, board: DispBoard, problems: &[St
         if finding.is_empty() || ids.contains(finding) {
             problems.push("{relative}: finding IDs must be non-empty and unique: {if finding.is_empty() -> "<empty>" else -> finding}")
         }
-        ids.push(finding)
+        ids.push(finding.copy())
         kind: disp_parse.lower(cells[1])
         if kind != "card" && kind != "decision" && kind != "no-action" {
             problems.push("{relative}: {finding} has unknown disposition {cells[1]}")

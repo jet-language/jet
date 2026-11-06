@@ -142,7 +142,7 @@ PackageProfileSet: struct {
             }
             merged := existing
             loop source in profile.sources {
-                if !merged.sources.contains(source) -> merged.sources.push(source)
+                if !merged.sources.contains(source) -> merged.sources.push(source.copy())
             }
             self.profiles[profile.name] = merged
             return
@@ -164,7 +164,7 @@ PackageProfileSet: struct {
             if selected_seen.get(name) == None {
                 selected_seen[name] = true
                 if selected.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
-                selected.push(name)
+                selected.push(name.copy())
             }
         }
         resolved := ResolvedPackageProfile{name: selected.join("+"), selected_profiles: selected}
@@ -186,7 +186,7 @@ PackageProfileSet: struct {
                     if self.profiles.get(current) == None -> return Err(PackageProfileError.Missing(current))
                     if state.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
                     state[current] = ENVMODEL_PROFILE_ENTERED
-                    stack.push(current)
+                    stack.push(current.copy())
                 }
                 profile: self.profiles[current]
                 parent_index: frame_next[top].copy()
@@ -196,12 +196,12 @@ PackageProfileSet: struct {
                     _ := frame_next.pop()
                     _ := stack.pop()
                     state[current] = ENVMODEL_PROFILE_FINISHED
-                    resolved.applied.push(current)
+                    resolved.applied.push(current.copy())
                     loop source in profile.sources {
                         if source_seen.get(source) == None {
                             source_seen[source] = true
                             if resolved.sources.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
-                            resolved.sources.push(source)
+                            resolved.sources.push(source.copy())
                         }
                     }
                     loop raw in profile.packages {
@@ -219,7 +219,7 @@ PackageProfileSet: struct {
                         owner_key: "{raw.bytes().len()}:{raw}{current}"
                         if declared_by_seen.get(owner_key) == None {
                             declared_by_seen[owner_key] = true
-                            resolved.packages[package_index].declared_by.push(current)
+                            resolved.packages[package_index].declared_by.push(current.copy())
                         }
                     }
                     loop path in envmodel_sorted_keys(profile.collisions) {
@@ -246,12 +246,12 @@ PackageProfileSet: struct {
                             if item == parent -> started = true
                             if started -> cycle.push(item)
                         }
-                        cycle.push(parent)
+                        cycle.push(parent.copy())
                         return Err(PackageProfileError.Cycle(cycle))
                     }
                     ENVMODEL_PROFILE_FINISHED -> {}
                     else -> {
-                        frame_names.push(parent)
+                        frame_names.push(parent.copy())
                         frame_next.push(0)
                     }
                 }

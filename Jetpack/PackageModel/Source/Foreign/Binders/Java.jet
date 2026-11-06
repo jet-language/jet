@@ -209,7 +209,7 @@ pkg_java_parse_javap: fn(class: String, text: String) -> JavaSurface ForeignBind
         name: if words.len() > 0 -> words[words.len() - 1] else -> ""
         if !pkg_binder_is_ident(name) -> next
         if names.contains(name) -> return Err(ForeignBindError.Source("overloaded Java method `{name}` needs an explicit overlay"))
-        names.push(name)
+        names.push(name.copy())
         types: pkg_java_descriptor_types(descriptor)
         if types.result == JavaScalar.Void -> return Err(ForeignBindError.Source("void Java method `{name}` needs a typed overlay"))
         methods.push(JavaMethod{name: name, params: types.params, result: types.result, is_static: sig.contains(" static ")})

@@ -87,7 +87,7 @@ jet_cli_yank_plan: fn(jet_argv: [String], color: Bool) -> JetCLIPlan Never! {
             skip_next = true
             next
         }
-        if !argument.starts_with("-") -> words.push(argument)
+        if !argument.starts_with("-") -> words.push(argument.copy())
     }
     // words[0] is the command word `yank`.
     if words.len() < 2 || words[1] == "" {
@@ -166,7 +166,7 @@ jet_cli_publish_hashes: fn(root: String, name: String) -[FS, Env]> (content_hash
 // Runs this `jet` with `args` in `root`; None when it could not start.
 jet_cli_publish_self: fn(root: String, args: [String]) -[Env, Exec, Time.Wait]> (success: Bool, code: Int, stdout: String, stderr: String)? Never! {
     argv := [String]{publish_sys.executable()}
-    loop arg in args -> argv.push(arg)
+    loop arg in args -> argv.push(arg.copy())
     ran: publish_process.cmd(argv).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? return None
     Val((success: ran.success, code: ran.code, stdout: ran.output, stderr: ran.errors))
 }

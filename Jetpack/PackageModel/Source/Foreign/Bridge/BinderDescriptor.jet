@@ -863,8 +863,8 @@ FFILinkClosure: struct {
 
     libraries: fn(self) -> [String] Never! {
         out := [String]{}
-        loop library in self.direct -> out.push(library)
-        loop library in self.transitive -> out.push(library)
+        loop library in self.direct -> out.push(library.copy())
+        loop library in self.transitive -> out.push(library.copy())
         out
     }
 
@@ -879,7 +879,7 @@ pkg_ffi_sorted_nonempty: fn(values: [String]) -> [String] Never! {
     out := [String]{}
     loop value in values {
         if value == "" || out.contains(value) -> next
-        out.push(value)
+        out.push(value.copy())
     }
     out.sort()
     out

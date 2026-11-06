@@ -89,7 +89,7 @@ sema_function_header_normalize_external_methods: fn(program: &Program, in_packag
                 next
             }
         }
-        items.push(item)
+        items.push(item.copy())
     }
     program.items = items
 }
@@ -262,7 +262,7 @@ sema_function_header_check_default_forward_refs: fn(function: Func, diagnostics:
 // The identifier nodes a default expression reads, in source order.
 sema_function_header_default_idents: fn(value: Expr, found: &[Expr]) {
     if value == {
-        .Ident(_, _, _) -> found.push(value)
+        .Ident(_, _, _) -> found.push(value.copy())
         .Binary(_, left, right, _, _) -> {
             sema_function_header_default_idents(left, found)
             sema_function_header_default_idents(right, found)
@@ -487,7 +487,7 @@ sema_function_header_variadic_statement: fn(statement: Stmt, name: String, top_l
                 }
                 .Field(base, _, _) -> sema_function_header_variadic_expr(base, name, uses)
                 .Local(local, local_span) -> {
-                    if local == name -> uses.push(local_span)
+                    if local == name -> uses.push(local_span.copy())
                 }
                 else -> {}
             }
@@ -511,7 +511,7 @@ sema_function_header_variadic_statement: fn(statement: Stmt, name: String, top_l
                     }
                     .In(collection, step) -> {
                         if collection == .Ident(collection_name, _, _) && collection_name == name {
-                            uses.push(span)
+                            uses.push(span.copy())
                         } else {
                             sema_function_header_variadic_expr(collection, name, uses)
                         }
@@ -549,7 +549,7 @@ sema_function_header_variadic_args: fn(args: [CallArg], name: String, uses: &[Sp
 sema_function_header_variadic_expr: fn(expr: Expr, name: String, uses: &[Span]) Never! {
     if expr == {
         .Ident(found, span, _) -> {
-            if found == name -> uses.push(span)
+            if found == name -> uses.push(span.copy())
         }
         .Call(call, _) -> sema_function_header_variadic_args(call.args, name, uses)
         .MethodCall(receiver, _, _, _, _, args, _) | .CallValue(receiver, args, _, _) -> {

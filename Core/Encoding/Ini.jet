@@ -165,13 +165,13 @@ set: fn(doc: Ini, section: String, key: String, value: String) -> Ini Never! {
                     pairs.push(Pair{key: key, value: value})
                     found_key = true
                 } else {
-                    pairs.push(p)
+                    pairs.push(p.copy())
                 }
             }
             if !found_key -> pairs.push(Pair{key: key, value: value})
             sections.push(Section{name: s.name, pairs: pairs})
         } else {
-            sections.push(s)
+            sections.push(s.copy())
         }
     }
     if !found_section {
@@ -186,11 +186,11 @@ remove_option: fn(doc: Ini, section: String, key: String) -> Ini Never! {
         if s.name == section {
             pairs := [Pair]{}
             loop p in s.pairs {
-                if p.key != key -> pairs.push(p)
+                if p.key != key -> pairs.push(p.copy())
             }
             sections.push(Section{name: s.name, pairs: pairs})
         } else {
-            sections.push(s)
+            sections.push(s.copy())
         }
     }
     Ini{sections: sections}
@@ -199,7 +199,7 @@ remove_option: fn(doc: Ini, section: String, key: String) -> Ini Never! {
 remove_section: fn(doc: Ini, section: String) -> Ini Never! {
     sections := [Section]{}
     loop s in doc.sections {
-        if s.name != section -> sections.push(s)
+        if s.name != section -> sections.push(s.copy())
     }
     Ini{sections: sections}
 }
@@ -209,7 +209,7 @@ defaults: fn(doc: Ini) -> [Pair] Never! { items(doc, "DEFAULT") }
 ensure_section: fn(doc: Ini, name: String) -> Ini Never! {
     if has_section(doc, name) -> return doc.copy()
     sections := [Section]{}
-    loop s in doc.sections -> sections.push(s)
+    loop s in doc.sections -> sections.push(s.copy())
     sections.push(Section{name: name, pairs: [Pair]{}})
     Ini{sections: sections}
 }

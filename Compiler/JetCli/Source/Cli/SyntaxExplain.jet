@@ -83,7 +83,7 @@ jet_cli_rule_argument_declarations: fn(signature: TAppliedRuleSignature) -> Stri
     }
     named := [String]{}
     loop param in signature.params -> named.push(param.source_type)
-    if signature.variadic_source_type == .Val(source_type) -> named.push(source_type)
+    if signature.variadic_source_type == .Val(source_type) -> named.push(source_type.copy())
     declarations := [String]{}
     loop name in named {
         if menus.contains(name) -> declarations.push("`core.compiler.lang.{name}`")

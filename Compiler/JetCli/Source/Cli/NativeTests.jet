@@ -351,7 +351,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
     batch_success := true
     batch_errors := ""
     if time_limit != None && check_names.len() == 0 {
-        loop test in tests -> missing.push(test)
+        loop test in tests -> missing.push(test.copy())
     } else {
         batch_path: "{records_path}.batch"
         native_test_files.write(batch_path, "") ?? return Err("couldn't create native test records: {err}")
@@ -379,7 +379,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
         }
         jet_native_test_merge(completed, selected, outcomes)
         loop test in tests {
-            if outcomes.get(test.id) == None -> missing.push(test)
+            if outcomes.get(test.id) == None -> missing.push(test.copy())
         }
         if missing.len() > 0 && batch.success -> return Err("native test executable completed without every selected outcome")
     }
@@ -390,7 +390,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
     if exit_fatal {
         loop test in tests {
             streamed.add(test.id, outcomes.get(test.id) ?? "").drop("selected test functions are unique")
-            missing.push(test)
+            missing.push(test.copy())
         }
         outcomes = [U64:String]{}
     }

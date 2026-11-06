@@ -183,11 +183,11 @@ plug_instantiate: fn(flat: &PlugFlat, index: Int) WasmError! {
         }
         loop table in wm.tables {
             inst.tables.push(flat.tables.len())
-            flat.tables.push(table)
+            flat.tables.push(table.copy())
         }
         loop memory in wm.memories {
             inst.memories.push(flat.memories.len())
-            flat.memories.push(memory)
+            flat.memories.push(memory.copy())
         }
         loop global in wm.globals {
             init: plug_const_value(flat, inst, global.init)

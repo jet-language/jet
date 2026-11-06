@@ -34,7 +34,7 @@ CacheBinding: struct {
             endpoint: store_cache_parse_endpoint(mirror)
             store_cache_validate_endpoint_binding(self, endpoint, self.allow_write)
             if seen.contains(mirror) -> return Err(StoreError.InvalidData("cache binding contains a duplicate mirror"))
-            seen.push(mirror)
+            seen.push(mirror.copy())
         }
         if !self.trust_key.starts_with("/") -> return Err(StoreError.InvalidData("cache trust key must be an absolute host path"))
         store_cache_validate_path_components(self.trust_key)
@@ -88,7 +88,7 @@ CacheBinding: struct {
                 }
                 name == "credential" && credential == None -> credential = Val(value)
                 name == "mirror" -> {
-                    mirrors.push(value)
+                    mirrors.push(value.copy())
                 }
                 else -> return Err(StoreError.InvalidData("cache binding has an unknown or duplicate field"))
             }

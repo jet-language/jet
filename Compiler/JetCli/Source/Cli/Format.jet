@@ -42,7 +42,7 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
         jet_cli_fmt_walk(jet_cli_manifest_root(cwd) ?? cwd, files)
     } else {
         loop raw in request.paths {
-            if cli_files.is_dir(raw) -> jet_cli_fmt_walk(raw, files) else -> files.push(raw)
+            if cli_files.is_dir(raw) -> jet_cli_fmt_walk(raw, files) else -> files.push(raw.copy())
         }
         files.sort()
         unique := [String]{}

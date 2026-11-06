@@ -198,7 +198,7 @@ pkg_parse_build: fn(body: String) -> [BuildProfileDef] PackageParseError! {
     loop entry in pkg_key_value_entries(body) {
         name: entry.key
         if seen.contains(name) -> return Err(PackageParseError.Composition("build field `{name}` is declared more than once"))
-        seen.push(name)
+        seen.push(name.copy())
         if name == BUILD_FIELD_ALLOW -> next
         profiles.push(pkg_parse_build_profile(name, entry.value.trim()))
     }
@@ -233,7 +233,7 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
     loop field in pkg_key_value_entries(inner) {
         key: field.key
         if seen_fields.contains(key) -> return Err(PackageParseError.Composition("build profile `{name}.{key}` is declared more than once"))
-        seen_fields.push(key)
+        seen_fields.push(key.copy())
         if key == {
             BUILD_FIELD_OPTIMIZE -> optimize_value = Val(pkg_unquote(field.value))
             BUILD_FIELD_DEBUG_INFO -> profile.debug_info = pkg_parse_build_bool(name, field.value)

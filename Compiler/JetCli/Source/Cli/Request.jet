@@ -113,7 +113,7 @@ jet_cli_keep_going_enabled: fn() -> Bool Never! {
 jet_cli_keep_going_report: fn(rows: [String]) -> String {
     report: cli_sys.get("JET_KEEP_GOING_REPORT") ?? return ""
     lines := [String]{"phase\titem\tcode\tmessage\tspan"}
-    loop row in rows -> lines.push(row)
+    loop row in rows -> lines.push(row.copy())
     lines.push("")
     cli_files.write(report, lines.join("\n")) ?? return "cannot write the compiler failure census: {err}"
     ""
@@ -608,7 +608,7 @@ jet_cli_root_path_reach: fn(entry: String, dependencies: [String: DepSpec]) -[FS
         if spec == .Path(relative) {
             if relative.starts_with("/") -> next
             canonical: cli_files.realpath(jet_cli_report_path(Val(entry), relative)) ?? next
-            declared.push(canonical)
+            declared.push(canonical.copy())
             if !jet_cli_dependency_within(canonical, entry) {
                 sibling_parent: jet_cli_parent(canonical) ?? "/"
                 if !sibling_dirs.contains(sibling_parent) -> sibling_dirs.push(sibling_parent)
@@ -1282,12 +1282,12 @@ jet_cli_insert_source: fn(files: &&[JetDriverAuthorizedSourceFile], added: JetDr
     placed := false
     loop file in files {
         if !placed && jet_cli_relative_precedes(added.relative_path, file.relative_path) {
-            ordered.push(added)
+            ordered.push(added.copy())
             placed = true
         }
         ordered.push(file)
     }
-    if !placed -> ordered.push(added)
+    if !placed -> ordered.push(added.copy())
     ordered
 }
 

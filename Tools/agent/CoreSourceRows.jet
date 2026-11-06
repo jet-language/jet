@@ -567,7 +567,7 @@ lang_effect_text: fn(lang: String, roots: [String]) -> String CoreRowsError! {
             }
             next
         }
-        out.push(line)
+        out.push(line.copy())
         if state == 0 && line == LANG_EFFECT_OPENER -> state = 1
     }
     if state != 2 -> return Err(rows_fail("{LANG_PATH} has no closed `{LANG_EFFECT_OPENER}` block"))
@@ -638,7 +638,7 @@ render_core_source_views: fn(raw_core: String, parts: String, effects: String, l
     core: core_effect_text(raw_core, root_names) ?? return Err(err)
     rows := declarations.source_rows
     loop row in source_parts(parts) ?? return Err(err) -> rows.push(row)
-    loop row in runtime -> rows.push(row)
+    loop row in runtime -> rows.push(row.copy())
     runtime_paths: loop row in runtime -> row.path
     source_hash: crypto.sha256("{core}{parts}{runtime_paths.join("\n")}{effects}").hex()
     header: "// Sources: {CORE_PATH} (source_module rows), {PARTS_PATH} (private parts), {RUNTIME_PATTERN} (runtime units), {EFFECTS_PATH} (effect source)\n// Source SHA-256: {source_hash}\n{GENERATED_BY}\n"

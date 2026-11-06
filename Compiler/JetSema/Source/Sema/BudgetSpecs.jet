@@ -168,7 +168,7 @@ sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: &[LocatedBud
         loop diagnostic in module_diagnostics -> findings.push(BudgetLocatedDiagnostic{module_index: module_index, diagnostic: diagnostic})
         package: row.package_identity
         if !packages.contains(package) {
-            packages.push(package)
+            packages.push(package.copy())
             group_specs[package] = [LocatedBudgetSpec]{}
             group_catalogs[package] = sema_budget_empty_catalog()
         }
@@ -204,7 +204,7 @@ sema_budget_empty_catalog: fn() -> BudgetAttachmentCatalog Never! {
 }
 
 sema_budget_set_insert: fn(set: &[String], value: String) Never! {
-    if !set.contains(value) -> set.push(value)
+    if !set.contains(value) -> set.push(value.copy())
 }
 
 sema_budget_catalog_extend: fn(catalog: &BudgetAttachmentCatalog, other: BudgetAttachmentCatalog) Never! {

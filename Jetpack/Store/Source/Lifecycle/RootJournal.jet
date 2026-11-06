@@ -337,7 +337,7 @@ store_lifecycle_protected_union: fn(state: [String: LifecycleRoot], now: Lifecyc
     loop id in ids {
         root: state[id]
         if root.is_protecting(now) {
-            loop target in root.protected_targets -> protected.push(target)
+            loop target in root.protected_targets -> protected.push(target.copy())
         }
     }
     store_lifecycle_sorted_set(protected)
@@ -527,7 +527,7 @@ store_lifecycle_checked_targets: fn(targets: [String], known: [String]) -> [Stri
     loop target in targets {
         store_lifecycle_validate_target(target)
         if exact.contains(target) -> return Err(StoreError.InvalidData("duplicate lifecycle target `{target}`"))
-        exact.push(target)
+        exact.push(target.copy())
         if !known.contains(target) -> return Err(StoreError.InvalidData("unknown lifecycle target `{target}`"))
     }
     Ok(store_lifecycle_sorted_set(exact))
@@ -666,7 +666,7 @@ store_lifecycle_scan_journal: fn(journal: PinnedLifecycleDirectory) -[FS]> Lifec
         checksum: pkg_sha256_hex(body.bytes())
         expected: "{store_lifecycle_pad20(sequence)}-{pkg_bytes_text(checksum.bytes(), 0, 16)}{STORE_LIFECYCLE_TXN_SUFFIX}"
         if name != expected -> return Err(store_lifecycle_corrupt_name(journal, name, "journal filename disagrees with checksum"))
-        transaction_names.push(name)
+        transaction_names.push(name.copy())
         if sequence > last_sequence -> last_sequence = sequence
         // A durable snapshot supersedes transaction semantics through its
         // sequence. Every old file and filename is still authenticated, but

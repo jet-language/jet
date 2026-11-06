@@ -65,7 +65,7 @@ s6_retirement_reviewed_contains_word: fn(text: String, word: String) -> Bool {
 s6_retirement_reviewed_collect: fn(tables: TokenTables, tokens: [Token], out: &[Token]) {
     loop token in tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EOF -> next
-        out.push(token)
+        out.push(token.copy())
         if (token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING) && token.literal >= 0 {
             loop part in tables.literals[token.literal].string_parts {
                 if part.kind == STRING_PART_INTERPOLATION -> s6_retirement_reviewed_collect(tables, part.tokens, out)

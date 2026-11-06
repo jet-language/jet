@@ -26,8 +26,8 @@ JetCLIForeignInputs: struct {
 jet_cli_foreign_add: fn(inputs: &JetCLIForeignInputs, path: String) JetCLIForeignLinkError! -[FS]> {
     if inputs.paths.contains(path) -> return Ok(())
     bytes: cli_files.read_bytes(path) ?? return Err(jet_cli_foreign_link_error("couldn't read C link input `{path}`: {err}"))
-    inputs.paths.push(path)
-    inputs.names.push(path)
+    inputs.paths.push(path.copy())
+    inputs.names.push(path.copy())
     inputs.bytes.push(bytes)
     Ok(())
 }
@@ -38,7 +38,7 @@ jet_cli_foreign_add: fn(inputs: &JetCLIForeignInputs, path: String) JetCLIForeig
 // policy's removed features. The parent environment is unchanged.
 jet_cli_native_c_command: fn(argv: [String]) -[Env, Exec]> cli_process.ProcessSpec Never! {
     full := [String]{}
-    loop word in argv -> full.push(word)
+    loop word in argv -> full.push(word.copy())
     loop flag in JET_CLI_NATIVE_C_FLAGS -> full.push(flag)
     spec := cli_process.cmd(full)
     if cli_sys.get("NIX_HARDENING_ENABLE") == .Val(enabled) {
@@ -140,7 +140,7 @@ jet_cli_native_c_cached: fn(archive: String) -[FS]> Bool Never! {
 jet_cli_native_c_publish: fn(tools: JetCLINativeCTools, lib: String, temporary: String, objects: [String], archive: String) JetCLIForeignLinkError! -[FS, Env, Exec, Time.Wait]> {
     staged: "{temporary}/lib{lib}.a"
     argv := [String]{tools.archiver, "rcsD", staged}
-    loop object in objects -> argv.push(object)
+    loop object in objects -> argv.push(object.copy())
     receipt: cli_process.cmd(argv).run() ?? return Err(jet_cli_foreign_link_error("couldn't archive C dependency `{lib}`: {err}"))
     if !receipt.success -> return Err(jet_cli_foreign_link_error("C archiver rejected `{lib}`: {receipt.errors}"))
     bytes: cli_files.read_bytes(staged) ?? return Err(jet_cli_foreign_link_error("couldn't read compiled C archive: {err}"))
@@ -282,7 +282,7 @@ jet_cli_inline_c_source: fn(row: JetDriverInlineC, body: String) -> String Never
     loop (position, param) in row.params {
         base: jet_cli_inline_c_type(param.ty)
         c_type: if param.write -> "{base}*" else -> base
-        types.push(c_type)
+        types.push(c_type.copy())
         typed.push("{c_type} p{position}")
         args.push("p{position}")
     }
@@ -438,9 +438,9 @@ jet_cli_native_c_closure: fn(facts: JetDriverForeignLinkFacts, rust_helper: Stri
     declarations: sources.declarations
     libraries := facts.direct_links.copy()
     if libraries.len() == 0 {
-        loop lib in facts.libraries -> libraries.push(lib)
+        loop lib in facts.libraries -> libraries.push(lib.copy())
     }
-    loop lib in facts.transitive_links -> libraries.push(lib)
+    loop lib in facts.transitive_links -> libraries.push(lib.copy())
     // The `libs` and `link_args` build options: more libraries, each found
     // in the `-L` directories first, and archives linked as they are.
     requested := sources.libs.copy()

@@ -89,7 +89,7 @@ sema_core_string_insert_sorted: fn(values: &[String], value: String) Never! {
     index: loop (index, existing) in values {
         if value < existing -> break index
     } ?? values.len()
-    values.push(value)
+    values.push(value.copy())
     cursor := values.len() - 1
     loop cursor > index {
         values[cursor] = values[cursor - 1]
@@ -361,12 +361,12 @@ sema_core_import_add: fn(imports: &[SemaCoreImport], row: SemaCoreImport) Never!
             return
         }
     }
-    imports.push(row)
+    imports.push(row.copy())
 }
 
 sema_core_import_copy: fn(imports: [SemaCoreImport]) -> [SemaCoreImport] Never! {
     result := [SemaCoreImport]{}
-    loop row in imports -> result.push(row)
+    loop row in imports -> result.push(row.copy())
     result
 }
 
@@ -471,7 +471,7 @@ sema_core_check_ui_usage: fn(usage: String, span: Span?, needs: [String], report
     row: core_call(parts[0], parts[1]) ?? return
     loop capability in row.ui_capabilities {
         if sema_core_string_contains(needs, capability) || sema_core_string_contains(reported, capability) -> next
-        reported.push(capability)
+        reported.push(capability.copy())
         service: "{parts[0]}.{parts[1]}"
         registry: diagnostic_registry_row("E2937") ?? panic("E2937 has no registry row")
         diagnostics.push(sema_error_optional("E2937", span, registry.what.replace("{{service}}", service).replace("{{capability}}", capability), registry.why, registry.fix.replace("{{capability}}", capability)))
@@ -1401,7 +1401,7 @@ sema_core_combine_module_usage: fn(modules: [SemaCoreModuleUsageResult]) -> Sema
         loop row in module_row.usage_spans {
             if span_seen.get(row.usage) != None -> next
             span_seen[row.usage] = true
-            spans.push(row)
+            spans.push(row.copy())
         }
         loop key in module_row.ffi_callback_keys -> sema_core_sorted_set_add(callbacks, callback_seen, key)
     }

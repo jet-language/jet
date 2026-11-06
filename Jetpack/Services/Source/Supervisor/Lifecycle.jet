@@ -243,7 +243,7 @@ SERVICES_LOG_REDIRECT_SCRIPT: "exec >\"$1\" 2>\"$2\"; shift 2; exec \"$@\""
 services_log_redirect_argv: fn(stdout_path: String, stderr_path: String, run: [String]) -[Env]> [String] ServicesError! {
     if sys.is_windows() -> return Err(ServicesError.new("service log capture needs a POSIX shell, which this host lacks"))
     argv := [String]{"/bin/sh", "-c", SERVICES_LOG_REDIRECT_SCRIPT, "jetpack-svc", stdout_path, stderr_path}
-    argv.extend(run)
+    argv.extend(run.copy())
     Ok(argv)
 }
 
@@ -552,7 +552,7 @@ services_is_terminal_evidence: fn(facts: LifecycleFacts) -> Bool Never! {
 // dependents first, and record the dependency failure on each.
 services_stop_dependents: fn(project_dir: String, dependency: String, visited: &[String]) -[FS, Env, Exec, Time, Time.Wait]> {
     if visited.contains(dependency) -> return
-    visited.push(dependency)
+    visited.push(dependency.copy())
     root: services_service_dir(project_dir, "")
     entries: files.list_dir(root) ?? return
     dependents := [String]{}
@@ -638,7 +638,7 @@ services_collect_watch_stamps: fn(project_dir: String, path: String, limit: Int,
 
 services_push_watch_stamp: fn(entries: &[String], limit: Int, stamp: String) ServicesError! {
     if entries.len() >= limit -> return Err(ServicesError.new("watched tree exceeds the bounded limit of {limit} entries"))
-    entries.push(stamp)
+    entries.push(stamp.copy())
 }
 
 // True once a changed watch fact has stayed identical for the debounce window.

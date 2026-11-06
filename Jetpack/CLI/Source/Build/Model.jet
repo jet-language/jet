@@ -116,37 +116,37 @@ TargetSpec: struct {
 
     with_source: fn(self, path: String) -> TargetSpec Never! {
         updated := self
-        updated.sources.push(path)
+        updated.sources.push(path.copy())
         updated
     }
 
     with_input: fn(self, path: String) -> TargetSpec Never! {
         updated := self
-        updated.inputs.push(path)
+        updated.inputs.push(path.copy())
         updated
     }
 
     with_output: fn(self, path: String) -> TargetSpec Never! {
         updated := self
-        updated.outputs.push(path)
+        updated.outputs.push(path.copy())
         updated
     }
 
     with_dep: fn(self, target: TargetRef) -> TargetSpec Never! {
         updated := self
-        updated.deps.push(target)
+        updated.deps.push(target.copy())
         updated
     }
 
     with_action: fn(self, action: HermeticActionHandle) -> TargetSpec Never! {
         updated := self
-        updated.actions.push(action)
+        updated.actions.push(action.copy())
         updated
     }
 
     with_probe: fn(self, probe: ProbeHandle) -> TargetSpec Never! {
         updated := self
-        updated.probes.push(probe)
+        updated.probes.push(probe.copy())
         updated
     }
 
@@ -291,13 +291,13 @@ ActionSpec: struct {
 
     with_inputs: fn(self, paths: [String]) -> ActionSpec Never! {
         updated := self
-        loop path in paths -> updated.inputs.push(path)
+        loop path in paths -> updated.inputs.push(path.copy())
         updated
     }
 
     with_outputs: fn(self, paths: [String]) -> ActionSpec Never! {
         updated := self
-        loop path in paths -> updated.outputs.push(path)
+        loop path in paths -> updated.outputs.push(path.copy())
         updated
     }
 
@@ -339,7 +339,7 @@ ActionSpec: struct {
 
     with_probe: fn(self, probe: ProbeHandle) -> ActionSpec Never! {
         updated := self
-        updated.probes.push(probe)
+        updated.probes.push(probe.copy())
         updated
     }
 
@@ -391,14 +391,14 @@ HermeticBuildAction: struct {
 // Rust `BTreeSet<String>::insert`.
 build_insert_sorted_text: fn(values: &[String], value: String) Never! {
     if values.contains(value) -> return
-    values.push(value)
+    values.push(value.copy())
     values.sort()
 }
 
 // Rust `BTreeSet<BuildCapability>::insert`.
 build_insert_effect: fn(values: &[BuildEffect], ability: BuildEffect) Never! {
     if values.contains(ability) -> return
-    values.push(ability)
+    values.push(ability.copy())
     values.sort_by(written -> written.rank())
 }
 
@@ -407,7 +407,7 @@ build_insert_pool: fn(values: &[BuildResourcePool], pool: BuildResourcePool) Nev
     loop existing in values {
         if existing == pool -> return
     }
-    values.push(pool)
+    values.push(pool.copy())
     values.sort_by((left: BuildResourcePool, right: BuildResourcePool) -> if left.rank() == right.rank() -> left.as_str() <=> right.as_str() else -> left.rank() <=> right.rank())
 }
 

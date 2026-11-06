@@ -362,7 +362,7 @@ pkg_ffi_emit_asm_wrapper: fn(entry: ExternEntry, inline: InlineEntry) -> String 
         register: pkg_ffi_normalize_register(clobber)
         wanted_return: Val(register)
         if return_reg == wanted_return || seen_clobbers.contains(register) -> next
-        seen_clobbers.push(register)
+        seen_clobbers.push(register.copy())
         operands.push("out(\"{register}\") _")
     }
     instructions := pkg_ffi_asm_instructions(inline.source)

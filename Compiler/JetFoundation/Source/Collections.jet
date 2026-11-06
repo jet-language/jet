@@ -666,6 +666,22 @@ collection_arg_is_callback: fn(arg: CollectionArg) -> Bool Never! {
     }
 }
 
+// A call never copies on its own (#6611): an argument a row stores in its receiver owns
+// what it receives, as a `&&` parameter does, so a bare name passed there is
+// taken, never copied. Rows that only compare their argument (`remove`,
+// `discard`, `take`, `delete`, `pop`, the difference and intersection
+// updates) take nothing.
+collection_row_takes_argument: fn(row: CollectionOperationRow, index: Int) -> Bool Never! {
+    if row.law != CollectionLaw.Mutate && row.law != CollectionLaw.TryMutate -> return false
+    if index >= row.args.len() || !COLLECTION_STORING_ROWS.contains(row.name) -> return false
+    if row.args[index] == {
+        .Element | .Key | .Value | .ElementList | .SameKind | .Entries -> true
+        else -> false
+    }
+}
+
+COLLECTION_STORING_ROWS: [String]{"push", "append", "try_push", "insert", "push_front", "push_back", "add", "add_new", "try_insert", "setdefault", "replace", "extend", "update", "symmetric_difference_update"}
+
 // E0106: the reserved built-in type vocabulary, frozen at the Rust-removal
 // cutover from the bootstrap's Collections::RESERVED_TYPES; this table is its
 // only home. Source-owned Core declarations are admitted by registration, not

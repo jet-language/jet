@@ -232,7 +232,7 @@ cli_replay_locked_nix: fn(verification: &StoreVerification, theme: Theme, roots:
     }
     nix_refs := [RefSpec]{}
     loop spec in refs {
-        if provider_uses_nix_provider_for_project(spec, table, offline, roots.root, Val(project_dir)) -> nix_refs.push(spec)
+        if provider_uses_nix_provider_for_project(spec, table, offline, roots.root, Val(project_dir)) -> nix_refs.push(spec.copy())
     }
     if nix_refs.len() == 0 -> return Ok(false)
     locked := [RefSpec]{}

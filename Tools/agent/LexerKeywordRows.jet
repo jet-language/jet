@@ -105,9 +105,9 @@ keyword_rows: fn(mapping: String, syntax: String, tokens: String, tags: String) 
         }
         if kind_tag(kind) != token_tag || !token_tags.contains(token_tag) || tag_count != 1 -> return Err(rows_fail("unresolved token kind {kind}/{token_tag}"))
         if spellings.contains(spelling) || kinds.contains(kind) || mapped.contains(token_tag) -> return Err(rows_fail("duplicate keyword spelling/kind {constant}/{kind}"))
-        spellings.push(spelling)
-        kinds.push(kind)
-        mapped.push(token_tag)
+        spellings.push(spelling.copy())
+        kinds.push(kind.copy())
+        mapped.push(token_tag.copy())
         bytes: loop byte in spelling.bytes() -> Int.from_u8(byte)
         rows.push(KeywordRow{constant: constant, kind: kind, tag: token_tag, spelling: spelling, bytes: bytes})
     }
@@ -150,7 +150,7 @@ branches: fn(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
         byte: row.bytes[offset]
         group := groups.get(byte) ?? [KeywordRow]{}
         if group.len() == 0 -> order.push(byte)
-        group.push(row)
+        group.push(row.copy())
         groups[byte] = group
     }
     order.sort()
@@ -175,7 +175,7 @@ render_keyword_spans: fn(rows: [KeywordRow]) -> String Never! {
         length: row.bytes.len()
         group := lengths.get(length) ?? [KeywordRow]{}
         if group.len() == 0 -> order.push(length)
-        group.push(row)
+        group.push(row.copy())
         lengths[length] = group
     }
     order.sort()

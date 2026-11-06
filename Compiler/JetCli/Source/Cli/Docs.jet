@@ -762,7 +762,7 @@ jet_cli_build_doc_graph: fn(modules: [JetDriverDocModule], index: JetCLISemIndex
 jet_cli_doc_undocumented_public: fn(graph: JetCLIDocGraph) -> [JetCLIDocItem] Never! {
     undocumented := [JetCLIDocItem]{}
     loop item in graph.items {
-        if item.public && item.summary == "" && !jet_cli_doc_command_entry(item) -> undocumented.push(item)
+        if item.public && item.summary == "" && !jet_cli_doc_command_entry(item) -> undocumented.push(item.copy())
     }
     undocumented
 }

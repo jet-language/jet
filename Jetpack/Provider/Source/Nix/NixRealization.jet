@@ -666,7 +666,7 @@ provider_realization_from_index: fn(spec: RefSpec, key: NixIndexKey, verified: N
     references := [String]{}
     loop output_name in admitted_names {
         loop digest in admitted.outputs[output_name].direct_reference_digests {
-            if !references.contains(digest) -> references.push(digest)
+            if !references.contains(digest) -> references.push(digest.copy())
         }
     }
     references.sort()

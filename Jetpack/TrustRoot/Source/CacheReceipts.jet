@@ -352,7 +352,7 @@ trust_revoke_cache_builder: fn(roots_dir: String, builder: String) TrustRootErro
     dir: trust_ensure_trust_dir(roots_dir)
     path: trust_revoked_builders_path(roots_dir)
     builders := trust_read_state_lines(path, "revoked cache-builder list is not a regular file") ?? [String]{}
-    builders.push(builder)
+    builders.push(builder.copy())
     trust_atomic_write(files.join(dir, "revoked-cache-builders"), trust_state_body(builders).bytes())
 }
 
@@ -372,7 +372,7 @@ trust_allow_cache_identity: fn(roots_dir: String, directory: String, role: Strin
     path: trust_cache_identity_allowlist_path(roots_dir, directory, role)
     files.create_dir_all(files.dirname(path))
     identities := trust_read_state_lines(path, "{label} allowlist is not a regular file") ?? [String]{}
-    identities.push(identity)
+    identities.push(identity.copy())
     trust_atomic_write(path, trust_state_body(identities).bytes())
 }
 

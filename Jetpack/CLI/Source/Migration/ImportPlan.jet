@@ -64,10 +64,10 @@ ImportPlan: struct {
             existing.add_fact(key, facts.facts[key], source)
         }
         loop loss in facts.losses {
-            if !existing.losses.contains(loss) -> existing.losses.push(loss)
+            if !existing.losses.contains(loss) -> existing.losses.push(loss.copy())
         }
         loop conflict in facts.conflicts {
-            if !existing.conflicts.contains(conflict) -> existing.conflicts.push(conflict)
+            if !existing.conflicts.contains(conflict) -> existing.conflicts.push(conflict.copy())
         }
         self.provider_facts[reference] = existing
         self.record_fact_findings(existing, source_path)

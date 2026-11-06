@@ -339,7 +339,7 @@ pkg_staged_unique_tools: fn(values: [String]) -> [String] StagedPlanError! {
             return Err(StagedPlanError.InvalidInput{path: value, reason: "authority name is empty or contains control characters"})
         }
         if out.contains(value) -> return Err(StagedPlanError.DuplicateTool(value))
-        out.push(value)
+        out.push(value.copy())
     }
     Ok(out)
 }
@@ -349,7 +349,7 @@ pkg_staged_unique_effects: fn(values: [BuildEffect]) -> [BuildEffect] StagedPlan
     seen := [BuildEffect]{}
     loop build_effect in values {
         if seen.contains(build_effect) -> return Err(StagedPlanError.DuplicateEffect(build_effect.flag()))
-        seen.push(build_effect)
+        seen.push(build_effect.copy())
     }
     Ok(BuildEffect.sorted(seen))
 }
@@ -397,7 +397,7 @@ pkg_staged_visit: fn(node: String, dependencies: [String: [String]], states: &[S
     }
     states[node] = StagedPlanVisit.Visiting
     path := stack
-    path.push(node)
+    path.push(node.copy())
     edges: dependencies.get(node) ?? [String]{}
     loop dependency in edges -> pkg_staged_visit(dependency, dependencies, states, path)
     states[node] = StagedPlanVisit.Done
@@ -414,6 +414,6 @@ pkg_staged_cycle_chain: fn(stack: [String], node: String) -> [String] Never! {
     }
     chain := [String]{}
     loop index in start..<stack.len() -> chain.push(stack[index])
-    chain.push(node)
+    chain.push(node.copy())
     chain
 }

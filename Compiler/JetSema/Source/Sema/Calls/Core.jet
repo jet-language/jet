@@ -746,7 +746,7 @@ sema_call_core_bind_arguments: fn(record: CoreCallRecord, signature: Type, args:
         return None
     }
     local_args := [CallArg]{}
-    loop arg in args -> local_args.push(arg)
+    loop arg in args -> local_args.push(arg.copy())
     sema_call_bind_direct("{record.module_name}.{record.member}", signature, local_args, span, diagnostics)
 }
 
@@ -1346,8 +1346,8 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     source_args := [CallArg]{}
     local_args := [CallArg]{}
     loop argument in args {
-        source_args.push(argument)
-        local_args.push(argument)
+        source_args.push(argument.copy())
+        local_args.push(argument.copy())
     }
     shape_params := sema_call_core_parameter_records(signature, [Type]{}, span, false)
     binding: sema_call_bind_args("{canonical_record.module_name}.{canonical_record.member}", shape_params, local_args, span, diagnostics) ?? return None

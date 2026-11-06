@@ -247,7 +247,7 @@ sema_call_return_view_facts: fn(signature: Type, receiver: Expr?, args: [CallArg
                 source_places: sema_ownership_places_from_expr_in_state(expression, scopes, state)
                 if source_places.len() == 0 {
                     temporary: expr_source_span(expression)
-                    temporaries.push(temporary)
+                    temporaries.push(temporary.copy())
                     if !sema_call_static_text_literal(expression) -> sema_call_report_temporary_view_source(temporary, string_result && entry.slot.len() == 0, diagnostics)
                 }
                 loop source_place in source_places {
@@ -400,7 +400,7 @@ sema_call_lambda_captures_local: fn(lambda: Lambda, scopes: SemaScopeTable) -> B
 }
 
 sema_call_note_ident: fn(names: &[String], expression: Expr) {
-    if expression == .Ident(name, _, _) -> names.push(name)
+    if expression == .Ident(name, _, _) -> names.push(name.copy())
 }
 
 sema_call_foreign_thread_safe_func: fn(func: Func) -> Bool Never! {
@@ -567,8 +567,12 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             next
         }
         // A bare name a take parameter receives is that parameter's take, as
-        // `name.move()` was.
+        // `name.move()` was. A resource has one cleanup owner, so a take that
+        // would copy it out of a place read in place (E0211) or out of a
+        // borrowed parameter (E0201 naming `&&`) is refused for that, never
+        // with a `.copy()` fix.
         taken_name: args[index].convention == AccessConvention.Move || decision == SemaCallConventionDecision.NeedsImplicitClone
+        if parameter.convention == AccessConvention.Move && decision == SemaCallConventionDecision.NeedsImplicitClone && args[index].convention != AccessConvention.Move && (!sema_copy_site_refuse_resource_copy(checked_value, environment, program, scopes, context, diagnostics) || !sema_copy_site_refuse_borrowed_copy(args[index].expr, sema_ownership_callee_text(callee), environment, program, scopes, context, diagnostics)) -> return None
         if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, state, context, diagnostics, taken_name) -> return None
         // A self-typed read that does not fit reports the generic E0108 at
         // the value; like any other argument, that becomes the call's E0112.
@@ -917,7 +921,7 @@ sema_crypto_misuse_precedence: fn(diagnostics: &[Diagnostic]) Never! {
     if !misused || !other -> return
     kept := [Diagnostic]{}
     loop diagnostic in diagnostics {
-        if diagnostic.code != "E2702" -> kept.push(diagnostic)
+        if diagnostic.code != "E2702" -> kept.push(diagnostic.copy())
     }
     diagnostics = kept
 }

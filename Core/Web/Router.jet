@@ -529,7 +529,7 @@ cache_path: fn(router: &WebRouter, path: String, state: WebRouterCacheStatus) ->
     }
     if router.cache.len() >= 256 -> return -1
     router.cache.push(path.copy())
-    router.cache_status.push(state)
+    router.cache_status.push(state.copy())
     router.cache.len() - 1
 }
 
@@ -566,7 +566,7 @@ hex_value: fn(b: U8) -> Int Never! {
 
 copy_routes: fn(routes: [WebRoute]) -> [WebRoute] {
     out := [WebRoute]{}
-    loop r in routes -> out.push(r)
+    loop r in routes -> out.push(r.copy())
     return out
 }
 

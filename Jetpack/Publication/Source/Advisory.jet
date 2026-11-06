@@ -378,7 +378,7 @@ publication_parse_advisory_trust: fn(text: String) -> PublicationAdvisoryTrustRo
         key: parts.before.trim()
         value: parts.after.trim()
         if key != "revoked_key" && seen.contains(key) -> return Err(PublicationDiagnosticError{diagnostic: publication_e2607("advisory trust root", "line {number} repeats field {key}")})
-        if key != "revoked_key" -> seen.push(key)
+        if key != "revoked_key" -> seen.push(key.copy())
         if key == "public_key" && root.public_key == "" -> root.public_key = value
         else if key == "min_sequence" -> root.min_sequence = publication_advisory_number(value, "advisory trust root", number, "minimum sequence")
         else if key == "accepted_digest" && root.accepted_digest == None {

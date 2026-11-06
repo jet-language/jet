@@ -147,7 +147,7 @@ build_validate_action: fn(name: String, spec: ActionSpec) HermeticBuildError! {
     seen := [String]{}
     loop output in spec.outputs {
         if seen.contains(output) -> return Err(HermeticBuildError.DuplicateActionOutput{action: name, output})
-        seen.push(output)
+        seen.push(output.copy())
     }
 }
 

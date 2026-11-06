@@ -546,7 +546,7 @@ cli_parse_legacy_tool_generation_meta: fn(verification: &StoreVerification, text
             bin: bins[index]
             cli_validate_bin_name(bin)
             if seen_bins.contains(bin) -> return Err(CLIError.Other("duplicate legacy profile bin `{bin}`"))
-            seen_bins.push(bin)
+            seen_bins.push(bin.copy())
             member: files.basename(targets[index])
             if member == "" -> return Err(CLIError.Other("legacy profile target has no UTF-8 member"))
             cli_validate_bin_name(member)

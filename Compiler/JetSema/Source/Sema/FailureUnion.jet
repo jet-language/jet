@@ -111,7 +111,7 @@ sema_failure_union_add_member: fn(context: &SemaCheckContext, ty: Type) Never! {
     loop existing in context.failure_union_members {
         if type_identity_equal(existing, ty) -> return
     }
-    context.failure_union_members.push(ty)
+    context.failure_union_members.push(ty.copy())
 }
 
 sema_failure_union_unparen: fn(value: Expr) -> Expr Never! {
@@ -299,7 +299,7 @@ sema_failure_union_flatten: fn(ty: Type, flat: &[Type]) Never! {
     loop existing in flat {
         if type_identity_equal(existing, ty) -> return
     }
-    flat.push(ty)
+    flat.push(ty.copy())
 }
 
 // Flatten nested unions, drop exact duplicates, sort by the
@@ -582,7 +582,7 @@ sema_failure_project_infallible: fn(graph: &SemaRegistrationGraph, solved: [Stri
             .Foreign(_, _) -> {}
             else -> {
                 loop site in sema_failure_method_rows(graph, row) -> sema_failure_project_method_site(graph, site, trail)
-                methods.push(key)
+                methods.push(key.copy())
             }
         }
     }

@@ -325,7 +325,7 @@ envmodel_evaluate_env_with_source_loader: fn<L: SourceLoader>(src: String, base_
                         return Err(envmodel_error("E1335", "integration `{integration.name}` has conflicting declarations", "one environment graph cannot silently choose different SDK, host, credential, or grant facts", "merge the integration options so they agree, or keep one declaration", None))
                     }
                 }
-                .None -> { integrations.push(integration) }
+                .None -> { integrations.push(integration.copy()) }
             }
             loop secret_name in integration.secrets {
                 declared := false
@@ -527,7 +527,7 @@ envmodel_merge_managed_file: fn(managed_files: &[ManagedFile], file: ManagedFile
             return
         }
     }
-    managed_files.push(file)
+    managed_files.push(file.copy())
 }
 
 // `names` is sorted: the requested module if declared, else `dev`, then
@@ -547,7 +547,7 @@ envmodel_select_active_environment: fn(names: [String], requested_environment: S
 }
 
 envmodel_push_unique: fn(values: &[String], value: String) Never! {
-    if !values.contains(value) { values.push(value) }
+    if !values.contains(value) { values.push(value.copy()) }
 }
 
 // An explicit declaration replaces an integration's implicit source name;
@@ -563,7 +563,7 @@ envmodel_merge_secret_spec: fn(specs: &[SecretSpec], incoming: SecretSpec) EnvMo
         if incoming.implicit -> return
         return Err(envmodel_error("E1333", "secret `{incoming.name}` is declared more than once", "one selected environment has one declaration for each secret name", "merge the metadata into one map entry or give the declarations different names", None))
     }
-    specs.push(incoming)
+    specs.push(incoming.copy())
 }
 
 envmodel_prompt_path_mode: fn(value: String) -> PromptPathMode Never! {

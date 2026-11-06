@@ -119,7 +119,7 @@ append_binary: fn(left: Expr, right: Expr, operator: Node) -> Expr {
     code := [Node]{}
     code.extend(left.code.copy())
     code.extend(right.code.copy())
-    code.push(operator)
+    code.push(operator.copy())
     return Expr{code: code}
 }
 
@@ -279,7 +279,7 @@ show: fn(expr: Expr) -> String {
     loop token in expr.code {
         if token == {
             .Const(value) -> { stack.push("{value}") }
-            .Var(name) -> { stack.push(name) }
+            .Var(name) -> { stack.push(name.copy()) }
             .Neg -> {
                 value: stack.pop() ?? "?"
                 stack.push("(-{value})")

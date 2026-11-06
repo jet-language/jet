@@ -273,7 +273,7 @@ policy_resolve: fn(key: PolicyKey, declarations: [PolicyDeclaration]) -> Effecti
     ordered := [PolicyDeclaration]{}
     loop scope in POLICY_ALL_SCOPES {
         loop declaration in declarations {
-            if declaration.key == key && declaration.scope == scope -> ordered.push(declaration)
+            if declaration.key == key && declaration.scope == scope -> ordered.push(declaration.copy())
         }
     }
     registry: policy_rule(key)

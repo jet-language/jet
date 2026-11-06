@@ -47,7 +47,7 @@ MarkerGroupNamespace: struct {
 marker_group_code: fn(input: [Token]) -> [Token] Never! {
     code := [Token]{}
     loop token in input {
-        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> code.push(token)
+        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> code.push(token.copy())
     }
     code
 }
@@ -234,10 +234,10 @@ expand_named_marker_groups_with_uses: fn(tokens: [Token], tables: &TokenTables, 
                 uses.push(ExpandedMarkerGroupUse{name: group.name, span: span})
                 hash := code[index]
                 hash.span = span
-                output.push(hash)
+                output.push(hash.copy())
                 open := hash
                 open.kind = TOKEN_LBRACKET
-                output.push(open)
+                output.push(open.copy())
                 marker_group_push_members(output, group, span, tables)
                 close := open
                 close.kind = TOKEN_RBRACKET

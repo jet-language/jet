@@ -70,7 +70,7 @@ suite_setup: fn(rows: TestRows) -> SuiteSetup? {
 // child `jet test` runs its own tests and writes its own evidence.
 jet_command: fn(setup: SuiteSetup, jet: String, args: [String]) -> ProcessSpec {
     argv := [String]{jet}
-    loop arg in args -> argv.push(arg)
+    loop arg in args -> argv.push(arg.copy())
     spec := process.cmd(argv).cwd(setup.checkout).env("JET_TOOLCHAIN_ROOT", setup.checkout)
     names: sys.vars() ?? [String]{}
     loop name in names {

@@ -347,7 +347,7 @@ publication_parse_oci_index: fn(bytes: [U8], subject: String) -> [PublicationOCI
         media_value: manifest.get("mediaType") ?? return Err(publication_invalid_oci("OCI referrer descriptor has no media type"))
         media_type: pkg_json_text(media_value) ?? return Err(publication_invalid_oci("OCI referrer media type is not a string"))
         if media_type != artifact_type || !([String]{PUBLICATION_OCI_SBOM_TYPE, PUBLICATION_OCI_SIGNATURE_TYPE, PUBLICATION_OCI_PROVENANCE_TYPE, PUBLICATION_OCI_REPRODUCIBILITY_TYPE}).contains(artifact_type) || seen.contains(artifact_type) -> return Err(publication_invalid_oci("OCI referrer descriptor has an unknown or repeated artifact type"))
-        seen.push(artifact_type)
+        seen.push(artifact_type.copy())
         digest_value: manifest.get("digest") ?? return Err(publication_invalid_oci("OCI referrer descriptor has no digest"))
         digest: pkg_json_text(digest_value) ?? return Err(publication_invalid_oci("OCI referrer digest is not a string"))
         publication_validate_oci_digest(digest)

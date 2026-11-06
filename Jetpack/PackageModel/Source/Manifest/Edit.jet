@@ -83,10 +83,10 @@ pkg_edit_restore_newline: fn(raw: String, out: [String]) -> String Never! {
 pkg_edit_insert_line: fn(lines: [String], at: Int, value: String) -> [String] Never! {
     out := [String]{}
     loop index in 0..<lines.len() {
-        if index == at -> out.push(value)
+        if index == at -> out.push(value.copy())
         out.push(lines[index])
     }
-    if at >= lines.len() -> out.push(value)
+    if at >= lines.len() -> out.push(value.copy())
     out
 }
 
@@ -212,7 +212,7 @@ pkg_edit_insert_or_replace_in_block: fn(raw: String, key: String, name: String, 
         if raw != "" && !raw.ends_with("\n") -> out.push("")
         out.push("")
         out.push("{key}: {{")
-        out.push(new_line)
+        out.push(new_line.copy())
         out.push("}}")
     }
     pkg_edit_restore_newline(raw, out)
@@ -243,7 +243,7 @@ pkg_edit_remove_from_block: fn(raw: String, key: String, name: String) -> String
                 if parts.before.trim() == name -> next
             }
         }
-        out.push(line)
+        out.push(line.copy())
     }
     pkg_edit_restore_newline(raw, out)
 }

@@ -69,7 +69,7 @@ ForeignBoundaryObservation: struct {
         out := self
         rows := [String]{}
         loop assumption in assumptions {
-            if !rows.contains(assumption) -> rows.push(assumption)
+            if !rows.contains(assumption) -> rows.push(assumption.copy())
         }
         rows.sort()
         out.assumptions = rows
@@ -393,7 +393,7 @@ ForeignBoundaryContract: struct {
         out := self
         rows := [String]{}
         loop assumption in assumptions {
-            if !rows.contains(assumption) -> rows.push(assumption)
+            if !rows.contains(assumption) -> rows.push(assumption.copy())
         }
         rows.sort()
         out.assumptions = rows
@@ -421,7 +421,7 @@ ForeignBoundaryContract: struct {
                 break
             }
         }
-        if !replaced -> self.obligations.push(obligation)
+        if !replaced -> self.obligations.push(obligation.copy())
         self.obligations = loop fresh_item in self.obligations -> fresh_item
         self.obligations.sort_by(row -> row.obligation)
     }

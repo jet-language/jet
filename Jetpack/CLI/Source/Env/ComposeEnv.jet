@@ -577,7 +577,7 @@ CLI_PROVIDER_METADATA_FILES: comptime { [ProviderMetadataFile]{
 cli_reject_unprompted_acquisition: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
     specs := [RefSpec]{}
     loop spec in plan.refs {
-        if provider_requires_acquisition(spec, plan.table, flags.offline, roots.hangar_dir()) -> specs.push(spec)
+        if provider_requires_acquisition(spec, plan.table, flags.offline, roots.hangar_dir()) -> specs.push(spec.copy())
     }
     label: if scope == {
         .Project -> if plan.environment.active_environment == {

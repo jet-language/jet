@@ -31,7 +31,7 @@ jet_cli_perf_browser_symbol: fn(value: String) -> Bool Never! {
 }
 jet_cli_perf_browser_status: fn(value: Dyn, action: String, required: [String], optional: [String]) JetCLIReadError! {
     fields := [String]{"schema", "action", "ok", "reports"}
-    loop field in required -> fields.push(field)
+    loop field in required -> fields.push(field.copy())
     jet_cli_perf_object(value, fields, optional, "browser relay status")
     if jet_cli_perf_text(jet_cli_perf_field(value, "schema")) != JET_CLI_STATUS_SCHEMA || jet_cli_perf_text(jet_cli_perf_field(value, "action")) != action || !jet_cli_perf_bool(jet_cli_perf_field(value, "ok")) -> return Err(jet_cli_read_error("browser relay status header is invalid"))
     if jet_cli_perf_array(jet_cli_perf_field(value, "reports")).len() != 0 -> return Err(jet_cli_read_error("browser relay has unexpected reports"))

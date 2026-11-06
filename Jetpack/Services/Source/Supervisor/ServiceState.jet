@@ -377,7 +377,7 @@ services_read_lifecycle: fn(dir: String) -[FS]> LifecycleFacts? ServicesError! {
         value: pair.after
         if key != "dependency" {
             if seen.contains(key) -> return Err(invalid)
-            seen.push(key)
+            seen.push(key.copy())
         }
         if key == {
             "version" -> {
@@ -398,7 +398,7 @@ services_read_lifecycle: fn(dir: String) -[FS]> LifecycleFacts? ServicesError! {
                     "recovery" -> recovery = Val(value)
                     "unit" -> unit = Val(value)
                     "guardian" -> guardian = Val(value)
-                    else -> dependencies.push(value)
+                    else -> dependencies.push(value.copy())
                 }
             }
             else -> return Err(invalid)

@@ -22,8 +22,8 @@ pkg_fetch_registry_plan: fn(resolver: PackageFetchResolver, manifest: Manifest) 
     loop name in pkg_lock_manifest_dependency_names(manifest) {
         if manifest.dependencies[name] == .Registry(raw) {
             constraints.push(PublicationVersionConstraint{package: name, req: pkg_fetch_requirement(name, raw), from: "{manifest.package.name} (root)"})
-            direct.push(name)
-            pending.push(name)
+            direct.push(name.copy())
+            pending.push(name.copy())
             owners[name] = [String]{manifest.package.name}
         }
     }
@@ -35,7 +35,7 @@ pkg_fetch_registry_plan: fn(resolver: PackageFetchResolver, manifest: Manifest) 
         name: pending[0]
         pending = pending[1..<pending.len()]
         if visited.contains(name) -> next
-        visited.push(name)
+        visited.push(name.copy())
         registry: pkg_fetch_registry_config(resolver, name)
         available: publication_resolve_and_verify_all(registry, name) ?? return Err(pkg_fetch_registry_evidence_error(name, err.diagnostic))
         previous: pkg_fetch_previous_package(resolver, name)
@@ -169,7 +169,7 @@ pkg_fetch_registry_node: fn(verification: &StoreVerification, roots: HangarRoots
     references := [String]{}
     loop child in dependencies {
         child_chain := chain
-        child_chain.push(child)
+        child_chain.push(child.copy())
         pkg_fetch_resolve(verification, roots, context, resolver, child, specs[child], snapshot.path(), child_chain)
         node: resolver.nodes[child]
         fingerprints.push(node.package.fingerprint)

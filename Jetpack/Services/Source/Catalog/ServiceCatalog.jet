@@ -483,7 +483,7 @@ services_prepare_database: fn(port: Int, data_dir: String, env: &ShellEnv, tool:
 
 services_run_catalog_tool: fn(env: &ShellEnv, tool: String, args: [String], data_dir: String) ServicesError! -[FS, Env, Exec, Time.Wait]> {
     argv := [String]{tool}
-    loop arg in args -> argv.push(arg)
+    loop arg in args -> argv.push(arg.copy())
     spec := process.cmd(argv).cwd(data_dir).stdout(.Capture).stderr(.Capture)
     spec = env.apply_to(spec) ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err.message()}"))
     receipt: spec.run() ?? return Err(ServicesError.new("couldn't initialize service preset with `{tool}`: {err}"))

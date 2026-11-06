@@ -87,7 +87,7 @@ ir_opt_scalar_replace: fn(m: IRModule, f: &IRFunction, promote: Bool) -> Int Nev
             if closed == .Loop -> depth -= 1
         }
         if op == .Block || op == .Loop || op == .If || op == .Else {
-            open.push(op)
+            open.push(op.copy())
             if op == .Loop -> depth += 1
         }
         if op == .Offset && f.a[at] >= 0 && candidate[f.a[at]] && f.dst[at] >= 0 && f.dst[at] != f.a[at] && facts.defs[f.dst[at]] == 1 {
@@ -500,7 +500,7 @@ IROptCode: struct {
 }
 
 ir_opt_code_put: fn(code: &IROptCode, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) Never! {
-    code.op.push(op)
+    code.op.push(op.copy())
     code.dst.push(dst)
     code.a.push(a)
     code.b.push(b)

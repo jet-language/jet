@@ -61,19 +61,19 @@ apply_step: fn(values: [Dyn], step: Step) -> [Dyn] {
     output := [Dyn]{}
     loop value in values {
         if step == {
-            .Identity -> { output.push(value) }
+            .Identity -> { output.push(value.copy()) }
             .Field(name) -> {
                 if field(value.copy(), name.copy()) == .Val(found) -> output.push(found)
             }
             .Each -> {
                 if value == .Array(items) {
-                    loop item in items -> output.push(item)
+                    loop item in items -> output.push(item.copy())
                 }
             }
             .AtLeast(name, limit) -> {
                 if field(value.copy(), name.copy()) == .Val(found) {
                     score: found.int() ?? Int.MIN
-                    if score >= limit -> output.push(value)
+                    if score >= limit -> output.push(value.copy())
                 }
             }
         }

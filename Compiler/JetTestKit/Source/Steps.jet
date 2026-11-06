@@ -48,7 +48,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.steps[scope.start].aggregate_names = scope.aggregates
                 captures = scope.names
                 loop name in scope.aggregates {
-                    if !kit_expect_named(captures, name) -> captures.push(name)
+                    if !kit_expect_named(captures, name) -> captures.push(name.copy())
                 }
                 capture_scopes = capture_scopes.slice(0, capture_scopes.len() - 1)
             }
@@ -71,7 +71,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 return plan
             }
             kind: words[0]
-            blocks.push(kind)
+            blocks.push(kind.copy())
             capture_scopes.push(KitCaptureScope{start: plan.steps.len(), names: captures, aggregates: []})
             plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], action: kind})
             modifier_adjacent = false
@@ -338,7 +338,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                         plan.error = "line {line_number}: duplicate await capture"
                         return plan
                     }
-                    captures.push(name)
+                    captures.push(name.copy())
                 }
                 cursor += 2
             }
@@ -463,7 +463,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     plan.error = "line {line_number}: invalid duplicate inventory label"
                     return plan
                 }
-                inventories.push(label)
+                inventories.push(label.copy())
             } else if words.len() != 3 || words[1] != "==" || !kit_expect_named(inventories, words[2]) {
                 plan.error = "line {line_number}: inventory comparison needs a known label"
                 return plan
@@ -490,7 +490,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 }
                 duration = kit_steps_duration_ns(words[2]) ?? 0
             }
-            joined.push(label)
+            joined.push(label.copy())
             plan.steps.push(KitStep{argv: ["wait", label], stdin: "", exit: "0", assertions: [], label: label, action: if key == "close" -> "close" else -> "wait", duration: duration})
             next
         }
@@ -561,7 +561,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     return plan
                 }
             }
-            if spawning -> pending.push(label)
+            if spawning -> pending.push(label.copy())
             plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], label: label, action: if spawning -> "spawn" else -> ""})
             next
         }

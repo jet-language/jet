@@ -47,7 +47,7 @@ store_record_locked_nix: fn(verification: &StoreVerification, roots: HangarRoots
     loop digest in object_digests {
         if digest == "" || digest.contains("/") || digest.contains("\\") -> return Err(StoreError.Other("locked Nix replay contains an unsafe CAS digest"))
         if digests.contains(digest) -> next
-        digests.push(digest)
+        digests.push(digest.copy())
         actual: pkg_try_output_hash_of_in_hangar(files.join(object_root, digest), hangar, false) ?? return Err(StoreError.Other(err.message()))
         if actual != digest -> return Err(StoreError.Other("locked Nix CAS object `{digest}` re-hashed as `{actual}`"))
     }
@@ -356,7 +356,7 @@ store_locked_nix_missing_members: fn(roots: HangarRoots, candidate: StoreEntry) 
     by_hash := [String: StoreEntry]{}
     loop entry in store_list_read_only(roots) -> by_hash[entry.envelope.output_hash] = entry
     queue := [String]{}
-    loop reference in candidate.references -> queue.push(reference)
+    loop reference in candidate.references -> queue.push(reference.copy())
     missing := [String]{}
     index := 0
     loop index < queue.len() {

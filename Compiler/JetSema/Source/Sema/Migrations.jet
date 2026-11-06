@@ -35,19 +35,19 @@ sema_migration_insert_sorted: fn(values: [String], value: String) -> [String] Ne
     loop current in values {
         if current == value -> return values.copy()
         if !inserted && current > value {
-            result.push(value)
+            result.push(value.copy())
             inserted = true
         }
-        result.push(current)
+        result.push(current.copy())
     }
-    if !inserted -> result.push(value)
+    if !inserted -> result.push(value.copy())
     result
 }
 
 sema_migration_remove: fn(values: [String], value: String) -> [String] Never! {
     result := [String]{}
     loop current in values {
-        if current != value -> result.push(current)
+        if current != value -> result.push(current.copy())
     }
     result
 }
@@ -102,7 +102,7 @@ sema_migration_canonical_shape: fn(definition: StructDef, migrations: [Migration
                 .Change(_, _, _, _, _, _, _, _, _) -> {}
             }
         }
-        historical_reverse.push(shape)
+        historical_reverse.push(shape.copy())
     }
     historical := [[String]]{}
     index := historical_reverse.len()
@@ -228,10 +228,10 @@ sema_migration_desugar: fn(migrations: &[MigrationDecl], enabled_types: [String]
                             updated.push(MigrationOp.Change{field: field, field_span: field_span, from_ty: from_ty, from_span: from_span, to_ty: to_ty, to_span: to_span, converter: Val(value), converter_span: converter_span, conv_fn: Val(name)})
                             functions.push(sema_migration_converter_function(name, from_ty, to_ty, value, span))
                         }
-                        .None -> updated.push(operation)
+                        .None -> updated.push(operation.copy())
                     }
                 }
-                else -> updated.push(operation)
+                else -> updated.push(operation.copy())
             }
         }
         migrations[migration_index].ops = updated

@@ -50,7 +50,7 @@ sema_unsafe_inspect: fn(modules: [SemaGateModule], gates: GateSet) -> UnsafeInsp
     result := UnsafeInspection{gates: [], diagnostics: []}
     loop row in modules {
         declarations := row.declarations
-        loop declaration in row.program.policy_declarations -> declarations.push(declaration)
+        loop declaration in row.program.policy_declarations -> declarations.push(declaration.copy())
         loop item in row.program.items {
             sema_unsafe_visit_item(item, row.source, declarations, row.program, gates, result)
         }
@@ -246,9 +246,9 @@ sema_unsafe_visit_gate: fn(target: Span, span: Span, is_function: Bool, reason: 
     loop declaration in declarations {
         if declaration.key != PolicyKey.Unsafe -> next
         if declaration.scope == PolicyScope.Organization || declaration.scope == PolicyScope.Package || declaration.scope == PolicyScope.Module {
-            outer.push(declaration)
+            outer.push(declaration.copy())
         }
-        if declaration.target == (Val(target)) -> site.push(declaration)
+        if declaration.target == (Val(target)) -> site.push(declaration.copy())
     }
     outer_policy: if policy_resolve_with_gates(PolicyKey.Unsafe, outer, gates) == {
         .Ok(policy) -> policy
@@ -370,7 +370,7 @@ sema_unsafe_discharge: fn(operations: [SemaUnsafeOperation], asserted: [String],
     loop operation in operations {
         missing := [String]{}
         loop name in operation.required {
-            if !asserted.contains(name) -> missing.push(name)
+            if !asserted.contains(name) -> missing.push(name.copy())
         }
         discharged: !track || missing.len() == 0
         if !discharged {
@@ -567,12 +567,12 @@ sema_unsafe_nested_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
             out := [[Stmt]]{}
             loop arm in arms -> out.push(arm.body)
-            if else_body == .Val(body) -> out.push(body)
+            if else_body == .Val(body) -> out.push(body.copy())
             out
         }
         .ComptimeIf(_, _, then_body, else_body, _, _) -> {
             out := [[Stmt]]{then_body}
-            if else_body == .Val(body) -> out.push(body)
+            if else_body == .Val(body) -> out.push(body.copy())
             out
         }
         else -> []

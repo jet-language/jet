@@ -160,15 +160,15 @@ jet_cli_import_stage: fn(mode: JetCLIImportMode, target: String, baseline: Strin
             .Val(current) -> {
                 if current != contents {
                     if mode == JetCLIImportMode.Create {
-                        conflicts.push(target)
+                        conflicts.push(target.copy())
                     } else if prior == .Val(old) {
                         if current == old {
                             writes.push(JetCLIImportWrite{path: target, contents: contents})
                         } else if contents != old {
-                            conflicts.push(target)
+                            conflicts.push(target.copy())
                         }
                     } else {
-                        conflicts.push(target)
+                        conflicts.push(target.copy())
                     }
                 }
             }

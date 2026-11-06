@@ -1725,7 +1725,7 @@ jet_driver_add_source_file: fn(files: &[SourceFile], file: SourceFile, diagnosti
             return
         }
     }
-    files.push(file)
+    files.push(file.copy())
 }
 
 jet_driver_valid_authority_relative_path: fn(path: String) -> Bool Never! {
@@ -2236,7 +2236,7 @@ jet_driver_module_reaches: fn(edges: JetDriverModuleEdges, start: String, target
         visited[current] = true
         slot: edges.slots.get(current) ?? next
         loop reached in edges.targets[slot] {
-            if visited.get(reached) == None -> pending.push(reached)
+            if visited.get(reached) == None -> pending.push(reached.copy())
         }
     }
     false
@@ -2404,7 +2404,7 @@ jet_driver_bind_dependency_imports: fn(program: &Program, unit: JetDriverSourceU
         }
     }
     if bindings.len() == 0 -> return
-    loop declaration in program.imports -> bindings.push(declaration)
+    loop declaration in program.imports -> bindings.push(declaration.copy())
     program.imports = bindings
 }
 
@@ -2685,7 +2685,7 @@ jet_driver_member_reach: fn(inputs: JetDriverReachShared, job: JetDriverReachJob
     loop word in inputs.always {
         if seen.get(word) != None -> next
         seen[word] = true
-        words.push(word)
+        words.push(word.copy())
     }
     refs := [String]{}
     cursor := 0
@@ -2693,13 +2693,13 @@ jet_driver_member_reach: fn(inputs: JetDriverReachShared, job: JetDriverReachJob
         word: words[cursor]
         cursor += 1
         if inputs.owners[job.table_index].get(word) == .Val(owner) {
-            if owner != job.position -> refs.push(word)
+            if owner != job.position -> refs.push(word.copy())
         }
         slot: inputs.default_slots.get(word) ?? next
         loop extra in inputs.default_words[slot] {
             if seen.get(extra) != None -> next
             seen[extra] = true
-            words.push(extra)
+            words.push(extra.copy())
         }
     }
     refs
@@ -3450,7 +3450,7 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             if name == names.event_time_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.stream_event_time = true
             if index + 4 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && tokens[index + 3].kind == TOKEN_DOT && tokens[index + 4].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) && names.core_segments.contains(name_index(tokens[index + 2].decoded)) {
                 path: "{token_decoded(tables, tokens[index])}.{token_decoded(tables, tokens[index + 2])}"
-                if !demand.core_paths.contains(path) -> demand.core_paths.push(path)
+                if !demand.core_paths.contains(path) -> demand.core_paths.push(path.copy())
                 if index + 6 < to && tokens[index + 5].kind == TOKEN_DOT && tokens[index + 6].kind == TOKEN_IDENT {
                     nested: "{path}.{token_decoded(tables, tokens[index + 4])}"
                     if !demand.core_paths.contains(nested) -> demand.core_paths.push(nested)
@@ -3460,12 +3460,12 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
                 row: if name >= 0 && name < names.bare_rows.len() -> names.bare_rows[name] else -> -2
                 if row >= 0 {
                     bare: CORE_BARE_SOURCE_MODULES[row].name
-                    if !demand.bare_names.contains(bare) -> demand.bare_names.push(bare)
+                    if !demand.bare_names.contains(bare) -> demand.bare_names.push(bare.copy())
                 } else if row == -2 {
                     loop at in 0..<names.bare.len() {
                         if name == names.bare[at] || name == names.bare_alias[at] {
                             bare: CORE_BARE_SOURCE_MODULES[at].name
-                            if !demand.bare_names.contains(bare) -> demand.bare_names.push(bare)
+                            if !demand.bare_names.contains(bare) -> demand.bare_names.push(bare.copy())
                         }
                     }
                 }
@@ -3810,7 +3810,7 @@ jet_driver_core_runtime_member_imports: fn(program: &Program, core_sources: [Jet
                 }
             }
         }
-        rewritten.push(declaration)
+        rewritten.push(declaration.copy())
     }
     program.imports = rewritten
 }
@@ -4647,7 +4647,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             loop bare in CORE_BARE_SOURCE_MODULES {
                 if !demand.bare_names.contains(bare.name) -> next
                 module_name: core_bare_source_module(bare.name) ?? next
-                if !bare_modules.contains(module_name) -> bare_modules.push(module_name)
+                if !bare_modules.contains(module_name) -> bare_modules.push(module_name.copy())
                 owner_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, module_name, false, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
                 if owner_index == .Val(index) {
                     if !queued[index] {
@@ -4918,7 +4918,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                     direct: jet_driver_file_import_path(unit.relative_path, definition.name)
                     import_path: if direct.valid && direct.path == target_unit.relative_path -> definition.name else -> "{definition.name}/module"
                     synthetic: ImportDecl{kind: ImportKind.File{path: import_path, span: definition.name_span}, alias: definition.name, alias_span: definition.name_span, span: definition.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None}
-                    synthetic_imports.push(synthetic)
+                    synthetic_imports.push(synthetic.copy())
                     if aliases.get(definition.name) == None -> _ := aliases.add(definition.name, target_unit_index)
                     edge: SemaRegistrationImportEdge{
                         source_module_identity: module_identity,
@@ -4985,7 +4985,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                                 if row.owner == "" && row.module_name == submodule && (!row.runtime || importer_core) -> sourced = true
                             }
                             if !sourced -> next
-                            if !bare_modules.contains(submodule) -> bare_modules.push(submodule)
+                            if !bare_modules.contains(submodule) -> bare_modules.push(submodule.copy())
                             submodule_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, submodule, importer_core, entry_module, entry_index ?? 0, module_alias_span, diagnostics) ?? next
                             if !queued[submodule_index] {
                                 queued[submodule_index] = true

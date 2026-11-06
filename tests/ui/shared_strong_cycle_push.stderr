@@ -1,7 +1,7 @@
 Error [jet.SharedReferenceCycle]: This write can close a strong `Shared` cycle through `Person`
   --> tests/ui/shared_strong_cycle_push.jet:10:5
     |
- 10 |     kid.kids.push(mum)
+ 10 |     kid.kids.push(mum.copy())
     |     ^^^^^^^^
  Why: The stored value may already reach this `Person` cell through strong `Shared` handles, and reference counting never frees a strong cycle
  Fix: Store a `Shared.Weak<Person>` back-edge (`.downgrade()`) or an id, or build the stored value here from new cells (`shared Person{…}`)

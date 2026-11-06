@@ -260,7 +260,7 @@ jet_ring_insert_string: fn(rows: &[String], value: String) Never! {
         if value < rows[index] -> break
         index += 1
     }
-    rows.push(value)
+    rows.push(value.copy())
     cursor := rows.len() - 1
     loop cursor > index {
         rows[cursor] = rows[cursor - 1]
@@ -305,7 +305,7 @@ jet_ring_classify_prelude_closure: fn(roots: [String]) -> [JetRingLayerFact] Nev
     classified := [String:Bool]{}
     loop root in roots {
         if !jet_ring_is_closure_marker(root) && !(pending_keys.get(root) ?? false) {
-            pending.push(root)
+            pending.push(root.copy())
             pending_keys[root] = true
         }
     }
@@ -319,7 +319,7 @@ jet_ring_classify_prelude_closure: fn(roots: [String]) -> [JetRingLayerFact] Nev
         closure.push(JetRingLayerFact{key: current, layer: jet_ring_core_usage_layer(current)})
         loop dependency in jet_ring_dependency_keys(current) {
             if !(pending_keys.get(dependency) ?? false) && !(classified.get(dependency) ?? false) {
-                pending.push(dependency)
+                pending.push(dependency.copy())
                 pending_keys[dependency] = true
             }
         }

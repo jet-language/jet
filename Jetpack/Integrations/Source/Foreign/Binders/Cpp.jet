@@ -202,7 +202,7 @@ pkg_cpp_bind_with_overlay_and_plans: fn(header: String, cache: String, options: 
     loop name in names {
         plan: plans[name]
         result.source = "{result.source}{plan.render_facade()}\n"
-        selected.push(plan)
+        selected.push(plan.copy())
     }
     result.plans = selected
     Ok(result)
@@ -273,9 +273,9 @@ pkg_cpp_clang_asts: fn(header: String, options: CppBindOptions) -[Exec, Time.Wai
         argv.push(options.target)
         loop directory in options.include_dirs {
             argv.push("-I")
-            argv.push(directory)
+            argv.push(directory.copy())
         }
-        argv.push(header)
+        argv.push(header.copy())
         output: pkg_cpp_supervised(argv, 60s, "clang++")
         if !output.success -> return Err(ForeignBindError.ToolchainRejected(pkg_cpp_launder(output.stderr)))
         outputs.push(output)
@@ -349,20 +349,20 @@ pkg_cpp_build_archive: fn(shim: String, archive: String, store: String, options:
     compile := [String]{options.clang, "-std=c++17", "-fPIC", "-c", "-target", options.target}
     loop directory in options.include_dirs {
         compile.push("-I")
-        compile.push(directory)
+        compile.push(directory.copy())
     }
     compile.push(cpp)
     compile.push("-o")
-    compile.push(object)
+    compile.push(object.copy())
     pkg_cpp_run(compile, "clang++")
     link := [String]{options.clang, "-target", options.target, "-shared", pkg_ffi_undefined_symbol_flag_for_target(options.target), object}
     loop directory in options.library_dirs {
         link.push("-L")
-        link.push(directory)
+        link.push(directory.copy())
     }
     loop library in options.libraries {
         link.push("-l")
-        link.push(library)
+        link.push(library.copy())
     }
     link.push("-o")
     link.push(proof)

@@ -99,7 +99,7 @@ impl ProviderFactReport {
                 .None -> {}
             }
             dependency_versions[dependency_key] = dependency_version
-            facts.dependencies.push(coordinate)
+            facts.dependencies.push(coordinate.copy())
             facts.add_typed_text("provider.maven.dependency.{index}.coordinate", coordinate)
             facts.add_typed_text("provider.maven.dependency.{index}.kind", scope)
             if declared_scope == None -> facts.add_typed_text("provider.maven.dependency.{index}.scope.defaulted", "true")
@@ -126,7 +126,7 @@ impl ProviderFactReport {
             plugin: provider_format_dependency("{plugin_group}:{artifact}", plugin_version)
             if artifact == "" -> losses.push("Maven build plugin {index} has no artifactId")
             if !provider_maven_exact_value(plugin_version) -> losses.push("Maven build plugin `{plugin}` has no exact version")
-            facts.scripts.push(plugin)
+            facts.scripts.push(plugin.copy())
             facts.add_typed_text("provider.maven.hook.{index}", plugin)
             facts.add_typed_text("provider.maven.hook.{index}.group", plugin_group)
             if declared_group == None -> facts.add_typed_text("provider.maven.hook.{index}.group.defaulted", "true")

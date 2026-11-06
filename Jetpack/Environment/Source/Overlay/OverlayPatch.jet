@@ -264,7 +264,7 @@ env_overlay_safe_relative_path: fn(raw: String, label: String) -> String Overlay
         part: parts[index]
         if part == ".." || (index == 0 && part == ".") -> return Err(refusal)
         if part == "" || part == "." -> next
-        names.push(part)
+        names.push(part.copy())
     }
     if names.len() == 0 -> return Err(refusal)
     Ok(names.join("/"))
@@ -309,7 +309,7 @@ env_overlay_commit_staged: fn(source: OverlayAuthority, stage: &OverlayStage, af
             suffix: if rollback_errors.len() == 0 -> "" else -> "; rollback failed: {rollback_errors.join("; ")}"
             return Err(OverlayError.IO("could not commit patched file `{stage.entries[key].path}`: {error}{suffix}"))
         }
-        committed.push(key)
+        committed.push(key.copy())
         after_commit(stage.entries[key].path)
     }
 }

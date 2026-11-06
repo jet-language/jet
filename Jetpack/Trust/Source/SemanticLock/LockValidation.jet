@@ -74,7 +74,7 @@ trust_lock_input_issues: fn(inputs: [LockInput]) -> [ValidationIssue] Never! {
     loop name in names {
         cycle_node: trust_lock_cycle_from(name, edges) ?? next
         if reported.contains(cycle_node) -> next
-        reported.push(cycle_node)
+        reported.push(cycle_node.copy())
         issues.push(ValidationIssue.InputCycle(cycle_node))
     }
     issues

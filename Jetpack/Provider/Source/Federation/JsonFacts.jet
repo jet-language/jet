@@ -147,8 +147,8 @@ provider_graph_json_parses: fn(document: String) -> Bool Never! {
 // The report with extra losses and conflicts appended.
 provider_graph_finish: fn(facts: MetadataFacts, losses: [String], conflicts: [String]) -> ProviderFactReport Never! {
     report := ProviderFactReport.with_identity(facts)
-    loop loss in losses -> report.losses.push(loss)
-    loop conflict in conflicts -> report.conflicts.push(conflict)
+    loop loss in losses -> report.losses.push(loss.copy())
+    loop conflict in conflicts -> report.conflicts.push(conflict.copy())
     report
 }
 
@@ -429,12 +429,12 @@ impl ProviderFactReport {
                         }
                         if list_field.field == {
                             "requires_dist" -> {
-                                facts.dependencies.push(text)
+                                facts.dependencies.push(text.copy())
                                 facts.add_typed_text("provider.pypi.dependency.{list_field.kind}.{index}", text)
                             }
                             "classifiers" -> {
                                 facts.add_typed_text("provider.pypi.variant.{list_field.kind}.{index}", text)
-                                if text.starts_with("Operating System: ") || text.starts_with("Platform: ") -> facts.platforms.push(text)
+                                if text.starts_with("Operating System: ") || text.starts_with("Platform: ") -> facts.platforms.push(text.copy())
                                 if facts.license == "" && text.starts_with("License: ") -> facts.license = text
                             }
                             else -> facts.add_typed_text("provider.pypi.variant.{list_field.kind}.{index}", text)

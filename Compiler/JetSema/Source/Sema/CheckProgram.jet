@@ -611,7 +611,7 @@ sema_incremental_cache_stats: fn(cache: SemaIncrementalCache) -> SemaIncremental
 sema_incremental_evict_module: fn(state: &SemaIncrementalState, module_identity: String) {
     keys := [String]{}
     loop (key, row) in state.rows {
-        if row.module_identity == module_identity -> keys.push(key)
+        if row.module_identity == module_identity -> keys.push(key.copy())
     }
     loop key in keys {
         removed := state.rows.remove(key)
@@ -1551,7 +1551,7 @@ sema_register_item: fn(scopes: &SemaScopeTable, declarations: &[SemaScopeDeclara
 
 sema_append_function: fn(functions: &[FnBody], checked: SemaFunctionResult) -> Bool Never! {
     function: checked.value ?? return false
-    functions.push(function)
+    functions.push(function.copy())
     true
 }
 
@@ -1642,9 +1642,9 @@ sema_function_merge_generic_params: fn(enclosing: [TGenericParam], current: [TGe
         loop inner in current {
             if outer.name == inner.name -> shadowed = true
         }
-        if !shadowed -> merged.push(outer)
+        if !shadowed -> merged.push(outer.copy())
     }
-    loop inner in current -> merged.push(inner)
+    loop inner in current -> merged.push(inner.copy())
     merged
 }
 sema_function_normalize_owner_type: fn(graph: SemaRegistrationGraph, owner_type: Type, caller_module_identity: String) -> Type Never! {
@@ -2397,10 +2397,10 @@ sema_comptime_checked_function_rows: fn(functions: [SemaComptimeFunctionResult])
 // caller carries those obligations to the solve that settles them.
 sema_comptime_append_checked_function: fn(result: SemaComptimeFunctionResult, functions: &[FnBody], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> Bool Never! {
     function: result.function ?? return false
-    functions.push(function)
-    loop fact in result.call_facts -> call_facts.push(fact)
-    loop request in result.calls -> comptime_requests.push(request)
-    loop reference in result.name_references -> name_references.push(reference)
+    functions.push(function.copy())
+    loop fact in result.call_facts -> call_facts.push(fact.copy())
+    loop request in result.calls -> comptime_requests.push(request.copy())
+    loop reference in result.name_references -> name_references.push(reference.copy())
     result.complete || result.obligations_pending
 }
 
@@ -2411,7 +2411,7 @@ sema_comptime_push_obligations: fn(result: SemaComptimeFunctionResult, diagnosti
     if !result.obligations_pending -> return
     mark: sema_failure_obligation_mark()
     loop diagnostic in result.diagnostics {
-        if sema_failure_obligation_callee(diagnostic, mark) != None -> diagnostics.push(diagnostic)
+        if sema_failure_obligation_callee(diagnostic, mark) != None -> diagnostics.push(diagnostic.copy())
     }
 }
 
@@ -2420,7 +2420,7 @@ sema_comptime_push_obligations: fn(result: SemaComptimeFunctionResult, diagnosti
 sema_comptime_append_checked_function_to_module: fn(result: SemaComptimeFunctionResult, module_row: &SemaGraphModuleResult) -> Bool Never! {
     if !sema_comptime_append_checked_function(result, module_row.functions, module_row.call_facts, module_row.comptime_requests, module_row.name_references) -> return false
     module_row.exact_int_reachable = module_row.exact_int_reachable || result.exact_int_reachable
-    loop event in result.copy_events -> module_row.copy_events.push(event)
+    loop event in result.copy_events -> module_row.copy_events.push(event.copy())
     true
 }
 
@@ -2536,7 +2536,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     if memory_row == {
         .Val(position) -> {
             if memory_plan.functions[position].function == .Val(planned) -> memory_func = planned
-            loop diagnostic in memory_plan.functions[position].diagnostics -> diagnostics.push(diagnostic)
+            loop diagnostic in memory_plan.functions[position].diagnostics -> diagnostics.push(diagnostic.copy())
             memory_complete = memory_plan.functions[position].complete
         }
         else -> {
@@ -2545,7 +2545,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     }
     sema_comptime_probe_prepare(probe, environment, program, available.counted_values)
     if !probe.applied {
-        loop diagnostic in probe.diagnostics -> diagnostics.push(diagnostic)
+        loop diagnostic in probe.diagnostics -> diagnostics.push(diagnostic.copy())
         sema_attach_diagnostic_source_locations(diagnostics, 0, environment.source_segments)
         return SemaComptimeFunctionResult{
             module_identity: module_identity,
@@ -2736,7 +2736,7 @@ sema_check_method_input_row: fn(module_identity: String, job: SemaBodyJob, memor
     diagnostics := [Diagnostic]{}
     memory_complete := false
     if memory_position == .Val(position) {
-        loop diagnostic in memory_plan.functions[position].diagnostics -> diagnostics.push(diagnostic)
+        loop diagnostic in memory_plan.functions[position].diagnostics -> diagnostics.push(diagnostic.copy())
         memory_complete = memory_plan.functions[position].complete
     }
     method_generic_params := environment.generic_params.copy()
@@ -3201,7 +3201,7 @@ sema_check_registration_module_start: fn(environment: SemaScopeEnvironment, prog
         // The module's unknown applied rules (E0927) do not stop its check;
         // they follow its declaration errors, as Rust reports a derive of a
         // tag (E0731) before the unknown rule on the same marker.
-        if module_index < graph.unknown_rule_diagnostics.len() -> loop diagnostic in graph.unknown_rule_diagnostics[module_index] -> diagnostics.push(diagnostic)
+        if module_index < graph.unknown_rule_diagnostics.len() -> loop diagnostic in graph.unknown_rule_diagnostics[module_index] -> diagnostics.push(diagnostic.copy())
         return SemaGraphModuleResult{
             package_identity: graph.modules[module_index].package_identity,
             module_path: graph.modules[module_index].module_path,
@@ -3554,7 +3554,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
             memory_position: sema_check_ready_memory_position(ready, item_index, job, module_index, memory_plan, environment, program)
             if memory_position == {
                 .Val(position) -> {
-                    loop diagnostic in memory_plan.functions[position].diagnostics -> result.diagnostics.push(diagnostic)
+                    loop diagnostic in memory_plan.functions[position].diagnostics -> result.diagnostics.push(diagnostic.copy())
                     if !memory_plan.functions[position].complete {
                         result.complete = false
                         result.incomplete_reasons.push("function `{function_name}`: memory plan is incomplete")
@@ -3575,7 +3575,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
             sema_hardware_use_merge(result.hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
             loop source in checked.comptime_body_sources -> result.comptime_body_sources.push(source)
             result.compute_facts.push(checked.compute_facts)
-            if checked.failure == .Val(facts) -> result.failure_facts.push(facts)
+            if checked.failure == .Val(facts) -> result.failure_facts.push(facts.copy())
             if checked.value == .Val(function) {
                 if sema_function_publish_return_views(scopes, return_view_rows, function) {
                     scopes_changed = true
@@ -3739,7 +3739,7 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     compute_facts.push(checked.compute_facts)
     // A method's failure row joins the bundle failure solve, which infers
     // the contract of an inherent method as it does a top-level function's.
-    if checked.failure == .Val(facts) -> failure_facts.push(facts)
+    if checked.failure == .Val(facts) -> failure_facts.push(facts.copy())
     name_references.extend(function_name_references)
     if !memory_complete || !owner_generic_complete {
         causes := [String]{}
@@ -4513,7 +4513,7 @@ sema_check_parallel_method_jobs: fn(graph: SemaRegistrationGraph, source_module:
             }
             .TopLevel(_) -> panic("a top-level job entered the method wave")
         }
-        jobs.push(job)
+        jobs.push(job.copy())
     }
     jobs
 }
@@ -5303,7 +5303,7 @@ sema_check_soft_public_signature: fn(function: Func, declared: [String:Int], cod
     loop parameter in function.type_params -> local.push(parameter.name)
     ranges := [Span]{}
     loop parameter in function.params -> ranges.push(parameter.ty_span)
-    if function.return_type_span == .Val(span) -> ranges.push(span)
+    if function.return_type_span == .Val(span) -> ranges.push(span.copy())
     // A bound runs from the parameter's name to its `,`, `>` or default `=`.
     loop parameter in function.type_params {
         end := parameter.name_span.end
@@ -5646,7 +5646,7 @@ sema_name_first_references: fn(rows: [NameReference]) -> [NameReference] Never! 
             kinds[row.kind] = kind
         }
         if sema_name_reference_seen(seen, path, kind, row.def_span.start, row.def_span.end, identity, 0) -> next
-        kept.push(row)
+        kept.push(row.copy())
     }
     kept
 }
@@ -6281,7 +6281,7 @@ SemaComptimeValueSite: enum {
 
 sema_comptime_value_site_add: fn(sites: &[String:[SemaComptimeValueSite]], slot: String, site: SemaComptimeValueSite) Never! {
     rows := sites.get(slot) ?? [SemaComptimeValueSite]{}
-    rows.push(site)
+    rows.push(site.copy())
     sites[slot] = rows
 }
 
@@ -7031,7 +7031,7 @@ sema_comptime_available_constants_add: fn(available: &SemaComptimeAvailableConst
 sema_comptime_waiting_dependencies: fn(available: SemaComptimeAvailableConstants, dependencies: [String]) -> [String] Never! {
     waiting := [String]{}
     loop key in dependencies {
-        if available.keys.get(key) == None -> waiting.push(key)
+        if available.keys.get(key) == None -> waiting.push(key.copy())
     }
     waiting
 }
@@ -7849,7 +7849,7 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
             loop existing in dependencies {
                 if existing == dependency -> already = true
             }
-            if !already -> dependencies.push(dependency)
+            if !already -> dependencies.push(dependency.copy())
         }
         waiting := sema_comptime_waiting_dependencies(available, dependencies)
         if waiting.len() > 0 -> return SemaComptimeItemCheck{request: None, dependencies: dependencies, waiting_dependencies: waiting, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
@@ -8084,7 +8084,7 @@ sema_failure_add_candidate: fn(graph: SemaRegistrationGraph, source_index: Int, 
     if facts.direct || address_taken.get(facts.function_key) != None -> return
     row: sema_registration_callable_row(graph, facts.function_key) ?? return
     if !sema_failure_row_in_module(graph, row, source_index) || !sema_failure_row_candidate(graph, row) -> return
-    candidates.push(facts)
+    candidates.push(facts.copy())
     inferred[facts.function_key] = true
 }
 
@@ -8213,7 +8213,7 @@ sema_failure_fixpoint: fn(candidates: [SemaFunctionFailureFacts], inferred: &[St
             caller: candidates[row].function_key
             if inferred.get(caller) ?? false {
                 inferred[caller] = false
-                fallen.push(caller)
+                fallen.push(caller.copy())
             }
         }
     }
@@ -8239,7 +8239,7 @@ sema_failure_settle_obligations: fn(diagnostics: &[Diagnostic], solved: [String:
     loop diagnostic in diagnostics {
         detail: diagnostic.detail ?? ""
         if !detail.starts_with(mark) {
-            kept.push(diagnostic)
+            kept.push(diagnostic.copy())
             next
         }
         lines: detail.split("\n").to_list()
@@ -8270,13 +8270,13 @@ sema_failure_domain_dedupe: fn(diagnostics: &[Diagnostic], seen: &[String:Bool])
     loop diagnostic in diagnostics {
         detail: diagnostic.detail ?? ""
         if diagnostic.code != "E2404" || !detail.starts_with("failure-domain:") {
-            kept.push(diagnostic)
+            kept.push(diagnostic.copy())
             next
         }
         key: detail.split("\n").to_list()[0]
         if seen.get(key) != None -> next
         seen[key] = true
-        kept.push(diagnostic)
+        kept.push(diagnostic.copy())
     }
     diagnostics = kept
 }
@@ -8300,7 +8300,7 @@ sema_comptime_failure_closure_add: fn(graph: SemaRegistrationGraph, closure: &Se
     if result.failure == .Val(facts) {
         if sema_registration_module_index(graph, result.module_identity) == .Val(source_index) {
             closure.owners.push(source_index)
-            closure.facts.push(facts)
+            closure.facts.push(facts.copy())
         }
     }
     sema_comptime_push_obligations(result, closure.obligations)
@@ -8975,7 +8975,7 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     diagnostics := stage.diagnostics
     checked_types := [TTypeDef]{}
     loop staged_module in stage.modules {
-        loop type_definition in staged_module.declarations.type_defs -> checked_types.push(type_definition)
+        loop type_definition in staged_module.declarations.type_defs -> checked_types.push(type_definition.copy())
     }
     complete := resolved_graph.complete && stage.complete
     obligation_mark: sema_failure_obligation_mark()
@@ -8984,7 +8984,7 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
         // body pass that reuses it (sema_comptime_push_obligations).
         loop diagnostic in result.diagnostics {
             if result.obligations_pending && sema_failure_obligation_callee(diagnostic, obligation_mark) != None -> next
-            diagnostics.push(diagnostic)
+            diagnostics.push(diagnostic.copy())
         }
         if !result.complete && !result.obligations_pending -> complete = false
     }
@@ -9225,11 +9225,11 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     compute_facts := [SemaComputeFunctionFacts]{}
     loop module_index in 0..<modules.len() {
         module_result: modules[module_index]
-        loop fact in module_result.call_facts -> call_facts.push(fact)
+        loop fact in module_result.call_facts -> call_facts.push(fact.copy())
         sema_hardware_use_merge(hardware_use, sema_hardware_use_snapshot(module_result.hardware_use))
-        loop request in module_result.comptime_requests -> comptime_requests.push(request)
-        loop source in module_result.comptime_body_sources -> comptime_body_sources.push(source)
-        loop facts in module_result.compute_facts -> compute_facts.push(facts)
+        loop request in module_result.comptime_requests -> comptime_requests.push(request.copy())
+        loop source in module_result.comptime_body_sources -> comptime_body_sources.push(source.copy())
+        loop facts in module_result.compute_facts -> compute_facts.push(facts.copy())
     }
     if trace_sink == .Val(sink) -> sink.end("sema.facts", call_facts.len())
     // Only an error makes the graph incomplete: warning-only bodies (L0103

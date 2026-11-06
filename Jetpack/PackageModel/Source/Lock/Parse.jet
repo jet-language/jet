@@ -545,7 +545,7 @@ pkg_lock_build_workspace_overlay_policy: fn(overlays: [PartialWorkspaceOverlay],
     loop overlay in overlays {
         name: overlay.name ?? return Err(LockError.Invalid("workspace overlay is missing `name`"))
         if overlay_names.contains(name) -> return Err(LockError.Invalid("duplicate workspace overlay `{name}`"))
-        overlay_names.push(name)
+        overlay_names.push(name.copy())
         provider: if overlay.provider == {
             .Val(provider_name) -> Val(ProviderOverride{provider: provider_name, channel: overlay.channel})
             .None -> None

@@ -86,7 +86,7 @@ link_pack_local: fn(p: &LinkPack, key: Int, name: String, info: Int, shndx: Int,
     if p.local_index.get(key) == .Val(found) -> return 1 + p.ord_row.len() + found
     j: p.l_name.len()
     p.local_index.add(key, j).drop("checked absent above")
-    p.l_name.push(name)
+    p.l_name.push(name.copy())
     p.l_info.push(info)
     p.l_shndx.push(shndx)
     p.l_value.push(value)
@@ -258,7 +258,7 @@ link_pack_header: fn(h: &LinkPackHeaders, name: Int, kind: Int, flags: Int, offs
 link_pack_shstr: fn(table: &[U8], seen: &[String:Int], name: String) -> Int Never! {
     if seen.get(name) == .Val(at) -> return at
     at: elf64_string(table, name)
-    seen.add(name, at).drop("checked absent above")
+    seen.add(name.copy(), at).drop("checked absent above")
     at
 }
 
@@ -430,7 +430,7 @@ link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8]
     if eh_index >= 0 {
         elf64_pad(bytes, 8)
         eh_at: bytes.len()
-        bytes.extend(eh)
+        bytes.extend(eh.copy())
         link_pack_header(h, link_pack_shstr(shstrtab, shstr_seen, ".eh_frame"), LINK_SHT_PROGBITS, 2, eh_at, eh.len(), 0, 0, 8, 0)
         if eh_rel_end > eh_rel_first {
             elf64_pad(bytes, 8)
@@ -442,20 +442,20 @@ link_pack_write: fn(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8]
     link_pack_header(h, link_pack_shstr(shstrtab, shstr_seen, ".note.GNU-stack"), LINK_SHT_PROGBITS, 0, bytes.len(), 0, 0, 0, 1, 0)
     elf64_pad(bytes, 8)
     symtab_at: bytes.len()
-    bytes.extend(symtab)
+    bytes.extend(symtab.copy())
     link_pack_header(h, link_pack_shstr(shstrtab, shstr_seen, ".symtab"), LINK_SHT_SYMTAB, 0, symtab_at, symtab.len(), strtab_index, first_global, 8, 24)
     if extended {
         elf64_pad(bytes, 8)
         xindex_at: bytes.len()
-        bytes.extend(xindex)
+        bytes.extend(xindex.copy())
         link_pack_header(h, link_pack_shstr(shstrtab, shstr_seen, ".symtab_shndx"), LINK_SHT_SYMTAB_SHNDX, 0, xindex_at, xindex.len(), symtab_index, 0, 4, 4)
     }
     strtab_at: bytes.len()
-    bytes.extend(strtab)
+    bytes.extend(strtab.copy())
     link_pack_header(h, link_pack_shstr(shstrtab, shstr_seen, ".strtab"), 3, 0, strtab_at, strtab.len(), 0, 0, 1, 0)
     shstrtab_name: link_pack_shstr(shstrtab, shstr_seen, ".shstrtab")
     shstrtab_at: bytes.len()
-    bytes.extend(shstrtab)
+    bytes.extend(shstrtab.copy())
     link_pack_header(h, shstrtab_name, 3, 0, shstrtab_at, shstrtab.len(), 0, 0, 1, 0)
     elf64_pad(bytes, 8)
     shoff: bytes.len()
@@ -489,15 +489,15 @@ x64_link_runtime_pack: fn(names: [String], bufs: &&[[U8]], extra_roots: [String]
             if g < 0 -> next
             name: c.g_name[g]
             if link_pack_c_abi(name) && seen.get(name) == None {
-                seen.add(name, true).drop("checked absent above")
-                root_names.push(name)
+                seen.add(name.copy(), true).drop("checked absent above")
+                root_names.push(name.copy())
             }
         }
     }
     loop name in extra_roots {
         if seen.get(name) == None {
-            seen.add(name, true).drop("checked absent above")
-            root_names.push(name)
+            seen.add(name.copy(), true).drop("checked absent above")
+            root_names.push(name.copy())
         }
     }
     loop name in root_names {
@@ -686,9 +686,9 @@ link_image_add_section_at: fn(elf: &[U8], tail: &[U8], origin: Int, name: String
     }
     elf64_pad(tail, 8)
     payload_at: origin + tail.len()
-    tail.extend(payload)
+    tail.extend(payload.copy())
     new_names_at: origin + tail.len()
-    tail.extend(names)
+    tail.extend(names.copy())
     elf64_pad(tail, 8)
     new_shoff: tail.len()
     tail.extend(headers)

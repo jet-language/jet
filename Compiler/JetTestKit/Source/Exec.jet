@@ -33,7 +33,7 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
     loop id in options.bless.ids {
         if kit_expect_named(seen, id) -> return KitSelection{ids: [], error: "duplicate bless ID: {id}"}
         if !kit_expect_named(all_ids, id) -> return KitSelection{ids: [], error: "unknown bless ID: {id}"}
-        seen.push(id)
+        seen.push(id.copy())
     }
     selected := [String]{}
     loop (index, id) in all_ids {
@@ -41,7 +41,7 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
         if options.bless.ids.len() > 0 && !kit_expect_named(options.bless.ids, id) -> next
         if options.filter != "" && !id.contains(options.filter) -> next
         if index % options.shard_count != options.shard_index - 1 -> next
-        selected.push(id)
+        selected.push(id.copy())
     }
     KitSelection{ids: selected, error: ""}
 }
@@ -136,7 +136,7 @@ kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, ove
             if variable.name == "JET_FFI_CACHE_DIR" -> cache_override = variable.value ?? ""
         }
         marked := [String]{env.trace_node, files.join(env.root, "Tools/testkit/native-command.mjs"), "--case", env.trace_case, "--root", env.root, "--cwd", cwd, "--jet", env.jet, "--cache-root", env.trace_cache, "--ffi-cache", cache_override, "--"}
-        loop argument in argv -> marked.push(argument)
+        loop argument in argv -> marked.push(argument.copy())
         marked
     } else -> { argv }
     spec := process.cmd(commands).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream).timeout(env.timeout)
@@ -231,7 +231,7 @@ kit_exec_invoke_terminal: fn(env: KitEnv, argv: [String], cwd: String, scratch: 
 kit_exec_terminal_order: fn(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
     ordered := [KitTerminalEvent]{}
     loop event in events {
-        ordered.push(event)
+        ordered.push(event.copy())
         position := ordered.len() - 1
         loop position > 0 && ordered[position - 1].at > ordered[position].at {
             earlier: ordered[position - 1]

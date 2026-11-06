@@ -15,6 +15,7 @@ use jet_foundation.[
     TListRemoveMode,
     Type,
     ViewSourcePath,
+    collection_row_takes_argument,
     expr_span,
     sema_collection_is_map,
     sema_collection_method_argument_type,
@@ -172,10 +173,13 @@ sema_call_collections_reject_callback_shape: fn(method: String, callback_return:
     return false
 }
 
-sema_call_collections_ownership_params: fn(required_types: [Type]) -> [SemaCallParam] Never! {
+// The ownership walk's parameter rows: a slot the row stores is a take
+// (`&&`) parameter, every other slot reads (collection_row_takes_argument).
+sema_call_collections_ownership_params: fn(contract: SemaCollectionMethodContract, required_types: [Type]) -> [SemaCallParam] Never! {
     params := [SemaCallParam]{}
     loop (index, ty) in required_types {
-        params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(ty), variadic: false})
+        convention: if collection_row_takes_argument(contract.row, index) -> AccessConvention.Move else -> AccessConvention.Read
+        params.push(SemaCallParam{label: "arg{index}", name: "arg{index}", zone: ParamZone.Either, default: None, default_ref: None, convention: convention, ty: Val(ty), variadic: false})
     }
     return params
 }
@@ -293,22 +297,39 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             comparator = true
             required = sema_collection_method_argument_type(contract, index, seed, true) ?? required
         }
-        required_types.push(required)
-        // A generated argument that takes (convention `Move`) on a method
-        // that stores its argument (a Mutate/TryMutate row other than
-        // `remove`, which only compares) keeps the exact-place move an
-        // ordinary consuming argument gets (Calls/Checking.jet), so the stored
-        // value moves out of its owner instead of materializing a copy (the
-        // Rust reference's `finish_builtin_method`). A method that only reads
-        // its argument (`contains`, `index_of`, ...) never takes it: the
-        // ownership walk below records no move for a collection argument, so
-        // a later read of the owner must still find its value. A read
-        // parameter or its field has no storage to give up (E0201): never a
-        // silent copy.
+        required_types.push(required.copy())
+        // A slot the row stores owns what it receives (#6611,
+        // collection_row_takes_argument), so an unmarked name there is the
+        // call's take exactly as at a `&&` parameter (Calls/Checking.jet): a
+        // plain owned local moves at its last use, any other name moves out
+        // of its owner here. A call never copies on its own:
+        // a read parameter has no storage to give up (E0201). A slot that only
+        // compares (`contains`, `remove`, `discard`, ...) never takes, so a
+        // later read of the owner still finds its value.
+        takes_argument: collection_row_takes_argument(contract.row, index)
+        unmarked_take: takes_argument && updated_args[index].convention == AccessConvention.Read
+        noted_take := false
+        if takes_argument && updated_args[index].convention == AccessConvention.Read && updated_args[index].expr == .Ident(_, _, _) && !sema_ownership_type_is_copy(value.ty) && !sema_ownership_type_is_copy(required) && !sema_ownership_argument_is_function_item(updated_args[index], scopes) {
+            if sema_ownership_note_implicit_take(state, updated_args[index].expr, value.ty, required, environment, program, context.generic_params, scopes) != None {
+                noted_take = true
+            } else {
+                updated_args[index].convention = AccessConvention.Move
+            }
+        }
+        // A taken argument keeps the exact-place move an ordinary consuming
+        // argument gets, so the stored value moves out of its owner instead
+        // of materializing a copy. A bare name of a read parameter is reported
+        // at the name by the ownership walk below, which names the consumer;
+        // a field place reports at the mark.
         stores_argument: (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.name != "remove"
-        consuming_mark: stores_argument && updated_args[index].convention == AccessConvention.Move && !sema_ownership_type_is_copy(value.ty)
+        consuming_mark: stores_argument && (updated_args[index].convention == AccessConvention.Move || noted_take) && !sema_ownership_type_is_copy(value.ty)
         taken_place := consuming_mark && sema_call_marked_move_place(updated_args[index].expr, value)
-        if taken_place && (sema_ownership_reject_read_param_move(state, updated_args[index].expr, scopes, diagnostics) || sema_ownership_reject_place_alias_move(state, updated_args[index].expr, scopes, "`.{method}()`", diagnostics)) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        walk_reports: takes_argument && updated_args[index].expr == .Ident(_, _, _)
+        // A resource has one cleanup owner, so a take that would copy it out
+        // of a place read in place (E0211) or out of a borrowed parameter
+        // (E0201 naming `&&`) is refused for that, never with a `.copy()` fix.
+        if unmarked_take && (!sema_copy_site_refuse_resource_copy(value, environment, program, scopes, context, diagnostics) || !sema_copy_site_refuse_borrowed_copy(updated_args[index].expr, "`.{method}()`", environment, program, scopes, context, diagnostics)) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        if taken_place && ((!walk_reports && sema_ownership_reject_read_param_move(state, updated_args[index].expr, scopes, diagnostics)) || sema_ownership_reject_place_alias_move(state, updated_args[index].expr, scopes, "`.{method}()`", diagnostics)) -> return SemaMethodSpecialCheck{handled: true, value: None}
         if taken_place && sema_ownership_binding_for_expr(state, updated_args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
         stored: sema_call_marked_move_value(state, taken_place, updated_args[index].expr, value, scopes, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         typed.push(stored)
@@ -332,15 +353,19 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
     }
     line: sema_source_line_at(environment.source_segments, span) ?? 0
     operation := sema_collection_method_operation(contract, updated_args.len(), literal_remove_mode, line, callback_return, callback_mutable, comparator)
-    ownership := if sema_call_collections_receiver_two_phase(receiver_value.ty, method) -> sema_ownership_check_two_phase_method_call(state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, false, sema_call_collections_ownership_params(required_types), updated_args, scopes, span, expr_span(receiver), diagnostics) else -> sema_ownership_check_method_call_as(state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, true, false, true, sema_call_collections_ownership_params(required_types), updated_args, scopes, span, expr_span(receiver), diagnostics)
+    ownership := if sema_call_collections_receiver_two_phase(receiver_value.ty, method) -> sema_ownership_check_two_phase_method_call(state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, false, sema_call_collections_ownership_params(contract, required_types), updated_args, scopes, span, expr_span(receiver), diagnostics) else -> sema_ownership_check_method_call_as(state, "collection.{method}", "`.{method}()`", receiver, contract.receiver_access, true, false, true, sema_call_collections_ownership_params(contract, required_types), updated_args, scopes, span, expr_span(receiver), diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    // An unmarked argument the method stores is shared by lowering; a value
-    // a clone refuses moves into the collection instead, and one holding a
-    // resource read in place is refused (CopySites.jet).
+    // A bare name in a slot the row stores was taken by the ownership walk
+    // above (a read parameter is E0201, a later use names this call). The
+    // copy-site audit settles every other stored value: one holding a resource
+    // read in place is refused (CopySites.jet), and an unmarked name inside a
+    // carrier (`Val(name)`) or in a slot that does not take moves in when a
+    // clone refuses it.
     if (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.name != "remove" {
         loop index in 0..<updated_args.len() {
             if index < typed.len() && !sema_copy_site_check_guard_owned(typed[index], environment, program, scopes, state, context, diagnostics, false) -> return SemaMethodSpecialCheck{handled: true, value: None}
-            if !sema_copy_site_record_stored(updated_args[index].expr, "`.{method}()`", environment, program, scopes, state, context, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+            taken_name: collection_row_takes_argument(contract.row, index) && updated_args[index].expr == .Ident(_, _, _)
+            if !taken_name && !sema_copy_site_record_stored(updated_args[index].expr, "`.{method}()`", environment, program, scopes, state, context, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
     effect_row := sema_collection_method_effect_row(contract, span)
@@ -444,7 +469,7 @@ sema_call_collections_record_disjoint_views: fn(receiver: Expr, method: String, 
     proof_spans := [Span]{}
     slots := [[String]]{}
     if method == "split_write" {
-        proof_spans.push(span)
+        proof_spans.push(span.copy())
         proof_spans.push(expr_span(args[0].expr))
         slots.push([String]{"left"})
         slots.push([String]{"right"})
@@ -455,7 +480,7 @@ sema_call_collections_record_disjoint_views: fn(receiver: Expr, method: String, 
                 slots.push([String]{"[]"})
             }
         } else {
-            proof_spans.push(span)
+            proof_spans.push(span.copy())
             slots.push([String]{"[]"})
         }
     }

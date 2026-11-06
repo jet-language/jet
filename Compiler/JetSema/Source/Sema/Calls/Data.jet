@@ -139,7 +139,7 @@ sema_dyn_try_member: fn(receiver: Expr, receiver_value: TExpr, method: String, a
     if count == 1 {
         sema_data_check_labels(method, args, [String]{}, span, diagnostics)
         argument: sema_check_expression(args[0].expr, if method == "get" -> None else -> Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        typed.push(argument)
+        typed.push(argument.copy())
         result_ty = Type.Option{inner: sema_dyn_type()}
         if method == "get" {
             index_ty: sema_expr_expected_type(argument.ty, environment, program)
@@ -364,7 +364,7 @@ sema_data_infer_query_callback: fn(call_name: String, row: Type, argument: CallA
 
 sema_data_query_push_argument: fn(argument: CallArg, value: TExpr?, source_args: &[CallArg], argument_types: &[Type], typed: &[TExpr]) -> Bool {
     checked: value ?? return false
-    source_args.push(argument)
+    source_args.push(argument.copy())
     argument_types.push(checked.ty)
     typed.push(checked)
     true
@@ -736,7 +736,7 @@ sema_data_check_list_query: fn(receiver: Expr, receiver_value: TExpr, row: Type,
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     source_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
-    loop argument in args -> source_args.push(argument)
+    loop argument in args -> source_args.push(argument.copy())
     result_type: Type.Result{ok: Type.Apply{name: sema_data_source_type_name(environment, program, "Query"), args: [Type]{row}}, err: sema_data_decode_error()}
     value: sema_data_core_emit(record, "query", source_args, [Type]{receiver_value.ty, sql}, [TExpr]{receiver_value, query}, [Type]{row}, result_type, span, expected, environment, program, scopes, state, context, diagnostics)
     SemaMethodSpecialCheck{handled: true, value: value}

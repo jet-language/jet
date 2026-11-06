@@ -343,7 +343,7 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
         }
     }
     loop field in graph.unsupported {
-        if !facts.unmapped.contains(field) -> facts.unmapped.push(field)
+        if !facts.unmapped.contains(field) -> facts.unmapped.push(field.copy())
     }
     loop output in graph.outputs {
         label: if output.system == "" -> "{output.kind.label()}:{output.attribute}" else -> "{output.kind.label()}:{output.system}:{output.attribute}"
@@ -372,7 +372,7 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
         }
     }
     loop field in facts.unmapped {
-        if !graph.unsupported.contains(field) -> graph.unsupported.push(field)
+        if !graph.unsupported.contains(field) -> graph.unsupported.push(field.copy())
     }
     graph.unsupported = provider_sorted_unique(graph.unsupported)
     lock := graph.semantic_lock()

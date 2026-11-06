@@ -653,7 +653,7 @@ channel_try_send: fn(channel: Shared<__ServiceChannel>, value: String) -> __Chan
     guard := channel.guard_edit()
     if guard.value.closed -> return __ChannelSend.Closed
     if guard.value.values.len() - guard.value.head >= guard.value.capacity -> return __ChannelSend.Full
-    guard.value.values.push(value)
+    guard.value.values.push(value.copy())
     __ChannelSend.Sent
 }
 
@@ -3678,7 +3678,7 @@ authority_route_select: fn(scan: __RouteScan, store: String, entry: __DeliveryEn
     bound := [__RouteCandidate]{}
     loop candidate in scan.candidates {
         if candidate.store == {
-            .Val(value) -> { if value == store -> bound.push(candidate) }
+            .Val(value) -> { if value == store -> bound.push(candidate.copy()) }
             .None -> {}
         }
     }
@@ -3802,7 +3802,7 @@ authority_requeue_pending: fn(endpoint: ServiceEndpoint, entries: [__PendingEntr
     loop entry in normalized {
         if !pending_contains(queue, entry) && !pending_contains(restored, entry) -> restored.push(entry)
     }
-    loop entry in queue -> restored.push(entry)
+    loop entry in queue -> restored.push(entry.copy())
     pending.value.queues[slot].entries = restored
 }
 

@@ -156,7 +156,7 @@ sema_expression_path_segments: fn(expression: Expr) -> [String]? {
         .Ident(name, _, _) -> Val([String]{name})
         .Field(inner, member, _, _) -> {
             segments := sema_expression_path_segments(inner) ?? return None
-            segments.push(member)
+            segments.push(member.copy())
             Val(segments)
         }
         else -> None
@@ -175,7 +175,7 @@ sema_expression_join_segments: fn(segments: [String], start: Int) -> String Neve
 // root names no variant.
 sema_expression_enum_variant_path: fn(base: Expr, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> SemaExpressionEnumPath? {
     segments := sema_expression_path_segments(base) ?? return None
-    segments.push(member)
+    segments.push(member.copy())
     root: segments[0]
     index: sema_scope_resolve_index(scopes, root)
     if index == .Val(found) {

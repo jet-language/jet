@@ -186,7 +186,7 @@ impl PackageFacts {
                 return Val("test suite `{code}` is declared twice: {where}, and by `t.suite(\"{code}\", …)` in test.jet; a suite has one name")
             }
         }
-        loop code in code_suites -> known.push(code)
+        loop code in code_suites -> known.push(code.copy())
         loop profile in self.test_profiles {
             loop suite in profile.suites {
                 if !known.contains(suite) -> return Val("test profile `{profile.name}` names unknown suite `{suite}` (known: {known.join(", ")})")

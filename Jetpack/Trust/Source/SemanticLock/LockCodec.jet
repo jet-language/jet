@@ -44,7 +44,7 @@ trust_lock_sorted_source_maps: fn(maps: [SourceMapEntry]) -> [SourceMapEntry] Ne
     loop map in maps {
         at := sorted.len()
         loop at > 0 && trust_lock_source_map_before(map, sorted[at - 1]) -> at -= 1
-        sorted.insert(at, map)
+        sorted.insert(at, map.copy())
     }
     sorted
 }
@@ -147,7 +147,7 @@ PartialSourceMap: struct {
         if key == {
             "pattern" -> self.pattern = Val(value)
             "sources" -> self.sources = trust_lock_string_list(value)
-            "source" -> self.sources.push(value)
+            "source" -> self.sources.push(value.copy())
             else -> {}
         }
     }

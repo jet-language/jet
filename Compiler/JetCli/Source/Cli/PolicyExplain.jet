@@ -72,13 +72,13 @@ jet_cli_explain_loaded_policy: fn(key: PolicyKey, loaded: JetDriverSourceQueryRe
  target: declaration.target ?? next
  if offset < target.start || offset > target.end -> next
  }
- declarations.push(declaration)
+ declarations.push(declaration.copy())
  }
  } else {
  // Whole-file policy queries combine every loaded module, not just entry.
  loop source_module in loaded.modules {
  loop declaration in source_module.program.policy_declarations {
- if declaration.key == key -> declarations.push(declaration)
+ if declaration.key == key -> declarations.push(declaration.copy())
  }
  }
  }

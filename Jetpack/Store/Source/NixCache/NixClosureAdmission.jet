@@ -134,7 +134,7 @@ NixAdmission: struct {
                 }
                 loop reference in found.references {
                     if !scheduled.has(reference) {
-                        scheduled.add(reference)
+                        scheduled.add(reference.copy())
                         queue.add(reference)
                     }
                 }
@@ -161,8 +161,8 @@ NixAdmission: struct {
                 object: objects[store_path]
                 loop reference in object.references {
                     if !scheduled.has(reference) {
-                        scheduled.add(reference)
-                        queue.add(reference)
+                        scheduled.add(reference.copy())
+                        queue.add(reference.copy())
                     }
                 }
                 fetched[store_path] = object

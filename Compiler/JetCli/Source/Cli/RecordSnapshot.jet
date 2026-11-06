@@ -116,12 +116,12 @@ jet_cli_record_snapshot_query: fn(entries: [JetCLIRecordIndexEntry], authenticat
             produced := [JetCLIRecordLink]{}
             loop link in entry.consumed {
                 if visible.get(jet_cli_record_key(link.kind, link.artifact_id)) != None {
-                    consumed.push(link)
+                    consumed.push(link.copy())
                 }
             }
             loop link in entry.produced {
                 if visible.get(jet_cli_record_key(link.kind, link.artifact_id)) != None {
-                    produced.push(link)
+                    produced.push(link.copy())
                 }
             }
             row.consumed = consumed

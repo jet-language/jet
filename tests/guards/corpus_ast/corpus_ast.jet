@@ -189,7 +189,7 @@ policy_walk: fn(stack: &[PolicyWalkNode], visited: &[Expr]) Never! {
                 }
             }
             .Expression(expression) -> {
-                visited.push(expression)
+                visited.push(expression.copy())
                 if expression == {
                     .Str(parts, _, _) -> {
                         index := parts.len()
@@ -1008,7 +1008,7 @@ policy_collect_body_facts: fn(root: [Stmt], aliases: [String: String], facts: &P
                         if body[index] == .Val(binding) && binding.mutable {
                             if policy_without_parens(binding.init) == .Int(number, _, _, _, _) && number == 0 {
                                 if body[index + 1] == .For(_, _, _, kind, nested, span, _, _, _) {
-                                    if kind == .In(_, _) && policy_manual_counter_body(binding.name, nested) -> facts.manual_counter_loops.push(span)
+                                    if kind == .In(_, _) && policy_manual_counter_body(binding.name, nested) -> facts.manual_counter_loops.push(span.copy())
                                 }
                             }
                         }
@@ -1277,7 +1277,7 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
     loop rule in rules -> enabled.push(policy_applies(manifest, path, row, rule))
     loop expression in policy_program_expressions(program) {
         span: expr_span(expression)
-        if policy_is_process_input(expression, aliases) -> argv_sites.push(span)
+        if policy_is_process_input(expression, aliases) -> argv_sites.push(span.copy())
         loop index in 0..<rules.len() {
             rule: rules[index]
             if !enabled[index] -> next
@@ -1367,7 +1367,7 @@ policy_markdown_fences: fn(source: String, language: String) -> [String] {
                 current = ""
             }
         } else if trimmed == "```" {
-            fences.push(current)
+            fences.push(current.copy())
             inside = false
         } else {
             current += "{line}\n"

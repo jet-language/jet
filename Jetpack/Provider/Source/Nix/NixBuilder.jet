@@ -277,7 +277,7 @@ nix_builder_validate_builder: fn(evaluation: NixNativeDerivation) NativeNixBuild
 nix_builder_validate_literal_store_paths: fn(evaluation: NixNativeDerivation) NativeNixBuildError! {
     values := [String]{}
     loop entry in evaluation.env -> values.push(entry.value)
-    loop arg in evaluation.args -> values.push(arg)
+    loop arg in evaluation.args -> values.push(arg.copy())
     loop value in values {
         if !value.contains("/nix/store/") || value == "/nix/store" -> next
         admitted := false

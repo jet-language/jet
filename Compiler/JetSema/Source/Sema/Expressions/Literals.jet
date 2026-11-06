@@ -448,8 +448,8 @@ sema_expression_list_elements: fn(elements: [Expr], expected_element: Type?, env
     loop slot in 0..<checked_parts.len() {
         part: checked_parts[slot] ?? panic("checked list element inference left an unresolved part")
         item_type: element_types[slot] ?? panic("checked list element inference lost its element type")
-        parts.push(part)
-        resolved_types.push(item_type)
+        parts.push(part.copy())
+        resolved_types.push(item_type.copy())
     }
     Val(SemaExpressionListCheckedParts{parts: parts, element_types: resolved_types})
 }
@@ -469,7 +469,7 @@ sema_expression_list_member_spreads: fn(elements: [Expr]) -> [Expr] Never! {
             .MemberSpread(base, members, span, _) -> {
                 loop field in sema_expression_member_spread_fields(base, members, span) -> expanded.push(field)
             }
-            else -> expanded.push(element)
+            else -> expanded.push(element.copy())
         }
     }
     expanded
@@ -692,7 +692,7 @@ sema_expression_tuple: fn(fields: [TupleField], span: Span, expected: Type?, env
             compatible: sema_expr_expected_assignable(field_ty, value.ty, environment, program) ?? return None
             if !compatible -> return None
         }
-        values.push(value)
+        values.push(value.copy())
         types.push(TypeTupleField{name: field.name, ty: value.ty})
     }
     if expected_fields != None && fields.len() != (expected_fields ?? [TypeTupleField]{}).len() {

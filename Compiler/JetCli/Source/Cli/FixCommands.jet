@@ -115,12 +115,12 @@ jet_cli_fix_checked: fn(file: String, source: String, fixes: [JetCLIFix], baseli
     result := JetCLIFixApply{source: source, applied: 0, deferred: whole.deferred}
     loop fix in fixes {
         trial_fixes := kept.copy()
-        trial_fixes.push(fix)
+        trial_fixes.push(fix.copy())
         trial: jet_cli_fix_apply_non_overlapping(source, trial_fixes)
         if trial.source == result.source -> next
         errors: jet_cli_fix_errors(file, trial.source)
         if errors.len() <= baseline.len() {
-            kept.push(fix)
+            kept.push(fix.copy())
             result = JetCLIFixApply{source: trial.source, applied: trial.applied, deferred: whole.deferred}
             next
         }

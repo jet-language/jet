@@ -42,7 +42,7 @@ NarInfo: struct {
         loop reference in self.references {
             store_nar_validate_store_reference(reference)
             if seen.contains(reference) -> return Err(store_nar_invalid("narinfo contains duplicate references"))
-            seen.push(reference)
+            seen.push(reference.copy())
         }
         if self.deriver == {
             .Val(deriver) -> {
@@ -108,7 +108,7 @@ NarInfo: struct {
             if !pair.after.starts_with(" ") || pair.after.starts_with("  ") -> return Err(store_nar_invalid("narinfo field is missing its separator"))
             value: pair.after.removeprefix(" ")
             if seen.contains(key) && key != "Sig" -> return Err(store_nar_invalid("narinfo contains duplicate fields"))
-            seen.push(key)
+            seen.push(key.copy())
             if key == {
                 "StorePath" -> info.store_path = value
                 "URL" -> info.url = value

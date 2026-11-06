@@ -83,7 +83,7 @@ jet_cli_architecture_unique: fn(values: &[String]) Never! {
     values.sort()
     unique := [String]{}
     loop value in values {
-        if unique.len() == 0 || unique[unique.len() - 1] != value -> unique.push(value)
+        if unique.len() == 0 || unique[unique.len() - 1] != value -> unique.push(value.copy())
     }
     values = unique
 }
@@ -136,7 +136,7 @@ jet_cli_architecture_rows: fn(index: JetCLISemIndex) -> [JetCLIArchitectureRow] 
         callers := [String]{}
         loop call in calls {
             if call.callee_key != key -> next
-            group.push(call)
+            group.push(call.copy())
             if !callers.contains(call.caller_key) -> callers.push(call.caller_key)
         }
         if callers.len() < 2 -> next
@@ -152,7 +152,7 @@ jet_cli_architecture_rows: fn(index: JetCLISemIndex) -> [JetCLIArchitectureRow] 
         returns := [String]{}
         loop call in calls {
             if call.caller_key != key -> next
-            group.push(call)
+            group.push(call.copy())
             if !callees.contains(call.callee_key) -> callees.push(call.callee_key)
             if call.callee_return == .Val(result) {
                 if !returns.contains(result) -> returns.push(result)

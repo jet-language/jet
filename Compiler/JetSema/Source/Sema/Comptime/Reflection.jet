@@ -549,12 +549,12 @@ sema_comptime_reflection_type_fact_rows: fn(path: String, ty: Type) -> [TComptim
             }
             .Dimension(value) -> dimension = Val(sema_comptime_reflection_dimension(value))
             .Classification(value) -> {
-                fact_members.push(value)
+                fact_members.push(value.copy())
                 detail_name = "classification"
                 detail = Val(sema_comptime_reflection_struct("ClassificationInfo", [SemaComptimeReflectionField]{SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: value}}}))
             }
             .Nominal(value) -> {
-                fact_members.push(value)
+                fact_members.push(value.copy())
                 detail_name = "nominal"
                 detail = Val(sema_comptime_reflection_struct("NominalInfo", [SemaComptimeReflectionField]{SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: value}}}))
             }

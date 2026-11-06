@@ -215,7 +215,7 @@ NativeRuntimeRailContract: struct {
             if expected_rc != "0" -> return Err(NativeRuntimePackError.Invalid("publication requires successful admitted rail steps"))
             inputs: native_pack_rail_inputs(values, "inputs", produced)
             outputs: native_pack_output_roles(values)
-            produced.add(id, outputs).drop("step checked absent")
+            produced.add(id.copy(), outputs.copy()).drop("step checked absent")
             steps.push(NativeRuntimeRailStep{id, expected_rc, invocation: native_pack_handle_field(values, "invocation"), inputs, outputs})
         }
         Ok(NativeRuntimeRailContract{
@@ -346,7 +346,7 @@ NativePackReadCensus: struct {
 
 native_pack_blob: fn(store: ArtifactStore, object: ObjectHandle, census: &NativePackReadCensus) -[FS, Env, Exec, Time, Rand]> [U8] NativeRuntimePackError! {
     bytes: store.get_blob(object) ?? return Err(NativeRuntimePackError.Invalid("missing or corrupt publication object {object.text()}"))
-    if census.capture -> census.objects.push(object)
+    if census.capture -> census.objects.push(object.copy())
     Ok(bytes)
 }
 
@@ -556,7 +556,7 @@ native_pack_array_field: fn(fields: [String: Dyn], name: String) -> [Dyn] Native
 
 native_pack_unique: fn(seen: &[String: Bool], role: String) NativeRuntimePackError! {
     if role == "" || seen.get(role) != None -> return Err(NativeRuntimePackError.Invalid("empty or duplicate publication role/step {role}"))
-    seen.add(role, true).drop("checked absent")
+    seen.add(role.copy(), true).drop("checked absent")
 }
 
 native_pack_roles_field: fn(fields: [String: Dyn], name: String) -> [NativeRuntimeRoleObject] NativeRuntimePackError! {

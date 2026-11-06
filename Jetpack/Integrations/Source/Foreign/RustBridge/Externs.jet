@@ -226,7 +226,7 @@ CRecordDefinitions: struct {
         if self.handle_names.contains(name) -> return Val("*mut core::ffi::c_void")
         base: self.aliases.get(name) ?? return None
         if stack.contains(name) -> return None
-        stack.push(name)
+        stack.push(name.copy())
         resolved: self.rust_type_with_stack(base, stack)
         _ := stack.pop()
         resolved
@@ -577,7 +577,7 @@ pkg_ffi_inline_asm_entry_diagnostic: fn(asm: ExternEntry, inline: InlineEntry, t
         normalized: pkg_ffi_normalize_register(clobber)
         if !inline_assembly_register_known(target, normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} names clobber register `{clobber}`, which is not valid for target `{target}`", "fixed assembly clobbers are checked against the selected target namespace", "use a register valid for the selected target"))
         if seen_clobbers.contains(normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} repeats clobber register `{clobber}`", "the checked assembly contract must contain each discarded output exactly once", "remove duplicate names from `; clobbers …`"))
-        seen_clobbers.push(normalized)
+        seen_clobbers.push(normalized.copy())
         if output_register == .Val(result_register) {
             if result_register == normalized -> return Val(pkg_ffi_asm_error("{asm.line_hint} uses `{clobber}` as both result and an early-written clobber", "an early-written clobber cannot overwrite the fixed result destination", "choose a distinct result register or clobber register"))
         }

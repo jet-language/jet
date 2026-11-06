@@ -306,7 +306,7 @@ sema_call_concurrency_parallel: fn(receiver: Expr, receiver_value: TExpr, method
         makes_callback: sema_call_concurrency_callback_makes(callback.ty, [Type]{element}, Type.Bool, args[0].span, diagnostics)
         _ := sema_call_concurrency_check_parallel_callback(callback, args[0].expr, environment, program, scopes, state, context, diagnostics)
         if !makes_callback -> return SemaMethodSpecialCheck{handled: true, value: None}
-        typed.push(callback)
+        typed.push(callback.copy())
         // As for para_map, a fallible predicate's failure
         // leaves the call, which is the Result of the selection.
         callback_error: sema_call_concurrency_callback_error(callback.ty)

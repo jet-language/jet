@@ -389,7 +389,7 @@ RecordStringTable: struct {
 record_intern: fn(table: &RecordStringTable, value: String) Never! {
     if table.index.get(value) == None {
         table.index[value] = table.order.len()
-        table.order.push(value)
+        table.order.push(value.copy())
     }
 }
 
@@ -790,7 +790,7 @@ record_elements: fn(reader: RecordReader, id: Int) -> RecordElementsResult Never
     loop index in 0..<record_section_elements(reader, section) {
         decoded: record_section_element(reader, section, index)
         value: decoded.value ?? return RecordElementsResult{value: None, problem: decoded.problem}
-        values.push(value)
+        values.push(value.copy())
     }
     RecordElementsResult{value: Val(values), problem: None}
 }
@@ -805,7 +805,7 @@ record_decode: fn(bytes: [U8]) -> RecordDecodeResult Never! {
         loop index in 0..<record_section_elements(reader, section) {
             decoded: record_section_element(reader, section, index)
             value: decoded.value ?? return RecordDecodeResult{record: None, problem: decoded.problem}
-            elements.push(value)
+            elements.push(value.copy())
         }
         sections.push(RecordSection{id: reader.ids[section], elements: elements})
     }

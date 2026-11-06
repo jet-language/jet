@@ -80,7 +80,7 @@ pkg_workspace_lock_load_checked_file: fn(cache: &WorkspaceDeclarationCache, reso
             if package.name != member.name || package.members.len() > 0 -> return None
             if member.package_digest == "" || package.semantic_digest() != member.package_digest -> return None
             if physical_paths.contains(physical_path) || names.contains(member.name) -> return None
-            physical_paths.push(physical_path)
+            physical_paths.push(physical_path.copy())
             names.push(member.name)
             checked_members.push(checked.member.move())
             resolver.revalidate_source(present) ?? return None

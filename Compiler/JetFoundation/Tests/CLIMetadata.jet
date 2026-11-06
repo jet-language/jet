@@ -114,11 +114,11 @@ cli_metadata_wasm: fn(record: [U8], count: Int) -> [U8] Never! {
     payload := [U8]{}
     cli_metadata_leb(payload, 11)
     payload.extend("jet.command".bytes())
-    payload.extend(record)
+    payload.extend(record.copy())
     loop _ in 0..<count {
         out.push(U8{0})
         cli_metadata_leb(out, payload.len())
-        out.extend(payload)
+        out.extend(payload.copy())
     }
     out
 }

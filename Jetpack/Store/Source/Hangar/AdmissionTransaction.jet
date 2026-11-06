@@ -147,7 +147,7 @@ AdmissionTransaction: struct {
         store_transaction_validate_digest(object.digest)
         files.stat(object.source) ?? return Err(StoreError.IO(err).with_message("cannot inspect staged Hangar object `{object.source}`: {StoreError.IO(err).message()}"))
         destination: files.join(files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR), object.digest)
-        self.objects.push(object)
+        self.objects.push(object.copy())
         Ok(destination)
     }
 

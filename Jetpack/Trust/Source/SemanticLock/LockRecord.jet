@@ -174,7 +174,7 @@ SemanticLockFile: struct {
         kept := [SemanticRecord]{}
         loop record in self.records {
             if record.identity.kind == kind && record.identity.key == key -> next
-            kept.push(record)
+            kept.push(record.copy())
         }
         self.records = kept
     }
@@ -191,7 +191,7 @@ SemanticLockFile: struct {
             }
         }
         if found < 0 {
-            self.records.push(new_record)
+            self.records.push(new_record.copy())
             return None
         }
         previous: self.records[found].copy()
@@ -199,7 +199,7 @@ SemanticLockFile: struct {
         loop index in 0..<self.records.len() {
             if index != found -> kept.push(self.records[index])
         }
-        kept.push(new_record)
+        kept.push(new_record.copy())
         self.records = kept
         Val(previous)
     }

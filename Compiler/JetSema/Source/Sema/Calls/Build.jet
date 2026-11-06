@@ -72,7 +72,7 @@ sema_build_context_method_contract: fn(method: String, arity: Int) -> SemaBuildC
                 parameters.push(toolchain)
             } else {
                 union: Type.Union{members: [Type]{Type.String, toolchain}}
-                loop _ in 3..<arity -> parameters.push(union)
+                loop _ in 3..<arity -> parameters.push(union.copy())
             }
             result = sema_build_result("BuildProbe")
         }
@@ -135,7 +135,7 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
     ordinary := [CallArg]{}
     loop argument in args {
         if argument.flags.template_items != None -> next
-        ordinary.push(argument)
+        ordinary.push(argument.copy())
         required := Type?{None}
         if ordinary.len() <= contract.parameters.len() -> required = Val(contract.parameters[ordinary.len() - 1])
         value: sema_check_expression(argument.expr, required, environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
@@ -150,7 +150,7 @@ sema_call_try_build_context_method: fn(receiver: Expr, receiver_value: TExpr, me
             diagnostics.push(sema_error("E0764", argument.span, "`Build.{method}` takes positional arguments", "the build method contract does not declare labels or variadic slots", "remove the label or spread from this argument"))
             return failed
         }
-        values.push(value)
+        values.push(value.copy())
         params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
     }
     ownership: sema_ownership_check_method_call(state, "Build.{method}", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)

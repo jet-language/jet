@@ -847,7 +847,7 @@ jet_target_machine_provides_capability: fn(machine: TargetMachine, capability: T
 
 // Rust push_unique / validate_provider_contract / validate_simple_capability.
 jet_target_push_unique: fn(errors: &[TargetMachineError], error: TargetMachineError) Never! {
-    if !errors.contains(error) -> errors.push(error)
+    if !errors.contains(error) -> errors.push(error.copy())
 }
 jet_target_validate_provider_contract: fn(capability: TargetCapability, provider: ProviderContract, errors: &[TargetMachineError]) Never! {
     if !jet_target_provider_valid(provider) -> jet_target_push_unique(errors, .InvalidProviderContract{capability: jet_target_capability_name(capability), provider: provider.provider, sha256: provider.sha256})

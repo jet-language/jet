@@ -191,7 +191,7 @@ envmodel_discover_imports: fn<L: SourceLoader>(root: EvalUnit, base_dir: String,
                 }
                 canonical_file: envmodel_source_files.join(environment_root, file_relative)
                 if seen_files.contains(canonical_file) -> next
-                seen_files.push(canonical_file)
+                seen_files.push(canonical_file.copy())
                 file_src: loader.read_file(file_relative)
                 program: envmodel_parse_program(file_src)
                 // Liftability law (U4): a discovered module may not import.

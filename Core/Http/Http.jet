@@ -768,7 +768,7 @@ headers_set: fn(h: Headers, name: String, value: String) -> Headers Never! {
                 replaced = true
             }
         } else {
-            fields.push(f)
+            fields.push(f.copy())
         }
     }
     if !replaced -> fields.push(Header{name: name, value: trim(value)})
@@ -778,7 +778,7 @@ headers_set: fn(h: Headers, name: String, value: String) -> Headers Never! {
 headers_append: fn(h: Headers, name: String, value: String) -> Headers Never! {
     if !valid_header_name(name) || has_ctl(value.bytes()) -> return h.copy()
     fields := [Header]{}
-    loop f in h.fields -> fields.push(f)
+    loop f in h.fields -> fields.push(f.copy())
     fields.push(Header{name: name, value: trim(value)})
     Headers{fields: fields}
 }

@@ -238,7 +238,7 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
                 loop index < args.len() {
                     package: args[index]
                     if package == "--" || package.starts_with("-") -> break
-                    flags.packages.push(package)
+                    flags.packages.push(package.copy())
                     index += 1
                 }
                 next
@@ -284,7 +284,7 @@ cli_parse_args_for: fn(verb: String, args: [String]) -> CLIParsed Never! {
                 if cli_flag_argument(args, index) == .Val(provider) -> flags.cache_credential = Val(provider)
             }
             arg.starts_with("--credential=") -> flags.cache_credential = Val(cli_trim_start_matches(arg, "--credential="))
-            else -> positional.push(arg)
+            else -> positional.push(arg.copy())
         }
         index += 1
     }
@@ -297,7 +297,7 @@ cli_before_argument_separator: fn(args: [String]) -> [String] Never! {
     out := [String]{}
     loop arg in args {
         if arg == "--" -> break
-        out.push(arg)
+        out.push(arg.copy())
     }
     out
 }

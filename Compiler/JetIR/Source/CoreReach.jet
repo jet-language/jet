@@ -200,7 +200,7 @@ ir_core_method_lowered_by_owner: fn(name: String) -> Bool Never! {
 }
 
 ir_core_reach_add: fn(keys: &[String], key: String) Never! {
-    if key != "" -> keys.push(key)
+    if key != "" -> keys.push(key.copy())
 }
 
 ir_core_reach_lambda_keys: fn(tree: BodyTree, value: BodyLambda, functions: [FnBody], keys: &[String]) Never! {
@@ -470,7 +470,7 @@ ir_named_function_tree: fn(tree: BodyTree, expression: Int, keys: &[String], dec
         }
         .Call(callee, _, _) -> {
             key: decls.rows[callee.row].key
-            if key.starts_with("function:") && !keys.contains(key) -> keys.push(key)
+            if key.starts_with("function:") && !keys.contains(key) -> keys.push(key.copy())
         }
         .Try(_, conversion, _) -> ir_named_conversion_key(conversion, keys)
         .TryWithContext(_, _, conversion, _, _, _) -> ir_named_conversion_key(conversion, keys)
@@ -481,7 +481,7 @@ ir_named_function_tree: fn(tree: BodyTree, expression: Int, keys: &[String], dec
 
 ir_named_conversion_key: fn(conversion: TTryConvert, keys: &[String]) Never! {
     if conversion == .Typed(key, _, _) {
-        if !keys.contains(key) -> keys.push(key)
+        if !keys.contains(key) -> keys.push(key.copy())
     }
 }
 

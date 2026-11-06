@@ -268,7 +268,7 @@ RuntimeLockSession: struct {
         key: authority.path()
         if self.held_roots.contains(identity) -> return Ok(RuntimeLockGuard{root: key, identity: identity, lock: None})
         lock: env_lock_acquire_opened(env_lock_open_scope(authority, scope), time.duration_seconds(RUNTIME_LOCK_WAIT_SECONDS))
-        self.held_roots.push(identity)
+        self.held_roots.push(identity.copy())
         Ok(RuntimeLockGuard{root: key, identity: identity, lock: Val(lock)})
     }
 

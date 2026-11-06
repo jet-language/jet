@@ -112,7 +112,7 @@ sema_expression_panic_locals: fn(scopes: SemaScopeTable, span: Span) -> [TPanicL
         if binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter -> next
         ty: binding.symbol.ty ?? { next }
         if ty != Type.Int && ty != Type.Float && ty != Type.Bool -> next
-        names.push(name)
+        names.push(name.copy())
         rows[name] = row
     }
     names.sort()
@@ -1206,25 +1206,25 @@ sema_control_value_loop_append_route: fn(statements: &[Stmt], route: Stmt) -> Bo
     if root == {
         .Loop(body, span, arrow_body, label) -> {
             updated_body := body.copy()
-            updated_body.push(route)
+            updated_body.push(route.copy())
             statements[0] = Stmt.Loop{body: updated_body, span: span, arrow_body: arrow_body, label: label}
             return true
         }
         .While(condition, body, span, arrow_body, label) -> {
             updated_body := body.copy()
-            updated_body.push(route)
+            updated_body.push(route.copy())
             statements[0] = Stmt.While{cond: condition, body: updated_body, span: span, arrow_body: arrow_body, label: label}
             return true
         }
         .For(variable, variable_span, variable_two, kind, body, span, arrow_body, label, vectorization) -> {
             updated_body := body.copy()
-            updated_body.push(route)
+            updated_body.push(route.copy())
             statements[0] = Stmt.For{var: variable, var_span: variable_span, var2: variable_two, kind: kind, body: updated_body, span: span, arrow_body: arrow_body, label: label, auto_vectorization: vectorization}
             return true
         }
         .CountedLoop(init, condition, step, body, span, arrow_body, label) -> {
             updated_body := body.copy()
-            updated_body.push(route)
+            updated_body.push(route.copy())
             statements[0] = Stmt.CountedLoop{init: init, cond: condition, step: step, body: updated_body, span: span, arrow_body: arrow_body, label: label}
             return true
         }
@@ -1786,7 +1786,7 @@ sema_expression_window_names: fn(pattern: Pattern, names: &[String]) {
             if inner == .Val(nested) {
                 sema_expression_window_names(nested, names)
             } else {
-                names.push(binding)
+                names.push(binding.copy())
             }
         }
         .Variant(_, slots, _, _) -> {
@@ -1794,7 +1794,7 @@ sema_expression_window_names: fn(pattern: Pattern, names: &[String]) {
         }
         .Struct(fields, _, _, _) -> {
             loop field in fields {
-                if field == .Bind(_, _, local, _) -> names.push(local)
+                if field == .Bind(_, _, local, _) -> names.push(local.copy())
                 if field == .Nested(_, _, inner) -> sema_expression_window_names(inner, names)
             }
         }
@@ -1804,7 +1804,7 @@ sema_expression_window_names: fn(pattern: Pattern, names: &[String]) {
 
 sema_expression_window_slot_names: fn(slot: PatSlot, names: &[String]) {
     if slot == {
-        .Bind(name, _) -> names.push(name)
+        .Bind(name, _) -> names.push(name.copy())
         .Nested(nested) -> sema_expression_window_names(nested, names)
         .Named(_, _, inner) -> sema_expression_window_slot_names(inner, names)
         else -> {}
@@ -1836,7 +1836,7 @@ sema_expression_pattern_binding_sources: fn(shape: TPatternShape, subject_ty: Ty
                     else -> subject_ty
                 }
                 sema_expression_pattern_binding_sources(nested.shape, ty, source, name, environment, program, sources, diagnostics)
-            } else if binding == name -> sources.push(source)
+            } else if binding == name -> sources.push(source.copy())
         }
         .Struct(fields, _) -> {
             loop field in fields {
@@ -1865,14 +1865,14 @@ sema_expression_pattern_binding_sources: fn(shape: TPatternShape, subject_ty: Ty
         .Or(alternatives, _) -> loop alternative in alternatives -> sema_expression_pattern_binding_sources(alternative, subject_ty, source, name, environment, program, sources, diagnostics)
         // List/map payload relations conservatively view the entire subject,
         // matching their existing return-provenance convention.
-        .List(_, _, _) | .Map(_, _, _) -> sources.push(source)
+        .List(_, _, _) | .Map(_, _, _) -> sources.push(source.copy())
         else -> {}
     }
 }
 
 sema_expression_pattern_slot_sources: fn(slot: TPatternBinding, ty: Type, source: Expr, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, sources: &[Expr], diagnostics: &[Diagnostic]) {
     if slot == {
-        .Bind(binding, _) -> if binding == name -> sources.push(source)
+        .Bind(binding, _) -> if binding == name -> sources.push(source.copy())
         .Nested(nested) -> sema_expression_pattern_binding_sources(nested.shape, ty, source, name, environment, program, sources, diagnostics)
         else -> {}
     }
@@ -2352,8 +2352,8 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     // The single-use check reads the state before the `if`, which the
     // rollback left live; the join and share notes report nothing.
     single_use_paths := [SemaOwnershipPath]{}
-    if then_reaches_merge -> single_use_paths.push(then_path)
-    if else_reaches_merge -> single_use_paths.push(else_path)
+    if then_reaches_merge -> single_use_paths.push(then_path.copy())
+    if else_reaches_merge -> single_use_paths.push(else_path.copy())
     sema_single_use_check_paths(state, single_use_paths, diagnostics)
     base: sema_ownership_fork_base(fork)
     joined: if {

@@ -375,7 +375,7 @@ jet_cli_repl_localize: fn(session: JetCLIReplSession, diagnostics: [Diagnostic],
             foreign = origin.path != session.anchor && origin.path != session.anchor_real && origin.display != session.anchor
         }
         if foreign {
-            localized.push(diagnostic)
+            localized.push(diagnostic.copy())
             next
         }
         shifted := repl_reanchor(diagnostic.copy(), input_start)
@@ -452,7 +452,7 @@ jet_cli_repl_move_ident: fn(session: JetCLIReplSession, expr: Expr, moved: &[Str
     if expr == .Ident(name, _, _) {
         index: jet_cli_repl_binding_index(session.bindings, name) ?? return
         scalar: if session.bindings[index].ty == .Val(ty) -> jet_cli_repl_scalar(ty) else -> false
-        if !scalar && !moved.contains(name) -> moved.push(name)
+        if !scalar && !moved.contains(name) -> moved.push(name.copy())
     }
 }
 
@@ -648,7 +648,7 @@ jet_cli_repl_child_plan: fn(raw: [String]) -> JetCLIPlan Never! {
         if argument.starts_with("--session=") {
             session = jet_cli_repl_bytes(argument, 10, argument.count_bytes())
         } else {
-            rows.push(argument)
+            rows.push(argument.copy())
         }
     }
     if session == "" -> return jet_cli_fail("E2104", "`jet {JET_CLI_REPL_CHILD_VERB}` needs `--session=<nonce>`", jet_cli_why("E2104"), "this command runs one `jet repl` turn; start `jet repl` instead", false, JET_DRIVER_EXIT_USAGE)
@@ -802,7 +802,7 @@ jet_cli_repl_stmts: fn(session: &JetCLIReplSession, body: [Stmt], suppress: Bool
             }
             kept := [JetCLIReplBinding]{}
             loop binding in session.bindings {
-                if !moved.contains(binding.name) -> kept.push(binding)
+                if !moved.contains(binding.name) -> kept.push(binding.copy())
             }
             session.bindings = kept
             echo_report: if shows_echo -> Val(JetCLIReplReport{name: echo_name, ty: echo_ty, mutable: false}) else -> JetCLIReplReport?{None}
@@ -844,9 +844,9 @@ jet_cli_repl_declaration: fn(session: &JetCLIReplSession, text: String, program:
         }
         .Checked(_, _) -> {
             if import {
-                session.imports.push(source)
+                session.imports.push(source.copy())
             } else {
-                session.items.push(source)
+                session.items.push(source.copy())
             }
             jet_cli_repl_out("{diagnostic_theme_paint(session.color, "32", "ok")}\n")
             jet_cli_repl_record(session, "ok", "ok", JetCLIReplStatus.Ok)

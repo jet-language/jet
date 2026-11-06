@@ -139,21 +139,21 @@ jet_cli_foreign_audit: fn(facts: JetDriverForeignLinkFacts, effects: [String], l
     loop row in effects {
         if {
             ffi.contains(row) || host.contains(row) -> next
-            row == "FFI" || row.starts_with("FFI.") -> ffi.push(row)
-            else -> host.push(row)
+            row == "FFI" || row.starts_with("FFI.") -> ffi.push(row.copy())
+            else -> host.push(row.copy())
         }
     }
     ffi.sort()
     host.sort()
     libraries := [String]{}
     loop library in facts.libraries {
-        if !libraries.contains(library) -> libraries.push(library)
+        if !libraries.contains(library) -> libraries.push(library.copy())
     }
     loop library in facts.direct_links {
-        if !libraries.contains(library) -> libraries.push(library)
+        if !libraries.contains(library) -> libraries.push(library.copy())
     }
     loop library in facts.transitive_links {
-        if !libraries.contains(library) -> libraries.push(library)
+        if !libraries.contains(library) -> libraries.push(library.copy())
     }
     libraries.sort()
     JetCLIForeignAudit{declarations: facts.declarations, ffi_effects: ffi, host_effects: host, c_libraries: libraries, loader: loader}

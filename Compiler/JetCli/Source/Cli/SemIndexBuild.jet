@@ -1273,7 +1273,7 @@ jet_cli_sem_expr: fn(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules:
         .Str(parts, _, _) -> {
             interpolations := [Expr]{}
             loop part in parts {
-                if part == .Interp(inner, _) -> interpolations.push(inner)
+                if part == .Interp(inner, _) -> interpolations.push(inner.copy())
             }
             jet_cli_sem_list("interpolations", interpolations, db, ctx, modules)
         }
@@ -1448,7 +1448,7 @@ JetCLISemSummary: struct {
 jet_cli_sem_sorted_unique: fn(values: [String]) -> [String] Never! {
     output := [String]{}
     loop value in values {
-        if !output.contains(value) -> output.push(value)
+        if !output.contains(value) -> output.push(value.copy())
     }
     loop index in 1..<output.len() {
         value: output[index]
@@ -1509,12 +1509,12 @@ jet_cli_sem_summaries: fn(modules: [JetDriverDocModule]) -> [JetCLISemSummary] {
             edge_locals := [String]{}
             loop edge in function.effects.call_edges {
                 if edge == "__jet_panic__" {
-                    edges.push(edge)
+                    edges.push(edge.copy())
                     edge_locals.push("")
                     next
                 }
                 edge_key: jet_cli_sem_function_key(edge) ?? {
-                    edges.push(edge)
+                    edges.push(edge.copy())
                     edge_locals.push("")
                     next
                 }
@@ -1587,7 +1587,7 @@ jet_cli_sem_witness: fn(function: String, effect_name: String, summaries: [JetCL
     // copy: `seen` stays with the caller (`seen` is a read parameter: no move out of it, E0201) and
     // the binding `visited` owns its own.
     visited := seen.copy()
-    visited.push(function)
+    visited.push(function.copy())
     summary: jet_cli_sem_summary(summaries, function) ?? return None
     if summary.direct.contains(effect_name) {
         spans := [Span]{}
@@ -1721,7 +1721,7 @@ jet_cli_sem_indexed_span: fn(summary: JetCLISemSummary, callee: String, index: J
 // jet_cli_sem_witness over the index; `visited` is the current path.
 jet_cli_sem_witness_at: fn(function: String, effect_name: String, summaries: [JetCLISemSummary], index: JetCLISemEffectIndex, visited: &[String]) -> JetCLISemWitness? {
     if visited.contains(function) -> return None
-    visited.push(function)
+    visited.push(function.copy())
     found: jet_cli_sem_witness_step(function, effect_name, summaries, index, visited)
     _ := visited.pop()
     found
@@ -1739,7 +1739,7 @@ jet_cli_sem_witness_step: fn(function: String, effect_name: String, summaries: [
     }
     if summary.maximal {
         spans := [Span]{}
-        if summary.maximal_span == .Val(span) -> spans.push(span)
+        if summary.maximal_span == .Val(span) -> spans.push(span.copy())
         return Val(JetCLISemWitness{path: [String]{function}, spans: spans})
     }
     loop callee in summary.edges {

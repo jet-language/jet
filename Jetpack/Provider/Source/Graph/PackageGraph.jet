@@ -90,12 +90,12 @@ PackageGraph: struct {
     }
 
     add_catalog: fn(&self, entry: CatalogEntry) Never! {
-        self.catalogs.push(entry)
+        self.catalogs.push(entry.copy())
     }
 
     add_workspace_member: fn(&self, name: String, path: String) Never! {
         paths := self.workspace_members.get(name) ?? [String]{}
-        paths.push(path)
+        paths.push(path.copy())
         self.workspace_members[name] = paths
     }
 
@@ -159,7 +159,7 @@ provider_graph_stable_sort_edges: fn(edges: [VisibleEdge]) -> [VisibleEdge] Neve
         loop position > 0 && (sorted[position - 1].dependency <=> edge.dependency) == Ordering.Greater -> position -= 1
         shifted := [VisibleEdge]{}
         loop index in 0..<position -> shifted.push(sorted[index])
-        shifted.push(edge)
+        shifted.push(edge.copy())
         loop index in position..<sorted.len() -> shifted.push(sorted[index])
         sorted = shifted
     }

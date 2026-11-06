@@ -195,7 +195,7 @@ parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
         key: trim_yaml(cut.before)
         if key.len() == 0 -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "YAML map key is empty"))
         if seen.has_key(key) -> return Err(syntax_error(EncodingFormat.YAML, 0, 1, 1, "", "duplicate YAML map key"))
-        _: seen.add(key, true)
+        _: seen.add(key.copy(), true)
         rest: trim_yaml(strip_inline_comment(cut.after))
         i += 1
         if rest == "|" || rest == ">" {
@@ -211,7 +211,7 @@ parse_map: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
                     next
                 }
                 if leading_spaces(child) <= pad -> break
-                child_rows.push(child)
+                child_rows.push(child.copy())
                 i += 1
             }
             entries.push((key: key, value: parse_block(join_lines(child_rows))))
@@ -254,7 +254,7 @@ parse_list: fn(rows: [String], indent: Int) -> Dyn EncodingError! {
                     next
                 }
                 if leading_spaces(child) <= pad -> break
-                child_rows.push(child)
+                child_rows.push(child.copy())
                 i += 1
             }
             items.push(parse_block(join_lines(child_rows)))

@@ -75,7 +75,7 @@ jet_driver_unit_words: fn(source: [U8], comments: [Span], items: [Item], lazy: B
             // Insertion by start: program.items is nearly in source order.
             at := spans.len()
             positions.push(position)
-            spans.push(span)
+            spans.push(span.copy())
             loop at > 0 && spans[at - 1].start > span.start {
                 spans[at] = spans[at - 1]
                 positions[at] = positions[at - 1]
@@ -278,7 +278,7 @@ jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: Str
 // it loads.
 jet_driver_reach_open: fn(reach: &JetDriverReach, module_name: String) {
     if !reach.enabled || reach.open_names.contains(module_name) -> return
-    reach.open_names.push(module_name)
+    reach.open_names.push(module_name.copy())
     loop unit in 0..<reach.units.len() {
         if reach.units[unit].module_name != module_name || reach.units[unit].open -> next
         reach.units[unit].open = true
@@ -409,7 +409,7 @@ jet_driver_reach_strip: fn(reach: JetDriverReach, modules: &[JetDriverLoadedModu
         if dead_imports[unit].len() > 0 {
             imports := [ImportDecl]{}
             loop declaration in modules[loaded].program.imports {
-                if !dead_imports[unit].contains(declaration.span) -> imports.push(declaration)
+                if !dead_imports[unit].contains(declaration.span) -> imports.push(declaration.copy())
             }
             modules[loaded].program.imports = imports.move()
         }

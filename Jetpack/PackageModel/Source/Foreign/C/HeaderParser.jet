@@ -105,7 +105,7 @@ CTypeCatalog: struct {
         seen := [String]{}
         loop {
             if seen.contains(current) -> return None
-            seen.push(current)
+            seen.push(current.copy())
             name: self.names.get(current)
             if name != None -> return name
             following: self.aliases.get(current) ?? return None
@@ -119,7 +119,7 @@ CTypeCatalog: struct {
         seen := [String]{}
         loop {
             if seen.contains(current) -> return None
-            seen.push(current)
+            seen.push(current.copy())
             scalar: pkg_cbind_layout_scalar(current)
             if scalar != None -> return scalar
             following: self.aliases.get(current) ?? return None
@@ -655,14 +655,14 @@ pkg_cbind_rfind_byte: fn(bytes: [U8], code: Int) -> Int Never! {
 pkg_bind_unique_name: fn(used: &[String], preferred: String) -> String Never! {
     base: if preferred == "" -> "value" else -> preferred
     if !used.contains(base) {
-        used.push(base)
+        used.push(base.copy())
         return base
     }
     suffix := 2
     loop {
         candidate: "{base}_{suffix}"
         if !used.contains(candidate) {
-            used.push(candidate)
+            used.push(candidate.copy())
             return candidate
         }
         suffix += 1

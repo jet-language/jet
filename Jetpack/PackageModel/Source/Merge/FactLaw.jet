@@ -383,7 +383,7 @@ pkg_fact_precedes: fn(left: FactContribution, right: FactContribution) -> Bool N
 pkg_fact_resolve: fn(key: FactKey, declarations: [FactContribution]) -> EffectiveFact? FactError! {
     chain := [FactContribution]{}
     loop declaration in declarations {
-        if declaration.key == key.name { chain.push(declaration) }
+        if declaration.key == key.name { chain.push(declaration.copy()) }
     }
     if key.default == {
         .Val(written) -> {

@@ -153,7 +153,7 @@ cli_env_info_service_json: fn(service: DevServicePlan) -> Dyn Never! {
 // Record `source` for variable `name` once, keeping first-seen order.
 cli_add_variable_source: fn(sources: &[String: [String]], name: String, source: String) Never! {
     known := sources.get(name) ?? [String]{}
-    if !known.contains(source) -> known.push(source)
+    if !known.contains(source) -> known.push(source.copy())
     sources[name] = known
 }
 
@@ -191,10 +191,10 @@ cli_cmd_env_info: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CL
     jobs := cli_list_project_jobs(entry)
     lifecycle: facts.lifecycle
     loop hook in lifecycle.on_enter {
-        if hook.action == .Task(name) -> jobs.push(name)
+        if hook.action == .Task(name) -> jobs.push(name.copy())
     }
     loop hook in lifecycle.checks {
-        if hook.action == .Task(name) -> jobs.push(name)
+        if hook.action == .Task(name) -> jobs.push(name.copy())
     }
     jobs = cli_sorted_unique(jobs)
     check_names := [String]{}

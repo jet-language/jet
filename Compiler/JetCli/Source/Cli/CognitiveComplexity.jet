@@ -54,7 +54,7 @@ JetCLIComplexityVisitor: struct {
     visit: fn(&self, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
         if expression == {
             .If(_, _, _, _, _, span, _) -> {
-                self.controls.push(span)
+                self.controls.push(span.copy())
                 self.nesting.push(Span{start: span.start, end: jet_cli_complexity_extent(expression, span.end)})
             }
             .Lambda(lambda, _) -> {
@@ -129,18 +129,18 @@ jet_cli_complexity_body: fn(body: [Stmt], controls: &[Span], nesting: &[Span]) N
 jet_cli_complexity_statement: fn(statement: Stmt, controls: &[Span], nesting: &[Span]) Never! {
     if statement == {
         .While(_, body, span, _, _) | .For(_, _, _, _, body, span, _, _, _) | .Loop(body, span, _, _) -> {
-            controls.push(span)
-            nesting.push(span)
+            controls.push(span.copy())
+            nesting.push(span.copy())
             jet_cli_complexity_body(body, controls, nesting)
         }
         .CountedLoop(_, _, step, body, span, _, _) -> {
-            controls.push(span)
-            nesting.push(span)
+            controls.push(span.copy())
+            nesting.push(span.copy())
             if step == .Val(value) -> jet_cli_complexity_statement(value, controls, nesting)
             jet_cli_complexity_body(body, controls, nesting)
         }
         .Switch(_, arms, else_body, span) | .ComptimeSwitch(_, arms, else_body, span) -> {
-            controls.push(span)
+            controls.push(span.copy())
             bodies := [[Stmt]]{}
             loop arm in arms {
                 jet_cli_complexity_body(arm.body, controls, nesting)
@@ -154,7 +154,7 @@ jet_cli_complexity_statement: fn(statement: Stmt, controls: &[Span], nesting: &[
             nesting.push(Span{start: span.start, end: jet_cli_complexity_body_extent(bodies, span.end)})
         }
         .ComptimeIf(_, _, then_body, else_body, span, _) -> {
-            controls.push(span)
+            controls.push(span.copy())
             jet_cli_complexity_body(then_body, controls, nesting)
             // copy: the bodies stay the statement's; the extent walk reads its own list.
             bodies := [[Stmt]]{then_body.copy()}

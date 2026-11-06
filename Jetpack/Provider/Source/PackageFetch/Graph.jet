@@ -77,7 +77,7 @@ pkg_fetch_closure: fn(lock: LockFile, target: String) -> [String] Never! {
     loop pending.len() > 0 {
         name: pending.pop() ?? break
         if seen.contains(name) -> next
-        seen.push(name)
+        seen.push(name.copy())
         if lock.find_package(name) == .Val(package) {
             loop dependency in package.dependencies -> pending.push(dependency)
         }
@@ -89,7 +89,7 @@ pkg_fetch_update_scope: fn(previous: LockFile?, options: PackageFetchOptions) ->
     if !options.update -> return [String]{}
     if options.update_dep == .Val(target) {
         scope := if previous == .Val(lock) -> pkg_fetch_closure(lock, target) else -> [String]{}
-        if !scope.contains(target) -> scope.push(target)
+        if !scope.contains(target) -> scope.push(target.copy())
         return scope
     }
     if previous == .Val(lock) -> return loop package in lock.packages -> package.name
@@ -136,7 +136,7 @@ pkg_fetch_resolve: fn(verification: &StoreVerification, roots: HangarRoots, cont
         return
     }
     if resolver.visiting.contains(name) -> return Err(pkg_fetch_error("E1207", "dependency graph contains a cycle at `{name}`", chain.join(" -> "), "remove the recursive package dependency"))
-    resolver.visiting.push(name)
+    resolver.visiting.push(name.copy())
     node: if spec == {
         .Path(path) -> {
             absolute: if path.starts_with("/") -> pkg_fetch_normalize_path(path) else -> pkg_fetch_normalize_path(files.join(parent, path))
@@ -171,7 +171,7 @@ pkg_fetch_source_node: fn(verification: &StoreVerification, roots: HangarRoots, 
     fingerprints := [String]{}
     loop child in dependencies {
         child_chain := chain
-        child_chain.push(child)
+        child_chain.push(child.copy())
         pkg_fetch_resolve(verification, roots, context, resolver, child, manifest.dependencies[child], snapshot.path(), child_chain)
         fingerprints.push(resolver.nodes[child].package.fingerprint)
     }

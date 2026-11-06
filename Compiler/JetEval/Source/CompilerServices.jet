@@ -378,7 +378,7 @@ jet_eval_compiler_services_lex: fn(input: JetCompilerServicesSourceInput) -> Jet
             bytes := source.bytes()
             lexed = lex(bytes)
         }
-        .Rejected(diagnostic) -> lexed.diagnostics.push(diagnostic)
+        .Rejected(diagnostic) -> lexed.diagnostics.push(diagnostic.copy())
     }
     value: jet_eval_compiler_services_lex_value(input.source, lexed) ?? return None
     Val(JetCompilerServicesLexFacts{source: input.source, compiler_source: compiler_source, lexed: lexed, value: value})
@@ -674,14 +674,14 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
                     if function.name == "build" -> next
                     key: jet_eval_compiler_services_function_key(function, module_row) ?? return .Missing(fact: "function `{module_row.module_identity}::{function.name}` is not registered")
                     value: jet_eval_compiler_services_function_info(function, module_row, checked, Val(key))
-                    functions.push(value)
+                    functions.push(value.copy())
                     package_functions.push(value)
                 }
                 else -> {}
             }
             if name == .Val(type_name) {
                 value: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog) ?? return .Missing(fact: "type `{module_row.module_identity}::{type_name}` has no TypeInfo")
-                types.push(value)
+                types.push(value.copy())
                 package_types.push(value)
             }
         }

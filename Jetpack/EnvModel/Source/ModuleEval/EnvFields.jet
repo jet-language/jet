@@ -320,10 +320,10 @@ envmodel_prompt_word: fn(value: CtValue) -> String? Never! {
 // Fold one contribution's lifecycle into the selected environment's.
 // Sequences concatenate; single-valued facts must agree across modules.
 envmodel_lifecycle_merge: fn(target: &EnvironmentLifecycle, incoming: EnvironmentLifecycle, module_name: String) EnvModelEvalError! {
-    loop item in incoming.dotenv -> target.dotenv.push(item)
-    loop item in incoming.unset -> target.unset.push(item)
-    loop item in incoming.on_enter -> target.on_enter.push(item)
-    loop item in incoming.checks -> target.checks.push(item)
+    loop item in incoming.dotenv -> target.dotenv.push(item.copy())
+    loop item in incoming.unset -> target.unset.push(item.copy())
+    loop item in incoming.on_enter -> target.on_enter.push(item.copy())
+    loop item in incoming.checks -> target.checks.push(item.copy())
     if incoming.git_hooks_path == {
         .Val(path) -> {
             if target.git_hooks_path == {

@@ -510,7 +510,7 @@ cli_nix_index_collect_named_strings: fn(value: Dyn, field: String, values: &[Str
 // Every `/nix/store/` text value anywhere in `value`.
 cli_nix_index_collect_store_paths: fn(value: Dyn, paths: &[String]) Never! {
     if value == {
-        .Text(text) -> if text.starts_with("/nix/store/") && !paths.contains(text) -> paths.push(text)
+        .Text(text) -> if text.starts_with("/nix/store/") && !paths.contains(text) -> paths.push(text.copy())
         .Array(items) -> {
             loop item in items -> cli_nix_index_collect_store_paths(item, paths)
         }
@@ -548,7 +548,7 @@ cli_nix_index_collect_json_files: fn(path: String, found: &[String]) CLIToolErro
     metadata: files.stat(path) ?? return Err(CLIToolError.new("inspect Hydra build input: {err}"))
     if metadata.is_symlink -> return Err(CLIToolError.new("Hydra build input `{path}` must not be a symlink"))
     if metadata.is_file {
-        found.push(path)
+        found.push(path.copy())
         return
     }
     if !metadata.is_dir -> return Err(CLIToolError.new("Hydra build input `{path}` is not a file or directory"))

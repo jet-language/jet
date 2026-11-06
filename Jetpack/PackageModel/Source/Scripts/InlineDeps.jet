@@ -235,7 +235,7 @@ pkg_inline_deps_best_match: fn(selector: String, candidates: [(version: String, 
     loop candidate in candidates {
         version_parts: pkg_inline_deps_numeric_version(candidate.version) ?? next
         accepted: if selector_parts.len() == 3 -> version_parts == selector_parts else -> version_parts.len() == 3 && pkg_inline_deps_has_prefix(version_parts, selector_parts)
-        if accepted -> matches.push(candidate)
+        if accepted -> matches.push(candidate.copy())
     }
     if matches.len() == 0 -> return None
     // Stable passes order by (major, minor, patch); ties keep input order.

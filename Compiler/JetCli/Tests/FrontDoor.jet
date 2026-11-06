@@ -79,9 +79,9 @@ cli_front_alias_fixture: fn(alias: String, verb: String) Never! {
     tail: [String]{"-c", "main.c", "--", "source with spaces.c"}
     argv := [String]{alias}
     expected := [String]{}
-    if verb != "" -> expected.push(verb)
+    if verb != "" -> expected.push(verb.copy())
     loop argument in tail {
-        argv.push(argument)
+        argv.push(argument.copy())
         expected.push(argument)
     }
     assert_eq(jet_cli_alias_args(argv), expected)

@@ -1466,7 +1466,7 @@ sema_check_context_rollback: fn(context: &SemaCheckContext, mark: SemaCheckConte
 // Records why the body being checked is incomplete when no diagnostic says so.
 // Every path that marks a body incomplete without a diagnostic calls this.
 sema_check_unsupported: fn(context: &SemaCheckContext, reason: String) Never! {
-    context.incomplete_reasons.push(reason)
+    context.incomplete_reasons.push(reason.copy())
 }
 
 // Gives `value`, the checked form of `expr`, the expression's node id, or a
@@ -1524,7 +1524,7 @@ sema_check_context_rollback_keep_expr_ids: fn(context: &SemaCheckContext, mark: 
 
 sema_scope_hardware_transfers_snapshot: fn(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
     result := [SemaHardwareDMATransferFact]{}
-    loop fact in source -> result.push(fact)
+    loop fact in source -> result.push(fact.copy())
     result
 }
 
@@ -1720,15 +1720,15 @@ sema_scope_leave: fn(table: &SemaScopeTable, state: &SemaOwnershipState) Never! 
     leaving := table.current
     remaining_transfers := [SemaHardwareDMATransferFact]{}
     loop fact in table.hardware_transfers {
-        if fact.buffer_frame != leaving -> remaining_transfers.push(fact)
+        if fact.buffer_frame != leaving -> remaining_transfers.push(fact.copy())
     }
     remaining_definite := [SemaHardwareDMATransferFact]{}
     loop fact in table.hardware_definite_transfers {
-        if fact.scope_frame != leaving && fact.buffer_frame != leaving -> remaining_definite.push(fact)
+        if fact.scope_frame != leaving && fact.buffer_frame != leaving -> remaining_definite.push(fact.copy())
     }
     remaining_pending := [SemaHardwareDMATransferFact]{}
     loop fact in table.hardware_pending_transfers {
-        if fact.buffer_frame != leaving -> remaining_pending.push(fact)
+        if fact.buffer_frame != leaving -> remaining_pending.push(fact.copy())
     }
     table.hardware_transfers = remaining_transfers
     table.hardware_definite_transfers = remaining_definite
@@ -1744,7 +1744,7 @@ sema_scope_hardware_intersection: fn(left: [SemaHardwareDMATransferFact], right:
     loop candidate in left {
         loop other in right {
             if sema_scope_hardware_fact_equal(candidate, other) {
-                result.push(candidate)
+                result.push(candidate.copy())
                 break
             }
         }
@@ -1758,7 +1758,7 @@ sema_scope_hardware_union: fn(left: [SemaHardwareDMATransferFact], right: [SemaH
         loop existing in result {
             if sema_scope_hardware_fact_equal(candidate, existing) -> found = true
         }
-        if !found -> result.push(candidate)
+        if !found -> result.push(candidate.copy())
     }
     result
 }
@@ -1919,7 +1919,7 @@ sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGrap
         }
     }
     position: table.policy_rows.len()
-    table.policy_modules.add(module_identity, position).drop("a new policy module has no row")
+    table.policy_modules.add(module_identity.copy(), position).drop("a new policy module has no row")
     table.policy_rows.push(policy)
     position
 }
@@ -2001,7 +2001,7 @@ sema_scope_push_binding: fn(table: &SemaScopeTable, binding: SemaScopeBinding) N
         name_rows_set(table.name_slots, binding.symbol.name, table.name_positions.len())
         table.name_positions.push([Int]{position})
     }
-    table.bindings.push(binding)
+    table.bindings.push(binding.copy())
 }
 
 // The `name_positions` row of `name`, if any binding ever had that name.

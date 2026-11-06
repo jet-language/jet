@@ -329,7 +329,7 @@ normalize_recipe: fn(parts: [URLPart]) -> [URLPart] Never! {
     segment := [URLPart]{}
     loop part in parts {
         if part.hole {
-            segment.push(part)
+            segment.push(part.copy())
         } else {
             raw: part.text.bytes()
             start := 0
@@ -367,7 +367,7 @@ normalize_recipe: fn(parts: [URLPart]) -> [URLPart] Never! {
     if absolute -> out.push(URLPart{text: "/", hole: false})
     loop i in 0..<normalized.len() {
         if i > 0 -> out.push(URLPart{text: "/", hole: false})
-        loop part in normalized[i] -> out.push(part)
+        loop part in normalized[i] -> out.push(part.copy())
     }
     if trailing && (out.len() == 0 || !ends_slash(out[out.len() - 1].text)) -> out.push(URLPart{text: "/", hole: false})
     out

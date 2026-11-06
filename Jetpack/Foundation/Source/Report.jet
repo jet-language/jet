@@ -194,13 +194,13 @@ StatusEnvelope: struct {
 
     with_report: fn(self, report: ReportEnvelope) -> StatusEnvelope Never! {
         envelope := self
-        envelope.reports.push(report)
+        envelope.reports.push(report.copy())
         envelope
     }
 
     with_reports: fn(self, reports: [ReportEnvelope]) -> StatusEnvelope Never! {
         envelope := self
-        loop report in reports -> envelope.reports.push(report)
+        loop report in reports -> envelope.reports.push(report.copy())
         envelope
     }
 
@@ -512,7 +512,7 @@ ReportEnvelope: struct {
 
     push_fix_edit: fn(&self, edit: ReportEdit) ReportError! {
         if self.no_fix_reason != None -> return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
-        self.fix_edits.push(edit)
+        self.fix_edits.push(edit.copy())
     }
 
     with_fix_edits: fn(self, edits: [ReportEdit]) -> ReportEnvelope ReportError! {

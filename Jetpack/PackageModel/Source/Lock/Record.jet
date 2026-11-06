@@ -162,7 +162,7 @@ pkg_lock_upsert_package: fn(lock: &LockFile, entry: LockedPackage, matches: fn(L
             return
         }
     }
-    lock.packages.push(entry)
+    lock.packages.push(entry.copy())
 }
 
 // The first package record satisfying `matches`.
@@ -269,7 +269,7 @@ pkg_lock_record_rust_bridge: fn(project_root: String, bridge_identity: String, p
         }
         kept.push(package)
     }
-    loop package in packages -> kept.push(package)
+    loop package in packages -> kept.push(package.copy())
     lock.packages = kept
     pkg_lock_ensure_build_stamp(project_root, lock)
     pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes())
@@ -449,7 +449,7 @@ pkg_lock_record_toolchain: fn(project_root: String, toolchain: LockedToolchain) 
             replaced = true
         }
     }
-    if !replaced -> lock.toolchains.push(toolchain)
+    if !replaced -> lock.toolchains.push(toolchain.copy())
     lock.validate_completeness()
     pkg_lock_ensure_build_stamp(project_root, lock)
     if pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) == {
@@ -470,7 +470,7 @@ pkg_lock_record_browser: fn(project_root: String, browser: LockedBrowser) -[FS, 
             replaced = true
         }
     }
-    if !replaced -> lock.browsers.push(browser)
+    if !replaced -> lock.browsers.push(browser.copy())
     pkg_lock_ensure_build_stamp(project_root, lock)
     pkg_lock_publish_or_report(project_root, pkg_lock_write(lock))
 }

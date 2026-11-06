@@ -252,7 +252,7 @@ policy_duplicate_errors: fn(values: [String], kind: String) -> [String] {
     errors := [String]{}
     loop value in values {
         if seen.contains(value) -> errors.push("duplicate {kind} selector {value}")
-        else -> seen.push(value)
+        else -> seen.push(value.copy())
     }
     errors
 }
@@ -433,9 +433,9 @@ policy_apply_exceptions: fn(manifest: PolicyManifest, path: String, candidates: 
         if expected == .Val(limit) {
             seen: (consumed.get(key) ?? 0) + 1
             consumed[key] = seen
-            if policy_decimal_less(limit, "{seen}") -> remaining.push(candidate)
+            if policy_decimal_less(limit, "{seen}") -> remaining.push(candidate.copy())
         } else {
-            remaining.push(candidate)
+            remaining.push(candidate.copy())
         }
     }
     Ok(remaining)
@@ -624,7 +624,7 @@ policy_discover_manifest_files: fn(manifest: PolicyManifest, root: String) -> Po
                 // A `config/` directory beside a `package.jet` is a candidate; the
                 // caller that owns the package parser decides whether the package
                 // declares it (Rust `is_declared_package_config_dir`).
-                if entry.name == "config" && policy_files.is_file(policy_join(root, "{relative}/package.jet")) && !candidates.contains(child) -> candidates.push(child)
+                if entry.name == "config" && policy_files.is_file(policy_join(root, "{relative}/package.jet")) && !candidates.contains(child) -> candidates.push(child.copy())
                 if !policy_skip_directory(entry.name) -> pending.push(child)
             } else if kind.is_file && child.ends_with(".jet") {
                 paths.push(child)

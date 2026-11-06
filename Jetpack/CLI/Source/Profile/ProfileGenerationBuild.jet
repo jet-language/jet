@@ -177,7 +177,7 @@ cli_build_package_generation_body: fn(verification: &StoreVerification, cache: &
     loop package in realized {
         loop node in package.nodes {
             contenders := groups.get(node.path) ?? [PackageOutputNode]{}
-            contenders.push(node)
+            contenders.push(node.copy())
             groups[node.path] = contenders
         }
     }

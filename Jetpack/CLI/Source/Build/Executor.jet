@@ -225,7 +225,7 @@ build_execute_one_action: fn(plan: HermeticBuildPlan, action: HermeticBuildActio
     loop probe in action.probes -> action_probe_names.push(plan.probes[probe.id].name)
     effective_probe_facts := [BuildProbeFact]{}
     loop fact in probe_facts {
-        if action_probe_names.contains(fact.name) -> effective_probe_facts.push(fact)
+        if action_probe_names.contains(fact.name) -> effective_probe_facts.push(fact.copy())
     }
     if plan.action(handle) == None -> return Err(BuildExecutionError.InvalidGraph(HermeticBuildError.UnknownAction(handle.id)))
     key: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, effective_probe_facts)

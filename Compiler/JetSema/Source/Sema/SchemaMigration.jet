@@ -49,7 +49,7 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
         if item == {
             .Migration(migration) -> {
                 operations := migrations.get(migration.type_name) ?? [MigrationOp]{}
-                loop operation in migration.ops -> operations.push(operation)
+                loop operation in migration.ops -> operations.push(operation.copy())
                 migrations[migration.type_name] = operations.move()
             }
             .ErrorConv(conversion) -> conversions.push((from_ty: conversion.from_ty, to_ty: conversion.to_ty))
@@ -234,7 +234,7 @@ sema_check_schema_migration_graph: fn(registration: &&SemaRegistrationGraph, che
     module_count: registration.modules.len()
     types := [TTypeDef]{}
     loop module_row in checked.modules {
-        loop definition in module_row.declarations.type_defs -> types.push(definition)
+        loop definition in module_row.declarations.type_defs -> types.push(definition.copy())
     }
     scope := sema_check_pass_environment(registration, types, SemaComptimeBodyValues{})
     program := SemaProgramTables{

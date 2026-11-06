@@ -212,15 +212,15 @@ envmodel_resolve_named_field: fn(name: String, fields: [String: NamedFieldExpr],
         }
         cycle := [String]{}
         loop index in start..<stack.len() -> cycle.push(stack[index])
-        cycle.push(name)
+        cycle.push(name.copy())
         return Err(envmodel_error("E0338", "computed module fields form a cycle: {cycle.join(" -> ")}", cycle_why, cycle_fix, Val(named.span)))
     }
-    stack.push(name)
+    stack.push(name.copy())
     loop dependency in envmodel_dependencies_for_expression(named.expr, field_names) {
         envmodel_resolve_named_field(dependency, fields, field_names, done, values, stack, scope, cycle_why, cycle_fix)
     }
     value: envmodel_evaluate_expression(named.expr, values, scope)
     values[name] = value
     _ := stack.pop()
-    done.push(name)
+    done.push(name.copy())
 }

@@ -126,9 +126,9 @@ pkg_cobol_bind: fn(source_path: String, source: String, copybook_path: String, c
     pkg_binder_write(bridge_c, pkg_cobol_render_bridge(program, layout, packed[0], input, lib), "could not write the COBOL C bridge")
     compile := [String]{"cc", "-c", "-fPIC"}
     loop flag in cflags -> compile.push(flag)
-    compile.push(bridge_c)
+    compile.push(bridge_c.copy())
     compile.push("-o")
-    compile.push(bridge_o)
+    compile.push(bridge_o.copy())
     pkg_cobol_run(compile, "cc")
     pkg_binder_write(probe_c, "int main(void) {{ return 0; }}\n", "could not write the COBOL link probe")
     link := [String]{"cc", "-Wl,--no-undefined", object, bridge_o, probe_c}
@@ -177,7 +177,7 @@ pkg_cobol_parse_copybook: fn(source: String) -> CobolRecordLayout ForeignBindErr
         if !pkg_binder_is_ident(name) || name == "_" || name.starts_with("__") || foundation_is_reserved_generated_name(name) || names.contains(name) {
             return Err(ForeignBindError.Source("copybook field name `{words[1]}` is not a unique, usable Jet identifier"))
         }
-        names.push(name)
+        names.push(name.copy())
         if words.len() < 3 || pkg_binder_ascii_upper(words[2]) != "PIC" -> return Err(ForeignBindError.Source("copybook field `{words[1]}` must use a PIC clause"))
         if words.len() < 4 -> return Err(ForeignBindError.Source("copybook field `{words[1]}` has no PIC shape"))
         pic: pkg_binder_ascii_upper(words[3])

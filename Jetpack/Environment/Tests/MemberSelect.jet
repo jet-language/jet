@@ -48,7 +48,7 @@ env_select_test_plan: fn(members: [WorkspacePlanMember]) -> WorkspacePlan {
 
 env_select_test_git: fn(root: String, args: [String]) -[Exec, Time.Wait]> String {
     argv := [String]{"git"}
-    loop arg in args -> argv.push(arg)
+    loop arg in args -> argv.push(arg.copy())
     receipt: process.cmd(argv).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? panic("run git")
     assert(receipt.success)
     receipt.output

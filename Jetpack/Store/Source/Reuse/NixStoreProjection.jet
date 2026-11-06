@@ -28,7 +28,7 @@ NixProjectionIndex: struct {
             loop digest in digests {
                 if digest == "" -> next
                 owners := by_digest.get(digest) ?? [StoreEntry]{}
-                owners.push(entry)
+                owners.push(entry.copy())
                 by_digest[digest] = owners
             }
         }
@@ -44,7 +44,7 @@ store_reuse_entries_by_id: fn(entries: [StoreEntry]) -> [StoreEntry] Never! {
     loop entry in entries {
         at := sorted.len()
         loop at > 0 && entry.id < sorted[at - 1].id -> at -= 1
-        sorted.insert(at, entry)
+        sorted.insert(at, entry.copy())
     }
     sorted
 }
@@ -65,7 +65,7 @@ store_nix_store_projection_for_entry_index: fn(roots: HangarRoots, entry: StoreE
         digest: pending[0]
         _: pending.remove(0, .Slot)
         if visited.contains(digest) -> next
-        visited.push(digest)
+        visited.push(digest.copy())
         candidates: if digest == entry.envelope.output_hash -> [StoreEntry]{entry} else -> index.by_digest.get(digest) ?? return Err(StoreError.Other("Nix closure object `{digest}` is missing from the warm reuse index"))
         loop candidate in candidates {
             candidate_producer: ProducerRecord.decode(candidate.producer_record) ?? return Err(StoreError.Other("Nix closure entry `{candidate.id}` has invalid producer facts: {err.message()}"))

@@ -15,7 +15,7 @@ registry_cli_test_root: fn(label: String) -[FS, Env]> String Never! {
 // helper/mock binary. Core process/provider #3593/#3594 and composition #4262.
 publication_tuf_test_git: fn(cwd: String, args: [String]) -[Exec, Time]> ProcessReceipt Never! {
     argv := [String]{"git"}
-    argv.extend(args)
+    argv.extend(args.copy())
     receipt: publication_tuf_test_process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).run() ?? panic("git fixture")
     assert(receipt.success, "git fixture failed: {receipt.errors}")
     receipt
@@ -44,7 +44,7 @@ publication_tuf_test_registry: fn(root: String, name: String, version: String) -
 }
 publication_tuf_test_command: fn(root: String, project: String, bare: String, store: String, args: [String]) -[Env, Exec]> ProcessSpec Never! {
     argv := [String]{sys.get("JET_BIN") ?? panic("JET_BIN must name the real rebuilt Jet publication/fetch engine (#4262)")}
-    argv.extend(args)
+    argv.extend(args.copy())
     publication_tuf_test_process.cmd(argv).cwd(project).stdout(.Capture).stderr(.Capture)
         .env("JET_REGISTRY_URL", "file://{bare}").env("JET_REGISTRY_CACHE_DIR", files.join(root, "cache"))
         .env("JET_PACKAGE_STORE_DIR", store).env("JET_KEYS_DIR", files.join(root, "keys"))

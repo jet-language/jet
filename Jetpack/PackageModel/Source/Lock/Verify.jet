@@ -243,7 +243,7 @@ pkg_lock_record_generated_inputs_with_lock_state: fn(project_root: String, gener
                 replaced = true
             }
         }
-        if !replaced -> lock.comptime_inputs.push(input)
+        if !replaced -> lock.comptime_inputs.push(input.copy())
     }
     lock.comptime_inputs = pkg_lock_sorted_comptime_inputs(lock.comptime_inputs)
     if pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) == {

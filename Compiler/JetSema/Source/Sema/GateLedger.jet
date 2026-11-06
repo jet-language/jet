@@ -462,7 +462,7 @@ sema_gate_policy_diagnostics: fn(ledger: GateLedger, modules: [SemaGateModule], 
         if selected < 0 || selected >= modules.len() -> next
         row: modules[selected]
         declarations := row.declarations
-        loop declaration in row.program.policy_declarations -> declarations.push(declaration)
+        loop declaration in row.program.policy_declarations -> declarations.push(declaration.copy())
         policy: policy_gate_forbidding(key, declarations) ?? next
         site: if entry.span == .Val(span) -> "{entry.source}:{span.start}..{span.end}" else -> "{entry.source} ({entry.subject})"
         result.push(GateDiagnostic{source: row.source, diagnostic: sema_gate_denied(key, site, entry.span, policy.source)})

@@ -355,11 +355,11 @@ ScriptRegistryOrderWalk: struct {
     visit: fn(&self, name: String) RegistryError! {
         if self.done.contains(name) -> return
         if self.active.contains(name) -> return Err(RegistryError.Reason("dependency cycle includes `{name}`"))
-        self.active.push(name)
+        self.active.push(name.copy())
         package: self.selected.get(name) ?? return Err(RegistryError.Reason("resolved package `{name}` disappeared"))
         loop dependency in package.dependencies -> self.visit(dependency.name)
         _ := self.active.pop()
-        self.done.push(name)
+        self.done.push(name.copy())
         self.out.push(package)
     }
 }

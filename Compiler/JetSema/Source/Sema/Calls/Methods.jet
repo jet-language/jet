@@ -581,7 +581,7 @@ sema_call_resolve_method_with_inference: fn(receiver_type: Type, method: String,
                 receiver_compatible: sema_call_type_assignable(expected_value, receiver_type, environment, program) ?? false
                 // copy: `candidate` is a row of read parameter `candidates`; the receiver-match list owns this one and the shape-match list may own another
                 if receiver_compatible -> receiver_matches.push(candidate.copy())
-                if receiver_compatible && sema_call_method_shape_matches(candidate, method, args, span) -> shape_matches.push(candidate)
+                if receiver_compatible && sema_call_method_shape_matches(candidate, method, args, span) -> shape_matches.push(candidate.copy())
             }
         }
     }
@@ -605,7 +605,7 @@ sema_call_resolve_method_with_inference: fn(receiver_type: Type, method: String,
                 actual_types := [Type]{}
                 if sema_call_method_receiver_type(candidate.signature, candidate.receiver_offset) == .Val(receiver_expected) {
                     parameter_types.push(receiver_expected)
-                    actual_types.push(receiver_type)
+                    actual_types.push(receiver_type.copy())
                 }
                 loop source_index in 0..<argument_types.len() {
                     if argument_types[source_index] != None && source_index < binding.slots.len() {

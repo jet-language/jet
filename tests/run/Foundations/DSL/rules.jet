@@ -76,12 +76,12 @@ apply: fn(facts: &[String:Int], fact: String, action: Action) -> String {
         .Add(delta) -> {
             next: current + delta
             event: "{fact}={next}"
-            facts.add(fact, next).drop("rule fact update")
+            facts.add(fact.copy(), next).drop("rule fact update")
             return event
         }
         .Set(next) -> {
             event: "{fact}={next}"
-            facts.add(fact, next).drop("rule fact update")
+            facts.add(fact.copy(), next).drop("rule fact update")
             return event
         }
     }

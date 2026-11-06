@@ -306,11 +306,11 @@ sema_effect_collect_statement_spans: fn(statements: [Stmt], assume_det: Bool, sp
     loop statement in statements {
         if statement == {
             .While(_, body, span, _, _) | .For(_, _, _, _, body, span, _, _, _) | .Loop(body, span, _, _) | .CountedLoop(_, _, _, body, span, _, _) -> {
-                if !assume_det -> spans.push(span)
+                if !assume_det -> spans.push(span.copy())
                 sema_effect_collect_statement_spans(body, assume_det, spans)
             }
             .AssumeDet(_, _, body, span) -> {
-                if assume_det -> spans.push(span)
+                if assume_det -> spans.push(span.copy())
                 sema_effect_collect_statement_spans(body, assume_det, spans)
             }
             .Unsafe(_, _, body, _)
@@ -522,7 +522,7 @@ sema_effect_set_contains: fn(set: [String], value: String) -> Bool Never! {
 
 sema_effect_set_add: fn(set: &[String], value: String) -> Bool Never! {
     if sema_effect_set_contains(set, value) -> return false
-    set.push(value)
+    set.push(value.copy())
     index := set.len() - 1
     // The row at `index` is the pushed value at every step of the walk.
     right: sema_effect_rank(value)
@@ -1015,7 +1015,7 @@ sema_effect_file_caps_of: fn(index: Int, direct: [[SemaEffectModuleCap]], parent
     loop parent in parents[index] {
         loop cap in sema_effect_file_caps_of(parent, direct, parents, depth + 1) -> caps.push(cap)
     }
-    loop cap in direct[index] -> caps.push(cap)
+    loop cap in direct[index] -> caps.push(cap.copy())
     caps
 }
 
@@ -2338,7 +2338,7 @@ sema_effect_span_before: fn(left: Span, right: Span) -> Bool Never! {
 sema_effect_memory_sorted_events: fn(events: [SemaMemoryEvent]) -> [SemaMemoryEvent] {
     sorted := [SemaMemoryEvent]{}
     loop event in events {
-        sorted.push(event)
+        sorted.push(event.copy())
         index := sorted.len() - 1
         loop index > 0 && sema_effect_span_before(sorted[index].span, sorted[index - 1].span) {
             swap := sorted[index - 1]
@@ -2353,7 +2353,7 @@ sema_effect_memory_sorted_events: fn(events: [SemaMemoryEvent]) -> [SemaMemoryEv
 sema_effect_memory_sorted_calls: fn(calls: [SemaMemoryCall]) -> [SemaMemoryCall] {
     sorted := [SemaMemoryCall]{}
     loop call in calls {
-        sorted.push(call)
+        sorted.push(call.copy())
         index := sorted.len() - 1
         loop index > 0 && sema_effect_span_before(sorted[index].span, sorted[index - 1].span) {
             swap := sorted[index - 1]
@@ -2552,7 +2552,7 @@ sema_effect_check_node: fn(node: SemaEffectNode, solved: [String], secret_reache
             // reports the missing trait bound once instead of the generic
             // ceiling diagnostics, and a bare purity marker reports nothing.
             if !node.has_declared_row -> return valid
-            diagnostics.push(found)
+            diagnostics.push(found.copy())
             return false
         }
         node.is_pure -> {
@@ -2866,7 +2866,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         graph_module: inputs[nodes[node_index].module_index].module_index
         caps := [SemaEffectModuleCap]{}
         if graph_module < file_caps.len() {
-            loop cap in file_caps[graph_module] -> caps.push(cap)
+            loop cap in file_caps[graph_module] -> caps.push(cap.copy())
         }
         loop cap in nodes[node_index].module_caps -> caps.push(SemaEffectModuleCap{cap: cap, site: None})
         if caps.len() == 0 -> next
@@ -3368,7 +3368,7 @@ sema_effect_walk_binary: fn(walk: SemaEffectWalk, nodes: &[SemaEffectNode], fact
         if node.kind == .Binary(_, _, _, inner_lhs, inner_rhs) {
             if sema_effect_walk_enter(current, nodes, facts, diagnostics, caller, tree, operand, node) == .Val(next) {
                 rights.push(inner_rhs)
-                walks.push(next)
+                walks.push(next.copy())
                 current = next
                 operand = inner_lhs
             } else {

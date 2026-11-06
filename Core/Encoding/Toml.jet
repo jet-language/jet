@@ -431,8 +431,8 @@ impl TOMLParser {
 
     assign: fn(&self, table: [String], key: [String], value: Dyn) -> Bool EncodingError! {
         path := [String]{}
-        loop k in table -> path.push(k)
-        loop k in key -> path.push(k)
+        loop k in table -> path.push(k.copy())
+        loop k in key -> path.push(k.copy())
         if has_path(self.root, path, 0) -> return Err(self.fail("duplicate TOML key"))
         self.root = put_path(self.root, path, 0, value)
         true

@@ -146,7 +146,7 @@ jet_cli_record_index_update: fn(index: &JetCLIRecordIndex, entry: JetCLIRecordIn
         return Err(jet_cli_read_error("record `{row.kind}/{row.artifact_id}` conflicts with an existing identity"))
     }
     candidate := index.entries
-    candidate.push(row)
+    candidate.push(row.copy())
     jet_cli_record_index_evict(candidate, index.budget)
     jet_cli_record_snapshot_validate(candidate, index.budget)
     retained := false
@@ -222,7 +222,7 @@ jet_cli_record_index_save_replay: fn(index: &JetCLIRecordIndex, artifact_id: Str
 jet_cli_record_index_saved_replays: fn(index: JetCLIRecordIndex, identity: JetCLIRecordIdentity) -> [JetCLIRecordIndexEntry] Never! {
     rows := [JetCLIRecordIndexEntry]{}
     loop entry in index.entries {
-        if entry.kind == "replay" && entry.saved && entry.identity == identity -> rows.push(entry)
+        if entry.kind == "replay" && entry.saved && entry.identity == identity -> rows.push(entry.copy())
     }
     loop position in 1..<rows.len() {
         row: rows[position]
@@ -243,7 +243,7 @@ jet_cli_record_index_remove_replay: fn(index: &JetCLIRecordIndex, artifact_id: S
     removed: jet_cli_record_index_find(index, "replay", artifact_id, true) ?? return Err(jet_cli_read_error("replay `{artifact_id}` is not indexed"))
     candidate := [JetCLIRecordIndexEntry]{}
     loop entry in index.entries {
-        if entry.kind != "replay" || entry.artifact_id != artifact_id -> candidate.push(entry)
+        if entry.kind != "replay" || entry.artifact_id != artifact_id -> candidate.push(entry.copy())
     }
     jet_cli_record_snapshot_validate(candidate, index.budget)
     index.entries = candidate.move()

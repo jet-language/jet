@@ -141,14 +141,14 @@ jet_cli_project_package_import: fn(start: String, environment_root: String) -[FS
     if directory {
         loop file in sources -> pending.push(file.path)
     } else {
-        pending.push(start)
+        pending.push(start.copy())
     }
     visited := [String]{}
     loop pending.len() > 0 {
         file: pending.pop() ?? break
         identity: cli_files.realpath(file) ?? file
         if visited.contains(identity) -> next
-        visited.push(identity)
+        visited.push(identity.copy())
         program: jet_cli_parsed_program(cli_files.read(file) ?? next) ?? next
         loop import in program.imports {
             if jet_cli_package_import_name(import, dependencies, allow_inline) == .Val(name) -> return Val(name)

@@ -194,14 +194,14 @@ ir_opt_report_add: fn(total: &IROptReport, part: IROptReport) Never! {
     total.ssa_fresh += part.ssa_fresh
     total.reduced += part.reduced
     total.reductions_declined += part.reductions_declined
-    loop note in part.reductions -> total.reductions.push(note)
+    loop note in part.reductions -> total.reductions.push(note.copy())
     total.stepped += part.stepped
     total.steps_declined += part.steps_declined
     total.factors += part.factors
     total.factors_declined += part.factors_declined
-    loop note in part.steps -> total.steps.push(note)
-    loop dump in part.dumps -> total.dumps.push(dump)
-    loop finding in part.lint -> total.lint.push(finding)
+    loop note in part.steps -> total.steps.push(note.copy())
+    loop dump in part.dumps -> total.dumps.push(dump.copy())
+    loop finding in part.lint -> total.lint.push(finding.copy())
 }
 
 // Optimizing threads (compiler_threads_admit): a thread is admitted for at

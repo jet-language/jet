@@ -123,11 +123,11 @@ build_session_insert_action: fn(state: &BuildSessionState, action: BuildSessionA
     seen := [String]{}
     loop output in action.outputs {
         if build_session_contains_string(seen, output) -> return build_session_error_fail(state, BuildSessionError.DuplicateActionOutput{action: action.name, output: output})
-        seen.push(output)
+        seen.push(output.copy())
         loop generated in state.generated { if generated.path == output -> return build_session_error_fail(state, BuildSessionError.GeneratedModuleCycle{name: generated.name, path: output}) }
     }
     id: state.actions.len()
-    state.actions.push(action)
+    state.actions.push(action.copy())
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildAction", session: state.id, id: id}}
 }
 
@@ -172,7 +172,7 @@ build_session_insert_target: fn(state: &BuildSessionState, target: BuildSessionT
         if id < 0 || id >= state.signing.len() -> return build_session_error_fail(state, BuildSessionError.UnknownSigningIdentity{id: id})
     }
     id: state.targets.len()
-    state.targets.push(target)
+    state.targets.push(target.copy())
     BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildTarget", session: state.id, id: id}}
 }
 

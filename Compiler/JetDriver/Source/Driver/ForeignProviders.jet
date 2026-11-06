@@ -392,8 +392,8 @@ jet_driver_foreign_collect_items: fn(items: [Item], root_index: Int, module_inde
                     surface_index = overlays.len() - 1
                 }
                 loop function in c_module.functions {
-                    overlays[surface_index].overlay_functions.push(function)
-                    overlays[surface_index].overlay_function_paths.push(source_path)
+                    overlays[surface_index].overlay_functions.push(function.copy())
+                    overlays[surface_index].overlay_function_paths.push(source_path.copy())
                 }
                 overlays[surface_index].overlay_span = c_module.path_span
                 if overlays[surface_index].overlay_path == "" -> overlays[surface_index].overlay_path = source_path
@@ -685,7 +685,7 @@ jet_driver_foreign_parse_metadata: fn(file: JetDriverAuthorizedSourceFile, libra
         jet_driver_foreign_metadata_error(file.path, "names a library different from its cache", diagnostics)
         valid = false
     }
-    if direct.len() == 0 -> direct.push(library)
+    if direct.len() == 0 -> direct.push(library.copy())
     if !valid -> return None
     JetDriverForeignMetadata{library: library, handles: handles, direct_links: direct, transitive_links: transitive}
 }
@@ -709,7 +709,7 @@ jet_driver_foreign_unique_strings: fn(values: [String]) -> [String] Never! {
                 break true
             }
         } ?? false
-        if !present -> result.push(value)
+        if !present -> result.push(value.copy())
     }
     result
 }
@@ -752,7 +752,7 @@ jet_driver_foreign_parse_provenance: fn(file: JetDriverAuthorizedSourceFile, lib
         if name == {
             "schema" -> schema = value
             "language" -> if language == "" -> language = value
-            "library" | "linked-library" -> direct_links.push(value)
+            "library" | "linked-library" -> direct_links.push(value.copy())
             "boundary-schema" -> boundary_schema = value
             "boundary-descriptor" -> descriptor = value
             "boundary-digest" -> boundary_digest = value
@@ -844,7 +844,7 @@ jet_driver_foreign_find_generated_module: fn(program: Program, language: String,
                 }
                 module_library = value.lib
                 span = value.path_span
-                loop function in value.functions -> functions.push(function)
+                loop function in value.functions -> functions.push(function.copy())
                 break
             }
             else -> {}
@@ -1017,7 +1017,7 @@ jet_driver_foreign_collect_canonical_overlay_items: fn(items: [Item], overlay_ba
                 if value.kind != CModuleKind.Extern || value.lib != library -> next
                 loop range_index in 0..<overlay_bases.len() {
                     if value.path_span.start >= overlay_bases[range_index] && value.path_span.start < overlay_ends[range_index] {
-                        loop function in value.functions -> functions.push(function)
+                        loop function in value.functions -> functions.push(function.copy())
                         break
                     }
                 }
@@ -1248,7 +1248,7 @@ jet_driver_foreign_remove_overlay_items: fn(load: &JetDriverLoadResult) Never! {
         items := [Item]{ }
         loop item_index in 0..<load.modules[index].program.items.len() {
             item: load.modules[index].program.items[item_index]
-            if item == { .CModule(_) -> {} else -> items.push(item) }
+            if item == { .CModule(_) -> {} else -> items.push(item.copy()) }
         }
         load.modules[index].program.items = items.move()
     }

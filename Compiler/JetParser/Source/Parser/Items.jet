@@ -588,7 +588,7 @@ parser_parse_import_row: fn(state: &JetParserState, start: Span) -> ImportDecl {
         if next_kind == TOKEN_LBRACKET || next_kind == TOKEN_STAR -> break
         parser_bump(state)
         member: parser_expect_name(state, "after `.` in an import path")
-        parts.push(member)
+        parts.push(member.copy())
         path = "{path}.{parser_value(state, member)}"
         last_span = member.span
     }
@@ -1225,7 +1225,7 @@ parser_drop_body_shaping_lines: fn(state: &JetParserState, markers: [Marker]) ->
             parser_add_error_code(state, "E0355", marker.span, "`#{marker.name}: …` cannot be written inside the body it shapes", "`#{marker.name}` decides how the function's body is read, so it must be known before the body starts", "write `#{parser_marker_above_text(marker)}` above the function")
             next
         }
-        kept.push(marker)
+        kept.push(marker.copy())
     }
     kept
 }
@@ -2115,7 +2115,7 @@ parser_parse_variant_markers: fn(state: &JetParserState) -> [Marker] {
             bracket_chunks += 1
         } else {
             marker: parser_parse_marker(state)
-            markers.push(marker)
+            markers.push(marker.copy())
             sequence.end = marker.span.end
             parser_skip_semicolons(state)
         }
@@ -2816,7 +2816,7 @@ parser_parse_tag_decl: fn(state: &JetParserState, modifiers: ParsedItemModifiers
                 keyword: parser_expect_name(state, "in a tag declaration")
                 target: parser_expect_name(state, "after a tag declaration clause")
                 item := NamedSpan{name: parser_value(state, target), span: target.span}
-                if parser_value(state, keyword) == "deny" -> deny.push(item)
+                if parser_value(state, keyword) == "deny" -> deny.push(item.copy())
                 if parser_value(state, keyword) == "from" -> from.push(item)
                 parser_finish_statement(state)
             }

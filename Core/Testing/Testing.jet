@@ -51,9 +51,9 @@ compare: fn<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) ->
         input: cases[i]
         expected: reference(input)
         actual: candidate(input)
-        inputs.push(input)
-        reference_values.push(expected)
-        candidate_values.push(actual)
+        inputs.push(input.copy())
+        reference_values.push(expected.copy())
+        candidate_values.push(actual.copy())
         case_ids.push("case-{i}")
         if first_difference < 0 && !expected.equal_unordered(actual) -> first_difference = i
     }

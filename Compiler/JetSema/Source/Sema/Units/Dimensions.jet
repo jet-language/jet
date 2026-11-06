@@ -64,7 +64,7 @@ sema_units_dimension_expression: fn(expression: Expr, visible: SemaUnitDimension
 // binary operator; the resolver itself admits only multiplication/division.
 sema_units_dimension_dependencies: fn(expression: Expr, names: &[String]) Never! {
     if expression == {
-        .Ident(name, _, _) -> names.push(name)
+        .Ident(name, _, _) -> names.push(name.copy())
         .Binary(_, left, right, _, _) -> {
             sema_units_dimension_dependencies(left, names)
             sema_units_dimension_dependencies(right, names)

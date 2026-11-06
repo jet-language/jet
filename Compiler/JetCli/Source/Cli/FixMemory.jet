@@ -129,7 +129,7 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
             replacement: row.repairs[0]
             if last_start == .Val(last) {
                 if end > last {
-                    options.push(row)
+                    options.push(row.copy())
                     next
                 }
             }
@@ -143,7 +143,7 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
             }
             expected_bytes: expected.bytes()
             if start > end || !jet_cli_memory_boundary(bytes, start) || !jet_cli_memory_boundary(bytes, end) || end - start != expected_bytes.len() || !jet_cli_memory_matches(bytes, expected_bytes, start) {
-                options.push(row)
+                options.push(row.copy())
                 next
             }
             updated := [U8]{}

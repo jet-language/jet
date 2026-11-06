@@ -279,7 +279,7 @@ pkg_merge_output_payload: fn(current: OutputPayload, incoming: OutputPayload, pa
     if current == .Array(current_values) && incoming == .Array(incoming_values) {
         merged := current_values
         loop value in incoming_values {
-            if !merged.contains(value) -> merged.push(value)
+            if !merged.contains(value) -> merged.push(value.copy())
         }
         pkg_record_provenance(provenance, path, origin)
         return Ok(OutputPayload.Array(merged))
@@ -312,7 +312,7 @@ pkg_merge_environments: fn(current: &[String: EnvironmentFact], incoming: [Strin
             pkg_merge_string_fields(merged.fields, [String: String]{"name": name}, path, fallback, origin, provenance)
         }
         loop tool in incoming[key].tools {
-            if !merged.tools.contains(tool) -> merged.tools.push(tool)
+            if !merged.tools.contains(tool) -> merged.tools.push(tool.copy())
         }
         merged.tools = pkg_manifest_sorted(merged.tools)
         pkg_record_provenance(provenance, "{path}.tools", origin)
@@ -376,7 +376,7 @@ pkg_record_environment_provenance: fn(provenance: &[String: [String]], path: Str
 pkg_record_provenance: fn(provenance: &[String: [String]], field: String, origin: String) Never! {
     origins := provenance.get(field) ?? [String]{}
     if origins.contains(origin) -> return
-    origins.push(origin)
+    origins.push(origin.copy())
     provenance[field] = origins
 }
 

@@ -234,7 +234,7 @@ image_registry_request: fn(request: RegistryRequest) -[Env, Exec, Time.Wait]> Re
     argv := [String]{"curl", "--silent", "--show-error", "--max-time", "120", "--netrc-optional", "--request", request.method}
     loop header in request.headers {
         argv.push("--header")
-        argv.push(header)
+        argv.push(header.copy())
     }
     if request.body != None {
         argv.push("--data-binary")

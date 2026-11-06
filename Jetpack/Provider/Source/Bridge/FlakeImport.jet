@@ -57,7 +57,7 @@ ImportCatalog: struct {
     nearest: fn(self, item: String, fallback: [String]) -> String Never! {
         candidates := self.names
         loop name in fallback {
-            if provider_is_catalog_name(name) -> candidates.push(name)
+            if provider_is_catalog_name(name) -> candidates.push(name.copy())
         }
         candidates = provider_sorted_unique(candidates)
         query: provider_last_segment(item)
@@ -101,7 +101,7 @@ provider_add_catalog_json: fn(path: String, names: &[String]) Never! -[FS]> {
 provider_add_catalog_value: fn(value: Dyn, names: &[String]) Never! {
     if value == {
         .Text(name) -> {
-            if provider_is_catalog_name(name) -> names.push(name)
+            if provider_is_catalog_name(name) -> names.push(name.copy())
         }
         .Array(values) -> {
             loop item in values -> provider_add_catalog_value(item, names)
@@ -319,7 +319,7 @@ provider_add_import_source_record: fn(lock: &SemanticLockFile, file: String, fin
 provider_retain_records_without_key: fn(lock: &SemanticLockFile, key: String) Never! {
     kept := [SemanticRecord]{}
     loop record in lock.records {
-        if record.identity.key != key -> kept.push(record)
+        if record.identity.key != key -> kept.push(record.copy())
     }
     lock.records = kept
 }
@@ -338,7 +338,7 @@ provider_clear_import_records: fn(lock: &SemanticLockFile) Never! {
                 if rationale.reason.starts_with("imported from bounded Nix devShell") -> imported_package = true
             }
         }
-        if !graph_record && !import_record && !imported_package -> kept.push(record)
+        if !graph_record && !import_record && !imported_package -> kept.push(record.copy())
     }
     lock.records = kept
 }

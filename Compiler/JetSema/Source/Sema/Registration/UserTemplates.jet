@@ -197,7 +197,7 @@ sema_derive_expand_template_loops: fn(items: &[Item], diagnostics: &[Diagnostic]
             loop generated_item in generated -> expanded.push(generated_item)
             next
         }
-        expanded.push(item)
+        expanded.push(item.copy())
     }
     items = expanded
 }
@@ -223,7 +223,7 @@ sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int
         source_origin: module_row.source_origin.copy()
         source_segments: module_row.source_segments.copy()
         loop item in generated {
-            module_row.program.items.push(item)
+            module_row.program.items.push(item.copy())
             if item == {
                 .Impl(_) -> {}
                 else -> {
@@ -456,7 +456,7 @@ sema_user_rule_accept: fn(items: [Item], rule: String, expanded: [Item], generat
                         diagnostics.push(diagnostic_with_detail(diagnostic, "generated member `{method.name}` from rule `{rule}` at span {method.name_span.start}..{method.name_span.end}\nexisting member `{implementation.type_name}.{method.name}` at span {span.start}..{span.end}"))
                         next
                     }
-                    methods.push(method)
+                    methods.push(method.copy())
                 }
                 if methods.len() > 0 {
                     accepted := implementation
@@ -464,7 +464,7 @@ sema_user_rule_accept: fn(items: [Item], rule: String, expanded: [Item], generat
                     generated.push(Item.Impl{value: accepted})
                 }
             }
-            else -> generated.push(expanded_item)
+            else -> generated.push(expanded_item.copy())
         }
     }
 }
@@ -583,12 +583,12 @@ sema_user_text_statement_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
             bodies := [[Stmt]]{}
             loop arm in arms -> bodies.push(arm.body)
-            if else_body == .Val(body) -> bodies.push(body)
+            if else_body == .Val(body) -> bodies.push(body.copy())
             bodies
         }
         .ComptimeIf(_, _, then_body, else_body, _, _) -> {
             bodies := [[Stmt]]{then_body}
-            if else_body == .Val(body) -> bodies.push(body)
+            if else_body == .Val(body) -> bodies.push(body.copy())
             bodies
         }
         .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> [[Stmt]]{body}

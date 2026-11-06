@@ -92,7 +92,7 @@ env_workspace_lock_write_locked: fn(cache: &WorkspaceDeclarationCache, workspace
         loop existing in lock.comptime_inputs {
             if existing.path == input.path -> recorded = true
         }
-        if !recorded -> lock.comptime_inputs.push(input)
+        if !recorded -> lock.comptime_inputs.push(input.copy())
     }
     if existing_lock == {
         .Val(file) -> resolver.revalidate_file(file) ?? return Err(env_workspace_lock_invalid("existing lock changed before write: {err.message()}"))

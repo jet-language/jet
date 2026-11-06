@@ -758,7 +758,7 @@ __build_fill: fn(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! 
     if failed != "" -> return Err(__build_tape_fail(wire, failed, message))
     count: got.len()
     if wire.prove == C_CLIENT_PROVE_CAPTURE {
-        wire.taped.extend(got)
+        wire.taped.extend(got.copy())
         if count == 0 -> wire.ending = "eof"
     }
     wire.buffer = got
@@ -1652,7 +1652,7 @@ __client_put_u64: fn(out: &[U8], value: Int) Never! {
 
 __client_put_bytes: fn(out: &[U8], bytes: [U8]) Never! {
     __client_put_u64(out, bytes.len())
-    out.extend(bytes)
+    out.extend(bytes.copy())
 }
 
 // The u64 LE at `at`, or -1 past the end or above Int's range.

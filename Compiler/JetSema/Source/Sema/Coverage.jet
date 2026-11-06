@@ -37,7 +37,7 @@ sema_coverage_shape_keys: fn(shape: TPatternShape, keys: &[String], ranges: &[Se
                     else -> {}
                 }
             }
-            keys.push(variant)
+            keys.push(variant.copy())
         }
         .Present(_, _, _, _) -> keys.push("Val")
         .Absent(_) -> keys.push("None")
@@ -165,7 +165,7 @@ sema_coverage_keys: fn(subject_ty: Type, shapes: [TPatternShape], environment: S
         }
         loop field in fields {
             if sema_coverage_field_covers(subject_ty, key, field, group, environment, program) {
-                keys.push(key)
+                keys.push(key.copy())
                 key_set[key] = true
                 break
             }
@@ -356,7 +356,7 @@ sema_coverage_nested_witnesses: fn(subject_ty: Type, missing: [String], shapes: 
         key: if entry == "Ok(...)" -> "Ok" else if entry == "Err(...)" -> "Err" else -> ""
         cases: if key == "" -> [String]{} else -> sema_coverage_nested_cases(subject_ty, key, shapes, environment, program)
         if cases.len() == 0 {
-            named.push(entry)
+            named.push(entry.copy())
             next
         }
         loop case in cases -> named.push("{key}({case})")
@@ -528,9 +528,9 @@ sema_coverage_arm_heads: fn(shape: TPatternShape, full: &[String], partial: &[St
                 }
             }
             if nested {
-                partial.push(variant)
+                partial.push(variant.copy())
             } else if !ranged {
-                full.push(variant)
+                full.push(variant.copy())
             }
         }
         .Present(_, _, inner, _) -> sema_coverage_push_head("Val", inner == None, full, partial)
@@ -543,9 +543,9 @@ sema_coverage_arm_heads: fn(shape: TPatternShape, full: &[String], partial: &[St
 
 sema_coverage_push_head: fn(head: String, full_cover: Bool, full: &[String], partial: &[String]) {
     if full_cover {
-        full.push(head)
+        full.push(head.copy())
     } else {
-        partial.push(head)
+        partial.push(head.copy())
     }
 }
 
@@ -774,7 +774,7 @@ sema_pattern_matrix_expand: fn(rows: [SemaPatternCoverageRow]) -> [SemaPatternCo
                 loop subrow in sema_pattern_matrix_expand([SemaPatternCoverageRow]{SemaPatternCoverageRow{cells: cells}}) -> expanded.push(subrow)
             }
         } else {
-            expanded.push(row)
+            expanded.push(row.copy())
         }
     }
     expanded
@@ -783,7 +783,7 @@ sema_pattern_matrix_expand: fn(rows: [SemaPatternCoverageRow]) -> [SemaPatternCo
 sema_pattern_matrix_tail: fn(types: [Type]) -> [Type] Never! {
     tail := [Type]{}
     loop (index, ty) in types {
-        if index > 0 -> tail.push(ty)
+        if index > 0 -> tail.push(ty.copy())
     }
     tail
 }
@@ -791,7 +791,7 @@ sema_pattern_matrix_tail: fn(types: [Type]) -> [Type] Never! {
 sema_pattern_matrix_append_tail: fn(cells: [SemaPatternCoverageCell], row: SemaPatternCoverageRow) -> SemaPatternCoverageRow Never! {
     result := cells
     loop (index, cell) in row.cells {
-        if index > 0 -> result.push(cell)
+        if index > 0 -> result.push(cell.copy())
     }
     SemaPatternCoverageRow{cells: result}
 }
@@ -830,7 +830,7 @@ sema_pattern_matrix_list_rows: fn(rows: [SemaPatternCoverageRow], length: Int, l
 
 sema_pattern_matrix_list_complete: fn(rows: [SemaPatternCoverageRow], elem: Type, length: Int, long: Bool, tail: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     types := (loop _ in 0..<length -> elem)
-    loop ty in tail -> types.push(ty)
+    loop ty in tail -> types.push(ty.copy())
     sema_pattern_matrix_complete(sema_pattern_matrix_list_rows(rows, length, long), types, environment, program)
 }
 

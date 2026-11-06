@@ -61,7 +61,7 @@ HermeticBuildContext: struct {
         checked: build_check_name(name, .Toolchain)
         if self.toolchain_names.contains(checked) -> return Err(HermeticBuildError.DuplicateToolchainName(checked))
         build_validate_toolchain(checked, spec)
-        self.toolchain_names.push(checked)
+        self.toolchain_names.push(checked.copy())
         id: self.toolchains.len()
         self.toolchains.push(HermeticBuildToolchain{
             id: id, name: checked, role: spec.role, host_triple: spec.host_triple, target_triple: spec.target_triple,
@@ -75,7 +75,7 @@ HermeticBuildContext: struct {
         checked: build_check_name(name, .SigningIdentity)
         if self.signing_identity_names.contains(checked) -> return Err(HermeticBuildError.DuplicateSigningIdentityName(checked))
         build_validate_identity(checked, spec.label, spec.provenance)
-        self.signing_identity_names.push(checked)
+        self.signing_identity_names.push(checked.copy())
         id: self.signing_identities.len()
         self.signing_identities.push(HermeticBuildSigningIdentity{id: id, name: checked, label: spec.label, provenance: spec.provenance})
         Ok(SigningIdentityHandle{id: id, context: self.context})
@@ -87,7 +87,7 @@ HermeticBuildContext: struct {
         toolchain: spec.toolchain ?? self.default_toolchain
         self.check_toolchain_ref(toolchain)
         build_validate_probe(checked, spec)
-        self.probe_names.push(checked)
+        self.probe_names.push(checked.copy())
         id: self.probes.len()
         self.probes.push(HermeticBuildProbe{id: id, name: checked, kind: spec.kind, reproducibility: spec.reproducibility, provenance: spec.provenance, toolchain: toolchain})
         Ok(ProbeHandle{id: id, context: self.context})
@@ -146,7 +146,7 @@ HermeticBuildContext: struct {
         checked: build_check_name(name, .Action)
         if self.action_names.contains(checked) -> return Err(HermeticBuildError.DuplicateActionName(checked))
         self.validate_action_spec(checked, spec)
-        self.action_names.push(checked)
+        self.action_names.push(checked.copy())
         toolchain: spec.toolchain ?? self.default_toolchain
         id: self.actions.len()
         self.actions.push(HermeticBuildAction{
@@ -171,7 +171,7 @@ HermeticBuildContext: struct {
         checked: build_check_name(name, .Target)
         if self.target_names.contains(checked) -> return Err(HermeticBuildError.DuplicateTargetName(checked))
         self.validate_target_spec(spec)
-        self.target_names.push(checked)
+        self.target_names.push(checked.copy())
         toolchain: spec.toolchain ?? self.default_toolchain
         id: self.targets.len()
         self.targets.push(HermeticBuildTarget{

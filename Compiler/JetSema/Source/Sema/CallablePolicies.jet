@@ -22,7 +22,7 @@ sema_policy_calls: fn(function: Func) -> [Call] Never! {
     loop marker in function.markers {
         if marker.name != "Policy" -> next
         loop argument in marker.args {
-            if argument == .Expr(value) && value == .Call(call, _) && !sema_policy_builtin(call.name) -> calls.push(call)
+            if argument == .Expr(value) && value == .Call(call, _) && !sema_policy_builtin(call.name) -> calls.push(call.copy())
         }
     }
     calls
@@ -127,7 +127,7 @@ sema_policy_declarations_checked: fn(input: [UserPolicyDecl], diagnostics: &[Dia
             next
         }
         names[declaration.name] = true
-        declarations.push(declaration)
+        declarations.push(declaration.copy())
     }
     declarations
 }
@@ -136,7 +136,7 @@ sema_policy_package_declarations: fn(inputs: [SemaRegistrationModuleInput], pack
     declarations := [UserPolicyDecl]{}
     loop input in inputs {
         if input.package_identity == package {
-            loop declaration in input.program.user_policy_declarations -> declarations.push(declaration)
+            loop declaration in input.program.user_policy_declarations -> declarations.push(declaration.copy())
         }
     }
     sema_policy_declarations_checked(declarations, diagnostics)
@@ -240,7 +240,7 @@ sema_policy_unsupported_applications: fn(program: Program) -> [AppliedRuleApplic
     unsupported := [AppliedRuleApplication]{}
     loop application in program.applied_rules {
         if sema_policy_statement_form(application) -> next
-        if application.marker.name != "Allow" -> unsupported.push(application)
+        if application.marker.name != "Allow" -> unsupported.push(application.copy())
     }
     loop application in program.rule_facts {
         // A file `#Target`, `#NoPrelude` or `#HTML(page)` is lowered by the
@@ -253,7 +253,7 @@ sema_policy_unsupported_applications: fn(program: Program) -> [AppliedRuleApplic
         // checked as every impl's markers are.
         if application.site == .Val(site) && site == RuleSite.Impl -> next
         if sema_policy_statement_form(application) -> next
-        if application.marker.name != "Allow" -> unsupported.push(application)
+        if application.marker.name != "Allow" -> unsupported.push(application.copy())
     }
     unsupported
 }

@@ -390,11 +390,11 @@ link_bind_sections: fn(c: &LinkContext, out: &[U8], origin: Int, view: LinkImage
     }
     elf64_pad(out, 8)
     symtab_at: origin + out.len()
-    out.extend(symtab)
+    out.extend(symtab.copy())
     strtab_index: headers.len() + 2
     headers.push(LinkSectionHeader{name: ".symtab", kind: LINK_SHT_SYMTAB, flags: 0, addr: 0, offset: symtab_at, size: symtab.len(), link: strtab_index, info: first_global, align: 8, entry_size: 24})
     strtab_at: origin + out.len()
-    out.extend(strtab)
+    out.extend(strtab.copy())
     headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
     shoff: link_write_section_headers(out, origin, headers)
     link_elf_sections(elf, shoff, headers.len() + 2)

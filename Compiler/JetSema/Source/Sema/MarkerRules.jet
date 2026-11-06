@@ -75,7 +75,7 @@ sema_marker_rules_append_name: fn(values: &[String], name: String) Never! {
             return
         }
     }
-    values.push(name)
+    values.push(name.copy())
 }
 
 sema_marker_rules_expr_name: fn(value: Expr) -> String? {
@@ -896,12 +896,12 @@ sema_marker_rules_append_comptime_source: fn(sources: &[SemaComptimeItemSource],
             return
         }
     }
-    sources.push(source)
+    sources.push(source.copy())
 }
 
 sema_marker_rules_append_comptime_requests: fn(requests: &[SemaComptimeRequest], incoming: [SemaComptimeRequest]) Never! {
     loop request in incoming {
-        requests.push(request)
+        requests.push(request.copy())
     }
 }
 
@@ -1389,7 +1389,7 @@ sema_marker_rules_impl_markers: fn(markers: [Marker], os_target: String?) -> [Ma
     kept := [Marker]{}
     loop marker in markers {
         if marker.name == "Target" && os_target != None -> next
-        kept.push(marker)
+        kept.push(marker.copy())
     }
     kept
 }
@@ -1429,7 +1429,7 @@ sema_marker_rules_item_applications: fn(item: Item, applications: &[AppliedRuleA
             // The parser owns `#FX` on a module as its effect cap.
             markers := [Marker]{}
             loop marker in code_module.markers {
-                if marker.name != "FX" -> markers.push(marker)
+                if marker.name != "FX" -> markers.push(marker.copy())
             }
             sema_marker_rules_attach(markers, code_module.name_span, RuleSite.Module, applications)
             if code_module.body == .Val(body) {
@@ -1456,7 +1456,7 @@ sema_marker_rules_applications: fn(program: Program) -> [AppliedRuleApplication]
         key: sema_marker_rules_application_key(application)
         if present.get(key) != None -> next
         present[key] = true
-        applications.push(application)
+        applications.push(application.copy())
     }
     applications
 }
@@ -1584,18 +1584,18 @@ sema_marker_rules_repeated_error: fn(marker: Marker, first: Marker, site: RuleSi
 
 sema_marker_rules_collect_function: fn(function: Func, markers: &[Marker]) Never! {
     loop marker in function.markers {
-        markers.push(marker)
+        markers.push(marker.copy())
     }
 }
 
 sema_marker_rules_collect_item: fn(item: Item, markers: &[Marker]) Never! {
     if item == .Struct(definition) {
         loop marker in definition.type_markers {
-            markers.push(marker)
+            markers.push(marker.copy())
         }
         loop field in definition.fields {
             loop marker in field.serde_markers {
-                markers.push(marker)
+                markers.push(marker.copy())
             }
         }
         loop function in definition.methods {
@@ -1610,11 +1610,11 @@ sema_marker_rules_collect_item: fn(item: Item, markers: &[Marker]) Never! {
     }
     if item == .Enum(definition) {
         loop marker in definition.type_markers {
-            markers.push(marker)
+            markers.push(marker.copy())
         }
         loop variant in definition.variants {
             loop marker in variant.serde_markers {
-                markers.push(marker)
+                markers.push(marker.copy())
             }
         }
         loop function in definition.methods {
@@ -1629,7 +1629,7 @@ sema_marker_rules_collect_item: fn(item: Item, markers: &[Marker]) Never! {
     }
     if item == .Distinct(definition) {
         loop marker in definition.type_markers {
-            markers.push(marker)
+            markers.push(marker.copy())
         }
         return
     }

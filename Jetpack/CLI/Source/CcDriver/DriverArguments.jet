@@ -88,9 +88,9 @@ DriverOptions: struct {
 
     // Record a source operand at the next argv slot.
     add_source: fn(&self, source: String) Never! {
-        self.sources.push(source)
+        self.sources.push(source.copy())
         self.source_indices.push(self.argv.len())
-        self.argv.push(source)
+        self.argv.push(source.copy())
     }
 
     // The index of the most recently pushed argv entry.
@@ -175,49 +175,49 @@ cli_cc_parse_expanded_args: fn(verb: String, args: [String]) -> DriverOptions CL
             "--gcc-toolchain" | "-B" | "-fuse-ld" | "-resource-dir" | "-Xlinker" -> return Err(CLIToolError.new("`{argument}` would override the pinned Hangar compiler or linker"))
             "-c" -> {
                 options.compile_only = true
-                options.argv.push(argument)
+                options.argv.push(argument.copy())
                 index = index + 1
             }
             "-MMD" | "-MD" -> {
                 options.dep_mode = true
-                options.argv.push(argument)
+                options.argv.push(argument.copy())
                 index = index + 1
             }
             "-M" | "-MM" | "-MG" -> return Err(CLIToolError.new("`{argument}` does not declare a reproducible output; use `-MD` or `-MMD`"))
             "-MP" -> {
                 options.dep_phony = true
-                options.argv.push(argument)
+                options.argv.push(argument.copy())
                 index = index + 1
             }
             "-v" -> {
                 options.verbose = true
-                options.argv.push(argument)
+                options.argv.push(argument.copy())
                 index = index + 1
             }
             "-x" | "-D" | "-U" | "-l" | "-std" | "--std" | "--param" -> {
                 value: cli_cc_next_value(args, index, argument)
                 if value == "" || cli_cc_has_nul(value) -> return Err(CLIToolError.new("option {argument} needs a non-empty value"))
-                options.argv.push(argument)
+                options.argv.push(argument.copy())
                 options.argv.push(value)
             }
             "-o" -> {
                 value: cli_cc_next_value(args, index, "-o")
                 options.output = cli_cc_set_once(options.output, value, "-o")
-                options.argv.push(argument)
+                options.argv.push(argument.copy())
                 options.argv.push(value)
                 options.output_index = Val(options.last_index())
             }
             "-MF" -> {
                 value: cli_cc_next_value(args, index, "-MF")
                 options.depfile = cli_cc_set_once(options.depfile, value, "-MF")
-                options.argv.push(argument)
+                options.argv.push(argument.copy())
                 options.argv.push(value)
                 options.depfile_index = Val(options.last_index())
             }
             "-MT" -> {
                 value: cli_cc_next_value(args, index, "-MT")
                 options.dep_target = cli_cc_set_once(options.dep_target, value, "-MT")
-                options.argv.push(argument)
+                options.argv.push(argument.copy())
                 options.argv.push(value)
                 options.dep_target_index = Val(options.last_index())
                 options.dep_target_option = Val("-MT")
@@ -226,7 +226,7 @@ cli_cc_parse_expanded_args: fn(verb: String, args: [String]) -> DriverOptions CL
                 value: cli_cc_next_value(args, index, "-MQ")
                 cli_cc_validate_operand(value, "-MQ")
                 options.dep_target = cli_cc_set_once(options.dep_target, value, "-MQ")
-                options.argv.push(argument)
+                options.argv.push(argument.copy())
                 options.argv.push(value)
                 options.dep_target_index = Val(options.last_index())
                 options.dep_target_option = Val("-MQ")
@@ -234,7 +234,7 @@ cli_cc_parse_expanded_args: fn(verb: String, args: [String]) -> DriverOptions CL
             "-I" | "-L" | "-include" | "-isystem" | "-iquote" | "-idirafter" | "-imacros" | "-iprefix" | "-iwithprefix" | "-iwithprefixbefore" -> {
                 value: cli_cc_next_value(args, index, argument)
                 cli_cc_validate_operand(value, argument)
-                options.argv.push(argument)
+                options.argv.push(argument.copy())
                 options.argv.push(value)
                 options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: ""})
             }
@@ -278,17 +278,17 @@ cli_cc_parse_prefixed_argument: fn(value: String, options: &DriverOptions) CLITo
         }
         value.starts_with("-o") && length > 2 -> {
             options.output = cli_cc_set_once(options.output, value.removeprefix("-o"), "-o")
-            options.argv.push(value)
+            options.argv.push(value.copy())
             options.output_index = Val(options.last_index())
         }
         value.starts_with("-MF") && length > 3 -> {
             options.depfile = cli_cc_set_once(options.depfile, value.removeprefix("-MF"), "-MF")
-            options.argv.push(value)
+            options.argv.push(value.copy())
             options.depfile_index = Val(options.last_index())
         }
         value.starts_with("-MT") && length > 3 -> {
             options.dep_target = cli_cc_set_once(options.dep_target, value.removeprefix("-MT"), "-MT")
-            options.argv.push(value)
+            options.argv.push(value.copy())
             options.dep_target_index = Val(options.last_index())
             options.dep_target_option = Val("-MT")
         }
@@ -296,30 +296,30 @@ cli_cc_parse_prefixed_argument: fn(value: String, options: &DriverOptions) CLITo
             target: value.removeprefix("-MQ")
             cli_cc_validate_operand(target, "-MQ")
             options.dep_target = cli_cc_set_once(options.dep_target, target, "-MQ")
-            options.argv.push(value)
+            options.argv.push(value.copy())
             options.dep_target_index = Val(options.last_index())
             options.dep_target_option = Val("-MQ")
         }
         value.starts_with("-I") && length > 2 -> {
             cli_cc_validate_operand(value.removeprefix("-I"), "-I")
-            options.argv.push(value)
+            options.argv.push(value.copy())
             options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: "-I"})
         }
         value.starts_with("-L") && length > 2 -> {
             cli_cc_validate_operand(value.removeprefix("-L"), "-L")
-            options.argv.push(value)
+            options.argv.push(value.copy())
             options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: "-L"})
         }
         attached != None -> {
             prefix: attached
             cli_cc_validate_operand(value.removeprefix(prefix), prefix)
-            options.argv.push(value)
+            options.argv.push(value.copy())
             options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: prefix})
         }
         value.starts_with("-") -> {
             cli_cc_reject_embedded_tool_override(value)
             cli_cc_validate_supported_flag(value)
-            options.argv.push(value)
+            options.argv.push(value.copy())
         }
         else -> {
             cli_cc_validate_operand(value, "source")
@@ -457,7 +457,7 @@ CcResponseExpansion: struct {
         if depth > CC_MAX_RESPONSE_DEPTH -> return Err(CLIToolError.new("response-file nesting exceeds {CC_MAX_RESPONSE_DEPTH} levels"))
         loop argument in args {
             if !argument.starts_with("@") {
-                self.expanded.push(argument)
+                self.expanded.push(argument.copy())
                 if self.expanded.len() > CC_MAX_RESPONSE_ARGS -> return Err(CLIToolError.new("response-file expansion exceeds {CC_MAX_RESPONSE_ARGS} arguments"))
                 next
             }
@@ -474,7 +474,7 @@ CcResponseExpansion: struct {
             metadata: files.stat(path) ?? return Err(CLIToolError.new("inspect response file {raw_path}: {err}"))
             if metadata.is_symlink || !metadata.is_file -> return Err(CLIToolError.new("response file {raw_path} is not a regular file"))
             if self.stack.contains(canonical) -> return Err(CLIToolError.new("response-file expansion contains a cycle at {raw_path}"))
-            self.stack.push(canonical)
+            self.stack.push(canonical.copy())
             self.file_count = self.file_count + 1
             bytes: cli_cc_read_bounded_response_file(canonical)
             words: cli_cc_parse_response_words(bytes, raw_path)

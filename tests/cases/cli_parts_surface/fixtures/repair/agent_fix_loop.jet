@@ -105,7 +105,7 @@ s1_repair_apply: fn(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1Repa
         edits := [S1RepairEdit]{}
         loop report in reports {
             loop edit in report.edits {
-                if edit.file == file.path -> edits.push(edit)
+                if edit.file == file.path -> edits.push(edit.copy())
             }
         }
         edits.sort_by((left: S1RepairEdit, right: S1RepairEdit) -> {

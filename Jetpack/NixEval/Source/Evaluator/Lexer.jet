@@ -87,7 +87,7 @@ NixEvalLexer: struct {
         estimated: self.bytes.len() * 4 + (self.tokens.len() + 1) * NIXEVAL_TOKEN_MEMORY_ESTIMATE_BYTES
         if estimated > NIXEVAL_MEMORY_BYTES -> return Err(NixEvalError.ResourceLimit("foreign flake evaluator memory budget exceeded"))
         if self.tokens.len() >= NIXEVAL_TOKEN_LIMIT -> return Err(NixEvalError.ResourceLimit("foreign flake has more than {NIXEVAL_TOKEN_LIMIT} tokens"))
-        self.tokens.push(token)
+        self.tokens.push(token.copy())
     }
 
     skip_space_and_comments: fn(&self) NixEvalError! {

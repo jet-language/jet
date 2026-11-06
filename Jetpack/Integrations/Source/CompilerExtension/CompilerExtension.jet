@@ -616,7 +616,7 @@ pkg_extension_negotiate_abilities: fn(protocol: Int, requested: [ExtensionAbilit
     granted := [ExtensionAbility]{}
     loop ability in requested {
         if !allowed.contains(ability) -> return Err(ExtensionProtocolError.new("ability `{ability.as_str()}` is not in the v1 allowlist"))
-        if !granted.contains(ability) -> granted.push(ability)
+        if !granted.contains(ability) -> granted.push(ability.copy())
     }
     granted.sort_by(ability -> ability.rank())
     Ok(granted)
@@ -816,7 +816,7 @@ pkg_extension_validate_interface_facts: fn(types: [TypeFact], symbols: [SymbolFa
         if authority_parse_right(import.required_right) == None -> return Err(ExtensionProtocolError.new("host import `{import.id}` has unknown required right `{import.required_right}`"))
         payload := import.parameter_type_ids
         if import.result_type_id == {
-            .Val(type_id) -> payload.push(type_id)
+            .Val(type_id) -> payload.push(type_id.copy())
             .None -> {}
         }
         loop type_id in payload {

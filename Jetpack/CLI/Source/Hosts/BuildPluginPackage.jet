@@ -62,7 +62,7 @@ WasmComponentPluginSpec: struct {
             key: split.before.trim()
             value: split.after.trim()
             if fields.contains(key) -> return Err(cli_build_plugin_error("plugin manifest field {key} is declared more than once"))
-            fields.push(key)
+            fields.push(key.copy())
             if key == {
                 "name" -> name = Val(cli_build_plugin_manifest_string(value, key) ?? return Err(err))
                 "version" -> version = Val(cli_build_plugin_manifest_string(value, key) ?? return Err(err))

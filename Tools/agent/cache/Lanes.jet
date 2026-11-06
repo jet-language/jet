@@ -125,7 +125,7 @@ run_in_lane: fn(lane: Lane, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait
 run_job: fn(lane: Lane, argv: [String], _slot: FileLock) -[Env, Exec, Time, Time.Wait, IO]> Int Never! {
     unit: "jw-{lane.name}-{sys.pid()}-{time.unix_ns()}"
     scoped := [String]{"systemd-run", "--user", "--slice=jetwork.slice", "--scope", "-q", "--unit={unit}", "-p", "MemoryMax={lane.memory}", "-p", "MemorySwapMax=0"}
-    loop arg in argv -> scoped.push(arg)
+    loop arg in argv -> scoped.push(arg.copy())
     spec := process.cmd(scoped).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     if lane.timeout_s == .Val(seconds) -> spec = spec.timeout(time.duration_seconds(seconds))
     loop pair in lane.env -> spec = spec.env(pair.name, pair.value)
@@ -174,7 +174,7 @@ jet_lane: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     timeout: digits_value(env_or("SAFE_JET_TIMEOUT", "300")) ?? return refuse("jet lane: SAFE_JET_TIMEOUT must be whole seconds", 64)
     slots: [String]{"{state}/jet-slots/1", "{state}/jet-slots/2", "{state}/jet-slots/3"}
     argv := [String]{jet}
-    loop arg in args -> argv.push(arg)
+    loop arg in args -> argv.push(arg.copy())
     run_in_lane(Lane{name: "safe-jet", slots: slots, wait_ms: 500, memory: memory, timeout_s: Val(timeout), env: [(name: String, value: String)]{(name: "TMPDIR", value: scratch_root())}}, argv)
 }
 

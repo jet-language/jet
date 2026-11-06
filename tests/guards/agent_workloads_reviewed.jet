@@ -406,7 +406,7 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
     selected := [[String]]{}
     candidate_cxx := false
     loop row in peers {
-        if row[2] == "best-applicable" -> selected.push(row)
+        if row[2] == "best-applicable" -> selected.push(row.copy())
         if row[2] == "candidate" && row[3] == "cxx" -> candidate_cxx = true
         assert_eq(row[12], "#1414")
     }

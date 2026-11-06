@@ -52,7 +52,7 @@ sema_ownership_crossing_new_problem: fn(kind: SemaSendProblemKind) -> SemaSendab
 
 sema_ownership_crossing_prepend: fn(root: String, field: String, problem: SemaSendabilityProblem) -> SemaSendabilityProblem Never! {
     path := [String]{field}
-    loop segment in problem.path -> path.push(segment)
+    loop segment in problem.path -> path.push(segment.copy())
     SemaSendabilityProblem{root: Val(root), path: path, kind: problem.kind}
 }
 
@@ -249,7 +249,7 @@ sema_ownership_crossing_named_type: fn(ty: Type, name: String, crossing: SemaSen
     parts: sema_ownership_crossing_core_row_parts(name) ?? return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
     key: "<core-row>::{name}"
     if walk.active.contains(key) || walk.finished.get(key) != None -> return None
-    walk.active.push(key)
+    walk.active.push(key.copy())
     found := SemaSendabilityProblem?{None}
     loop part in parts {
         problem: sema_ownership_crossing_type_inner(part.ty, crossing, true, strict_callable, cell_only, environment, program, context, walk) ?? next

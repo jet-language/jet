@@ -232,7 +232,7 @@ pkg_collect_effects_for_key: fn(key: String, reachable: [String: Bool], solved: 
     if !pkg_effect_key_is_reachable(key, reachable) -> return
     set: solved.get(key) ?? return
     loop effect_name in set {
-        aggregate.effects.push(effect_name)
+        aggregate.effects.push(effect_name.copy())
         if !aggregate.effect_sites.has_key(effect_name) {
             seen := [String: Bool]{}
             aggregate.effect_sites[effect_name] = pkg_effect_site(key, effect_name, solved, summaries, seen)
@@ -291,7 +291,7 @@ pkg_panic_site: fn(key: String, summaries: [String: PackageEffectSummary], seen:
 pkg_effect_summary_line: fn(entries: [PackageEffects]) -> String Never! {
     all := [String]{}
     loop entry in entries {
-        loop effect_name in entry.effects -> all.push(effect_name)
+        loop effect_name in entry.effects -> all.push(effect_name.copy())
     }
     all = authority_holds(all)
     if all.len() == 0 -> return "effects: none"

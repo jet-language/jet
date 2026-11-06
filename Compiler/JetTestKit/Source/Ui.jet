@@ -461,7 +461,7 @@ kit_ui_source_code: fn(code: String) -> Bool {
 }
 
 kit_ui_add_code: fn(codes: &[String], code: String) {
-    if !kit_expect_named(codes, code) -> codes.push(code)
+    if !kit_expect_named(codes, code) -> codes.push(code.copy())
 }
 
 kit_ui_extract_source: fn(text: String) -> [String] {
@@ -575,7 +575,7 @@ kit_ui_set_coverage: fn(rows: [KitUIRegistryRow], emitted: [String], rendered: [
         side: fields[1]
         valid: kit_ui_report_code(code) && kit_expect_named(registered, code) && !kit_expect_named(seen, code) && (side == "left-only" || side == "right-only") && fields[2].trim() != ""
         if !valid -> errors.push("invalid coverage allowlist row: {line}")
-        seen.push(code)
+        seen.push(code.copy())
         allowances.push(KitUIAllowance{code: code, side: side, card: fields[2]})
         needed: if side == "left-only" -> kit_expect_named(left, code) && !kit_expect_named(right, code) else -> kit_expect_named(right, code) && !kit_expect_named(left, code)
         if valid && !needed {

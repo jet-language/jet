@@ -857,7 +857,7 @@ browser_trace_push: fn(browser: Browser, entry: String) Never! {
         loop index in drop..<guard.value.trace.len() -> kept.push(guard.value.trace[index])
         guard.value.trace = kept
     }
-    guard.value.trace.push(entry)
+    guard.value.trace.push(entry.copy())
     guard.value.trace_bytes = total + size
 }
 
@@ -878,7 +878,7 @@ browser_queue_event: fn(browser: Browser, event: BrowserEvent) Never! {
         loop index in 1..<guard.value.events.len() -> rest.push(guard.value.events[index])
         guard.value.events = rest
     }
-    guard.value.events.push(event)
+    guard.value.events.push(event.copy())
 }
 
 browser_check_command: fn(browser: Browser, method: String) BrowserError! {

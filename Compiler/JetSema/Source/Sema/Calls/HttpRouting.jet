@@ -291,7 +291,7 @@ sema_http_route_path_fields: fn(pattern: String) -> [SemaHTTPRoutePathField]? {
                     field_name := String.from_bytes(segment.bytes().slice(1, segment.bytes().len())) ?? return None
                     if !sema_http_route_name_is_valid(field_name) -> return None
                     loop existing in names { if existing == field_name -> return None }
-                    names.push(field_name)
+                    names.push(field_name.copy())
                     fields.push(SemaHTTPRoutePathField{name: field_name, catch_all: catch_all})
                 }
                 else -> {
@@ -467,7 +467,7 @@ sema_http_route_schema_type: fn(ty: Type, environment: SemaScopeEnvironment, pro
             if nominal.kind != SemaRegistrationNominalKind.Struct -> return None
             loop previous in active { if previous == nominal.symbol.id.key -> return None }
             next_active := [String]{}
-            loop previous in active -> next_active.push(previous)
+            loop previous in active -> next_active.push(previous.copy())
             next_active.push(nominal.symbol.id.key)
             // The fields are named as the struct's own module names them.
             properties := [String]{}

@@ -223,7 +223,7 @@ jet_cli_digest_section: fn(title: String, body: String) -> String Never! {
 jet_cli_digest_list: fn(values: [String]) -> String Never! {
     unique := [String]{}
     loop value in values {
-        if !unique.contains(value) -> unique.push(value)
+        if !unique.contains(value) -> unique.push(value.copy())
     }
     rows: loop value in unique -> "- {value}"
     rows.join("\n")
@@ -661,7 +661,7 @@ jet_cli_engine_dispatch: fn(engine: String, verb: String, argv: [String]) -[Env,
         return jet_cli_version_skew(engine, JET_CLI_VERSION, reply)
     }
     command := [String]{bin}
-    loop argument in argv -> command.push(argument)
+    loop argument in argv -> command.push(argument.copy())
     spec: cli_process.cmd(command).env(JET_CLI_ROOT_ENGINE_DISPATCH_PID_ENV, "{cli_process.current_pid()}").stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     receipt: spec.run() ?? return jet_cli_report_output("", "E2105", "couldn't run `{bin}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false, JET_DRIVER_EXIT_USER_ERROR)
     exit_code := receipt.code
@@ -692,7 +692,7 @@ jet_cli_find_external: fn(name: String) -[FS, Env]> String? Never! {
 // stdio; its exit code is this run's (a signal-ended one exits 0).
 jet_cli_external_run: fn(bin: String, args: [String]) -[Exec, Time.Wait]> JetDriverVerbOutput Never! {
     command := [String]{bin}
-    loop argument in args -> command.push(argument)
+    loop argument in args -> command.push(argument.copy())
     receipt: cli_process.cmd(command).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return jet_cli_report_output("", "E2105", "couldn't run `{bin}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false, JET_DRIVER_EXIT_USER_ERROR)
     exit_code: if receipt.signal != None -> 0 else -> receipt.code
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
@@ -735,7 +735,7 @@ jet_cli_inspect_first_positional: fn(args: [String]) -> String? Never! {
 jet_cli_inspect_positionals: fn(args: [String]) -> [String] Never! {
     found := [String]{}
     loop argument in args {
-        if !argument.starts_with("-") -> found.push(argument)
+        if !argument.starts_with("-") -> found.push(argument.copy())
     }
     found
 }

@@ -56,7 +56,7 @@ pkg_parse_policy: fn(body: String, package_only_fields: Bool) -> [PolicyDeclarat
         }
         key: policy_key_parse(name) ?? next
         if seen.contains(key) -> return Err(pkg_bad_mem("package policy `{name}` is declared more than once"))
-        seen.push(key)
+        seen.push(key.copy())
         value: if policy_parse_value(key, raw) == {
             .Ok(parsed) -> parsed
             .Err(error) -> {
@@ -176,7 +176,7 @@ pkg_parse_package_policy_surface: fn(body: String) -> PackagePolicySurface Packa
                     stars: pkg_text_count(pattern, "*")
                     if pattern.trim() == "" || (pattern.contains("*") && !pattern.ends_with("*")) || stars > 1 -> return Err(pkg_bad_policy("`policy.sources` patterns must be exact names or one trailing `*`"))
                     if seen_sources.contains(pattern) -> return Err(pkg_bad_policy("`policy.sources.{pattern}` is declared more than once"))
-                    seen_sources.push(pattern)
+                    seen_sources.push(pattern.copy())
                     sources: pkg_parse_string_list(rule.value.trim()) ?? return Err(pkg_bad_policy("`policy.sources.{pattern}` must contain a non-empty source list"))
                     if sources.len() == 0 || pkg_policy_any_blank(sources) -> return Err(pkg_bad_policy("`policy.sources.{pattern}` must contain a non-empty source list"))
                     if pkg_policy_has_repeat(sources) -> return Err(pkg_bad_policy("`policy.sources.{pattern}` cannot repeat a source authority"))
@@ -205,7 +205,7 @@ pkg_policy_has_repeat: fn(values: [String]) -> Bool Never! {
     unique := [String]{}
     loop value in values {
         if unique.contains(value) -> return true
-        unique.push(value)
+        unique.push(value.copy())
     }
     false
 }
@@ -306,9 +306,9 @@ pkg_parse_policy_exceptions: fn(raw: String) -> [PackagePolicyException] Package
         pkg_validate_exception_text("reason", reason)
         if !pkg_is_exact_exception_scope(scope) -> return Err(pkg_bad_policy("`PolicyException.scope` must be an exact `package#version` target; wildcards, `@`, and ranges are not allowed"))
         if seen_ids.contains(id) -> return Err(pkg_bad_policy("`policy.exceptions` repeats exception id `{id}`"))
-        seen_ids.push(id)
+        seen_ids.push(id.copy())
         if seen_scopes.contains(scope) -> return Err(pkg_bad_policy("`policy.exceptions` repeats exact scope `{scope}`"))
-        seen_scopes.push(scope)
+        seen_scopes.push(scope.copy())
         exceptions.push(PackagePolicyException{id: id, scope: scope, reason: reason, expires_at: expires})
     }
     Ok(exceptions)

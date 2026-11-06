@@ -22,7 +22,7 @@ store_nix_test_parse_fails: fn(text: String) -> Bool Never! {
 store_nix_test_put: fn(output: &[U8], value: [U8]) Never! {
     length: value.len()
     loop index in 0..<8 -> output.push(U8{((length >> (index * 8))).bit_and(255)})
-    output.extend(value)
+    output.extend(value.copy())
     padding: (8 - length % 8) % 8
     loop _ in 0..<padding -> output.push(U8{0})
 }

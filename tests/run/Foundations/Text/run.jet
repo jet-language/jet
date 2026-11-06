@@ -33,7 +33,7 @@ merge_sequence: fn(sequence: [String], key: String) -> [String] {
         next: sequence.get(index + 1) ?? ""
         if {
             index + 1 < sequence.len() && pair_key(current, next) == key -> {
-                result.push(merged)
+                result.push(merged.copy())
                 index += 2
             }
             else -> {
@@ -71,7 +71,7 @@ train_bpe: fn(corpus: String) -> BPEModel {
             }
         }
         if best_count == 0 -> break
-        merges.push(best)
+        merges.push(best.copy())
         next_sequences := [[String]]{}
         loop sequence in sequences -> next_sequences.push(merge_sequence(sequence, best))
         sequences = next_sequences

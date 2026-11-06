@@ -109,8 +109,8 @@ build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
     file_rows := [String:BuildGraphFile]{}
     loop (id, target) in state.targets {
         paths := target.sources
-        loop path in target.inputs -> paths.push(path)
-        loop path in target.outputs -> paths.push(path)
+        loop path in target.inputs -> paths.push(path.copy())
+        loop path in target.outputs -> paths.push(path.copy())
         targets.push(BuildGraphTarget{id: id, name: target.name, kind: build_key_target_kind(target.kind), deps: target.deps, actions: target.actions, files: paths, plugin: target.plugin})
     }
     loop (id, action) in state.actions {
@@ -132,8 +132,8 @@ build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
     }
     loop (id, target) in state.targets {
         paths := target.sources
-        loop path in target.inputs -> paths.push(path)
-        loop path in target.outputs -> paths.push(path)
+        loop path in target.inputs -> paths.push(path.copy())
+        loop path in target.outputs -> paths.push(path.copy())
         loop path in paths {
             row := file_rows.get(path) ?? BuildGraphFile{path: path, owner: None, consumers: [Int]{}, targets: [Int]{}}
             row.targets.push(id)
@@ -143,7 +143,7 @@ build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {
             action: state.actions[action_id]
             owner: build_session_action_target(state, action_id) ?? panic("checked target action lost its owner")
             action_paths := action.inputs
-            loop path in action.outputs -> action_paths.push(path)
+            loop path in action.outputs -> action_paths.push(path.copy())
             loop path in action_paths {
                 row := file_rows.get(path) ?? BuildGraphFile{path: path, owner: None, consumers: [Int]{}, targets: [Int]{}}
                 build_session_append_int(row.targets, owner)

@@ -407,25 +407,25 @@ WriterGrant: struct {
         if repeated -> return Err(store_broker_invalid("shared-store peer enrollment repeats `{key}`"))
         if key == {
             "source" -> {
-                self.sources.push(value)
+                self.sources.push(value.copy())
             }
             "builder" -> {
-                self.builders.push(value)
+                self.builders.push(value.copy())
             }
             "action" -> {
-                self.actions.push(value)
+                self.actions.push(value.copy())
             }
             "output" -> {
-                self.outputs.push(value)
+                self.outputs.push(value.copy())
             }
             "platform" -> {
-                self.platforms.push(value)
+                self.platforms.push(value.copy())
             }
             "sandbox" -> {
-                self.sandboxes.push(value)
+                self.sandboxes.push(value.copy())
             }
             else -> {
-                self.policies.push(value)
+                self.policies.push(value.copy())
             }
         }
     }
@@ -461,7 +461,7 @@ store_broker_parse_writer_grant: fn(text: String) -> WriterGrant StoreError! {
         if line == {
             "read" | "write" -> {
                 if seen.contains(line) -> return Err(store_broker_invalid("shared-store peer enrollment repeats `{line}`"))
-                seen.push(line)
+                seen.push(line.copy())
                 if line == "read" {
                     grant.read = true
                 } else {

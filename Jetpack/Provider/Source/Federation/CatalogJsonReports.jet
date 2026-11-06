@@ -501,7 +501,7 @@ impl ProviderFactReport {
                 losses.push("binary metadata `{key}` is empty")
                 next
             }
-            digests.push(digest)
+            digests.push(digest.copy())
             facts.add_typed_text("provider.binary.identity.{key}", digest)
         }
         loop index in 1..<digests.len() {
@@ -618,7 +618,7 @@ provider_graph_dependency_field: fn(facts: &MetadataFacts, object: [String: Dyn]
         if pkg_json_text(item) == {
             .Val(name) -> {
                 if name.trim() != "" {
-                    dependencies.push(name)
+                    dependencies.push(name.copy())
                     facts.add_conflicting_typed_json("provider.{namespace}.dependency.{kind}.{name}", item)
                     next
                 }
@@ -860,7 +860,7 @@ provider_binary_artifact_facts: fn(facts: &MetadataFacts, value: Dyn, losses: &[
         return
     }
     loop platform in artifacts.keys().to_list() {
-        facts.platforms.push(platform)
+        facts.platforms.push(platform.copy())
         artifact: pkg_json_object(artifacts[platform]) ?? {
             losses.push("binary artifact `{platform}` must be an object")
             next

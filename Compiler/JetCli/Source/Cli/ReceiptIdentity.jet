@@ -153,7 +153,7 @@ jet_cli_receipt_authority_roots: fn(cache: &WorkspaceDeclarationCache, start: St
         package: jet_cli_receipt_regular(jet_cli_rooted_join(directory, "package.jet")) || jet_cli_receipt_regular(jet_cli_rooted_join(directory, "pkg.jet"))
         workspace: jet_cli_receipt_regular(jet_cli_rooted_join(directory, "workspace.jet"))
         if package && !package_seen {
-            roots.push(directory)
+            roots.push(directory.copy())
             package_seen = true
         }
         if workspace {
@@ -176,7 +176,7 @@ jet_cli_receipt_generated_paths: fn(path: String, strict: Bool, paths: &[String]
         return
     }
     if info.is_file {
-        paths.push(path)
+        paths.push(path.copy())
         return
     }
     if !info.is_dir -> return

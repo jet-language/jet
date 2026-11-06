@@ -27,7 +27,7 @@ jet_cli_receipt_merge_sections: fn(original: &&JetCLIReceipt, claim: JetCLIRecei
             }
             return Err(jet_cli_read_error("receipt section `{section.name}` conflicts with the immutable receipt"))
         }
-        if !same -> receipt.sections.push(section)
+        if !same -> receipt.sections.push(section.copy())
     }
     receipt.sections = jet_cli_receipt_normalized_sections(receipt.sections)
     Ok(receipt)

@@ -114,7 +114,7 @@ derivation_store_intern: fn(store: &DerivationStore, record: DerivationRecord) -
     loop existing in store.records {
         if existing.id == record.id -> return Val(derivation_record_reference(existing))
     }
-    store.records.push(record)
+    store.records.push(record.copy())
     derivation_store_sort(store)
     Val(derivation_record_reference(record))
 }

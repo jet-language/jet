@@ -93,13 +93,13 @@ sema_alias_expr_path: fn(value: Expr) -> [String]? Never! {
         .Ident(name, _, _) -> Val([String]{name})
         .Field(base, member, _, _) -> {
             parts := sema_alias_expr_path(base) ?? return None
-            parts.push(member)
+            parts.push(member.copy())
             Val(parts)
         }
         .EnumLit(type_name, variant, _, args, leading_dot, _, _) -> {
             if leading_dot || args.len() > 0 || type_name == "" -> return None
             parts := type_name.split(".").to_list()
-            parts.push(variant)
+            parts.push(variant.copy())
             Val(parts)
         }
         else -> None

@@ -413,7 +413,7 @@ sema_call_try_stream_handle_method: fn(receiver: Expr, receiver_value: TExpr, me
         }
         access: if owner == "FileReader" -> AccessConvention.Write else -> AccessConvention.Read
         source_args := [CallArg]{CallArg{convention: access, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
-        loop argument in args -> source_args.push(argument)
+        loop argument in args -> source_args.push(argument.copy())
         scopes.ownership_call_depth += 1
         value := sema_call_core_check_source_owned(target, "{owner}.{method}", [Type]{}, source_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         scopes.ownership_call_depth -= 1

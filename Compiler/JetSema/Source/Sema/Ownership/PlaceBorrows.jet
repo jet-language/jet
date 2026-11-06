@@ -63,7 +63,7 @@ sema_place_borrow_function: fn(body: &[TStmt], params: [TParameter], receiver: S
         if param.convention != AccessConvention.Read -> next
         if param.local.symbol_id == .Val(id) -> _ := table.roots.add(id.key, true)
     }
-    if receiver != "" -> _ := table.roots.add(receiver, true)
+    if receiver != "" -> _ := table.roots.add(receiver.copy(), true)
     sema_place_borrow_statements(body, census, arena, table)
 }
 
@@ -73,8 +73,8 @@ sema_place_borrow_statements: fn(body: &[TStmt], census: SemaPlaceBorrowCensus, 
         if body[index] == .Let(local, let_ty, init, gc_promotion, gc_transferred, _) {
             key: if local.symbol_id == .Val(id) -> id.key else -> ""
             if key != "" {
-                if table.seen.get(key) != None -> _ := table.blocked.add(key, true)
-                _ := table.seen.add(key, true)
+                if table.seen.get(key) != None -> _ := table.blocked.add(key.copy(), true)
+                _ := table.seen.add(key.copy(), true)
             }
             if key != "" && gc_promotion == None && !gc_transferred && sema_place_borrow_plain_local(local, let_ty) {
                 if sema_place_borrow_place(init, false, arena) && !sema_place_borrow_consumed(census, key, local.name) {
@@ -224,7 +224,7 @@ sema_place_borrow_census_stmt: fn(statement: TStmt, arena: BodyTree, census: &Se
             sema_place_borrow_census_list(body, arena, census)
         }
         .GCEdit(root, _, _, _, _, nested, _) -> {
-            _ := census.names.add(root, true)
+            _ := census.names.add(root.copy(), true)
             sema_place_borrow_census_stmt(nested, arena, census)
         }
         .Reactive(executable, _) -> return sema_place_borrow_census_lambda(executable, arena, census)

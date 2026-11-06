@@ -158,7 +158,7 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
         }
         .Registered(guid, major, minor, lcid) -> {
             command.push("reg")
-            command.push(guid)
+            command.push(guid.copy())
             command.push("{major}")
             command.push("{minor}")
             command.push("{lcid}")
@@ -482,7 +482,7 @@ pkg_com_parse_method: fn(fields: [String], methods: [ComMethod]) -> ComMethod Fo
         pair: value.split_once(":") ?? return Err(ForeignBindError.Source("COM member `{raw}` has malformed parameter metadata"))
         param_name: pkg_com_project(pair.before)
         if names.contains(param_name) -> return Err(ForeignBindError.Source("COM member `{raw}` has duplicate parameter name `{param_name}`"))
-        names.push(param_name)
+        names.push(param_name.copy())
         kind: ComKind.parse(pair.after) ?? return Err(ForeignBindError.Source("COM member `{raw}` has unsupported parameter type `{pair.after}`"))
         params.push(ComParam{name: param_name, kind: kind})
     }

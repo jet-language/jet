@@ -79,8 +79,8 @@ sema_footprint_note_field: fn(uses: &SemaFootprintUses, name: String, span: Span
         return
     }
     if uses.names.contains(name) -> return
-    uses.names.push(name)
-    uses.spans.push(span)
+    uses.names.push(name.copy())
+    uses.spans.push(span.copy())
 }
 
 // The receiver of a method that can have a footprint: a `self` or `&self`
@@ -120,7 +120,7 @@ sema_footprint_check: fn(items: [Item]) -> [Diagnostic] {
                 fields[definition.name] = stored
                 methods := definition.methods
                 loop block in definition.trait_impls {
-                    loop method in block.methods -> methods.push(method)
+                    loop method in block.methods -> methods.push(method.copy())
                 }
                 sema_footprint_add_owner(owners, definition.name, methods, stated)
             }
@@ -143,7 +143,7 @@ sema_footprint_add_owner: fn(owners: &[SemaFootprintOwner], name: String, method
     }
     loop index in 0..<owners.len() {
         if owners[index].name == name {
-            loop method in methods -> owners[index].methods.push(method)
+            loop method in methods -> owners[index].methods.push(method.copy())
             return
         }
     }

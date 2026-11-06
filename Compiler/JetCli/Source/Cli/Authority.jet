@@ -77,7 +77,7 @@ jet_cli_sorted_set: fn(values: [String]) -> [String] Never! {
     loop value in values {
         if sorted.contains(value) -> next
         index := sorted.len()
-        sorted.push(value)
+        sorted.push(value.copy())
         loop index > 0 && sorted[index - 1] > value {
             sorted[index] = sorted[index - 1]
             index -= 1
@@ -190,7 +190,7 @@ jet_cli_with_invocation: fn(authority: &JetCLIAuthority, invocation: JetCLIInvoc
 jet_cli_undecided: fn(authority: JetCLIAuthority) -> [String] Never! {
     missing := [String]{}
     loop right in authority.required {
-        if !authority_is_deny_only(right) && jet_cli_answer(authority, right) == JetCLIVerdict.Missing && !missing.contains(right) -> missing.push(right)
+        if !authority_is_deny_only(right) && jet_cli_answer(authority, right) == JetCLIVerdict.Missing && !missing.contains(right) -> missing.push(right.copy())
     }
     rights := [String]{}
     loop right in missing {
@@ -209,7 +209,7 @@ jet_cli_undecided: fn(authority: JetCLIAuthority) -> [String] Never! {
 jet_cli_denied_required: fn(authority: JetCLIAuthority) -> [String] Never! {
     rights := [String]{}
     loop right in authority.required {
-        if jet_cli_answer(authority, right) == JetCLIVerdict.Denied -> rights.push(right)
+        if jet_cli_answer(authority, right) == JetCLIVerdict.Denied -> rights.push(right.copy())
     }
     rights
 }
@@ -231,7 +231,7 @@ jet_cli_inline_allow_row: fn(authority: JetCLIAuthority) -> [String] Never! {
     rights := [String]{}
     loop right in authority.required {
         if authority_is_deny_only(right) || jet_cli_covers_any(AUTHORITY_AMBIENT_BASIC_EFFECTS, right) -> next
-        rights.push(right)
+        rights.push(right.copy())
     }
     rights
 }
@@ -264,7 +264,7 @@ jet_cli_invocation_denials: fn(authority: JetCLIAuthority, denied: [String]) -> 
     loop entry in authority.invocation_denied {
         loop right in denied {
             if jet_cli_right_covers(entry, right) {
-                entries.push(entry)
+                entries.push(entry.copy())
                 break
             }
         }

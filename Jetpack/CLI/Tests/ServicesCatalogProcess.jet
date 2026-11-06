@@ -21,7 +21,7 @@ cli_test_install_catalog_tools: fn(root: String) -[FS]> {
 cli_test_catalog_tool_env: fn(root: String, systemd_bin: String?) -> ShellEnv {
     bin_dirs := [String]{files.join(root, "bin")}
     if systemd_bin == {
-        .Val(bin) -> bin_dirs.push(bin)
+        .Val(bin) -> bin_dirs.push(bin.copy())
         .None -> {}
     }
     ShellEnv{

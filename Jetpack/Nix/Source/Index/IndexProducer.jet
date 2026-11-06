@@ -123,7 +123,7 @@ nix_index_validate_oracle_record: fn(record: NixIndexRecord) NixIndexError! {
         path: record.outputs[name]
         nix_index_validate_store_path(path, false)
         if paths.contains(path) -> return Err(NixIndexError.Invalid("oracle record repeats an output path"))
-        paths.push(path)
+        paths.push(path.copy())
     }
 }
 

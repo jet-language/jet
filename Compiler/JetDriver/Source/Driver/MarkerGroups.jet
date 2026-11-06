@@ -99,7 +99,7 @@ jet_driver_marker_group_item_key: fn(item: Item) -> String Never! {
 
 jet_driver_marker_group_imports: fn(existing: [ImportDecl], parsed: [ImportDecl]) -> [ImportDecl] Never! {
     rows := [Int:ImportDecl]{}
-    loop declaration in parsed -> _ := rows.add(declaration.span.start, declaration)
+    loop declaration in parsed -> _ := rows.add(declaration.span.start, declaration.copy())
     imports := existing
     loop index in 0..<imports.len() {
         declaration: rows.get(imports[index].span.start) ?? next
@@ -135,7 +135,7 @@ jet_driver_marker_group_items: fn(existing: [Item], parsed: [Item]) -> [Item] Ne
     rows := [String:Item]{}
     loop item in parsed {
         key: jet_driver_marker_group_item_key(item)
-        if key != "" -> _ := rows.add(key, item)
+        if key != "" -> _ := rows.add(key, item.copy())
     }
     items := [Item]{}
     loop item in existing {

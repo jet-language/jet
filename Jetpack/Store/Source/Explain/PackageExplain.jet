@@ -566,14 +566,14 @@ store_explain_without_entry: fn(roots: HangarRoots, query: String, lens: Explain
 store_explain_find_entry: fn(entries: [StoreEntry], query: String) -> StoreEntry? StoreError! {
     exact := [StoreEntry]{}
     loop entry in entries {
-        if entry.id == query || entry.reference == query -> exact.push(entry)
+        if entry.id == query || entry.reference == query -> exact.push(entry.copy())
     }
     if exact.len() > 1 -> return Err(store_explain_ambiguous_query(query, exact))
     if exact.len() == 1 -> return Ok(Val(exact[0]))
     package: store_explain_package_name(query)
     matches := [StoreEntry]{}
     loop entry in entries {
-        if entry.name == package || store_explain_package_name(entry.reference) == package -> matches.push(entry)
+        if entry.name == package || store_explain_package_name(entry.reference) == package -> matches.push(entry.copy())
     }
     sorted: store_reuse_entries_by_id(matches)
     if sorted.len() > 1 -> return Err(store_explain_ambiguous_query(query, sorted))
@@ -860,7 +860,7 @@ store_explain_unique_facts: fn(facts: [ProviderFacts]) -> [ProviderFacts] Never!
     loop item in facts {
         at := sorted.len()
         loop at > 0 && item.digest() < sorted[at - 1].digest() -> at -= 1
-        sorted.insert(at, item)
+        sorted.insert(at, item.copy())
     }
     unique := [ProviderFacts]{}
     loop item in sorted {
@@ -1025,7 +1025,7 @@ store_explain_sorted_roots: fn(roots: [ExplainRoot]) -> [ExplainRoot] Never! {
     loop root in roots {
         at := sorted.len()
         loop at > 0 && (root.kind < sorted[at - 1].kind || (root.kind == sorted[at - 1].kind && root.id < sorted[at - 1].id)) -> at -= 1
-        sorted.insert(at, root)
+        sorted.insert(at, root.copy())
     }
     sorted
 }

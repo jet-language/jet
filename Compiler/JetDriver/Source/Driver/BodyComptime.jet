@@ -74,8 +74,8 @@ jet_driver_comptime_body_failure: fn(
 }
 
 jet_driver_comptime_trace_append: fn(target: &JetDriverCompileTrace, addition: JetDriverCompileTrace) Never! {
-    loop text in addition.stdout -> target.stdout.push(text)
-    loop text in addition.stderr -> target.stderr.push(text)
+    loop text in addition.stdout -> target.stdout.push(text.copy())
+    loop text in addition.stderr -> target.stderr.push(text.copy())
     if addition.exit_code != None -> target.exit_code = addition.exit_code
     target.soft_stop = target.soft_stop || addition.soft_stop
 }
@@ -109,7 +109,7 @@ jet_driver_comptime_diagnostics_add: fn(diagnostics: &[Diagnostic], incoming: [D
         key: jet_driver_comptime_diagnostic_key(diagnostic)
         if seen.get(key) != None -> next
         seen[key] = true
-        diagnostics.push(diagnostic)
+        diagnostics.push(diagnostic.copy())
     }
 }
 // A run returns its one graph on every exit, with later edits in its trail.
@@ -139,7 +139,7 @@ jet_driver_comptime_body_sources: fn(graph: SemaGraphResult) -> [SemaComptimeBod
             key: "{source.module_identity}\n{source.key}"
             if seen.get(key) != None -> next
             seen[key] = true
-            sources.push(source)
+            sources.push(source.copy())
         }
     }
     sources

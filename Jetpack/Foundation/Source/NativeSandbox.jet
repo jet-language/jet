@@ -176,7 +176,7 @@ foundation_linux_sandbox_spec: fn(source: String, output: String?, env: [String:
     bwrap: foundation_sandbox_program("bwrap") ?? return Err(NativeSandboxError.Unsupported("bubblewrap (`bwrap`) is not available on PATH"))
     argv := foundation_linux_sandbox_argv(bwrap, Val(source), output, env, share_network, true, source_writable, mounts, Val(files.basename(program)))
     argv.push(foundation_mounted_executable_path(program, mounts))
-    loop arg in args -> argv.push(arg)
+    loop arg in args -> argv.push(arg.copy())
     Ok(process.cmd(argv).env_clear())
 }
 
@@ -187,7 +187,7 @@ foundation_macos_sandbox_spec: fn(source: String, output: String?, env: [String:
     // The profile is passed inline: a temporary `-f` profile could be
     // replaced between spawn and Seatbelt reading it.
     argv := [String]{NATIVE_SANDBOX_MACOS_EXEC, "-p", profile, program}
-    loop arg in args -> argv.push(arg)
+    loop arg in args -> argv.push(arg.copy())
     spec := process.cmd(argv).env_clear().cwd(source)
     if output == {
         .Val(path) -> spec = spec.env("JET_BUILD_OUTPUT", path)
@@ -222,7 +222,7 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
                         argv.push("/work/source")
                     } else {
                         argv.push(source_bind)
-                        argv.push(source_path)
+                        argv.push(source_path.copy())
                         argv.push("/work/source")
                     }
                     output_args: [String]{"--bind", output_path, "/work/output", "--chdir", "/work/source", "--setenv", "JET_BUILD_OUTPUT", "/work/output"}
@@ -234,7 +234,7 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
                         argv.push("/work")
                     } else {
                         argv.push(source_bind)
-                        argv.push(source_path)
+                        argv.push(source_path.copy())
                         argv.push("/work")
                     }
                     argv.push("--chdir")
@@ -263,7 +263,7 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
             if segment == "" -> next
             destination = "{destination}/{segment}"
             argv.push("--dir")
-            argv.push(destination)
+            argv.push(destination.copy())
         }
         argv.push("--ro-bind")
         argv.push(mount.source)
@@ -272,13 +272,13 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
     if share_network -> argv.push("--share-net")
     loop name in foundation_sandbox_sorted_names(env) {
         argv.push("--setenv")
-        argv.push(name)
+        argv.push(name.copy())
         argv.push(env[name])
     }
     if argv0 == {
         .Val(name) -> {
             argv.push("--argv0")
-            argv.push(name)
+            argv.push(name.copy())
         }
         else -> {}
     }

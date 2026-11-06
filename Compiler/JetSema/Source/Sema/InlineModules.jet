@@ -619,7 +619,7 @@ sema_inline_rewrite_str_parts: fn(rewrite: &SemaInlineRewrite, parts: [StrPart])
     loop part in parts {
         if part == {
             .Interp(expression, format) -> mapped.push(StrPart.Interp{expr: sema_inline_rewrite_expr(rewrite, expression), format: format})
-            else -> mapped.push(part)
+            else -> mapped.push(part.copy())
         }
     }
     mapped
@@ -994,7 +994,7 @@ sema_inline_rewrite_stmt: fn(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Ne
                 .In(collection, step) -> ForKind.In{collection: sema_inline_rewrite_expr(rewrite, collection), step: sema_inline_rewrite_optional_expr(rewrite, step)}
             }
             saved: rewrite.locals.len()
-            rewrite.locals.push(var)
+            rewrite.locals.push(var.copy())
             if var2 == .Val(second) -> rewrite.locals.push(second.name)
             mapped_body: sema_inline_rewrite_stmts(rewrite, body)
             sema_inline_restore_locals(rewrite, saved)
@@ -1062,7 +1062,7 @@ sema_inline_rewrite_markers: fn(rewrite: &SemaInlineRewrite, markers: [Marker]) 
         loop arg in marker.args {
             if arg == {
                 .Expr(value) -> args.push(MarkerCallArg.Expr{value: sema_inline_rewrite_expr(rewrite, value)})
-                else -> args.push(arg)
+                else -> args.push(arg.copy())
             }
         }
         updated.args = args
@@ -1277,7 +1277,7 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
         // A file imported under an alias can still carry the defining
         // module's compiler-owned spelling; normalize it to this identity.
         direct_types[sema_inline_type_name(display_alias, name)] = resolved
-        direct_names.push(name)
+        direct_names.push(name.copy())
         // The enclosing file reaches private member types by
         // their full module path too. Do not export a nested relative name.
         hoist.exported["{source_path}.{name}"] = resolved
@@ -1298,8 +1298,8 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
                 }
                 kept.push(Item.CodeModule{value: hoisted.code_module})
             }
-            .Struct(_) | .Enum(_) | .Trait(_) | .Tag(_) | .Impl(_) | .Distinct(_) | .TypeAlias(_) -> lifted.push(inner)
-            else -> kept.push(inner)
+            .Struct(_) | .Enum(_) | .Trait(_) | .Tag(_) | .Impl(_) | .Distinct(_) | .TypeAlias(_) -> lifted.push(inner.copy())
+            else -> kept.push(inner.copy())
         }
     }
     visible := sema_inline_rewrite_empty()
@@ -1361,7 +1361,7 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
         all_types["{source_path}.{name}"] = ty
     }
     loop full_path in descendant_paths {
-        all_paths.push(full_path)
+        all_paths.push(full_path.copy())
         all_types[full_path] = descendant_types.get(full_path) ?? next
     }
     SemaInlineHoisted{code_module: updated, paths: all_paths, types: all_types}
@@ -1394,7 +1394,7 @@ sema_inline_rewrite_exported: fn(items: [Item], rewrite: &SemaInlineRewrite) -> 
                 if definition.body == .Val(body) -> updated.body = Val(sema_inline_rewrite_exported(body, rewrite))
                 mapped.push(Item.CodeModule{value: updated})
             }
-            else -> mapped.push(item)
+            else -> mapped.push(item.copy())
         }
     }
     mapped
@@ -1418,7 +1418,7 @@ sema_inline_bind_imports: fn(program: Program, surfaces: [SemaInlineModuleSurfac
             if declaration.kind == .Unqualified(_, _, items, _, _) {
                 loop item in items -> seen[sema_registration_import_local(item)] = true
             }
-            kept.push(declaration)
+            kept.push(declaration.copy())
             next
         }
         if declaration.kind == .Unqualified(module_alias, module_alias_span, items, _, _) {
@@ -1594,7 +1594,7 @@ sema_inline_scope_surfaces: fn(nested: [SemaInlineModuleSurface], context: Strin
     scope := [SemaInlineModuleSurface]{}
     prefix: "{context}."
     loop surface in nested {
-        scope.push(surface)
+        scope.push(surface.copy())
         if !surface.path.starts_with(prefix) -> next
         relative := surface
         relative.name = String.from_bytes(surface.path.bytes()[prefix.bytes().len()..<surface.path.bytes().len()]) ?? next
@@ -1646,7 +1646,7 @@ sema_inline_strip_members: fn(body: [Item]) -> [Item] Never! {
                 if child.body == .Val(child_body) -> updated.body = Val(sema_inline_strip_members(child_body))
                 kept.push(Item.CodeModule{value: updated})
             }
-            else -> kept.push(item)
+            else -> kept.push(item.copy())
         }
     }
     kept
@@ -1719,7 +1719,7 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
             hoisted_items.push(Item.CodeModule{value: hoisted.code_module})
             next
         }
-        hoisted_items.push(item)
+        hoisted_items.push(item.copy())
     }
     if hoist.has_exported {
         exported := sema_inline_rewrite_empty()
@@ -1800,7 +1800,7 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
                 }
             }
         }
-        lowered_items.push(item)
+        lowered_items.push(item.copy())
     }
     loop declaration in hoist.declarations -> lowered_items.push(declaration)
 

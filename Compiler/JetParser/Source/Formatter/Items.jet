@@ -119,7 +119,7 @@ jfmt_member_is_compact: fn(member: JetFmtMember) -> Bool Never! {
 jfmt_above_markers: fn(markers: [Marker]) -> [Marker] Never! {
     above := [Marker]{}
     loop marker in markers {
-        if !marker.inside -> above.push(marker)
+        if !marker.inside -> above.push(marker.copy())
     }
     above
 }
@@ -128,7 +128,7 @@ jfmt_above_markers: fn(markers: [Marker]) -> [Marker] Never! {
 jfmt_inside_markers: fn(markers: [Marker]) -> [Marker] Never! {
     inside := [Marker]{}
     loop marker in markers {
-        if marker.inside -> inside.push(marker)
+        if marker.inside -> inside.push(marker.copy())
     }
     inside
 }
@@ -284,7 +284,7 @@ jfmt_push_shape: fn(shapes: &[SerdeWireShape], shape: SerdeWireShape) Never! {
     loop existing in shapes {
         if existing == shape -> return
     }
-    shapes.push(shape)
+    shapes.push(shape.copy())
 }
 
 // Rust `finish`: dedup; an empty shape set is no fact.
@@ -414,12 +414,12 @@ jfmt_decode_named_shapes: fn(items: [Item], name: String, args: [Type], seen: &[
     loop seen_name in seen {
         if seen_name == name -> return None
     }
-    seen.push(name)
+    seen.push(name.copy())
     result: jfmt_decode_named_shapes_inner(items, name, args, seen)
     // Rust `seen.remove(name)`.
     kept := [String]{}
     loop seen_name in seen {
-        if seen_name != name -> kept.push(seen_name)
+        if seen_name != name -> kept.push(seen_name.copy())
     }
     seen = kept
     result
@@ -1029,8 +1029,8 @@ jfmt_fmt_generic_module: fn(f: &JetFmt, generic: GenericModuleDef) {
     value_params := [GenericModuleParam]{}
     loop param in generic.params {
         if param == {
-            .Type(_, _, _) -> type_params.push(param)
-            .Value(_, _, _) -> value_params.push(param)
+            .Type(_, _, _) -> type_params.push(param.copy())
+            .Value(_, _, _) -> value_params.push(param.copy())
         }
     }
     type_source: jfmt_source_list_span_after(f, generic.name_span.end, JFMT_DELIM_ANGLE)
@@ -1958,7 +1958,7 @@ jfmt_fmt_view_source_union: fn(f: &JetFmt, provenance: ViewProvenance, params: [
             .Parameter(position) -> {
                 ordinary := [Param]{}
                 loop param in params {
-                    if param.name != "self" -> ordinary.push(param)
+                    if param.name != "self" -> ordinary.push(param.copy())
                 }
                 if position < ordinary.len() {
                     jfmt_write(f, ordinary[position].name)
@@ -2056,7 +2056,7 @@ jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, start: Int, expand
     jfmt_emit_leading(f, start)
     settings := [MarkerDeclParam]{}
     loop param in declaration.params {
-        if param.name.starts_with("$") && param.value != None -> settings.push(param)
+        if param.name.starts_with("$") && param.value != None -> settings.push(param.copy())
     }
     if settings.len() == 0 && declaration.group == None && declaration.body == None {
         jfmt_write(f, "impl Marker {{}}")
@@ -2483,13 +2483,13 @@ jfmt_import_rows: fn(imports: [ImportDecl]) -> [ImportDecl] Never! {
                 if item.alias == .Val(alias) {
                     renamed.push(ImportDecl{kind: ImportKind.Module{name: "{module_alias}.{item.original}", span: item_span}, alias: alias, alias_span: local_span, span: import.span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: import.is_pub, is_package_pub: import.is_package_pub, inline_version: None, comptime_span: import.comptime_span})
                 } else {
-                    plain.push(item)
+                    plain.push(item.copy())
                     item_spans.push(item_span)
                     local_spans.push(local_span)
                 }
             }
             if renamed.len() == 0 {
-                rows.push(import)
+                rows.push(import.copy())
                 next
             }
             if plain.len() > 0 {
@@ -2502,7 +2502,7 @@ jfmt_import_rows: fn(imports: [ImportDecl]) -> [ImportDecl] Never! {
             loop row in renamed -> rows.push(row)
             next
         }
-        rows.push(import)
+        rows.push(import.copy())
     }
     rows
 }

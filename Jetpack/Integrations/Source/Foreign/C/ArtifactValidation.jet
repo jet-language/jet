@@ -209,7 +209,7 @@ pkg_cffi_cpp_runtime_library: fn(name: String, target: String) -> Bool Never! {
 pkg_cffi_nm_symbols: fn(path: String, undefined: Bool) -[Exec, Time.Wait]> [String] ForeignBridgeError! {
     argv := [String]{"nm", "-g"}
     if undefined -> argv.push("-u")
-    argv.push(path)
+    argv.push(path.copy())
     receipt: process.cmd(argv).run() ?? return Err(pkg_bridge_error(pkg_bridge_spawn_error("nm", err)))
     if !receipt.success {
         detail: receipt.errors.trim()

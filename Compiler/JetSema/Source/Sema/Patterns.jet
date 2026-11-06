@@ -458,9 +458,9 @@ sema_pattern_strip_named_slots: fn(slots: [PatSlot]) -> [PatSlot] {
     stripped := [PatSlot]{}
     loop slot in slots {
         if slot == {
-            .Named(_, _, inner) -> stripped.push(inner)
+            .Named(_, _, inner) -> stripped.push(inner.copy())
             .Rest(_) -> {}
-            else -> stripped.push(slot)
+            else -> stripped.push(slot.copy())
         }
     }
     stripped
@@ -891,7 +891,7 @@ sema_pattern_test_binding_names: fn(pattern: Pattern, names: &[BindName]) Never!
         .List(items, rest, _) -> {
             loop item in items -> sema_pattern_test_slot_names(item, names)
             if rest == .Val(tail) && tail.name == .Val(bound) {
-                if bound.rename == .Val(local) -> names.push(BindName{name: local.name, span: local.span, rename: None}) else -> names.push(bound)
+                if bound.rename == .Val(local) -> names.push(BindName{name: local.name, span: local.span, rename: None}) else -> names.push(bound.copy())
             }
         }
         .Map(entries, _, _) -> loop entry in entries -> sema_pattern_test_slot_names(entry.slot, names)
@@ -1249,7 +1249,7 @@ sema_pattern_source_text: fn(pattern: Pattern) -> String? {
             loop slot in slots {
                 if slot == {
                     .Wildcard -> parts.push("_")
-                    .Bind(name, _) -> parts.push(name)
+                    .Bind(name, _) -> parts.push(name.copy())
                     .Range(lo, hi) -> parts.push("{lo}..{hi}")
                     .Nested(inner) -> {
                         text: sema_pattern_source_text(inner) ?? return None

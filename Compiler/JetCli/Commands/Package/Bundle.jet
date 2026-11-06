@@ -284,7 +284,7 @@ jet_cli_bundle_build: fn<H: JetCLIBundleHost>(options: JetCLIBundleOptions, host
         }
         format: chosen ?? return Err(jet_cli_bundle_error("`jet package --icon` needs `--icon-format` when the extension is unknown"))
         spec.icons.push(BundleIcon.new(package, format, options.icon_size, icon_bytes).with_source(icon_path.raw))
-        input_paths.push(icon_path)
+        input_paths.push(icon_path.copy())
     }
     if (options.update_channel != None) != (options.update_url != None) -> return Err(jet_cli_bundle_error("`--update-channel` and `--update-url` must be supplied together"))
     if options.update_channel == .Val(channel) {

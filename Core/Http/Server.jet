@@ -719,10 +719,10 @@ __sorted: fn(values: [String]) -> [String] Never! {
         loop at > 0 && __text_less(value, out[at - 1]) -> at = at - 1
         rebuilt := [String]{}
         loop i in 0..<out.len() {
-            if i == at -> rebuilt.push(value)
+            if i == at -> rebuilt.push(value.copy())
             rebuilt.push(out[i])
         }
-        if at == out.len() -> rebuilt.push(value)
+        if at == out.len() -> rebuilt.push(value.copy())
         out = rebuilt
     }
     out
@@ -810,7 +810,7 @@ __route_parse: fn(pattern: String) -> __HTTPParsedRoute Never! {
                 if !__route_name_ok(name_bytes) -> return __route_problem("a parameter needs a name of letters, digits and `_`")
                 name: String.from_bytes(name_bytes) ?? return __route_problem("parameter name is not UTF-8")
                 if __list_contains(names, name) -> return __route_problem("parameter `{name}` appears twice")
-                names.push(name)
+                names.push(name.copy())
                 if first == 58 {
                     segments.push(__HTTPSegment.Param(name))
                 } else {

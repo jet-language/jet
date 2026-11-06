@@ -420,7 +420,7 @@ sema_ownership_frozen_set: fn(rows: &SemaOwnershipFrozenRows, key: String, hash:
         return
     }
     name_rows_set_hashed(rows.keys, key, hash, rows.sites.len())
-    rows.sites.push(site)
+    rows.sites.push(site.copy())
 }
 
 SemaOwnershipFreezeSite: struct {
@@ -495,8 +495,8 @@ sema_ownership_state_init: fn() -> SemaOwnershipState Never! {
 
 sema_ownership_place_snapshot: fn(source: SemaOwnershipPlace) -> SemaOwnershipPlace Never! {
     result := SemaOwnershipPlace{root: source.root, root_key: source.root_key, root_span: source.root_span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}
-    loop projection in source.projections -> result.projections.push(projection)
-    loop typed_projection in source.typed_projections -> result.typed_projections.push(typed_projection)
+    loop projection in source.projections -> result.projections.push(projection.copy())
+    loop typed_projection in source.typed_projections -> result.typed_projections.push(typed_projection.copy())
     result
 }
 
@@ -540,7 +540,7 @@ sema_ownership_view_snapshot: fn(source: SemaOwnershipViewFact) -> SemaOwnership
         invalidated_span: source.invalidated_span,
         invalidated_verb: source.invalidated_verb,
     }
-    loop path in source.output_path -> result.output_path.push(path)
+    loop path in source.output_path -> result.output_path.push(path.copy())
     result
 }
 
@@ -548,14 +548,14 @@ sema_ownership_state_snapshot: fn(source: SemaOwnershipState) -> SemaOwnershipSt
     snapshot := sema_ownership_state_init()
     snapshot.scope_depth = source.scope_depth
     snapshot.next_seq = source.next_seq
-    loop declaration in source.declarations -> snapshot.declarations.push(declaration)
-    loop site in source.freeze_sites -> snapshot.freeze_sites.push(site)
+    loop declaration in source.declarations -> snapshot.declarations.push(declaration.copy())
+    loop site in source.freeze_sites -> snapshot.freeze_sites.push(site.copy())
     loop moved in source.moved -> snapshot.moved.push(sema_ownership_moved_snapshot(moved))
     loop loan in source.loans -> snapshot.loans.push(sema_ownership_loan_snapshot(loan))
     loop view in source.views -> snapshot.views.push(sema_ownership_view_snapshot(view))
-    loop reference in source.references -> snapshot.references.push(reference)
-    loop site in source.share_known -> snapshot.share_known.push(site)
-    loop site in source.share_found -> snapshot.share_found.push(site)
+    loop reference in source.references -> snapshot.references.push(reference.copy())
+    loop site in source.share_known -> snapshot.share_known.push(site.copy())
+    loop site in source.share_found -> snapshot.share_found.push(site.copy())
     snapshot.fixed_length_write_params = source.fixed_length_write_params
     snapshot.uninit = source.uninit
     snapshot.static_roots = source.static_roots
@@ -872,7 +872,7 @@ sema_ownership_push_declaration: fn(state: &SemaOwnershipState, fact: SemaOwners
     state.declaration_previous.push(previous)
     if state.key_facts[slot].first < 0 -> state.key_facts[slot].first = row
     state.key_facts[slot].last = row
-    state.declarations.push(fact)
+    state.declarations.push(fact.copy())
     if fact.active -> sema_ownership_active_add(state, fact.scope_depth, row)
     if fact.single_use -> state.single_use_rows.push(row)
     canonical: sema_ownership_canonical_counts(state, row)
@@ -897,7 +897,7 @@ sema_ownership_push_reference: fn(state: &SemaOwnershipState, reference: SemaOwn
     slot: sema_ownership_key_slot(state, reference.def_key)
     state.key_facts[slot].references += 1
     if reference.kind == SemaOwnershipReferenceKind.Write -> state.key_facts[slot].writes += 1
-    state.references.push(reference)
+    state.references.push(reference.copy())
 }
 
 sema_ownership_truncate_references: fn(state: &SemaOwnershipState, count: Int) Never! {
@@ -967,7 +967,7 @@ sema_ownership_leave_scope: fn(state: &SemaOwnershipState) Never! {
 
     remaining_moves := [SemaOwnershipMovedPlace]{}
     loop moved in state.moved {
-        if !sema_ownership_key_declared_from(state, moved.place.root_key, depth) -> remaining_moves.push(moved)
+        if !sema_ownership_key_declared_from(state, moved.place.root_key, depth) -> remaining_moves.push(moved.copy())
     }
     // A deferred `close` of this scope has now taken its value.
     loop index in 0..<remaining_moves.len() {
@@ -977,19 +977,19 @@ sema_ownership_leave_scope: fn(state: &SemaOwnershipState) Never! {
 
     remaining_loans := [SemaOwnershipLoan]{}
     loop loan in state.loans {
-        if loan.scope_depth < depth -> remaining_loans.push(loan)
+        if loan.scope_depth < depth -> remaining_loans.push(loan.copy())
     }
     state.loans = remaining_loans
 
     remaining_views := [SemaOwnershipViewFact]{}
     loop view in state.views {
-        if view.active && view.scope_depth < depth -> remaining_views.push(view)
+        if view.active && view.scope_depth < depth -> remaining_views.push(view.copy())
     }
     state.views = remaining_views
 
     remaining_lambda_writes := [SemaOwnershipLambdaWriteBorrow]{}
     loop borrow in state.lambda_write_borrows {
-        if borrow.scope_depth < depth -> remaining_lambda_writes.push(borrow)
+        if borrow.scope_depth < depth -> remaining_lambda_writes.push(borrow.copy())
     }
     state.lambda_write_borrows = remaining_lambda_writes
     state.scope_depth = depth - 1
@@ -1392,7 +1392,7 @@ sema_ownership_append_place_unique: fn(places: &[SemaOwnershipPlace], candidate:
     loop place in places {
         if sema_ownership_place_exact(place, candidate) -> return
     }
-    places.push(candidate)
+    places.push(candidate.copy())
 }
 
 sema_ownership_places_from_expr_in_state: fn(expr: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) -> [SemaOwnershipPlace] {
@@ -1553,7 +1553,7 @@ sema_ownership_record_view_fact_inner: fn(state: &SemaOwnershipState, carrier: S
     }
     stored_source := sema_ownership_place_snapshot(source)
     stored_output_path := [String]{}
-    loop path in output_path -> stored_output_path.push(path)
+    loop path in output_path -> stored_output_path.push(path.copy())
     fact_seq := sema_ownership_next_sequence(state)
     state.views.push(SemaOwnershipViewFact{
         carrier: carrier,
@@ -1889,7 +1889,7 @@ sema_ownership_view_slot_equal: fn(left: [String], right: [String]) -> Bool Neve
 
 sema_ownership_string_list_snapshot: fn(source: [String]) -> [String] Never! {
     result := [String]{}
-    loop segment in source -> result.push(segment)
+    loop segment in source -> result.push(segment.copy())
     result
 }
 
@@ -2166,7 +2166,7 @@ sema_ownership_check_binding_view_conflicts: fn(state: &SemaOwnershipState, carr
 sema_ownership_list_view_element_spans: fn(elements: [Expr]) -> [Span] Never! {
     spans := [Span]{}
     loop element in elements {
-        if element == .Place(_, access, span, _) && access == PlaceAccess.Write -> spans.push(span)
+        if element == .Place(_, access, span, _) && access == PlaceAccess.Write -> spans.push(span.copy())
     }
     spans
 }
@@ -2203,7 +2203,7 @@ sema_ownership_check_list_view_element_aliases: fn(state: &SemaOwnershipState, e
                 }
             }
             previous.push(place)
-            previous_access.push(access)
+            previous_access.push(access.copy())
         }
     }
 }
@@ -2375,7 +2375,8 @@ sema_ownership_report_implicit_take_reused: fn(callee: String, name: String, sit
         }
     }
     label: if sema_ownership_span_same(site, reuse) -> "the next loop iteration passes `{name}` here again" else -> "`{name}` is used again here"
-    diagnostic: sema_error("E0209", site, "`{callee}` takes `{name}`, but `{name}` is used again later", "`{callee}` takes ownership of this argument, and a call never copies on its own, so `{name}` has no value after this call", "write `{name}.copy()` to pass a copy and keep `{name}`, or reorder so this call is the last use of `{name}`")
+    consumer: sema_ownership_callee_text(callee)
+    diagnostic: sema_error("E0209", site, "{consumer} takes `{name}`, but `{name}` is used again later", "{consumer} takes ownership of this argument, and a call never copies on its own, so `{name}` has no value after this call", "write `{name}.copy()` to pass a copy and keep `{name}`, or reorder so this call is the last use of `{name}`")
     labeled: diagnostic_with_label(diagnostic, reuse, label)
     diagnostics.push(diagnostic_with_edit_grade(labeled, TextEdit{span: Span{start: site.end, end: site.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
 }
@@ -2384,7 +2385,7 @@ sema_ownership_note_share_found: fn(state: &SemaOwnershipState, found: SemaOwner
     loop site in state.share_found {
         if sema_ownership_span_same(site.span, found.span) -> return
     }
-    state.share_found.push(found)
+    state.share_found.push(found.copy())
 }
 
 // A share site found on a branch path is found for the
@@ -3522,7 +3523,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
                 diagnostics.push(sema_ownership_diag_take_while_lent(sema_ownership_taken_name(arg, places), callee, expr_source_span(arg.expr)))
                 next
             }
-            if !sema_ownership_mark_move(state, arg.expr, scopes, "`{callee}`", diagnostics) -> accepted = false
+            if !sema_ownership_mark_move(state, arg.expr, scopes, sema_ownership_callee_text(callee), diagnostics) -> accepted = false
         }
         if param.convention == AccessConvention.Move && arg.convention == AccessConvention.Move && !binder_rooted && sema_ownership_exact_field_take(state, arg.expr) {
             // A place the use check above already found moved is reported there.
@@ -3573,7 +3574,15 @@ sema_ownership_taken_name: fn(arg: CallArg, places: [SemaOwnershipPlace]) -> Str
 }
 
 sema_ownership_diag_take_while_lent: fn(name: String, callee: String, span: Span) -> Diagnostic {
-    sema_error("E0204", span, "`{name}` is already lent to this call, so `{callee}` can't take it here too", "an earlier argument lets `{callee}` read `{name}` for the whole call, so this argument can't hand the same value over", "pass a copy to one of the two parameters with `{name}.copy()`")
+    consumer: sema_ownership_callee_text(callee)
+    sema_error("E0204", span, "`{name}` is already lent to this call, so {consumer} can't take it here too", "an earlier argument lets {consumer} read `{name}` for the whole call, so this argument can't hand the same value over", "pass a copy to one of the two parameters with `{name}.copy()`")
+}
+
+// The callee as a diagnostic names it: a built-in collection method by its
+// call shape (`.push()`), any other callee by its name.
+sema_ownership_callee_text: fn(callee: String) -> String Never! {
+    if callee.starts_with("collection.") -> return "`.{callee.slice(11, callee.len())}()`"
+    "`{callee}`"
 }
 
 sema_ownership_place_root_start: fn(expr: Expr) -> Int? Never! {
@@ -3599,7 +3608,8 @@ sema_ownership_is_window_type: fn(ty: Type) -> Bool Never! {
 // E0209 (Rust `take_unmarked_last_use` `named_elsewhere`): one call names
 // the same binding in two argument slots, so neither slot is its last use.
 sema_ownership_diag_take_twice: fn(name: String, callee: String, span: Span) -> Diagnostic {
-    sema_error("E0209", span, "`{name}` is passed to `{callee}` more than once in this call", "a name used in two arguments of one call has no last use in that call, so `{callee}` can't take `{name}` there", "write `{name}.copy()` in the argument that keeps a copy")
+    consumer: sema_ownership_callee_text(callee)
+    sema_error("E0209", span, "`{name}` is passed to {consumer} more than once in this call", "a name used in two arguments of one call has no last use in that call, so {consumer} can't take `{name}` there", "write `{name}.copy()` in the argument that keeps a copy")
 }
 
 sema_ownership_expr_site_listed: fn(sites: [Span], expr: Expr) -> Bool Never! {
@@ -3624,7 +3634,7 @@ sema_ownership_exact_field_take: fn(state: SemaOwnershipState, expr: Expr) -> Bo
 // The move of an eligible unmarked take argument: an exact move whose origin
 // names the callee, so a later use reports E0209 at the argument.
 sema_ownership_mark_implicit_take: fn(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, callee: String, diagnostics: &[Diagnostic]) -> Bool {
-    if !sema_ownership_mark_move(state, expr, scopes, "`{callee}`", diagnostics) -> return false
+    if !sema_ownership_mark_move(state, expr, scopes, sema_ownership_callee_text(callee), diagnostics) -> return false
     span: expr_span(expr)
     loop index in 0..<state.moved.len() {
         if sema_ownership_span_same(state.moved[index].origin.span, span) -> state.moved[index].origin.implicit_take = Val(callee)
@@ -3691,7 +3701,7 @@ sema_ownership_note_direct_call_lambda: fn(state: &SemaOwnershipState, site: Spa
     loop known in state.direct_call_lambdas {
         if sema_ownership_span_same(known, site) -> return
     }
-    state.direct_call_lambdas.push(site)
+    state.direct_call_lambdas.push(site.copy())
 }
 
 // The binding `key` holds the lambda at `site` with `captures`. When only
@@ -3776,7 +3786,7 @@ sema_ownership_note_implicit_take: fn(state: &SemaOwnershipState, expr: Expr, ty
         if sema_ownership_binding_captured(scopes, binding) -> return None
         if !type_identity_equal(ty, required) || sema_ownership_type_mentions_generic(ty, generic_params) -> return None
         if !facts.accepted || !facts.complete || facts.copyable || !facts.cloneable || facts.resource || facts.materializes_view || facts.dynamic_loan -> return None
-        state.implicit_take_ok.push(span)
+        state.implicit_take_ok.push(span.copy())
         return Val(binding.symbol.id.key)
     }
     None
@@ -3788,10 +3798,10 @@ sema_ownership_note_implicit_take: fn(state: &SemaOwnershipState, expr: Expr, ty
 sema_ownership_note_implicit_take_twice: fn(state: &SemaOwnershipState, span: Span) Never! {
     kept := [Span]{}
     loop site in state.implicit_take_ok {
-        if !sema_ownership_span_same(site, span) -> kept.push(site)
+        if !sema_ownership_span_same(site, span) -> kept.push(site.copy())
     }
     state.implicit_take_ok = kept
-    state.implicit_take_twice.push(span)
+    state.implicit_take_twice.push(span.copy())
 }
 
 // A binding declared outside the innermost lambda body around this point.
@@ -4296,7 +4306,7 @@ sema_ownership_call_result_views: fn(state: SemaOwnershipState, expr: Expr) -> [
 
 sema_ownership_call_view_prefixed: fn(fact: SemaCallReturnViewFact, prefix: [String]) -> SemaCallReturnViewFact Never! {
     slot := prefix
-    loop part in fact.slot -> slot.push(part)
+    loop part in fact.slot -> slot.push(part.copy())
     // copy: the source fact keeps its places for its other readers.
     SemaCallReturnViewFact{slot: slot, access: fact.access, places: fact.places.copy(), sources: fact.sources.copy(), temporaries: fact.temporaries.copy()}
 }
@@ -4816,14 +4826,14 @@ sema_ownership_bind_pattern_names: fn(pattern: Pattern, bound: &[String]) Never!
             if inner == .Val(nested) {
                 sema_ownership_bind_pattern_names(nested, bound)
             } else {
-                bound.push(binding)
+                bound.push(binding.copy())
             }
         }
         .Variant(_, bindings, _, _) -> loop slot in bindings -> sema_ownership_bind_slot_names(slot, bound)
         .Struct(fields, _, _, _) -> {
             loop field in fields {
                 if field == {
-                    .Bind(_, _, local, _) -> bound.push(local)
+                    .Bind(_, _, local, _) -> bound.push(local.copy())
                     .Nested(_, _, nested) -> sema_ownership_bind_pattern_names(nested, bound)
                     else -> {}
                 }
@@ -4835,12 +4845,12 @@ sema_ownership_bind_pattern_names: fn(pattern: Pattern, bound: &[String]) Never!
         .Or(alternatives, _) -> if alternatives.len() > 0 -> sema_ownership_bind_pattern_names(alternatives[0], bound)
         .StrMatch(parts, _) -> {
             loop part in parts {
-                if part == .Hole(name, _, _) -> bound.push(name)
+                if part == .Hole(name, _, _) -> bound.push(name.copy())
             }
         }
         .BinMatch(parts, _) -> {
             loop part in parts {
-                if part == .Hole(name, _, _) -> bound.push(name)
+                if part == .Hole(name, _, _) -> bound.push(name.copy())
             }
         }
         else -> {}
@@ -4849,7 +4859,7 @@ sema_ownership_bind_pattern_names: fn(pattern: Pattern, bound: &[String]) Never!
 
 sema_ownership_bind_slot_names: fn(slot: PatSlot, bound: &[String]) Never! {
     if slot == {
-        .Bind(name, _) -> bound.push(name)
+        .Bind(name, _) -> bound.push(name.copy())
         .Nested(pattern) -> sema_ownership_bind_pattern_names(pattern, bound)
         .Named(_, _, inner) -> sema_ownership_bind_slot_names(inner, bound)
         else -> {}
@@ -4891,7 +4901,7 @@ sema_ownership_collect_evaluated_stmt_accesses: fn(state: &SemaOwnershipState, b
                     }
                 }
                 body_bound := bound.copy()
-                body_bound.push(var)
+                body_bound.push(var.copy())
                 if var2 == .Val(second) -> body_bound.push(second.name)
                 sema_ownership_collect_evaluated_stmt_accesses(state, loop_body, mode, body_bound, nested, scopes, events, checks)
             }
@@ -5519,7 +5529,7 @@ sema_ownership_merge_loan: fn(merged: &[SemaOwnershipLoan], slots: &NameRows, ro
         }
     }
     sema_ownership_bucket_add(slots, rows, loan.place.root_key, merged.len())
-    merged.push(loan)
+    merged.push(loan.copy())
 }
 
 // A repeated view has the same carrier; merged views are all active.
@@ -5538,7 +5548,7 @@ sema_ownership_merge_view: fn(merged: &[SemaOwnershipViewFact], slots: &NameRows
     }
     if fact.active {
         sema_ownership_bucket_add(slots, rows, fact.carrier_key, merged.len())
-        merged.push(fact)
+        merged.push(fact.copy())
     }
 }
 
@@ -5736,7 +5746,7 @@ sema_ownership_share_found_add: fn(found: &[SemaOwnershipShareSite], site: SemaO
     loop known in found {
         if sema_ownership_span_same(known.span, site.span) -> return
     }
-    found.push(site)
+    found.push(site.copy())
 }
 
 // A declaration of a path joins under a key neither the fork (the rows of
@@ -5749,7 +5759,7 @@ sema_ownership_join_declaration: fn(index: SemaOwnershipState, limit: Int, keys:
     }
     if name_rows_get(keys, fact.key, hash) != None -> return
     name_rows_set_hashed(keys, fact.key, hash, 0)
-    joined.push(fact)
+    joined.push(fact.copy())
 }
 
 // A reference of a path joins unless the fork (the rows of `index` before
@@ -5758,7 +5768,7 @@ sema_ownership_join_reference: fn(index: SemaOwnershipState, limit: Int, anchors
     if sema_ownership_anchor_held(index.references, index.anchors, limit, reference) -> return
     if sema_ownership_anchor_held(joined, anchors, joined.len(), reference) -> return
     sema_ownership_anchor_add(anchors, reference.use_span.start, joined.len())
-    joined.push(reference)
+    joined.push(reference.copy())
 }
 
 // The join of two paths of `fork` (Rust `FlowFacts::merge_paths`): what the
@@ -5787,14 +5797,14 @@ sema_ownership_path_join: fn(index: SemaOwnershipState, fork: SemaOwnershipFork,
         loop known in freeze_sites {
             if known.span == site.span -> seen = true
         }
-        if !seen -> freeze_sites.push(site)
+        if !seen -> freeze_sites.push(site.copy())
     }
     loop site in else_path.freeze_sites {
         seen := false
         loop known in freeze_sites {
             if known.span == site.span -> seen = true
         }
-        if !seen -> freeze_sites.push(site)
+        if !seen -> freeze_sites.push(site.copy())
     }
 
     merged_moves := [SemaOwnershipMovedPlace]{}
@@ -5803,13 +5813,13 @@ sema_ownership_path_join: fn(index: SemaOwnershipState, fork: SemaOwnershipFork,
     loop moved in then_path.moved {
         if !sema_ownership_moved_covered(merged_moves, move_slots, move_rows, moved) {
             sema_ownership_bucket_add(move_slots, move_rows, moved.place.root_key, merged_moves.len())
-            merged_moves.push(moved)
+            merged_moves.push(moved.copy())
         }
     }
     loop moved in else_path.moved {
         if !sema_ownership_moved_covered(merged_moves, move_slots, move_rows, moved) {
             sema_ownership_bucket_add(move_slots, move_rows, moved.place.root_key, merged_moves.len())
-            merged_moves.push(moved)
+            merged_moves.push(moved.copy())
         }
     }
     if !has_else {
@@ -5929,7 +5939,7 @@ sema_ownership_uninit_join: fn(left: [SemaOwnershipUninitFact], right: [SemaOwne
     loop fact in right {
         if name_rows_get_text(merged_keys, fact.key) != None -> next
         name_rows_set(merged_keys, fact.key, 0)
-        merged.push(fact)
+        merged.push(fact.copy())
     }
     merged
 }
@@ -5950,7 +5960,7 @@ sema_ownership_uninit_take: fn(state: &SemaOwnershipState, key: String) -> SemaO
         if fact.key == key {
             taken = Val(fact)
         } else {
-            remaining.push(fact)
+            remaining.push(fact.copy())
         }
     }
     state.uninit = remaining
@@ -5959,7 +5969,7 @@ sema_ownership_uninit_take: fn(state: &SemaOwnershipState, key: String) -> SemaO
 
 sema_ownership_uninit_set: fn(state: &SemaOwnershipState, fact: SemaOwnershipUninitFact) Never! {
     _ := sema_ownership_uninit_take(state, fact.key)
-    state.uninit.push(fact)
+    state.uninit.push(fact.copy())
 }
 
 sema_ownership_loop_path_to_depth: fn(path: SemaOwnershipState, target_depth: Int) -> SemaOwnershipState Never! {
@@ -5983,11 +5993,11 @@ sema_ownership_check_loop_move_backedge: fn(state: &SemaOwnershipState, frame: S
     repeated := [SemaOwnershipMovedPlace]{}
     loop moved in state.moved {
         if !sema_ownership_loop_move_repeats(state, frame, moved) {
-            remaining.push(moved)
+            remaining.push(moved.copy())
             next
         }
-        repeated.push(moved)
-        if moved.origin.share_ty == None && moved.origin.implicit_take == None -> remaining.push(moved)
+        repeated.push(moved.copy())
+        if moved.origin.share_ty == None && moved.origin.implicit_take == None -> remaining.push(moved.copy())
     }
     state.moved = remaining
     loop moved in repeated {

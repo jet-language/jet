@@ -16,6 +16,7 @@ use jet_foundation.[
     LValue,
     Span,
     Type,
+    expr_source_span,
     expr_span,
     type_name,
 ]
@@ -151,6 +152,10 @@ sema_shared_cycle_fresh: fn(value: Expr, ty: Type?, owner: String, allowed: [Spa
     if ty == .Val(known) && !sema_shared_cycle_reaches(owner, known, environment, program) -> return true
     if value == {
         .Paren(inner, _, _) -> return sema_shared_cycle_fresh(inner, ty, owner, allowed, environment, program, scopes, state)
+        // A copy (`x.copy()`, or a generated copy) shares every `Shared`
+        // handle its source holds, so it reaches exactly the cells its source
+        // reaches.
+        .Copy(inner, _, _) -> return sema_shared_cycle_fresh(inner, ty, owner, allowed, environment, program, scopes, state)
         .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Str(_, _, _) | .Char(_, _, _) | .Unit(_, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) | .Lambda(_, _) -> return true
         .Present(inner, _, _) -> return sema_shared_cycle_fresh(inner, sema_shared_cycle_option_inner(ty), owner, allowed, environment, program, scopes, state)
         .Call(call, _) -> {
@@ -161,6 +166,7 @@ sema_shared_cycle_fresh: fn(value: Expr, ty: Type?, owner: String, allowed: [Spa
             if variant == "Val" && args.len() == 1 -> return sema_shared_cycle_fresh(sema_shared_cycle_enum_arg(args[0]), sema_shared_cycle_option_inner(ty), owner, allowed, environment, program, scopes, state)
         }
         .MethodCall(receiver, method, _, _, _, args, _) -> {
+            if method == "copy" && args.len() == 0 -> return sema_shared_cycle_fresh(receiver, ty, owner, allowed, environment, program, scopes, state)
             if method == "new" && args.len() == 1 && args[0].flags.shared_operand {
                 if receiver == .Ident(name, _, _) && name == "Shared" -> return sema_shared_cycle_fresh(args[0].expr, sema_shared_cycle_shared_inner(ty), owner, allowed, environment, program, scopes, state)
             }
@@ -234,7 +240,7 @@ sema_shared_cycle_fresh_name: fn(name: String, owner: String, allowed: [Span], e
     if !sema_shared_cycle_frame_runs_once(scopes, scopes.bindings[row].frame) -> return false
     if !sema_shared_cycle_unread(state, scopes.bindings[row].symbol.id.key, allowed) -> return false
     within := allowed.copy()
-    within.push(expr_span(init))
+    within.push(expr_source_span(init))
     sema_shared_cycle_fresh(init, None, owner, within, environment, program, scopes, state)
 }
 
@@ -253,7 +259,7 @@ sema_shared_cycle_check_stored: fn(found: (owner: Type, place: Type)?, span: Spa
     cell: found ?? return
     owner: sema_shared_cycle_owner_key(cell.owner, environment, program) ?? return
     if !sema_shared_cycle_reaches(owner, cell.place, environment, program) -> return
-    if sema_shared_cycle_fresh(value, Val(cell.place), owner, [Span]{expr_span(value)}, environment, program, scopes, state) -> return
+    if sema_shared_cycle_fresh(value, Val(cell.place), owner, [Span]{expr_source_span(value)}, environment, program, scopes, state) -> return
     diagnostics.push(sema_shared_cycle_diagnostic(span, cell.owner))
 }
 
@@ -266,7 +272,9 @@ sema_shared_cycle_check_call: fn(place: Expr, args: [CallArg], environment: Sema
     found: sema_shared_cycle_place(place, environment, program, scopes) ?? return
     owner: sema_shared_cycle_owner_key(found.owner, environment, program) ?? return
     if !sema_shared_cycle_reaches(owner, found.place, environment, program) -> return
-    allowed: [Span]{Span{start: expr_span(args[0].expr).start, end: expr_span(args[args.len() - 1].expr).end}}
+    // A method-call argument (`kid.copy()`) is spanned at its method name, so
+    // the allowed extent starts at its receiver.
+    allowed: [Span]{Span{start: expr_source_span(args[0].expr).start, end: expr_span(args[args.len() - 1].expr).end}}
     loop argument in args {
         if argument.expr == .Ident(name, _, _) && name.starts_with(SEMA_SHARED_HOISTED_RHS) -> next
         if !sema_shared_cycle_fresh(argument.expr, None, owner, allowed, environment, program, scopes, state) {
@@ -296,7 +304,7 @@ sema_shared_cycle_check_hoisted_call: fn(expr: Expr, environment: SemaScopeEnvir
 sema_shared_cycle_check_replace: fn(inner: Type, value: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
     owner: sema_shared_cycle_owner_key(inner, environment, program) ?? return
     if !sema_shared_cycle_reaches(owner, inner, environment, program) -> return
-    if sema_shared_cycle_fresh(value, Val(inner), owner, [Span]{expr_span(value)}, environment, program, scopes, state) -> return
+    if sema_shared_cycle_fresh(value, Val(inner), owner, [Span]{expr_source_span(value)}, environment, program, scopes, state) -> return
     diagnostics.push(sema_shared_cycle_diagnostic(span, inner))
 }
 

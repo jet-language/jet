@@ -121,7 +121,7 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
             if pid == 0 -> return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id"}
             live = Val(pid)
             options.push("--live")
-            options.push(value)
+            options.push(value.copy())
             index += 2
             next
         }
@@ -130,7 +130,7 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
             pid: jet_cli_inspect_pid(value) ?? return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id, got `{value}`"}
             if pid == 0 -> return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id"}
             live = Val(pid)
-            options.push(argument)
+            options.push(argument.copy())
             index += 1
             next
         }
@@ -139,7 +139,7 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
             value: argv[index + 1]
             replay = Val(value)
             options.push("--replay")
-            options.push(value)
+            options.push(value.copy())
             index += 2
             next
         }
@@ -147,13 +147,13 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
             value: argument.slice(9..<argument.len())
             if value == "" -> return JetCLIInspectParse.Failed{message: "`--replay` needs a replay artifact path"}
             replay = Val(value)
-            options.push(argument)
+            options.push(argument.copy())
             index += 1
             next
         }
         if argument == "--" -> return JetCLIInspectParse.Failed{message: "inspect planes do not accept a `--` command tail"}
         if argument.starts_with("-") {
-            options.push(argument)
+            options.push(argument.copy())
             if jet_cli_inspect_flag_takes_value(argument) && index + 1 < argv.len() && !argv[index + 1].starts_with("-") {
                 options.push(argv[index + 1])
                 index += 2

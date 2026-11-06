@@ -979,7 +979,7 @@ sema_expression_lambda_add_capture_key: fn(keys: &[String], key: String) Never! 
     loop existing in keys {
         if existing == key -> return
     }
-    keys.push(key)
+    keys.push(key.copy())
 }
 
 sema_expression_lambda_collect_reference_keys: fn(state: &SemaOwnershipState, first_reference: Int, frame: Int, scopes: &SemaScopeTable, keys: &[String], mutable_keys: &[String]) Never! {
@@ -1295,7 +1295,7 @@ sema_expression_lambda_name_contains: fn(names: [String], name: String) -> Bool 
 }
 
 sema_expression_lambda_append_name: fn(names: &[String], name: String) Never! {
-    if !sema_expression_lambda_name_contains(names, name) -> names.push(name)
+    if !sema_expression_lambda_name_contains(names, name) -> names.push(name.copy())
 }
 
 sema_expression_lambda_view_crossing: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext) -> Bool {
@@ -1854,7 +1854,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             _ := sema_ownership_record_view_fact(lambda_state, parameter.name, parameter.name_span, source, [String]{}, AccessConvention.Write, lambda_scopes, -1)
             lambda_context.lending_view_parameter_keys.push(parameter_id.key)
         }
-        param_symbols.push(parameter_id)
+        param_symbols.push(parameter_id.copy())
         lambda_context.return_view_parameter_keys.push(parameter_id.key)
         param_types.push(parameter_type)
         param_names.push(parameter.name)
@@ -2328,7 +2328,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             saved_view_receiver := lambda_context.return_view_receiver_key.copy()
             saved_view_keys := lambda_context.return_view_parameter_keys.copy()
             if lambda_context.return_view_receiver_key == "" -> lambda_context.return_view_receiver_key = context.return_view_receiver_key.copy()
-            loop key in context.return_view_parameter_keys -> lambda_context.return_view_parameter_keys.push(key)
+            loop key in context.return_view_parameter_keys -> lambda_context.return_view_parameter_keys.push(key.copy())
             _ := sema_stmt_record_return_views(view_body, ret_ty, lambda_scopes, lambda_state, lambda_context, diagnostics)
             lambda_context.return_view_provenance = saved_view_provenance
             lambda_context.return_view_receiver_key = saved_view_receiver

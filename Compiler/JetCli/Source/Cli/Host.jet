@@ -180,7 +180,7 @@ jet_cli_ice: fn(what: String) -> JetDriverVerbOutput Never! {
 jet_cli_errors: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
     errors := [Diagnostic]{}
     loop diagnostic in diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic)
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic.copy())
     }
     errors
 }
@@ -357,7 +357,7 @@ jet_cli_check_json_outcome: fn(file: String, source: String, diagnostics: [Diagn
     }
     lints := [Diagnostic]{}
     loop diagnostic in diagnostics {
-        if !jet_driver_is_a11y_lint(diagnostic.code) -> lints.push(diagnostic)
+        if !jet_driver_is_a11y_lint(diagnostic.code) -> lints.push(diagnostic.copy())
     }
     if lints.len() > 0 {
         return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", true, base, file, source, lints), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -705,8 +705,8 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     // object never touches the disk.
     names := [String]{"{executable_path} (program object)", runtime_path}
     bytes := [[U8]]{object.move(), runtime.move()}
-    loop name in closure.names -> names.push(name)
-    loop input in closure.bytes -> bytes.push(input)
+    loop name in closure.names -> names.push(name.copy())
+    loop input in closure.bytes -> bytes.push(input.copy())
     input_count: names.len()
     // copy: only a C closure can refuse LINK_RUN_BASE, and the retry at LINK_RUN_LOW_BASE needs the inputs again.
     retry: if base != LINK_BASE && closure.names.len() > 0 -> Val(bytes.copy()) else -> None
@@ -1360,7 +1360,7 @@ jet_cli_authority_report: fn(file: String, source: String, color: Bool, json: Bo
 jet_cli_present_shown: fn(result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, show_advisories: Bool) -> [Diagnostic] Never! {
     shown := [Diagnostic]{}
     loop diagnostic in result.diagnostics {
-        if show_advisories || diagnostic.severity != DIAGNOSTIC_LINT -> shown.push(diagnostic)
+        if show_advisories || diagnostic.severity != DIAGNOSTIC_LINT -> shown.push(diagnostic.copy())
     }
     jet_driver_present_diagnostics(shown, snapshot, result.generated_source_files)
 }
@@ -1493,7 +1493,7 @@ jet_cli_finish: fn(output: JetDriverVerbOutput) -> Never {
 jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?) -> X64Launch {
     executable: cli_files.absolute(file) ?? file
     argv := [String]{executable}
-    loop argument in program_args -> argv.push(argument)
+    loop argument in program_args -> argv.push(argument.copy())
     relaunch := [String]{cli_sys.executable(), "run"}
     if options.profile != "" -> relaunch.push("--profile={options.profile}")
     loop choice in options.written {
@@ -1620,7 +1620,7 @@ jet_cli_launch_failed: fn(why: String, color: Bool) -> JetDriverVerbOutput Never
 jet_cli_write_verbose_lints: fn(file: String, source: String, color: Bool, json: Bool, diagnostics: [Diagnostic]) {
     lints := [Diagnostic]{}
     loop diagnostic in diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_LINT && !jet_driver_is_a11y_lint(diagnostic.code) -> lints.push(diagnostic)
+        if diagnostic.severity == DIAGNOSTIC_LINT && !jet_driver_is_a11y_lint(diagnostic.code) -> lints.push(diagnostic.copy())
     }
     report: jet_cli_run_problems(file, source, lints, color, json)
     if report.len() > 0 {
@@ -2086,7 +2086,7 @@ jet_cli_rfc3339: fn(unix_ns: Int) -> String Never! {
 // `git_output`: trimmed stdout of a successful `git -C <root> …`.
 jet_cli_git_output: fn(root: String, args: [String]) -> String? {
     argv := [String]{"git", "-C", root}
-    loop argument in args -> argv.push(argument)
+    loop argument in args -> argv.push(argument.copy())
     receipt: cli_process.cmd(argv).run() ?? return None
     if !receipt.success -> return None
     Val(receipt.output.trim())
@@ -2703,9 +2703,9 @@ jet_cli_external_fmt_temp_dir: fn() -> JetCLIExternalFmtTemp {
 // staged outputs to the continuation (ExternalFormat.jet).
 jet_cli_external_fmt_staged: fn(temp: String, project_dir: String, program: String, files: [String], child_flags: [String], check_only: Bool, show_diff: Bool, json: Bool, color: Bool) -> JetDriverVerbOutput {
     command := [String]{"env"}
-    loop flag in child_flags -> command.push(flag)
+    loop flag in child_flags -> command.push(flag.copy())
     command.push("--")
-    command.push(program)
+    command.push(program.copy())
     staged := [String]{}
     befores := [[U8]]{}
     loop index in 0..<files.len() {
@@ -2713,7 +2713,7 @@ jet_cli_external_fmt_staged: fn(temp: String, project_dir: String, program: Stri
         before: cli_files.read_bytes(source_path) ?? return jet_cli_external_fmt_fail("E1340", "could not read `{source_path}`", jet_cli_io_error_text(err), "fix the file permissions and retry", color, JET_DRIVER_EXIT_USAGE)
         staged_path: jet_cli_authority_path(temp, "{jet_cli_zero_pad(index, 4)}-{jet_cli_fmt_file_name(source_path)}")
         cli_files.write_bytes(staged_path, before) ?? return jet_cli_external_fmt_fail("E1340", "could not stage formatter inputs", jet_cli_io_error_text(err), "fix the temporary directory and retry", color, JET_DRIVER_EXIT_USAGE)
-        command.push(staged_path)
+        command.push(staged_path.copy())
         staged.push(staged_path)
         befores.push(before)
     }
@@ -2755,7 +2755,7 @@ jet_cli_external_fmt: fn(raw: [String], color: Bool) -> JetDriverVerbOutput {
                 if index >= raw.len() -> return jet_cli_external_fmt_fail("E2104", "{argument} needs a value", "these options select the realized environment", "pass a value after the option", color, JET_DRIVER_EXIT_USAGE)
                 if argument == "--preset" -> preset = Val(raw[index])
                 if argument == "--env" -> environment = Val(raw[index])
-                child_flags.push(argument)
+                child_flags.push(argument.copy())
                 child_flags.push(raw[index])
             }
             argument.starts_with("--fixtures=") -> {
@@ -2772,10 +2772,10 @@ jet_cli_external_fmt: fn(raw: [String], color: Bool) -> JetDriverVerbOutput {
                 child_flags.push("--env")
                 child_flags.push(jet_cli_trim_start_matches(argument, "--env="))
             }
-            JET_CLI_EXTERNAL_FMT_FORWARDED.contains(argument) || argument.starts_with("--color=") -> child_flags.push(argument)
+            JET_CLI_EXTERNAL_FMT_FORWARDED.contains(argument) || argument.starts_with("--color=") -> child_flags.push(argument.copy())
             argument == "--" -> return jet_cli_external_fmt_fail("E2104", "jet fmt --lang does not accept a command separator", "Jet supplies the staged files to the environment formatter", "pass formatter input paths before `--`", color, JET_DRIVER_EXIT_USAGE)
             argument.starts_with("-") -> return jet_cli_external_fmt_fail("E2102", "unknown external formatter option `{argument}`", "Jet forwards only environment selection and formatter mode flags", "run `jet fmt --help` or remove the unknown option", color, JET_DRIVER_EXIT_USAGE)
-            else -> explicit_paths.push(argument)
+            else -> explicit_paths.push(argument.copy())
         }
         index += 1
     }
@@ -3253,7 +3253,7 @@ jet_cli_dev_launch: fn(executable: X64Executable, binary: String, file: String, 
         return JetCLIDevChild.Idle
     }
     argv := [String]{binary}
-    loop argument in program_args -> argv.push(argument)
+    loop argument in program_args -> argv.push(argument.copy())
     spec := cli_process.cmd(argv)
     if port == .Val(number) -> spec = spec.env("JET_DEV_PORT", "{number}")
     if spec.stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).spawn() == {

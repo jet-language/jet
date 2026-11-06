@@ -178,7 +178,7 @@ jet_cli_c_bind_collect_imports: fn(relative_path: String, imports: [ImportDecl],
 // Adds the root-relative `path` to `modules` once; an invalid import path
 // (empty) adds nothing.
 jet_cli_c_bind_reach: fn(path: String, modules: &[String]) Never! {
-    if path != "" && !modules.contains(path) -> modules.push(path)
+    if path != "" && !modules.contains(path) -> modules.push(path.copy())
 }
 
 // The binding inputs of the program `entry_path` heads. A package compiles
@@ -304,7 +304,7 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
         if argument == {
             "--pkg" -> lib = Val(value)
             "--overlay" -> overlay_path = Val(value)
-            "--link" -> links.push(value)
+            "--link" -> links.push(value.copy())
             else -> output = Val(value)
         }
         index += 2

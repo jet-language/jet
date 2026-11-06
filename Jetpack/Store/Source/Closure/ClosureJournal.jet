@@ -148,7 +148,7 @@ store_apply_entry: fn(graph: &ClosureGraph, entry: ClosureJournalEntry) StoreErr
     deleted := graph.deleted_records.copy()
     loop id in entry.deleted_records {
         graph.records.remove(id).drop("a tombstone may name an already removed record")
-        deleted.push(id)
+        deleted.push(id.copy())
     }
     graph.deleted_records = store_sorted_unique(deleted)
     loop object in entry.objects {
@@ -165,7 +165,7 @@ store_apply_entry: fn(graph: &ClosureGraph, entry: ClosureJournalEntry) StoreErr
         store_merge_action_record(actions, record)
         remaining := [String]{}
         loop id in graph.deleted_records {
-            if id != record.id -> remaining.push(id)
+            if id != record.id -> remaining.push(id.copy())
         }
         graph.deleted_records = remaining
         graph.records[record.id] = record

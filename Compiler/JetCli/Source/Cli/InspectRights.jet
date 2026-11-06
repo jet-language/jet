@@ -76,7 +76,7 @@ jet_cli_rights_expand: fn(rights: [String]) -> [String] Never! {
     expanded := [String]{}
     loop right in rights {
         canonical: jet_cli_parse_right(right) ?? right.trim()
-        expanded.push(canonical)
+        expanded.push(canonical.copy())
         loop leaf in EFFECT_VOCABULARY_LEAVES {
             if jet_cli_right_covers(canonical, leaf) -> expanded.push(leaf)
         }
@@ -200,7 +200,7 @@ jet_cli_rights_declared: fn(view: JetCLICallableView) -> JetCLIRightsRow Never! 
             if name.starts_with("!") {
                 deny.push(name.slice(1..<name.len()))
             } else {
-                allow.push(name)
+                allow.push(name.copy())
             }
         }
         return jet_cli_rights_invocation(allow, deny, provenance)

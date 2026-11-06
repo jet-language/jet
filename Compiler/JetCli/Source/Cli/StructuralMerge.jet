@@ -110,7 +110,7 @@ jet_cli_struct_load: fn(path: String) -> JetCLIStructLoaded {
 jet_cli_struct_transition: fn(before: JetCLIStructDocument, after: JetCLIStructDocument) -> [JetCLISemOp] {
     output := [JetCLISemOp]{}
     combined := before.operations
-    loop operation in after.operations -> combined.push(operation)
+    loop operation in after.operations -> combined.push(operation.copy())
     loop operation in combined {
         if jet_cli_sem_op_transition(operation, [String]{before.path, after.path}, before.source_hash, after.source_hash) && !output.contains(operation) {
             output.push(operation)

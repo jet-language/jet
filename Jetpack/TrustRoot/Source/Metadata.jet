@@ -44,7 +44,7 @@ RoleKeys: struct {
         seen := [String]{}
         loop id in key_ids {
             if seen.contains(id) -> return Err(TrustRootError.InvalidThreshold{detail: "duplicate key id `{id}` in role"})
-            seen.push(id)
+            seen.push(id.copy())
         }
         Ok(RoleKeys{key_ids, threshold})
     }

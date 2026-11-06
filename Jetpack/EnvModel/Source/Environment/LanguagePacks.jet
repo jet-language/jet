@@ -148,7 +148,7 @@ LanguageExpansion: struct {
 
     // Add `package` to the expanded package list once.
     add_package: fn(&self, package: String) Never! {
-        if !self.packages.contains(package) -> self.packages.push(package)
+        if !self.packages.contains(package) -> self.packages.push(package.copy())
     }
 }
 
@@ -227,7 +227,7 @@ LanguagePackCatalog: struct {
                 }
             }
             if duplicate -> next
-            expansion.selections.push(normalized)
+            expansion.selections.push(normalized.copy())
             projection := LanguageProjection{selection: normalized, pack: pack, host: pack.host, platform: platform, license: pack.license}
             if selection.enable && pack.license.trim() == "" {
                 return Err(EnvironmentFactError.new("language pack `{pack.name}` has no license fact"))
@@ -260,7 +260,7 @@ LanguagePackCatalog: struct {
             }
             if !expansion.applied.contains(pack.name) {
                 expansion.applied.push(pack.name)
-                expansion.packs.push(pack)
+                expansion.packs.push(pack.copy())
             }
             loop package in pack.packages {
                 versioned: envmodel_versioned_package(package, selection.version)
@@ -269,7 +269,7 @@ LanguagePackCatalog: struct {
             }
             loop package in selection.extra_packages {
                 expansion.add_package(package)
-                projection.included.push(package)
+                projection.included.push(package.copy())
             }
             if {
                 selection.venv -> {

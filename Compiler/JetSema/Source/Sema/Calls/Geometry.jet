@@ -285,7 +285,7 @@ sema_call_try_geometry: fn(receiver: Expr, receiver_value: TExpr, method: String
         checked: if depth_argument -> sema_check_expression(argument.expr, Val(Type.Float), environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         if checked == {
             .Val(value) -> {
-                values.push(value)
+                values.push(value.copy())
                 types.push(value.ty)
             }
             else -> {

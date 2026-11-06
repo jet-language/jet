@@ -94,14 +94,14 @@ kit_steps_resolve_step: fn(original: KitStep, context: KitStepCtx, state: KitSte
     if conditional_env {
         selected := [KitEnvVar]{}
         loop variable in original.environment {
-            if kit_steps_conditions(variable.conditions, context, state) -> selected.push(variable)
+            if kit_steps_conditions(variable.conditions, context, state) -> selected.push(variable.copy())
         }
         // Select before expanding values: unselected branches may name tools
         // or captures unavailable on this host.
         step.environment = selected
     }
     step.replacements = context.plan.replacements
-    loop rule in original.replacements -> step.replacements.push(rule)
+    loop rule in original.replacements -> step.replacements.push(rule.copy())
     argv := [String]{}
     loop word in original.argv -> argv.push(kit_steps_runtime_expand(word, context, state) ?? return None)
     step.argv = argv

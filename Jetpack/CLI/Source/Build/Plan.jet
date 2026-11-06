@@ -121,7 +121,7 @@ HermeticBuildPlan: struct {
             if !selected.contains(action.id) -> next
             nodes.push(BuildExecutionNode{action: action.id, name: action.name, target: action_targets.get(action.id), prerequisites: prereqs.get(action.id) ?? [Int]{}, pools: build_action_pools(action)})
             console_order.push(action.id)
-            selected_actions.push(action)
+            selected_actions.push(action.copy())
         }
         events := [BuildExecutionEvent]{}
         loop stage in stages {
@@ -145,7 +145,7 @@ HermeticBuildPlan: struct {
         events := [BuildExecutionEvent]{}
         selected_actions := [HermeticBuildAction]{}
         loop action in self.actions {
-            if selected.contains(action.id) -> selected_actions.push(action)
+            if selected.contains(action.id) -> selected_actions.push(action.copy())
         }
         metrics := build_execution_metrics(selected_actions, stages)
         loop stage in stages {

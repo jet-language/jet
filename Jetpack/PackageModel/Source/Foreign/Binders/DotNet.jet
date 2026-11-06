@@ -156,7 +156,7 @@ pkg_dotnet_parse_surface: fn(bytes: [U8], expected: String) -> DotNetSurface For
                 name: fields[1]
                 if !pkg_binder_is_ident(name) -> next
                 if names.contains(name) -> return Err(ForeignBindError.Source("overloaded C# method `{name}` needs an explicit overlay"))
-                names.push(name)
+                names.push(name.copy())
                 result: DotNetScalar.parse(fields[3]) ?? return Err(ForeignBindError.Source("C# method `{name}` uses an unsupported return type; use long or double"))
                 params: pkg_dotnet_parse_scalars(fields, 4, name)
                 methods.push(DotNetMethod{name: name, is_static: fields[2] == "S", result: result, params: params})

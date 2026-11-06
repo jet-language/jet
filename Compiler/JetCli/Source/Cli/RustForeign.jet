@@ -352,7 +352,7 @@ jet_cli_rust_foreign_run: fn(bwrap: String, cargo: String, source: String, outpu
         jet_cli_rust_foreign_mount(args, cargo, cargo)
     }
     loop argument in ([String]{"--argv0", "cargo", "--", cargo}) -> args.push(argument)
-    loop argument in command -> args.push(argument)
+    loop argument in command -> args.push(argument.copy())
     cli_process.cmd(args).env_clear().output_limit(67108864).run() ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't run Cargo in the mandatory native sandbox: {err}"))
 }
 

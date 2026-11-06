@@ -52,7 +52,7 @@ run_argv: fn(argv: [String], cwd: String) -[Exec, Time.Wait]> Ran Never! {
 
 with_args: fn(prefix: [String], args: [String]) -> [String] Never! {
     argv := prefix.copy()
-    argv.extend(args)
+    argv.extend(args.copy())
     argv
 }
 
@@ -188,7 +188,7 @@ personal_problems: fn(root: String, dir: String, paths: [String], literals: [Str
         argv.extend(pass.flags)
         argv.extend(pass.args)
         argv.push("--")
-        argv.extend(paths)
+        argv.extend(paths.copy())
         found: run_argv(argv, dir)
         if found.code > 1 {
             problems.push(problem(PERSONAL, "git grep failed (exit {found.code}): {found.errors.trim()}"))

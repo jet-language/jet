@@ -178,7 +178,7 @@ sort: fn<T, E>(rows: [T], descending: Bool, key_fn: fn(T) -> String E!) -> [T] E
 filter: fn<T, E>(rows: [T], predicate: fn(T) -> Bool E!) -> [T] E! {
     out := [T]{ }
     loop row in rows {
-        if predicate(row) -> out.push(row)
+        if predicate(row) -> out.push(row.copy())
     }
     out
 }
@@ -229,9 +229,9 @@ set_selected: fn<T>(table: &WebTable<T>, key: String, on: Bool) WebTableError! {
     if !has_key<T>(table.rows, key) -> return Err(WebTableError.NotFound)
     selected := [String]{ }
     loop item in table.state.selected {
-        if item != key -> selected.push(item)
+        if item != key -> selected.push(item.copy())
     }
-    if on -> selected.push(key)
+    if on -> selected.push(key.copy())
     table.state.selected = selected
 }
 
@@ -270,7 +270,7 @@ selected_rows: fn<T>(table: WebTable<T>) -> [WebTableRow<T>] WebTableError! {
         if contains_key(seen, key) -> next
         loop row in table.rows {
             if row.key == key {
-                out.push(row)
+                out.push(row.copy())
                 seen.push(key.copy())
                 break
             }
@@ -321,14 +321,14 @@ remove_row: fn<T>(table: &WebTable<T>, key: String) -> T WebTableError! {
             removed = row.value
             found = true
         } else {
-            remaining.push(row)
+            remaining.push(row.copy())
         }
     }
     if !found -> return Err(WebTableError.NotFound)
     table.rows = remaining
     selected := [String]{}
     loop item in table.state.selected {
-        if item != key -> selected.push(item)
+        if item != key -> selected.push(item.copy())
     }
     table.state.selected = selected
     if table.state.focus == key -> table.state.focus = ""
@@ -385,10 +385,10 @@ projected_rows: fn<T>(table: WebTable<T>) -> [WebTableRow<T>] Never! {
     filter_index := column_index<T>(table.columns, table.state.filter.column)
     loop row in table.rows {
         if filter_index < 0 || table.state.filter.value.len() == 0 {
-            rows.push(row)
+            rows.push(row.copy())
         } else {
             text := table.columns[filter_index].project(row.value)
-            if contains_text(text, table.state.filter.value) -> rows.push(row)
+            if contains_text(text, table.state.filter.value) -> rows.push(row.copy())
         }
     }
     sort_index := column_index<T>(table.columns, table.state.sort.column)
@@ -444,7 +444,7 @@ default_state: fn() -> WebTableState {
 
 copy_values: fn<T>(values: [T]) -> [T] {
     out := [T]{ }
-    loop value in values -> out.push(value)
+    loop value in values -> out.push(value.copy())
     out
 }
 

@@ -43,7 +43,7 @@ NixDerivationStore: struct {
                 digest: child_hashes.get(output_name) ?? return Err(NixError.DrvPath("no hash for output `{output_name}` of `{input.path}`"))
                 hex: nix_hex(digest)
                 names := inputs.get(hex) ?? [String]{}
-                names.push(output_name)
+                names.push(output_name.copy())
                 inputs[hex] = nixeval_sorted_unique(names)
             }
         }

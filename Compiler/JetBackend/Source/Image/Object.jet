@@ -294,8 +294,8 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
                     local := import_rows.get(symbol) ?? -1
                     if local < 0 {
                         local = imports.len()
-                        imports.push(symbol)
-                        import_rows.add(symbol, local).drop("checked absent above")
+                        imports.push(symbol.copy())
+                        import_rows.add(symbol.copy(), local).drop("checked absent above")
                     }
                     runtime_at.push(relas.len())
                     runtime_local.push(local)
@@ -535,7 +535,7 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
             found := import_rows.get(symbol) ?? -1
             if found < 0 {
                 found = imports.len()
-                imports.push(symbol)
+                imports.push(symbol.copy())
                 import_rows.add(symbol, found).drop("checked absent above")
             }
             globals.push(first_import + found)

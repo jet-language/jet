@@ -169,7 +169,7 @@ jet_driver_plural: fn(count: Int) -> String Never! {
 jet_driver_report_problems: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool, show_advisories: Bool) -> String Never! {
     shown := [Diagnostic]{}
     loop diagnostic in diagnostics {
-        if show_advisories || diagnostic.severity != DIAGNOSTIC_LINT -> shown.push(diagnostic)
+        if show_advisories || diagnostic.severity != DIAGNOSTIC_LINT -> shown.push(diagnostic.copy())
     }
     count: shown.len()
     jet_driver_problem_report(file, source, shown, "{count} problem{jet_driver_plural(count)} found", color)
@@ -184,9 +184,9 @@ jet_driver_check_outcome: fn(file: String, source: String, diagnostics: [Diagnos
     lints := [Diagnostic]{}
     loop diagnostic in diagnostics {
         if {
-            diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic)
+            diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic.copy())
             jet_driver_is_a11y_lint(diagnostic.code) -> {}
-            else -> lints.push(diagnostic)
+            else -> lints.push(diagnostic.copy())
         }
     }
     if errors.len() > 0 {

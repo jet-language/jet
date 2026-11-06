@@ -728,7 +728,7 @@ provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: S
         if source == "" -> next
         provider_cc_validate_relative_path(source)
         object: "{source.replace("/", "_")}.o"
-        objects.push(object)
+        objects.push(object.copy())
         specs.push(provider_cc_pack_compile(clang, flags, files.join(source_root, source), files.join(scratch, object), false))
     }
     if objects.len() == 0 -> return Err(CcToolchainError.Invalid("musl source list for {target.arch} is empty"))
@@ -753,7 +753,7 @@ provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: S
 
 provider_cc_pack_compile: fn(clang: String, flags: [String], source: String, object: String, pic: Bool) -[Exec]> ProcessSpec Never! {
     argv := [String]{clang}
-    argv.extend(flags)
+    argv.extend(flags.copy())
     if pic -> argv.push("-fPIC")
     argv.extend([String]{"-c", source, "-o", object})
     process.cmd(argv).env_clear().stdout(.Capture).stderr(.Capture)

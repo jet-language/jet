@@ -89,7 +89,7 @@ ir_ssa_find: fn(s: IRSsa, value: Int) -> Int Never! {
 ir_ssa_value: fn(s: &IRSsa, slot: Int, kind: IRSsaKind, at: Int) -> Int Never! {
     id: s.val_slot.len()
     s.val_slot.push(slot)
-    s.val_kind.push(kind)
+    s.val_kind.push(kind.copy())
     s.val_at.push(at)
     s.repl.push(id)
     id
@@ -116,7 +116,7 @@ ir_ssa_block: fn(s: &IRSsa, preds: &&[Int]) -> Int Never! {
 // slot the join merges.
 ir_ssa_edge: fn(s: &IRSsa, join: Int, kind: IRSsaEdgeKind, at: Int, from: Int, current: [Int]) Never! {
     id: s.edge_kind.len()
-    s.edge_kind.push(kind)
+    s.edge_kind.push(kind.copy())
     s.edge_at.push(at)
     s.edge_block.push(from)
     s.edge_join.push(join)

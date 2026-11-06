@@ -104,7 +104,7 @@ QueryEngine: struct<T> {
         self.prune_invalid_memos(true)
         dead := [QueryKey]{}
         loop (query, _) in self.recompute_by_key {
-            if query.subject == key.subject -> dead.push(query)
+            if query.subject == key.subject -> dead.push(query.copy())
         }
         loop query in dead -> _: self.recompute_by_key.remove(query)
         true
@@ -184,7 +184,7 @@ QueryEngine: struct<T> {
     invalidate_kind: fn(&self, kind: String) Never! {
         dead := [QueryKey]{}
         loop (key, _) in self.memo {
-            if key.kind == kind -> dead.push(key)
+            if key.kind == kind -> dead.push(key.copy())
         }
         loop key in dead -> self.remove_memo(key)
     }
@@ -202,7 +202,7 @@ QueryEngine: struct<T> {
 
     record_dep: fn(&self, key: QueryDepKey) Never! {
         if self.dep_stack.len() == 0 -> return
-        self.dep_stack[self.dep_stack.len() - 1].deps.push(key)
+        self.dep_stack[self.dep_stack.len() - 1].deps.push(key.copy())
     }
     // Rust memo_entry_valid/memo_key_valid: generations are per-key recompute
     // counts, and revisiting a key returns true (not a new cycle error).
@@ -236,7 +236,7 @@ QueryEngine: struct<T> {
         dead := [QueryKey]{}
         loop (key, _) in self.memo {
             visiting := [QueryKey:Bool]{}
-            if !self.memo_key_valid(key, visiting) -> dead.push(key)
+            if !self.memo_key_valid(key, visiting) -> dead.push(key.copy())
         }
         loop key in dead {
             self.remove_memo(key)

@@ -833,7 +833,7 @@ sema_checked_foreign_nominal_type: fn(graph: SemaRegistrationGraph, nominal: Sem
     key: nominal.symbol.id.key
     if sema_checked_foreign_seen(seen, key) -> return false
     next_seen := seen
-    next_seen.push(key)
+    next_seen.push(key.copy())
     if nominal.source == {
         .CompilerBuiltinTrait(_) -> false
         .ForeignHandle(facts) -> c_abi && sema_checked_foreign_handle_source_matches(handles, facts)
@@ -918,7 +918,7 @@ sema_checked_foreign_by_reference_struct: fn(graph: SemaRegistrationGraph, ty: T
     key: nominal.symbol.id.key
     if sema_checked_foreign_seen(seen, key) -> return false
     next_seen := seen
-    next_seen.push(key)
+    next_seen.push(key.copy())
     if nominal.source == .SourceAST(.Struct(definition)) {
         if definition.type_params.len() > 0 -> return false
         loop field in definition.fields {
@@ -1566,8 +1566,8 @@ sema_checked_foreign_row: fn(graph: SemaRegistrationGraph, module_row: SemaRegis
         c_abi -> {
             loop provider in providers {
                 if provider.module_identity != module_row.module_identity -> next
-                scoped_providers.push(provider)
-                loop handle in provider.handles -> handles.push(handle)
+                scoped_providers.push(provider.copy())
+                loop handle in provider.handles -> handles.push(handle.copy())
             }
         }
         else -> {
@@ -2213,7 +2213,7 @@ sema_checked_validate_field_policy: fn(definition: StructDef, diagnostics: &[Dia
         if definition.fields[field_index].computed == .Val(formula) {
             names.push(definition.fields[field_index].name)
             spans.push(definition.fields[field_index].name_span)
-            formulas.push(formula)
+            formulas.push(formula.copy())
         }
     }
     if names.len() == 0 -> return
@@ -2527,7 +2527,7 @@ sema_checked_program_boxed_edges: fn(graph: SemaRegistrationGraph) -> [String:[S
             first: graph.nominal_symbol_rows.get(key) ?? next
             if first.module_index != module_index || first.row != row || nodes.get(key) != None -> next
             nodes[key] = box_graph.keys.len()
-            box_graph.keys.push(key)
+            box_graph.keys.push(key.copy())
             rows.push(first)
         }
     }
@@ -2738,7 +2738,7 @@ sema_checked_shared_witness: fn(graph: SemaRegistrationGraph, owner: String, cal
             // sema_checked_shared_reaches); a nested pattern clones the Item.
             if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
                 if item == .Struct(definition) {
-                    walk.stack.push(key)
+                    walk.stack.push(key.copy())
                     outer_met: walk.met_path
                     walk.met_path = false
                     witness := String?{None}
@@ -2955,7 +2955,7 @@ sema_checked_validate_nested_impl: fn(graph: SemaRegistrationGraph, module_row: 
     loop method in block.methods {
         loop registered in nominal.methods {
             if registered.declaration.name_span == method.name_span && registered.declaration.name == method.name {
-                methods.push(registered)
+                methods.push(registered.copy())
                 break
             }
         }
@@ -3315,7 +3315,7 @@ sema_checked_coherence_core_trait: fn(graph: SemaRegistrationGraph, owner_module
 sema_checked_coherence_add_operator: fn(state: &SemaCheckedCoherence, left: String, trait_name: String, rhs: Type) Never! {
     operator_key: "{left}::{trait_name}"
     if state.operator_slots.get(operator_key) == .Val(slot) {
-        state.operator_rhs[slot].push(rhs)
+        state.operator_rhs[slot].push(rhs.copy())
     } else {
         state.operator_slots[operator_key] = state.operator_rhs.len()
         state.operator_rhs.push([Type]{rhs})

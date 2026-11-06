@@ -142,7 +142,7 @@ TransitionFieldEntry: struct {
 env_transition_required_field: fn(entries: [TransitionSourceEntry], field: String, path: String) -> TransitionFieldEntry EnvironmentError! {
     matches := [TransitionSourceEntry]{}
     loop entry in entries {
-        if entry.field == Val((field)) -> matches.push(entry)
+        if entry.field == Val((field)) -> matches.push(entry.copy())
     }
     if matches.len() != 1 {
         return Err(env_transition_error("{field} must be declared exactly once in {path}"))
@@ -157,7 +157,7 @@ env_transition_required_inline_config: fn(entries: [TransitionSourceEntry], name
     key: "::{name}"
     matches := [TransitionSourceEntry]{}
     loop entry in entries {
-        if entry.field == Val((key)) -> matches.push(entry)
+        if entry.field == Val((key)) -> matches.push(entry.copy())
     }
     if matches.len() != 1 {
         return Err(env_transition_error("closed Config {name} was not found in {path}"))

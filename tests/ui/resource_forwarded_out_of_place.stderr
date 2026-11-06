@@ -124,11 +124,11 @@ Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read 
  Fix: Use `item` where it is, or move the place it reads with `.move()` when this scope owns it
 More: jet-lang.dev/e/E0211
 
-Error [jet.MissingMoveMarker]: `item` cannot be moved from borrowed storage
+Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read from
   --> tests/ui/resource_forwarded_out_of_place.jet:89:30
     |
  89 |         total = total + keep(item)
     |                              ^^^^
- Why: `item` reads its value through a view of the place it was bound to, so that place keeps the value; moving it here would copy it
- Fix: Write `item.copy()` when `keep` should receive a copy, or move the place itself with `.move()` when this scope owns it
-More: jet-lang.dev/e/E0201
+ Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
+ Fix: Use `item` where it is, or move the place it reads with `.move()` when this scope owns it
+More: jet-lang.dev/e/E0211

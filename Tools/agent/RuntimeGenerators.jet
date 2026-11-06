@@ -1744,7 +1744,7 @@ function_heads: fn(text: String, code: [U8]) -> [FunctionHead] Never! {
         if at == 0 || Int.from_u8(code[at - 1]) == 10 {
             if colon_function_head(text, code, at) == {
                 .Val(head) -> {
-                    heads.push(head)
+                    heads.push(head.copy())
                     at = head.end
                     next
                 }
@@ -2040,9 +2040,9 @@ runtime_stop_exports: fn(sources: [RuntimeSource], addresses: [String:String]) -
         calls: functions.get(name) ?? [String]{}
         loop callee in calls {
             if seen.contains(callee) || !functions.has_key(callee) -> next
-            seen.push(callee)
+            seen.push(callee.copy())
             list := callers.get(callee) ?? [String]{}
-            list.push(name)
+            list.push(name.copy())
             callers[callee] = list
         }
     }
@@ -2276,7 +2276,7 @@ errno_number: fn(definitions: [ErrnoDefinition], name: String) -> Int GeneratorE
             }
         }
         if chain.contains(current) -> return Err(generator_fail("unresolved errno {name}"))
-        chain.push(current)
+        chain.push(current.copy())
         found := ""
         loop definition in definitions {
             if definition.name == current {

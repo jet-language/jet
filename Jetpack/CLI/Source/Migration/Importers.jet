@@ -146,10 +146,10 @@ cli_import_merge_provider_projection: fn(target: &ProviderFacts, source: Provide
         target.add_fact(key, source.facts[key], provenance)
     }
     loop loss in source.losses {
-        if !target.losses.contains(loss) -> target.losses.push(loss)
+        if !target.losses.contains(loss) -> target.losses.push(loss.copy())
     }
     loop conflict in source.conflicts {
-        if !target.conflicts.contains(conflict) -> target.conflicts.push(conflict)
+        if !target.conflicts.contains(conflict) -> target.conflicts.push(conflict.copy())
     }
 }
 

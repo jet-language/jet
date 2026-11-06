@@ -411,7 +411,7 @@ sema_call_method_receiver_candidate_type: fn(candidate: SemaCallMethodCandidate)
 
 sema_call_direct_shape_matches: fn(target: SemaCallDirectTarget, name: String, args: [CallArg], span: Span) -> Bool Never! {
     probe := [CallArg]{}
-    loop arg in args -> probe.push(arg)
+    loop arg in args -> probe.push(arg.copy())
     probe_diagnostics := [Diagnostic]{}
     sema_call_bind_direct(name, target.signature, probe, span, probe_diagnostics) != None
 }
@@ -438,7 +438,7 @@ sema_call_resolve_direct_candidates: fn(name: String, args: [CallArg], candidate
 
 sema_call_method_shape_matches: fn(candidate: SemaCallMethodCandidate, method: String, args: [CallArg], span: Span) -> Bool Never! {
     probe := [CallArg]{}
-    loop arg in args -> probe.push(arg)
+    loop arg in args -> probe.push(arg.copy())
     probe_diagnostics := [Diagnostic]{}
     sema_call_bind_method(method, candidate.signature, candidate.receiver_offset, probe, span, probe_diagnostics) != None
 }
@@ -449,7 +449,7 @@ sema_call_resolve_method: fn(receiver_type: Type, method: String, args: [CallArg
         if candidate.method.name == method {
             if sema_call_method_receiver_candidate_type(candidate) == .Val(expected) {
                 compatible: sema_call_type_assignable(expected, receiver_type, environment, program) ?? false
-                if compatible -> receiver_matches.push(candidate)
+                if compatible -> receiver_matches.push(candidate.copy())
             }
         }
     }
@@ -500,7 +500,7 @@ sema_call_trait_rows_push: fn(graph: SemaRegistrationGraph, rows: &[SemaRegistra
             return
         }
     }
-    rows.push(row)
+    rows.push(row.copy())
 }
 
 sema_call_generic_receiver_name: fn(ty: Type) -> String? {

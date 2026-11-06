@@ -282,7 +282,7 @@ NarReader: struct {
             if names.len() > 0 && !store_nar_bytes_less(names[names.len() - 1], name) {
                 return Err(store_nar_invalid("NAR directory entries are not in canonical name order"))
             }
-            names.push(name)
+            names.push(name.copy())
             if self.string() != "node" -> return Err(store_nar_invalid("NAR directory entry has no node"))
             child: self.node(depth + 1, relative_depth + 1)
             if self.string() != ")" -> return Err(store_nar_invalid("NAR directory entry is unbalanced"))
@@ -467,7 +467,7 @@ NarStreamReader: struct {
                 if folded.contains(lowered) -> return Err(store_nar_invalid("NAR stream directory contains duplicate names"))
                 folded.push(lowered)
             }
-            names.push(name)
+            names.push(name.copy())
             if self.string() != "node" -> return Err(store_nar_invalid("NAR stream directory entry has no node"))
             child: files.join(path, store_nar_path_text(name))
             self.node(child, root, depth + 1, relative_depth + 1)

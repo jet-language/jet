@@ -11,7 +11,7 @@ pkg_data_bind_csv: fn(input: String, root_name: String) -> SchemaBuilder DataBin
     loop header in headers {
         if header.trim() == "" -> return Err(DataBindError{message: "CSV has a missing header"})
         if seen.contains(header) -> return Err(DataBindError{message: "CSV has a duplicate header {header}"})
-        seen.push(header)
+        seen.push(header.copy())
     }
     width: headers.len()
     columns := [[String]]{}
@@ -128,7 +128,7 @@ pkg_data_csv_type: fn(values: [String]) -> (ty: BoundType, optional: Bool) Never
         if value == "" {
             optional = true
         } else {
-            nonempty.push(value)
+            nonempty.push(value.copy())
         }
     }
     if nonempty.len() == 0 -> return (optional: optional, ty: BoundType.Scalar("String"))

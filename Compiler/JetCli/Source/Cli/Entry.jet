@@ -200,7 +200,7 @@ jet_cli_significant_tokens: fn(tokens: [Token]) -> [Token] Never! {
     kept := [Token]{}
     loop token in tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
-        kept.push(token)
+        kept.push(token.copy())
     }
     kept
 }
@@ -1211,7 +1211,7 @@ jet_cli_workspace_runnable: fn(root: String, members: [JetCLIWorkspaceMember], c
             }
         }
         if entry == .Val(selected) {
-            runnable.push(member)
+            runnable.push(member.copy())
             entries.push(selected)
             stocks.push(from_stock)
         }

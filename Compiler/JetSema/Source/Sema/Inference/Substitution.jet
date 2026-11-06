@@ -19,7 +19,7 @@ sema_inference_binding_type: fn(name: String, bindings: [SemaInferenceBinding], 
     loop binding in bindings {
         if binding.name == name {
             next_seen := seen
-            next_seen.push(name)
+            next_seen.push(name.copy())
             value: binding.ty
             if value == .Named(next) {
                 already: loop seen_name in next_seen {
@@ -63,7 +63,7 @@ sema_inference_substitute_type_inner: fn(ty: Type, bindings: [SemaInferenceBindi
             // the caller's type (a read parameter), which stays in the signature.
             if type_identity_equal(value, ty) -> return ty.copy()
             next_seen := seen
-            next_seen.push(name)
+            next_seen.push(name.copy())
             sema_inference_substitute_type_inner(value, bindings, next_seen, chain)
         }
         .List(inner) -> Type.List{element: sema_inference_substitute_type_inner(inner, bindings, seen, chain)}

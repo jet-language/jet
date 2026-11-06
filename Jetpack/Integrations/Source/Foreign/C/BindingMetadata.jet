@@ -49,15 +49,15 @@ CBindingMetadata: struct {
     }
 
     add_handle: fn(&self, fact: FFIHandleFact) Never! {
-        self.handle_facts.push(fact)
+        self.handle_facts.push(fact.copy())
         self.handle_facts = pkg_cffi_sorted_facts(self.handle_facts)
     }
 
     add_closure: fn(&self, closure: FFILinkClosure) Never! {
         direct := self.link_closure.direct
-        loop library in closure.direct -> direct.push(library)
+        loop library in closure.direct -> direct.push(library.copy())
         transitive := self.link_closure.transitive
-        loop library in closure.transitive -> transitive.push(library)
+        loop library in closure.transitive -> transitive.push(library.copy())
         self.link_closure = FFILinkClosure.new(direct, transitive)
     }
 }
@@ -143,7 +143,7 @@ pkg_cffi_read_boundary_facts: fn(cache: String, expected_language: ForeignLangua
         if values.len() == 0 -> return Err(pkg_bridge_error("artifact `{relative}` has no digest"))
         digest: values[values.len() - 1]
         pkg_cffi_verify_artifact(pkg_cffi_resolve_provenance_artifact(path, relative), digest)
-        artifact_digests.push(digest)
+        artifact_digests.push(digest.copy())
     }
     rows: provenance.fields.get("boundary-obligation") ?? return Err(pkg_bridge_error("foreign boundary provenance has no obligation rows"))
     obligations := [FFIBoundaryObligation]{}

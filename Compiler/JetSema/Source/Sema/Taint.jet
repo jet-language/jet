@@ -152,7 +152,7 @@ SemaTaintFlowState: struct {
 sema_taint_coverage_reports: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
     reports := [Diagnostic]{}
     loop diagnostic in diagnostics {
-        if diagnostic.code == "E0307" -> reports.push(diagnostic)
+        if diagnostic.code == "E0307" -> reports.push(diagnostic.copy())
     }
     reports
 }
@@ -165,7 +165,7 @@ sema_taint_has: fn(values: [String], value: String) -> Bool Never! {
 }
 
 sema_taint_add: fn(values: &[String], value: String) Never! {
-    if !sema_taint_has(values, value) -> values.push(value)
+    if !sema_taint_has(values, value) -> values.push(value.copy())
 }
 
 sema_taint_union: fn(target: &[String], values: [String]) Never! {
@@ -477,7 +477,7 @@ sema_taint_callable_key: fn(module_identity: String, owner: String, name: String
 }
 
 sema_taint_add_known_source: fn(catalog: &SemaTaintCatalog, source: String) Never! {
-    if sema_taint_slot_add(catalog.known_source_slots, source, catalog.known_sources.len()) -> catalog.known_sources.push(source)
+    if sema_taint_slot_add(catalog.known_source_slots, source, catalog.known_sources.len()) -> catalog.known_sources.push(source.copy())
 }
 
 sema_taint_add_source_path: fn(catalog: &SemaTaintCatalog, module_alias: String, owner: String, name: String) Never! {
@@ -1267,7 +1267,7 @@ sema_taint_check_stmt: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
             }
             if else_body == {
                 .Val(body) -> paths.push(sema_taint_walk_path(graph, state, before, body))
-                .None -> if !sema_taint_switch_exhaustive(arms, state.coverage_reports, span) -> paths.push(before)
+                .None -> if !sema_taint_switch_exhaustive(arms, state.coverage_reports, span) -> paths.push(before.copy())
             }
             sema_taint_merge_paths(state, before, paths)
         }
@@ -1509,7 +1509,7 @@ sema_taint_check_body: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
 sema_taint_finish_body: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_index: Int, found: &[Diagnostic]) {
     if state.diagnostics.len() == 0 -> return
     sema_attach_diagnostic_source_locations(state.diagnostics, 0, graph.modules[module_index].source_segments)
-    loop diagnostic in state.diagnostics -> found.push(diagnostic)
+    loop diagnostic in state.diagnostics -> found.push(diagnostic.copy())
 }
 
 // The bodies of module `module_index`, walked in item order; their reports
@@ -1539,7 +1539,7 @@ sema_taint_check_module: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowS
 // `existing_diagnostics` already holds it.
 sema_taint_join_reports: fn(reports: &[Diagnostic], existing_diagnostics: [Diagnostic], found: [Diagnostic]) {
     loop diagnostic in found {
-        if !sema_taint_has_diagnostic(reports, diagnostic) && !sema_taint_has_diagnostic(existing_diagnostics, diagnostic) -> reports.push(diagnostic)
+        if !sema_taint_has_diagnostic(reports, diagnostic) && !sema_taint_has_diagnostic(existing_diagnostics, diagnostic) -> reports.push(diagnostic.copy())
     }
 }
 

@@ -920,7 +920,7 @@ parser_debug_label_piece: fn(state: JetParserState, token: Token) -> String Neve
 // enclosing statement stops, as Rust's `Err(first)` does.
 parser_take_nested_failure: fn(state: &JetParserState, diagnostics: [Diagnostic]) {
     if parser_aborting(state) -> return
-    loop diagnostic in diagnostics -> state.diagnostics.push(diagnostic)
+    loop diagnostic in diagnostics -> state.diagnostics.push(diagnostic.copy())
     state.abort_mark = state.diagnostics.len()
     state.abort_position = state.position
 }

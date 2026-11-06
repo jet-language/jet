@@ -712,7 +712,7 @@ sema_derive_expand_str_match_parts: fn(expansion: &SemaDeriveExpansion, parts: [
     loop part in parts {
         if part == {
             .Hole(name, ty, span) -> expanded.push(StrMatchPart.Hole{name: name, ty: ty.map((value) -> sema_derive_expand_type(expansion, value)), span: span})
-            else -> expanded.push(part)
+            else -> expanded.push(part.copy())
         }
     }
     expanded
@@ -805,7 +805,7 @@ sema_derive_expand_str_parts: fn(expansion: &SemaDeriveExpansion, parts: [StrPar
     loop part in parts {
         if part == {
             .Interp(expression, format) -> expanded.push(StrPart.Interp{expr: sema_derive_expand_expr(expansion, expression), format: format})
-            else -> expanded.push(part)
+            else -> expanded.push(part.copy())
         }
     }
     expanded
@@ -1239,7 +1239,7 @@ sema_derive_expand_markers: fn(expansion: &SemaDeriveExpansion, markers: [Marker
         loop arg in marker.args {
             if arg == {
                 .Expr(value) -> args.push(MarkerCallArg.Expr{value: sema_derive_expand_expr(expansion, value)})
-                else -> args.push(arg)
+                else -> args.push(arg.copy())
             }
         }
         updated.args = args
@@ -2171,7 +2171,7 @@ sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_n
         if !requested || readiness.candidates.get(name) != None || sema_derive_has_trait_impl(index, name, trait_name) || index.codec_methods.get(sema_type_metadata_impl_key(name, trait_name)) != None -> next
         readiness.candidates[name] = names.len()
         names.push(name)
-        nodes.push(item)
+        nodes.push(item.copy())
     }
     failed := [Bool]{}
     dependents := [[Int]]{}

@@ -3393,7 +3393,7 @@ sema_expr_core_module_receiver_path: fn(receiver: Expr) -> SemaExprCoreReceiverP
         .Ident(name, span, _) -> return Val(SemaExprCoreReceiverPath{alias: name, alias_span: span, leaves: [String]{}})
         .Field(base, leaf, _, _) -> {
             path := sema_expr_core_module_receiver_path(base) ?? return None
-            path.leaves.push(leaf)
+            path.leaves.push(leaf.copy())
             return Val(path)
         }
         else -> return None

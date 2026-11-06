@@ -257,7 +257,7 @@ sema_loop_value_lower_collecting_body: fn(body: [TStmt], item_type: Type, span: 
     local.mutable = true
     empty := sema_tree_node(collector_type, TExprKind.List{values: [TExpr]{}, trait_coercion: None}, span)
     lowered := [TStmt]{TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: collector_type, wrapper: TLetWrapper.Plain}, init: empty, gc_promotion: None, gc_transferred: false, span: span}}
-    loop statement in body -> lowered.push(statement)
+    loop statement in body -> lowered.push(statement.copy())
     if !sema_loop_value_rewrite_collecting_statements(lowered, local, item_type, environment, program, diagnostics) -> return None
     result := sema_loop_value_collect_local_expr(local, item_type, span)
     lowered.push(TStmt.ExprStmt{value: result, span: span})

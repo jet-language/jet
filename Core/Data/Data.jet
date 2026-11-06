@@ -739,7 +739,7 @@ __query_make: fn<T>(steps: [String], one_shot: Bool, limits: DataLimits, run: &&
 
 __query_steps: fn(steps: [String], step: String) -> [String] Never! {
     out := steps.copy()
-    out.push(step)
+    out.push(step.copy())
     out
 }
 
@@ -1042,7 +1042,7 @@ __stream_windows_ready: fn<K, T>(keys: [K], pending: &[__PendingWindow<T>], widt
         if flush || open.start_ns + width_ns <= watermark_ns {
             ready.push(Window<K, T>{key: keys[open.key_index], start: time.from_unix_nanoseconds(open.start_ns), end: time.from_unix_nanoseconds(open.start_ns + width_ns), events: open.events})
         } else {
-            kept.push(open)
+            kept.push(open.copy())
         }
     }
     pending = kept
@@ -1243,7 +1243,7 @@ __group_find: fn<K: Comparable>(keys: [K], order: [Int], key: K) -> Int Never! {
 
 __group_add: fn<K>(keys: &[K], order: &[Int], found: Int, key: K) Never! {
     order.insert(-1 - found, keys.len())
-    keys.push(key)
+    keys.push(key.copy())
 }
 
 __group_sorted: fn<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] Never! {

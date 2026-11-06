@@ -220,7 +220,7 @@ cli_schema_job_enter: fn(jobs: [JobFact], index: [String:Int], name: String, sta
             if visit.row == row -> started = true
             if started -> cycle.push(jobs[visit.row].name)
         }
-        cycle.push(name)
+        cycle.push(name.copy())
         return Err(CLIJobGraphError{message: "job graph contains a cycle: {cycle.join(" -> ")}"})
     }
     if jobs[row].parallel == 0 -> return Err(CLIJobGraphError{message: "job `{name}` declares a zero parallel bound"})

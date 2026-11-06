@@ -131,7 +131,7 @@ sema_taskgroup_state_snapshot: fn(source: SemaTaskGroupState) -> SemaTaskGroupSt
         })
     }
     effects := [TEffectSpan]{}
-    loop time_effect in source.time_effects -> effects.push(time_effect)
+    loop time_effect in source.time_effects -> effects.push(time_effect.copy())
     SemaTaskGroupState{
         stack: stack,
         in_spawn: source.in_spawn,
@@ -284,7 +284,7 @@ sema_taskgroup_mark_spawns_owned: fn(context: &SemaCheckContext, origin: SemaTas
         }
         else -> {
             loop frame in context.taskgroups.stack {
-                if frame.origin == SemaTaskGroupOrigin.Parameter -> frames.push(frame)
+                if frame.origin == SemaTaskGroupOrigin.Parameter -> frames.push(frame.copy())
             }
         }
     }

@@ -915,7 +915,7 @@ report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! 
     loop entry in measured {
         if field(entry.row, "always_on") == .Val(always) {
             id: js_string(field(entry.row, "id"))
-            always_ids.push(id)
+            always_ids.push(id.copy())
             if entry.present -> always_ns = always_ns + entry.ns
             always_budget = always_budget + number_or_nan(field(entry.row, "budget") ?? Dyn.Null, column)
             loop kind in texts(field(always, "spans")) {

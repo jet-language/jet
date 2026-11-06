@@ -733,7 +733,7 @@ jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definit
             }
             .Single(ty, _) -> {
                 payload: jet_target_layout_type_inner(engine, ty, owner_qualified_name, query)
-                payloads.push(payload)
+                payloads.push(payload.copy())
                 payloads_known.push(payload != None)
             }
             .Named(fields) -> {
@@ -744,7 +744,7 @@ jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definit
                     types.push(field.ty)
                 }
                 payload: jet_target_layout_aggregate(engine, names, types, owner_qualified_name, query).bytes
-                payloads.push(payload)
+                payloads.push(payload.copy())
                 payloads_known.push(payload != None)
             }
         }
@@ -910,7 +910,7 @@ jet_target_layout_named_item: fn(engine: TargetLayoutEngine, item: Item, identit
     }
     if cycle_hits == query.cycle_hits && query.completed_positions.get(key) == None {
         query.completed_positions[key] = query.completed.len()
-        query.completed.push(result)
+        query.completed.push(result.copy())
     }
     result
 }

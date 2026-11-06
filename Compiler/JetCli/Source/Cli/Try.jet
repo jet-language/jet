@@ -171,7 +171,7 @@ jet_cli_try_read_plan: fn(path: String) -> JetCLITryPlan JetCLIReadError! {
 jet_cli_try_canonical: fn(path: String) -> String Never! { cli_files.realpath(path) ?? path }
 
 jet_cli_try_group_edit: fn(groups: &[JetCLITryFileEdits], positions: &[String:Int], path: String, edit: TextEdit) Never! {
-    if positions.get(path) == .Val(index) -> groups[index].edits.push(edit) else {
+    if positions.get(path) == .Val(index) -> groups[index].edits.push(edit.copy()) else {
         positions[path] = groups.len()
         groups.push(JetCLITryFileEdits{path: path, edits: [TextEdit]{edit}})
     }

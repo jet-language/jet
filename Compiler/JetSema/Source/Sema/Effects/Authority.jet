@@ -434,7 +434,7 @@ sema_authority_call_argument_escape: fn(expr: Expr, handle: String, aliases: [St
 
 sema_authority_derived_binding: fn(init: Expr, name: String, handle: String, aliases: &[String]) -> Span? {
     if sema_authority_narrowing_chain(init, handle, aliases) || sema_authority_bound_spec(init, handle, aliases) {
-        if name != "_" -> aliases.push(name)
+        if name != "_" -> aliases.push(name.copy())
         return None
     }
     sema_authority_value_escape(init, handle, aliases)

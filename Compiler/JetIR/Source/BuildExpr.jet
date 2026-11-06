@@ -2888,7 +2888,7 @@ ir_self_append: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding
         if part == .Interpolation(part_value, _) {
             if ir_mentions_slot(p, b, part_value, binding.slot) -> return false
         }
-        rest.push(part)
+        rest.push(part.copy())
     }
     text: ir_string(m, p, b, rest, span)
     if ir_failed(b) || text < 0 -> return true

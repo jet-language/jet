@@ -99,7 +99,7 @@ kit_no_nix_argv: fn(env: KitEnv, argv: [String], scratch: String, network: Strin
     if network == "disabled" -> result.push("--net")
     result.push(helpers[3])
     result.push(asset)
-    result.push(bootstrap)
+    result.push(bootstrap.copy())
     loop helper in helpers -> result.push(helper)
     loop image in images -> result.push(image)
     result.push("{subjects.len()}")
@@ -140,7 +140,7 @@ kit_netns_helpers: fn() -> [String] Err! {
 
 kit_netns_wrap: fn(helpers: [String], argv: [String]) -> [String] {
     result := [String]{helpers[0], "--user", "--map-root-user", "--net", helpers[1], "-c", KIT_NETNS_RAISE, "sh", helpers[2]}
-    loop argument in argv -> result.push(argument)
+    loop argument in argv -> result.push(argument.copy())
     result
 }
 

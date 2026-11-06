@@ -702,7 +702,7 @@ sema_serde_items_struct_decode_body: fn(definition: StructDef, items: [Item], sp
             body.push(sema_serde_items_binding(result, None, sema_serde_items_decode_call(sema_serde_items_ident("tree", span), field.ty, span), false, span))
             body.push(sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, [Stmt]{sema_serde_items_assign_local(slot, Expr.Present{value: sema_serde_items_take(ok_value, span), span: span, id: AST_NODE_GENERATED}, span)}, error_name, sema_serde_items_decode_error_body(error_name, None, None, span), span))
             decoded_slots.push(slot)
-            decoded_values.push(value_name)
+            decoded_values.push(value_name.copy())
             value = sema_serde_items_take(value_name, span)
         } else {
             key: sema_serde_items_field_key(definition, field)
@@ -728,7 +728,7 @@ sema_serde_items_struct_decode_body: fn(definition: StructDef, items: [Item], sp
                 value = sema_serde_items_ident(slot, span)
             } else {
                 decoded_slots.push(slot)
-                decoded_values.push(value_name)
+                decoded_values.push(value_name.copy())
                 value = sema_serde_items_take(value_name, span)
             }
         }
@@ -1569,7 +1569,7 @@ sema_derive_index_methods: fn(graph: &SemaRegistrationGraph) {
                 rows[key] = SemaDeriveMethodRow{module_index: module_index, nominal: nominal, method: method}
                 leaf: sema_serde_named_leaf(graph.modules[module_index].nominals[nominal].symbol.name)
                 keys := types.get(leaf) ?? [String]{}
-                keys.push(key)
+                keys.push(key.copy())
                 types[leaf] = keys.move()
             }
         }

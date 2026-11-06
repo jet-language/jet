@@ -201,7 +201,7 @@ counter_inc: fn(counter: SyncCounter, replica: String, delta: Int) -> SyncCounte
         count.negative = count.negative - delta
     }
     counts := counter.counts
-    _: counts.add(replica, count)
+    _: counts.add(replica.copy(), count)
     updated: SyncCounter{counts: counts, valid: true}
     if counter_total(updated) == .None -> return invalid_counter()
     updated
@@ -350,14 +350,14 @@ policy_new: fn() -> RowPolicy Never! { RowPolicy{allow: [String]{}, deny: [Strin
 policy_grant: fn(policy: RowPolicy, action: String) -> RowPolicy Never! {
     if action.len() == 0 || contains(policy.allow, action) -> return policy.copy()
     allow := policy.allow.copy()
-    allow.push(action)
+    allow.push(action.copy())
     RowPolicy{allow: allow, deny: policy.deny.copy()}
 }
 
 policy_deny: fn(policy: RowPolicy, action: String) -> RowPolicy Never! {
     if action.len() == 0 || contains(policy.deny, action) -> return policy.copy()
     deny := policy.deny.copy()
-    deny.push(action)
+    deny.push(action.copy())
     RowPolicy{allow: policy.allow.copy(), deny: deny}
 }
 
@@ -416,7 +416,7 @@ write_entry: fn(map: SyncMap, key: String, entry: LWW) -> SyncMap Never! {
     if clock >= MAX_INT -> return invalid_map()
     if map.entries.get(key) == .None && map.entries.len() >= MAX_ENTRIES -> return invalid_map()
     entries := map.entries
-    _: entries.add(key, LWW{value: entry.value, clock: clock + 1, writer: entry.writer, deleted: entry.deleted})
+    _: entries.add(key.copy(), LWW{value: entry.value, clock: clock + 1, writer: entry.writer, deleted: entry.deleted})
     SyncMap{entries: entries, valid: true}
 }
 
@@ -432,7 +432,7 @@ text_order: fn(doc: SyncText) -> [Int] Never! {
         anchor: doc.atoms[index].after
         siblings := children.get(anchor) ?? [Int]{}
         siblings.push(index)
-        _: children.add(anchor, siblings)
+        _: children.add(anchor.copy(), siblings)
     }
     order := [Int]{}
     stack := reversed_children(doc, children, "")
@@ -505,7 +505,7 @@ mark_deleted: fn(doc: SyncText, indices: [Int]) -> SyncText Never! {
     loop index in 0..<doc.atoms.len() {
         atom: doc.atoms[index]
         if marked.get(index) == .None {
-            atoms.push(atom)
+            atoms.push(atom.copy())
         } else {
             atoms.push(SyncTextAtom{replica: atom.replica, counter: atom.counter, after: atom.after, scalar: atom.scalar, deleted: true})
         }
@@ -550,12 +550,12 @@ insert_item: fn(items: [RGAItem], item: RGAItem) -> [RGAItem] Never! {
         later := existing.replica > item.replica
         if existing.replica == item.replica -> later = existing.value > item.value
         if !placed && later {
-            out.push(item)
+            out.push(item.copy())
             placed = true
         }
-        out.push(existing)
+        out.push(existing.copy())
     }
-    if !placed -> out.push(item)
+    if !placed -> out.push(item.copy())
     out
 }
 

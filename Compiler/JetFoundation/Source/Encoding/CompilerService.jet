@@ -67,7 +67,7 @@ jet_config_plain_literal: fn(expr: Expr) -> CtValue? Never! {
         .Str(parts, _, _) -> {
             text := [String]{}
             loop part in parts {
-                if part == .Lit(piece) -> text.push(piece) else -> return None
+                if part == .Lit(piece) -> text.push(piece.copy()) else -> return None
             }
             Val(CtValue.Str{value: text.join("")})
         }

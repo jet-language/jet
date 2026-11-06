@@ -334,7 +334,7 @@ jet_cli_web_record_route: fn(walk: &JetCLIWebWalk, route: &&JetCLIWebRoute) {
 jet_cli_web_collect_functions: fn(items: [Item], out: &[Func]) {
     loop item in items {
         if item == {
-            .Func(function) -> out.push(function)
+            .Func(function) -> out.push(function.copy())
             .CodeModule(module_value) -> {
                 if module_value.body == .Val(body) -> jet_cli_web_collect_functions(body, out)
             }
@@ -778,7 +778,7 @@ jet_cli_web_render_facts: fn(modules: [JetDriverDocModule], entry_identity: Stri
         captures_from := [Func]{}
         if handler_fn == .Val(function) {
             loop row in jet_cli_web_function_effects(modules, entry_identity, function) -> effects.push(row)
-            captures_from.push(function)
+            captures_from.push(function.copy())
         }
         loader := String?{None}
         form := String?{None}
@@ -1024,7 +1024,7 @@ jet_cli_web_collect_uses: fn(modules: [JetDriverDocModule], functions: [Func], g
         loop earlier in kept {
             if earlier.model == fact.model && earlier.action == fact.action && earlier.provenance == fact.provenance -> seen = true
         }
-        if !seen -> kept.push(fact)
+        if !seen -> kept.push(fact.copy())
     }
     kept.sort_by((left: JetCLIWebForm, right: JetCLIWebForm) -> (left.model <=> right.model).then(left.action <=> right.action).then(left.provenance <=> right.provenance))
     graph.forms = kept

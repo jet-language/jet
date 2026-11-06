@@ -67,8 +67,8 @@ WasmValidator: struct {
 
     push_frame: fn(&self, op: Int, params: [Int], results: [Int]) Never! {
         self.frame_ops.push(op)
-        self.frame_params.push(params)
-        self.frame_results.push(results)
+        self.frame_params.push(params.copy())
+        self.frame_results.push(results.copy())
         self.frame_heights.push(self.vals.len())
         self.frame_unreachable.push(false)
         self.push_all(params)
@@ -241,7 +241,7 @@ wasm_validate_imports: fn(v: &WasmValidator) WasmError! {
             v.memories += 1
         } else {
             global: entry.global ?? return Err(WasmError.new("malformed global import", -1))
-            v.globals.push(global)
+            v.globals.push(global.copy())
         }
     }
 }

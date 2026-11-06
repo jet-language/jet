@@ -223,7 +223,7 @@ jet_cli_symbol_index: fn(symbols: [JetCLISymbol]) -> [JetCLISymbol] Never! {
         if existing == .Val(position) -> unique[position] = symbol
         if existing == None {
             positions[symbol.identity] = unique.len()
-            unique.push(symbol)
+            unique.push(symbol.copy())
         }
     }
     // `SemanticSymbolIndex::sort`: qualified name, module, identity.
@@ -461,7 +461,7 @@ jet_cli_symbol_scopes: fn(index: JetCLISemIndex) -> JetCLISymbolScopes Never! {
         scopes.nodes_by_id["{node.module_path}\n{node.id}"] = node
         if queries.get(node.module_path) == None -> next
         list := module_nodes.get(node.module_path) ?? [JetCLISemNode]{}
-        list.push(node)
+        list.push(node.copy())
         module_nodes[node.module_path] = list
         if node.parent == .Val(parent) {
             child_key: "{node.module_path}\n{parent}"
@@ -703,7 +703,7 @@ jet_cli_symbol_alias_identity: fn(module_path: String, span: Span) -> String? Ne
 // import.
 jet_cli_symbol_imported_module: fn(modules: [JetDriverDocModule], doc_module: JetDriverDocModule, imports: [ImportDecl], module_alias: String) -> String? Never! {
     candidates := imports
-    loop import in doc_module.imports -> candidates.push(import)
+    loop import in doc_module.imports -> candidates.push(import.copy())
     loop candidate in candidates {
         if candidate.alias != module_alias -> next
         if candidate.kind == {

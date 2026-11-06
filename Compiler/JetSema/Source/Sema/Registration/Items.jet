@@ -215,7 +215,7 @@ sema_registration_unit_fact_push: fn(facts: &[SemaRegistrationUnitFact], fact: S
     loop existing in facts {
         if existing.name == fact.name && existing.package == fact.package -> return
     }
-    facts.push(fact)
+    facts.push(fact.copy())
 }
 
 sema_registration_unit_family_facts: fn(definition: UnitFamilyDef, facts: &[SemaRegistrationUnitFact]) Never! {
@@ -1147,7 +1147,7 @@ sema_registration_extern_signature: fn(function: ExternFn, owner: SemaRegistrati
     conventions := [AccessConvention]{}
     loop parameter_index in 0..<function.params.len() {
         ty: function.params[parameter_index].ty
-        if function.params[parameter_index].variadic -> params.push(Type.List{element: ty}) else -> params.push(ty)
+        if function.params[parameter_index].variadic -> params.push(Type.List{element: ty}) else -> params.push(ty.copy())
         names.push(function.params[parameter_index].name)
         defaults.push(None)
         variadic.push(function.params[parameter_index].variadic)
@@ -1465,7 +1465,7 @@ sema_registration_index_canonical_nominals: fn(graph: &SemaRegistrationGraph) Ne
         names := [String]{}
         loop row in 0..<graph.modules[module_index].nominals.len() {
             spelling: "{graph.modules[module_index].nominals[row].symbol.module_name}::{graph.modules[module_index].nominals[row].symbol.name}"
-            names.push(spelling)
+            names.push(spelling.copy())
             if graph.modules[module_index].nominals[row].symbol.name.contains("::") -> next
             owner: name_rows_get_text(graph.module_rows, graph.modules[module_index].nominals[row].symbol.module_name) ?? next
             if name_rows_get_text(table.rows, spelling) != None -> next
@@ -1585,7 +1585,7 @@ sema_registration_index_impl_traits: fn(graph: &SemaRegistrationGraph) {
 
 sema_registration_impl_trait_name_push: fn(graph: &SemaRegistrationGraph, trait_name: String, reference: SemaRegistrationRowRef) Never! {
     if graph.impl_trait_name_slots.get(trait_name) == .Val(slot) {
-        graph.impl_trait_name_buckets[slot].push(reference)
+        graph.impl_trait_name_buckets[slot].push(reference.copy())
     } else {
         graph.impl_trait_name_slots[trait_name] = graph.impl_trait_name_buckets.len()
         graph.impl_trait_name_buckets.push([SemaRegistrationRowRef]{reference})
@@ -2171,7 +2171,7 @@ sema_registration_push_import_binding: fn(graph: &SemaRegistrationGraph, module_
         packed: import_index * SEMA_IMPORT_BINDING_STRIDE + graph.modules[module_index].imports[import_index].bindings.len()
         name_rows_set(graph.modules[module_index].import_binding_rows, binding.local, packed)
     }
-    graph.modules[module_index].imports[import_index].bindings.push(binding)
+    graph.modules[module_index].imports[import_index].bindings.push(binding.copy())
 }
 
 sema_registration_add_foreign_functions: fn(module_row: &SemaRegistrationModule, functions: [ExternFn], owner: SemaRegistrationForeignOwner, foreign_library: String, foreign_library_span: Span, diagnostics: &[Diagnostic]) -> Bool {
@@ -2233,7 +2233,7 @@ sema_registration_add_root: fn(module_row: &SemaRegistrationModule, item: Item, 
     nominal: sema_registration_nominal(item, module_row.module_identity, source_file, source_origin, source_segments, diagnostics)
     name_rows_set(module_row.symbol_positions, name, module_row.symbols.len())
     module_row.declaration_positions[name] = module_row.declarations.len()
-    module_row.symbols.push(symbol)
+    module_row.symbols.push(symbol.copy())
     module_row.symbol_nominal_rows.push(if nominal != None -> module_row.nominals.len() else -> -1)
     sema_registration_push_declaration(module_row, item)
     if function == .Val(value) -> module_row.functions.push(value)
@@ -2435,7 +2435,7 @@ sema_registration_add_impl: fn(module_row: &SemaRegistrationModule, item: Item, 
             if !definition.type_name.contains(".") && row.target_module_identity == None && !sema_registration_package_is_namespace(module_row.package_identity) && !sema_registration_opmix_builtin_impl(items, definition) {
                 diagnostics.push(sema_registration_unknown_impl_target(definition))
             }
-            module_row.impls.push(row)
+            module_row.impls.push(row.copy())
             if row.target_module_identity != None {
                 nominal_index: rows.nominals.get(definition.type_name) ?? -1
                 if nominal_index >= 0 {
@@ -2834,7 +2834,7 @@ sema_registration_expand_fallible_aliases: fn(items: &[Item]) Never! {
     aliases := [TypeAliasDef]{}
     loop item in items {
         if item == .TypeAlias(definition) {
-            if definition.target == .Result(_, _) -> aliases.push(definition)
+            if definition.target == .Result(_, _) -> aliases.push(definition.copy())
         }
     }
     if aliases.len() == 0 -> return
@@ -3612,7 +3612,7 @@ sema_registration_serde_union_members: fn(items: [Item], union_ty: Type, members
             }
             if previous < 0 {
                 seen_shapes.push(shape)
-                seen_members.push(member)
+                seen_members.push(member.copy())
                 next
             }
             first_label: sema_registration_serde_label(seen_members[previous])
@@ -3708,7 +3708,7 @@ sema_registration_push_graph_diagnostic: fn(graph: &SemaRegistrationGraph, modul
             graph.diagnostics.push(sema_diagnostic_with_source_location(diagnostic.copy(), graph.modules[module_index].source_segments))
         }
         else -> {
-            graph.diagnostics.push(diagnostic)
+            graph.diagnostics.push(diagnostic.copy())
         }
     }
 }
@@ -4589,7 +4589,7 @@ sema_registration_index_namespaces: fn(graph: &SemaRegistrationGraph) Never! {
             rows.push(SemaRegistrationNamespaceName{slot: slot, name: name.copy(), entry: entry})
             graph.namespace_entries[slot].push(entry)
             graph.namespace_entry_modules.push(module_index)
-            graph.namespace_entry_names.push(name)
+            graph.namespace_entry_names.push(name.copy())
         }
     }
     rows.sort_by((left: SemaRegistrationNamespaceName, right: SemaRegistrationNamespaceName) -> (left.slot <=> right.slot).then(left.name <=> right.name).then(left.entry <=> right.entry))

@@ -519,7 +519,7 @@ cli_image_service_executable: fn(service: String, executable: String) -> String 
 cli_collect_image_service: fn(name: String, plans: [DevServicePlan], selected: &[DevServicePlan], names: &[String], visiting: &[String]) CLIError! {
     if names.contains(name) -> return
     if visiting.contains(name) -> return Err(CLIError.InvalidData("service dependency cycle includes `{name}`"))
-    visiting.push(name)
+    visiting.push(name.copy())
     found := DevServicePlan?{None}
     loop candidate in plans {
         if candidate.name == name && found == None -> found = Val(candidate)
@@ -530,7 +530,7 @@ cli_collect_image_service: fn(name: String, plans: [DevServicePlan], selected: &
     // Depth-first: every dependency finished, so `name` is the newest visit.
     _ := visiting.pop()
     selected.push(service)
-    names.push(name)
+    names.push(name.copy())
 }
 
 // The `/jet/supervise` script: start every service, stop them all when one
@@ -576,7 +576,7 @@ cli_shell_quote: fn(value: String) -> String Never! {
 cli_environment_image_files: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, plan: EnvPlan, name: String, target: String, projection: &ProjectionReport) -[IO, FS, Env, Time, Time.Wait]> [LayerFile] Never! {
     package_refs := [String]{}
     loop reference in plan.package_refs {
-        if !package_refs.contains(reference) -> package_refs.push(reference)
+        if !package_refs.contains(reference) -> package_refs.push(reference.copy())
     }
     package_refs.sort()
     layer_files := [LayerFile]{}

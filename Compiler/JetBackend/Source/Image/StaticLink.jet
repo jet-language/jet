@@ -361,7 +361,7 @@ link_align: fn(value: Int, align: Int) -> Int Never! {
 }
 
 link_error: fn(c: &LinkContext, message: String) Never! {
-    c.errors.push(message)
+    c.errors.push(message.copy())
 }
 
 // ---------------------------------------------------------------------------
@@ -471,8 +471,8 @@ link_sec_addr: fn(c: LinkContext, s: Int) -> Int Never! {
 link_intern: fn(c: &LinkContext, name: String) -> Int Never! {
     if c.g_index.get(name) == .Val(found) -> return found
     id: c.g_name.len()
-    c.g_index.add(name, id).drop("checked absent above")
-    c.g_name.push(name)
+    c.g_index.add(name.copy(), id).drop("checked absent above")
+    c.g_name.push(name.copy())
     c.g_kind.push(LINK_G_NONE)
     c.g_section.push(LINK_UNDEF)
     c.g_value.push(0)
@@ -662,7 +662,7 @@ link_load_object: fn(c: &LinkContext, b: Int, base: Int, size: Int, name: String
     strtab: if symtab < 0 -> 0 else -> base + link_u64(c.bufs, b, shoff + 64 * link_u32(c.bufs, b, symtab_header + 40) + 24)
     first_global: if symtab < 0 -> 0 else -> link_u32(c.bufs, b, symtab_header + 44)
     first_symbol: if obj == 0 -> 0 else -> c.obj_first_symbol[obj - 1] + c.obj_sym_count[obj - 1]
-    c.obj_name.push(name)
+    c.obj_name.push(name.copy())
     c.obj_buffer.push(b)
     c.obj_base.push(base)
     c.obj_shoff.push(shoff)
@@ -933,7 +933,7 @@ link_synth_code: fn(s: &LinkSynth, bytes: [Int]) Never! {
 link_synth_rel32: fn(s: &LinkSynth, name: String, kind: Int) Never! {
     at: s.text.len()
     s.rel_at.push(at)
-    s.rel_names.push(name)
+    s.rel_names.push(name.copy())
     s.rel_types.push(kind)
     s.rel_addends.push(-4)
     link_synth_code(s, [Int]{0, 0, 0, 0})
@@ -943,17 +943,17 @@ link_synth_rel32: fn(s: &LinkSynth, name: String, kind: Int) Never! {
 // instruction's operand), at the end of the text so far.
 link_synth_pcrel_field: fn(s: &LinkSynth, name: String) Never! {
     s.rel_at.push(s.text.len())
-    s.rel_names.push(name)
+    s.rel_names.push(name.copy())
     s.rel_types.push(LINK_R_PC32)
     s.rel_addends.push(0)
     link_synth_code(s, [Int]{0, 0, 0, 0})
 }
 
 link_synth_define: fn(s: &LinkSynth, name: String, section: Int, value: Int) Never! {
-    s.def_names.push(name)
+    s.def_names.push(name.copy())
     s.def_sections.push(section)
     s.def_values.push(value)
-    s.names.add(name, true).drop("a synthetic object defines each name once")
+    s.names.add(name.copy(), true).drop("a synthetic object defines each name once")
 }
 
 link_synth_function: fn(s: &LinkSynth, name: String) Never! {
@@ -977,11 +977,11 @@ link_synth_object: fn(s: LinkSynth) -> [U8] Never! {
         elf64_u16(symtab, s.def_sections[k])
         elf64_u64(symtab, s.def_values[k])
         elf64_u64(symtab, 0)
-        indexes.add(name, k + 1).drop("defined names are unique")
+        indexes.add(name.copy(), k + 1).drop("defined names are unique")
     }
     loop name in s.rel_names {
         if indexes.get(name) != None -> next
-        indexes.add(name, symtab.len().div_euclid(24)).drop("checked absent above")
+        indexes.add(name.copy(), symtab.len().div_euclid(24)).drop("checked absent above")
         elf64_u32(symtab, elf64_string(strtab, name))
         symtab.push(U8{0x10})
         symtab.push(U8{0})
@@ -2648,7 +2648,7 @@ link_debug_sections: fn(c: &LinkContext, debug_info: Bool) -> LinkDebug Never! {
             group := groups.get(name) ?? -1
             if group < 0 {
                 group = debug.names.len()
-                groups.add(name, group).drop("checked absent above")
+                groups.add(name.copy(), group).drop("checked absent above")
                 debug.names.push(name)
                 debug.rows.push([Int]{})
                 debug.sizes.push(0)
@@ -2736,7 +2736,7 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
         frame: link_debug_frame(c)
         elf64_pad(out, 4)
         start: out.len()
-        out.extend(frame)
+        out.extend(frame.copy())
         headers.push(LinkSectionHeader{name: ".debug_frame", kind: LINK_SHT_PROGBITS, flags: 0, addr: 0, offset: start, size: frame.len(), link: 0, info: 0, align: 4, entry_size: 0})
     }
 
@@ -2773,11 +2773,11 @@ link_write_sections: fn(c: &LinkContext, out: &[U8], l: LinkLayout, debug: LinkD
     }
     elf64_pad(out, 8)
     symtab_at: out.len()
-    out.extend(symtab)
+    out.extend(symtab.copy())
     strtab_index: headers.len() + 2
     headers.push(LinkSectionHeader{name: ".symtab", kind: LINK_SHT_SYMTAB, flags: 0, addr: 0, offset: symtab_at, size: symtab.len(), link: strtab_index, info: first_global, align: 8, entry_size: 24})
     strtab_at: out.len()
-    out.extend(strtab)
+    out.extend(strtab.copy())
     headers.push(LinkSectionHeader{name: ".strtab", kind: 3, flags: 0, addr: 0, offset: strtab_at, size: strtab.len(), link: 0, info: 0, align: 1, entry_size: 0})
     shoff: link_write_section_headers(out, 0, headers)
     link_elf_sections(out, shoff, headers.len() + 2)
@@ -2841,7 +2841,7 @@ link_write_section_headers: fn(out: &[U8], origin: Int, headers: [LinkSectionHea
     loop header in headers -> name_offsets.push(elf64_string(shstrtab, header.name))
     names_offset: elf64_string(shstrtab, ".shstrtab")
     shstrtab_at: origin + out.len()
-    out.extend(shstrtab)
+    out.extend(shstrtab.copy())
     elf64_pad(out, 8)
     shoff: origin + out.len()
     loop _ in 0..<64 -> out.push(U8{0})
@@ -3037,7 +3037,7 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
         seen := [String:Bool]{}
         loop symbol in wanted.callable_exports {
             if symbol == "" || seen.get(symbol) != None -> return link_resident_failure([String]{"empty or duplicate resident runtime export `{symbol}`"})
-            seen.add(symbol, true).drop("checked absent above")
+            seen.add(symbol.copy(), true).drop("checked absent above")
             global: link_intern(c, symbol)
             link_reference(c, global, false)
         }

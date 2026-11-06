@@ -248,7 +248,7 @@ sema_call_cell_guard_projection_path: fn(expression: Expr, parameter: String) ->
         }
         .Field(base, member, _, _) -> {
             path := sema_call_cell_guard_projection_path(base, parameter) ?? return None
-            path.push(member)
+            path.push(member.copy())
             return Val(path)
         }
         .Paren(inner, _, _) -> return sema_call_cell_guard_projection_path(inner, parameter)

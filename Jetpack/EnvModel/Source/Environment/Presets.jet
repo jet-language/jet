@@ -59,7 +59,7 @@ PresetSet: struct {
     resolve_many: fn(self, names: [String]) -> ResolvedPreset PresetError! {
         selected := [String]{}
         loop name in names {
-            if !selected.contains(name) -> selected.push(name)
+            if !selected.contains(name) -> selected.push(name.copy())
         }
         resolved := ResolvedPreset{name: selected.join("+"), selected_presets: selected}
         stack := [String]{}
@@ -95,15 +95,15 @@ PresetSet: struct {
             started := false
             loop item in stack {
                 if item == name -> started = true
-                if started -> cycle.push(item)
+                if started -> cycle.push(item.copy())
             }
-            cycle.push(name)
+            cycle.push(name.copy())
             return Err(PresetError.Cycle(cycle))
         }
         preset: self.presets.get(name) ?? return Err(PresetError.Missing(name))
-        stack.push(name)
+        stack.push(name.copy())
         loop parent in preset.extends -> self.resolve_into(parent, stack, resolved)
-        if !resolved.applied.contains(name) -> resolved.applied.push(name)
+        if !resolved.applied.contains(name) -> resolved.applied.push(name.copy())
         loop package in preset.packages {
             if !resolved.packages.contains(package) -> resolved.packages.push(package)
         }

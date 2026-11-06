@@ -234,12 +234,12 @@ parser_fence_expand: fn(tokens: [Token], tables: &TokenTables) -> ParserFenceExp
         if boundary {
             parser_fence_flush_segment(expansion, segment, brace_depth, tables)
             segment = [Token]{}
-            expansion.tokens.push(token)
+            expansion.tokens.push(token.copy())
             if kind == TOKEN_LBRACE -> brace_depth += 1
             if kind == TOKEN_RBRACE && brace_depth > 0 -> brace_depth -= 1
             next
         }
-        segment.push(token)
+        segment.push(token.copy())
         if {
             kind == TOKEN_LPAREN -> paren_depth += 1
             kind == TOKEN_RPAREN && paren_depth > 0 -> paren_depth -= 1
@@ -260,13 +260,13 @@ parser_fence_flush_segment: fn(expansion: &ParserFenceExpansion, segment: [Token
         if token.kind == TOKEN_FENCE_OPEN || token.kind == TOKEN_FENCE_CLOSE -> break true
     } ?? false
     if !has_fence {
-        loop token in segment -> expansion.tokens.push(token)
+        loop token in segment -> expansion.tokens.push(token.copy())
         return
     }
     result: parser_fence_expand_segment(segment, brace_depth, expansion.budget, tables)
     expansion.budget = ParserFenceBudget{entries: result.budget.entries, bytes: result.budget.bytes}
     if !result.valid {
-        loop token in segment -> expansion.tokens.push(token)
+        loop token in segment -> expansion.tokens.push(token.copy())
         loop diagnostic in result.diagnostics -> expansion.diagnostics.push(diagnostic)
         return
     }
@@ -457,7 +457,7 @@ parser_fence_parse_entries: fn(content: [Token], open_span: Span, binding_fence:
         }
         token_cost: parser_fence_token_cost([Token]{token.copy()}, tables)
         if !parser_fence_reserve(used, 1, token_cost.bytes) -> return parser_fence_entries_failure(open_span, parser_fence_rejected_entry(token.span, "a fenced entry exceeds the expansion resource budget"), used)
-        current.push(token)
+        current.push(token.copy())
     }
     if current.len() == 0 -> return parser_fence_entries_failure(open_span, parser_fence_rejected_entry(content[content.len() - 1].span, "this fence ends after a comma"), used)
     entries.push(current)

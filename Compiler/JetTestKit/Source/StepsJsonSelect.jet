@@ -114,7 +114,7 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
                 filter: kit_steps_json_filter(part) ?? return None
                 selected := [Dyn]{}
                 loop item in items {
-                    if kit_steps_json_filter_matches(item, filter) -> selected.push(item)
+                    if kit_steps_json_filter_matches(item, filter) -> selected.push(item.copy())
                 }
                 if selected.len() == 0 -> return Val([Dyn]{})
                 return kit_steps_json_select(Dyn.Array(selected), parts, depth + 1)

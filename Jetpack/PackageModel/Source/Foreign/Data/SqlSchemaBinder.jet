@@ -47,10 +47,10 @@ pkg_data_strip_sql_comments: fn(input: String) -> String DataBindError! {
     loop index < chars.len() {
         ch: chars[index]
         if quote != "" {
-            out.push(ch)
+            out.push(ch.copy())
             if ch == quote {
                 if pkg_data_at(chars, index + 1) == quote {
-                    out.push(quote)
+                    out.push(quote.copy())
                     index += 2
                     next
                 }
@@ -62,7 +62,7 @@ pkg_data_strip_sql_comments: fn(input: String) -> String DataBindError! {
         if {
             pkg_data_sql_is_quote(ch) -> {
                 quote = ch
-                out.push(ch)
+                out.push(ch.copy())
                 index += 1
             }
             ch == "-" && pkg_data_at(chars, index + 1) == "-" -> {
@@ -79,7 +79,7 @@ pkg_data_strip_sql_comments: fn(input: String) -> String DataBindError! {
                 index += 2
             }
             else -> {
-                out.push(ch)
+                out.push(ch.copy())
                 index += 1
             }
         }
@@ -99,10 +99,10 @@ pkg_data_split_sql_statements: fn(input: String) -> [String] DataBindError! {
     loop index < chars.len() {
         ch: chars[index]
         if quote != "" {
-            current.push(ch)
+            current.push(ch.copy())
             if ch == quote {
                 if pkg_data_at(chars, index + 1) == quote {
-                    current.push(quote)
+                    current.push(quote.copy())
                     index += 2
                     next
                 }
@@ -113,7 +113,7 @@ pkg_data_split_sql_statements: fn(input: String) -> [String] DataBindError! {
         }
         if pkg_data_sql_is_quote(ch) {
             quote = ch
-            current.push(ch)
+            current.push(ch.copy())
         } else {
             if ch == {
                 "(" -> depth += 1
@@ -134,7 +134,7 @@ pkg_data_split_sql_statements: fn(input: String) -> [String] DataBindError! {
                 }
                 else -> {}
             }
-            current.push(ch)
+            current.push(ch.copy())
         }
         index += 1
     }
@@ -159,7 +159,7 @@ pkg_data_sql_tokens: fn(statement: String) -> [String] DataBindError! {
         if {
             pkg_data_is_ascii_whitespace(ch) -> index += 1
             SQL_SYMBOLS.contains(ch) -> {
-                tokens.push(ch)
+                tokens.push(ch.copy())
                 index += 1
             }
             pkg_data_sql_is_quote(ch) -> {
@@ -169,7 +169,7 @@ pkg_data_sql_tokens: fn(statement: String) -> [String] DataBindError! {
                 loop index < chars.len() {
                     if chars[index] == ch {
                         if pkg_data_at(chars, index + 1) == ch {
-                            value.push(ch)
+                            value.push(ch.copy())
                             index += 2
                         } else {
                             index += 1
@@ -208,7 +208,7 @@ pkg_data_sql_tokens: fn(statement: String) -> [String] DataBindError! {
                 tokens.push(pkg_data_slice(chars, start, index))
             }
             ch == "+" || ch == "-" -> {
-                tokens.push(ch)
+                tokens.push(ch.copy())
                 index += 1
             }
             else -> return Err(DataBindError{message: "SQL has unsupported character {ch}"})

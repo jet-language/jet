@@ -231,11 +231,11 @@ store_measure_physical_walk: fn(digest: String, path: String, owners: [String], 
     node := nodes.get(key) ?? PhysicalNode{bytes: bytes, owners: [String]{}}
     if node.bytes != bytes -> return Err(StoreError.InvalidData("filesystem allocation changed while measuring `{path}`"))
     all_owners := node.owners.copy()
-    loop owner in owners -> all_owners.push(owner)
+    loop owner in owners -> all_owners.push(owner.copy())
     node.owners = store_sorted_unique(all_owners)
     nodes[key] = node
     keys := object_nodes.get(digest) ?? [FileID]{}
-    if !keys.contains(key) -> keys.push(key)
+    if !keys.contains(key) -> keys.push(key.copy())
     object_nodes[digest] = keys
     if metadata.is_dir && !expanded.has_key(key) {
         expanded[key] = true

@@ -39,8 +39,8 @@ sema_infer_registered_method: fn(function: SemaRegistrationFunction, graph: Sema
     if function.signature == {
         .Fn(parameters, ret, _, _, _, _) -> {
             actuals := [Type]{}
-            if receiver == .Val(receiver_ty) -> actuals.push(receiver_ty)
-            loop arg in args -> actuals.push(arg)
+            if receiver == .Val(receiver_ty) -> actuals.push(receiver_ty.copy())
+            loop arg in args -> actuals.push(arg.copy())
             sema_infer_callable(graph, context, parameters, ret, actuals, explicit_type_args, span, diagnostics)
         }
         else -> {

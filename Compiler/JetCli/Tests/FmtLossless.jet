@@ -270,7 +270,7 @@ fl_canonicalize_file_prefix: fn(tokens: [FmtTok]) -> [FmtTok] {
         if token.kind == TOKEN_LBRACE -> brace_depth += 1
         if token.kind == TOKEN_RBRACE -> brace_depth -= 1
         end: token.kind == TOKEN_EOF || (brace_depth == 0 && token.kind == TOKEN_SEMI)
-        chunk.push(token)
+        chunk.push(token.copy())
         if end {
             chunks.push(chunk)
             chunk = [FmtTok]{}
@@ -353,7 +353,7 @@ fl_canonicalize_file_prefix: fn(tokens: [FmtTok]) -> [FmtTok] {
 fl_code_tokens: fn(tokens: [FmtTok]) -> [FmtTok] {
     out := [FmtTok]{}
     loop token in tokens {
-        if !fl_is_trivia(token.kind) -> out.push(token)
+        if !fl_is_trivia(token.kind) -> out.push(token.copy())
     }
     out
 }
@@ -604,7 +604,7 @@ fl_tokens_equal: fn(left: FmtTok, right: FmtTok) -> Bool {
 fl_without_terminators: fn(tokens: [FmtTok]) -> [FmtTok] {
     out := [FmtTok]{}
     loop token in tokens {
-        if token.kind != TOKEN_SEMI && token.kind != TOKEN_EOF -> out.push(token)
+        if token.kind != TOKEN_SEMI && token.kind != TOKEN_EOF -> out.push(token.copy())
     }
     out
 }

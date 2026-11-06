@@ -120,7 +120,7 @@ kit_golden_build: fn(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv,
     path: if step.cwd == "" -> entry.path else -> files.join(source, entry.path)
     args := [String]{env.jet, if tier.direct -> "check" else -> "build", path}
     if !tier.direct {
-        loop flag in tier.flags -> args.push(flag)
+        loop flag in tier.flags -> args.push(flag.copy())
     }
     case_env: kit_steps_environment(plan, env, work, scratch, "")
     overlay: kit_steps_step_environment(step, env, work, scratch, "", case_env)
@@ -177,7 +177,7 @@ kit_golden_test_outcome: fn(context: KitStepCtx, entry: KitEntry, tier: KitTier,
     code: kit_golden_test_exit(golden) ?? return Val(KitOutcome{verdict: kit_expect_verdict("FAIL", "{files.basename(path)} ends in no test summary, so its exit is unknown"), run: kit_exec_failed("no test summary")})
     project: files.basename(entry.path) == "run.jet" && (kit_golden_exists(files.join(context.work, "package.jet")) || kit_golden_exists(files.join(context.work, "workspace.jet")))
     args := [String]{context.env.jet, "test"}
-    loop flag in tier.test_flags -> args.push(flag)
+    loop flag in tier.test_flags -> args.push(flag.copy())
     args.push(if project -> context.work else -> files.join(source, entry.path))
     result: kit_exec_invoke_with_env(context.env, args, context.work, context.scratch, "", kit_steps_environment(context.plan, context.env, context.work, context.scratch, ""))
     failure: kit_exec_process_failure(result)

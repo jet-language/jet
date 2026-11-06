@@ -189,7 +189,7 @@ sentence_list: fn(text: String) -> [String] Never! {
             next
         }
         in_space = false
-        current.push(piece)
+        current.push(piece.copy())
         last = piece
     }
     sentence: current.join("")
@@ -217,7 +217,7 @@ close_run: fn(out: &[String], current: &[String], run: &[String]) Never! {
             current = [String]{}
             loop index in (last + 1)..<run.len() -> current.push(run[index])
         }
-        else -> loop piece in run -> current.push(piece)
+        else -> loop piece in run -> current.push(piece.copy())
     }
     run = [String]{}
 }
@@ -276,7 +276,7 @@ fence_opener: fn(line: String) -> FenceOpener? Never! {
     }
     if count < 3 -> return None
     markers := [String]{}
-    loop _ in 0..<count -> markers.push(mark)
+    loop _ in 0..<count -> markers.push(mark.copy())
     Val(FenceOpener{mark: mark, marker: markers.join(""), rest: rest.join("")})
 }
 

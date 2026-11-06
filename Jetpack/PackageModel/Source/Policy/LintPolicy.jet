@@ -28,7 +28,7 @@ pkg_lint_policy_apply: fn(deny: [String], diagnostics: [Diagnostic]) -> [Diagnos
         if diagnostic.severity == DIAGNOSTIC_LINT && pkg_lint_policy_is_denied(deny, diagnostic.code) {
             out.push(pkg_lint_e1293(diagnostic))
         } else {
-            out.push(diagnostic)
+            out.push(diagnostic.copy())
         }
     }
     out
@@ -82,7 +82,7 @@ pkg_lint_non_denied: fn(lints: [Diagnostic], manifest: PackageFacts) -> [Diagnos
     deny: manifest.policy.lints_deny ?? [String]{}
     out := [Diagnostic]{}
     loop lint in lints {
-        if !pkg_lint_policy_is_denied(deny, lint.code) -> out.push(lint)
+        if !pkg_lint_policy_is_denied(deny, lint.code) -> out.push(lint.copy())
     }
     out
 }

@@ -135,7 +135,7 @@ pkg_merge_packages: fn(lists: [[Pkg]]) -> [Pkg] Never! {
     out := [Pkg]{}
     loop list in lists {
         loop pkg in list {
-            if !out.contains(pkg) -> out.push(pkg)
+            if !out.contains(pkg) -> out.push(pkg.copy())
         }
     }
     out
@@ -166,7 +166,7 @@ pkg_merge_entry: fn(contribs: [EntryContribution]) -> MergedEntry MergeError! {
     loop contribution in contribs {
         loop key in pkg_merge_sorted_setting_keys(contribution.settings) {
             writers := by_key.get(key) ?? [FactContribution]{}
-            loop writer in contribution.settings[key] -> writers.push(writer)
+            loop writer in contribution.settings[key] -> writers.push(writer.copy())
             by_key[key] = writers
         }
     }

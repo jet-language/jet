@@ -109,7 +109,7 @@ pkg_cffi_append_link_flags: fn(args: &[String], flags: LinkFlags) Never! {
     }
     loop name in flags.link_names {
         args.push("-l")
-        args.push(name)
+        args.push(name.copy())
     }
     loop dir in flags.rpath_dirs {
         args.push("-C")
@@ -259,7 +259,7 @@ pkg_cffi_cpp_link: fn(lib: String, actual: String, dir: String, archive: String,
         if line.starts_with("L\t") {
             value: line.removeprefix("L\t")
             if files.is_absolute(value) {
-                flags.lib_dirs.push(value)
+                flags.lib_dirs.push(value.copy())
                 flags.rpath_dirs.push(value)
             }
         } else if line.starts_with("l\t") {
@@ -430,7 +430,7 @@ pkg_cffi_parse_pkg_config: fn(text: String, lib: String) -> LinkFlags Never! {
             else -> {}
         }
     }
-    if flags.link_names.len() == 0 -> flags.link_names.push(lib)
+    if flags.link_names.len() == 0 -> flags.link_names.push(lib.copy())
     flags
 }
 

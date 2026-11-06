@@ -84,7 +84,7 @@ cli_run_project_job_leaf: fn(verification: &StoreVerification, cache: &Workspace
     loop limit in metadata.limits -> env.vars[cli_task_limit_env_name(limit.key)] = limit.value
     task_args := cli_tail(parsed.positional, 1)
     if parsed.command == .Val(command) {
-        loop arg in command -> task_args.push(arg)
+        loop arg in command -> task_args.push(arg.copy())
     }
     job_cwd: cli_job_path(project_dir, metadata.cwd, "cwd", false) ?? {
         theme.error_coded("E1330", "job `{job}` has an unsafe cwd", err.message(), "use a project-relative path without `..`.")

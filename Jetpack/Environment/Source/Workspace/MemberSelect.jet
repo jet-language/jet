@@ -60,7 +60,7 @@ env_select_members: fn(root: String, plan: WorkspacePlan, request: SelectRequest
         names: env_member_names(plan)
         loop name in request.packages {
             if !names.contains(name) -> return Err(env_e1231_unknown_member(name, plan))
-            if !selected.contains(name) -> selected.push(name)
+            if !selected.contains(name) -> selected.push(name.copy())
         }
     }
     if request.affected || request.affected_since != None {
@@ -75,7 +75,7 @@ env_select_members: fn(root: String, plan: WorkspacePlan, request: SelectRequest
     }
     chosen := [WorkspacePlanMember]{}
     loop member in plan.members {
-        if selected.contains(member.name) -> chosen.push(member)
+        if selected.contains(member.name) -> chosen.push(member.copy())
     }
     Ok(chosen)
 }
@@ -277,7 +277,7 @@ env_close_under_dependents: fn(root: String, plan: WorkspacePlan, seeds: [String
         dependents: reverse.get(name) ?? next
         loop dependent in dependents {
             if !out.contains(dependent) {
-                out.push(dependent)
+                out.push(dependent.copy())
                 stack.push(dependent)
             }
         }

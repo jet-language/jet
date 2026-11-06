@@ -64,18 +64,18 @@ sema_hardware_empty_use: fn() -> TargetHardwareUse Never! {
 
 sema_hardware_use_snapshot: fn(source: TargetHardwareUse) -> TargetHardwareUse Never! {
     result := sema_hardware_empty_use()
-    loop fact in source.register_accesses -> result.register_accesses.push(fact)
-    loop fact in source.interrupt_handlers -> result.interrupt_handlers.push(fact)
-    loop fact in source.dma_operations -> result.dma_operations.push(fact)
-    loop fact in source.unresolved_references -> result.unresolved_references.push(fact)
+    loop fact in source.register_accesses -> result.register_accesses.push(fact.copy())
+    loop fact in source.interrupt_handlers -> result.interrupt_handlers.push(fact.copy())
+    loop fact in source.dma_operations -> result.dma_operations.push(fact.copy())
+    loop fact in source.unresolved_references -> result.unresolved_references.push(fact.copy())
     result
 }
 
 sema_hardware_use_merge: fn(destination: &TargetHardwareUse, source: TargetHardwareUse) Never! {
-    loop fact in source.register_accesses -> destination.register_accesses.push(fact)
-    loop fact in source.interrupt_handlers -> destination.interrupt_handlers.push(fact)
-    loop fact in source.dma_operations -> destination.dma_operations.push(fact)
-    loop fact in source.unresolved_references -> destination.unresolved_references.push(fact)
+    loop fact in source.register_accesses -> destination.register_accesses.push(fact.copy())
+    loop fact in source.interrupt_handlers -> destination.interrupt_handlers.push(fact.copy())
+    loop fact in source.dma_operations -> destination.dma_operations.push(fact.copy())
+    loop fact in source.unresolved_references -> destination.unresolved_references.push(fact.copy())
 }
 
 sema_hardware_result: fn(check: SemaMethodSpecialCheck) -> SemaHardwareMethodCheck Never! {
@@ -163,7 +163,7 @@ sema_hardware_bind_pending_dma_transfer: fn(init: Expr, symbol: Symbol, scopes: 
     fact := scopes.hardware_pending_transfers[found]
     _ := scopes.hardware_pending_transfers.remove(found, .Slot)
     fact = sema_hardware_bind_dma_transfer_identity(fact, symbol.name, symbol.id.key, scopes.current)
-    scopes.hardware_transfers.push(fact)
+    scopes.hardware_transfers.push(fact.copy())
     scopes.hardware_definite_transfers.push(fact)
     true
 }
@@ -210,7 +210,7 @@ sema_hardware_expr_path: fn(expression: Expr) -> [String]? {
         .Ident(name, _, _) -> { return Val([String]{name}) }
         .Field(base, member, _, _) -> {
             path := sema_hardware_expr_path(base) ?? return None
-            path.push(member)
+            path.push(member.copy())
             return Val(path)
         }
         .Paren(inner, _, _) -> { return sema_hardware_expr_path(inner) }
@@ -317,7 +317,7 @@ sema_hardware_discard_arguments: fn(args: [CallArg], environment: SemaScopeEnvir
 sema_hardware_missing_fact: fn(reference: TargetHardwareUnresolvedReference, description: String, span: Span, diagnostics: &[Diagnostic]) -> SemaHardwareMethodCheck {
     check := SemaMethodSpecialCheck{handled: true, value: None}
     result := sema_hardware_result(check)
-    result.hardware_use.unresolved_references.push(reference)
+    result.hardware_use.unresolved_references.push(reference.copy())
     diagnostics.push(sema_error("E0904", span, "the selected board profile has no checked {description} fact", "hardware calls must carry the exact profile fact into the checked tree; path spelling cannot supply an address, width, or channel", "select a board profile that registers this hardware resource"))
     result
 }

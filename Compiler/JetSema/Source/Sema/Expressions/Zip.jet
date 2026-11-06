@@ -202,7 +202,7 @@ sema_expression_zip_family: fn(method: String, inputs: [TExpr], fields: [String]
     operation := TBuiltinOp.Zip{mode: mode, fields: names, flatten: false, input_count: inputs.len(), fill_mode: fill_mode, field_types: field_types}
     lowered_args := [TExpr]{}
     loop index in 1..<inputs.len() -> lowered_args.push(inputs[index])
-    loop fill in fill_args -> lowered_args.push(fill)
+    loop fill in fill_args -> lowered_args.push(fill.copy())
     value := sema_tree_node(result_ty, TExprKind.BuiltinMethod{receiver: receiver, operation: operation, args: lowered_args}, span)
     return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
 }
@@ -247,10 +247,10 @@ sema_expression_zip_free_call: fn(call: Call, expected: Type?, environment: Sema
         label := if call.args[arg_index].label == {.Val(value) -> Val(value.name) else -> None}
         if {
             is_pad && label == (Val("fill")) -> {
-                if common_fill == .Val(fill) -> fill_args.push(fill)
+                if common_fill == .Val(fill) -> fill_args.push(fill.copy())
             }
             is_pad && label == (Val("fills")) -> {
-                if column_fills == .Val(fill) -> fill_args.push(fill)
+                if column_fills == .Val(fill) -> fill_args.push(fill.copy())
             }
         }
     }

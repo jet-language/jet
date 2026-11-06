@@ -637,7 +637,7 @@ impl Parser {
             key: self.parse_string()
             self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
             if !self.expect(U8{58}) -> return Err(self.err("expected ':' after an object key"))
-            self.path.push(key)
+            self.path.push(key.copy())
             if positions.get(key) == .Val(position) {
                 if !self.allow_duplicates {
                     error: self.err("duplicate object key `{key}`")
@@ -649,7 +649,7 @@ impl Parser {
                 entries[position].value = later
             } else {
                 value: self.parse_value()
-                _: positions.add(key, entries.len())
+                _: positions.add(key.copy(), entries.len())
                 entries.push((key: key, value: value))
             }
             _: self.path.pop()
@@ -1299,13 +1299,13 @@ patch_edit: fn(node: Dyn, segments: [String], depth: Int, kind: Int, value: Dyn)
                     next
                 }
                 if kind == PATCH_ADD {
-                    out.push(value)
+                    out.push(value.copy())
                     out.push(items[i])
                     next
                 }
-                if kind == PATCH_REPLACE -> out.push(value)
+                if kind == PATCH_REPLACE -> out.push(value.copy())
             }
-            if last && kind == PATCH_ADD && index == items.len() -> out.push(value)
+            if last && kind == PATCH_ADD && index == items.len() -> out.push(value.copy())
             return Ok(Dyn.Array(out))
         }
         else -> { _ := 0 }

@@ -141,7 +141,7 @@ publication_push_index_inner: fn(registry: PublicationRegistryConfig, repo: Stri
     add := [String]{"add", "--"}
     loop path in stage {
         relative: publication_checkout_relative(repo, path) ?? return Err(publication_registry_cache_error(registry, "publication path escapes its checkout"))
-        allowed.push(relative)
+        allowed.push(relative.copy())
         add.push(relative)
     }
     added: publication_checkout_git(registry, transport, repo, add)

@@ -278,7 +278,7 @@ CranOrderWalk: struct {
     visit: fn(&self, name: String) RegistryError! {
         if self.done.contains(name) -> return
         if self.active.contains(name) -> return Err(RegistryError.Reason("CRAN dependency cycle includes `{name}`"))
-        self.active.push(name)
+        self.active.push(name.copy())
         record: self.records.get(name) ?? return Err(RegistryError.Reason("CRAN dependency `{name}` is absent from repository metadata"))
         loop dependency in record.dependencies {
             selected: self.records.get(dependency.name) ?? return Err(RegistryError.Reason("CRAN dependency `{dependency.name}` is absent from repository metadata"))
@@ -293,8 +293,8 @@ CranOrderWalk: struct {
             self.visit(dependency.name)
         }
         _ := self.active.pop()
-        self.done.push(name)
-        self.out.push(name)
+        self.done.push(name.copy())
+        self.out.push(name.copy())
     }
 }
 

@@ -92,14 +92,14 @@ kit_steps_capture_guards: fn(plan: KitPlan, before: Int, inline: [String]) -> [S
         step: plan.steps[index]
         if step.action == "when" {
             frames.push(guards.len())
-            loop condition in step.conditions -> guards.push(condition)
+            loop condition in step.conditions -> guards.push(condition.copy())
             guards.push(step.argv[0])
         } else if step.action == "end when" {
             guards = guards.slice(0, frames[frames.len() - 1])
             frames = frames.slice(0, frames.len() - 1)
         }
     }
-    loop condition in inline -> guards.push(condition)
+    loop condition in inline -> guards.push(condition.copy())
     guards
 }
 

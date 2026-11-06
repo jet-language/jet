@@ -70,7 +70,7 @@ sema_typestate_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrati
         registration: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
         open_switches := [Span]{}
         loop diagnostic in modules[module_index].diagnostics {
-            if diagnostic.code == "E0307" && diagnostic.span == .Val(span) -> open_switches.push(span)
+            if diagnostic.code == "E0307" && diagnostic.span == .Val(span) -> open_switches.push(span.copy())
         }
         walk := SemaStateWalk{table: table.copy(), states: [String:String]{}, open_switches: open_switches, typed: false, diagnostics: [Diagnostic]{}}
         loop item in graph.modules[registration].program.items {

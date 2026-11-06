@@ -25,7 +25,7 @@ cli_run_job_with_access_trace: fn(env: &ShellEnv, argv: [String], project_dir: S
     }
     files.remove(trace_path).drop("a stale trace from an earlier run is replaced")
     traced := [String]{tracer, "-f", "-qq", "-e", "trace=%file", "-o", trace_path}
-    loop arg in argv -> traced.push(arg)
+    loop arg in argv -> traced.push(arg.copy())
     code: if {
         clean && silent -> env.run_clean_command_in_silent(traced, Val(project_dir))
         clean -> env.run_clean_command_in(traced, Val(project_dir))

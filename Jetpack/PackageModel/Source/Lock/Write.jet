@@ -386,7 +386,7 @@ pkg_lock_last_by_name_in_order: fn(values: [LockedPackage]) -> [LockedPackage] N
             .Val(index) -> canonical[index] = value
             .None -> {
                 positions[value.name] = canonical.len()
-                canonical.push(value)
+                canonical.push(value.copy())
             }
         }
     }
@@ -470,7 +470,7 @@ pkg_lock_dedup_contributions: fn(values: [LockedBuildContribution]) -> [LockedBu
     out := [LockedBuildContribution]{}
     loop value in values {
         if out.len() > 0 && out[out.len() - 1] == value -> next
-        out.push(value)
+        out.push(value.copy())
     }
     out
 }
@@ -490,7 +490,7 @@ pkg_lock_dedup_comptime_inputs: fn(values: [ComptimeInput]) -> [ComptimeInput] N
     out := [ComptimeInput]{}
     loop value in values {
         if out.len() > 0 && out[out.len() - 1] == value -> next
-        out.push(value)
+        out.push(value.copy())
     }
     out
 }

@@ -976,8 +976,8 @@ sema_stmt_check_unit_if_parts: fn(condition: Expr, then_body: [Stmt], then_value
     // The single-use check reads the state before the branch, which the
     // rollback left live; the join reports nothing, so the order holds.
     single_use_paths := [SemaOwnershipPath]{}
-    if then_reaches_merge -> single_use_paths.push(then_path)
-    if else_reaches_merge -> single_use_paths.push(else_path)
+    if then_reaches_merge -> single_use_paths.push(then_path.copy())
+    if else_reaches_merge -> single_use_paths.push(else_path.copy())
     sema_single_use_check_paths(state, single_use_paths, diagnostics)
     base: sema_ownership_fork_base(fork)
     joined: if {
@@ -1107,7 +1107,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
             target := sema_stmt_type_switch_target(param, arms[arm_index].cond, type_arms, environment, program, scopes, diagnostics)
             if target == .Val(arm_type) {
                 if return_type == .Val(declared) -> arm_return = Val(sema_inference_substitute_type(declared, [String]{param}, [Type]{arm_type}))
-                type_arms.push(arm_type)
+                type_arms.push(arm_type.copy())
                 arm_target = Val(arm_type)
                 conditions.push(Val(sema_stmt_type_test_condition(param, arm_type, expr_span(arms[arm_index].cond), context)))
             } else {
@@ -1198,7 +1198,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     // table again, which the single-use check reads; the join reports
     // nothing, so the order holds.
     sema_ownership_fork_rollback(state, fork)
-    if else_reaches_merge -> single_use_paths.push(else_path)
+    if else_reaches_merge -> single_use_paths.push(else_path.copy())
     sema_single_use_check_paths(state, single_use_paths, diagnostics)
     base: sema_ownership_fork_base(fork)
     joined: if {
@@ -2671,7 +2671,7 @@ sema_stmt_record_static_view_return: fn(provenance: &ViewProvenanceMap, slot: [S
                 if sema_stmt_view_source_path_equal(entry.value.sources[source_index], source) -> return true
                 source_index += 1
             }
-            provenance.entries[entry_index].value.sources.push(source)
+            provenance.entries[entry_index].value.sources.push(source.copy())
             return true
         }
         entry_index += 1
@@ -2871,7 +2871,7 @@ sema_stmt_view_owner_path: fn(slot: [String]) -> [String] Never! {
         part: slot[index]
         if {
             part.starts_with(".") || part.starts_with("[") || part == "*" -> {
-                result.push(part)
+                result.push(part.copy())
             }
             else -> {
                 result.push(".{part}")
@@ -3620,7 +3620,7 @@ sema_stmt_leading_guard_enum: fn(condition: TIfCond) -> String? Never! {
 
 sema_stmt_refutable_loop_labels: fn(nested_labels: [String], label: NamedSpan?) -> [String] Never! {
     labels := [String]{}
-    loop nested_label in nested_labels -> labels.push(nested_label)
+    loop nested_label in nested_labels -> labels.push(nested_label.copy())
     if label == {
         .Val(value) -> labels.push(value.name)
         .None -> {}
@@ -4197,7 +4197,7 @@ sema_stmt_check_refutable_binding: fn(binding: Binding, pattern: Pattern, fallba
         local := sema_stmt_destructure_local(name, ty, binding.mutable, environment, program, scopes, state, diagnostics)
         if local == None -> next
         installed: local ?? next
-        locals.push(installed)
+        locals.push(installed.copy())
         if checked_pattern_tree != None {
             typed := checked_pattern_tree ?? next
             sema_stmt_refutable_assign_capture_identity(typed.pattern, name, installed)
@@ -4563,7 +4563,7 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
         if index >= fields.len() -> break
         field := fields[index]
         local: sema_stmt_destructure_local(name, field.ty, binding.mutable, environment, program, scopes, state, diagnostics) ?? next
-        locals.push(local)
+        locals.push(local.copy())
         binds.push(TDestructureBinding{local: local, field: field.name})
         projected_binding := binding
         projected_binding.name = local.name
@@ -5379,7 +5379,7 @@ sema_stmt_transaction_add_root: fn(name: String, roots: &[String]) Never! {
     loop existing in roots {
         if existing == name -> return
     }
-    roots.push(name)
+    roots.push(name.copy())
 }
 
 sema_stmt_transaction_collect_roots: fn(statements: [Stmt], roots: &[String]) Never! {
@@ -8789,7 +8789,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             }
         }
         .Reactive(body, span) -> {
-            state.reactive_bodies.push(span)
+            state.reactive_bodies.push(span.copy())
             checked := sema_stmt_check_reactive(body, span, environment, program, scopes, state, tail_store, context, diagnostics)
             if checked == {
                 .Val(value) -> output.push(TStmt.Reactive{executable: value, span: span})

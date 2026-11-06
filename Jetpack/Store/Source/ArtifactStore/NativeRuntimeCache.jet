@@ -104,7 +104,7 @@ NativeRuntimeIdentityCache: struct {
 // The standard output of `rustc <args>` under `rustc_env`.
 store_runtime_rustc_query: fn(rustc: String, rustc_env: [NativeRuntimeEnvVar], args: [String]) -[Exec, Time]> String NativeRuntimeError! {
     argv := [String]{rustc}
-    loop arg in args -> argv.push(arg)
+    loop arg in args -> argv.push(arg.copy())
     rendered: args.join(" ")
     spec := process.cmd(argv).stdout(.Capture).stderr(.Capture)
     loop variable in rustc_env -> spec = spec.env(variable.name, variable.value)
@@ -299,7 +299,7 @@ store_runtime_compile_flags: fn(flags: [String]) -> [String] Never! {
             flag != "-C" && store_runtime_is_link_only_flag(flag) -> 1
             else -> 0
         }
-        if skip == 0 -> compile_flags.push(flag)
+        if skip == 0 -> compile_flags.push(flag.copy())
         index += if skip == 0 -> 1 else -> skip
     }
     compile_flags
@@ -349,7 +349,7 @@ store_runtime_compile_artifact: fn(store: ArtifactStore, key: String, exported: 
     }
 
     argv := [String]{rustc, "--edition", "2021", "--crate-name", STORE_RUNTIME_CRATE_NAME, "--crate-type", "rlib"}
-    loop flag in rustc_flags -> argv.push(flag)
+    loop flag in rustc_flags -> argv.push(flag.copy())
     argv.push("-C")
     argv.push("metadata={key}")
     if files.canonicalize(staging) == {
@@ -359,9 +359,9 @@ store_runtime_compile_artifact: fn(store: ArtifactStore, key: String, exported: 
         }
         else -> {}
     }
-    argv.push(source)
+    argv.push(source.copy())
     argv.push("-o")
-    argv.push(staged_rlib)
+    argv.push(staged_rlib.copy())
     spec := process.cmd(argv).stdout(.Capture).stderr(.Capture)
     loop variable in rustc_env -> spec = spec.env(variable.name, variable.value)
     receipt: if process.run_spec(spec) == {
@@ -500,7 +500,7 @@ store_runtime_cache_key: fn(source: String, exported_source: String, rustc: Stri
 // `value` framed by its length as eight big-endian bytes.
 store_runtime_push_bytes: fn(out: &[U8], value: [U8]) Never! {
     out.extend(store_runtime_be64(value.len()))
-    out.extend(value)
+    out.extend(value.copy())
 }
 
 // `u64::to_be_bytes`.

@@ -239,7 +239,7 @@ FlakeGraph: struct {
     named_dev_shells: fn(self) -> [FlakeOutput] Never! {
         shells := [FlakeOutput]{}
         loop output in self.outputs {
-            if output.kind == FlakeOutputKind.DevShell -> shells.push(output)
+            if output.kind == FlakeOutputKind.DevShell -> shells.push(output.copy())
         }
         shells
     }
@@ -418,7 +418,7 @@ FlakeGraph: struct {
         composition.module_sources = pkg_overlay_sorted_unique(module_sources)
         self.composition = Val(composition)
         outputs := self.outputs
-        loop output in imported_outputs -> outputs.push(output)
+        loop output in imported_outputs -> outputs.push(output.copy())
         self.outputs = trust_flake_sorted_outputs(outputs)
     }
 
@@ -480,7 +480,7 @@ FlakeGraph: struct {
                 return Err(TrustError.IO("flake-parts module `{module_path}` must be a file inside the flake project"))
             }
             if visited.contains(canonical) -> next
-            visited.push(canonical)
+            visited.push(canonical.copy())
             bytes: files.read_bytes(canonical) ?? return Err(TrustError.IO("couldn't read flake-parts module `{module_path}`: {err}"))
             module_text: String.from_bytes(bytes) ?? return Err(TrustError.IO("couldn't read flake-parts module `{module_path}` as UTF-8: invalid utf-8"))
             source_name: if visit.root_module -> module_path else -> "./{files.relative(canonical, project_root)}"
@@ -536,7 +536,7 @@ trust_flake_follow_revision: fn(name: String, facts: [String: FlakeInput], stack
     if fact.follows == "" -> return Ok(None)
     if stack.contains(name) -> return Err(TrustError.FollowsCycle(name))
     deeper := stack
-    deeper.push(name)
+    deeper.push(name.copy())
     Ok(trust_flake_follow_revision(fact.follows, facts, deeper))
 }
 
@@ -749,7 +749,7 @@ trust_flake_lock_nodes: fn(lock: SemanticLockFile) -> [FlakeLockNode] TrustError
         if record.identity.kind != LockRecordKind.FlakeEvaluator || !record.identity.key.starts_with("flake-lock-node:") -> next
         name: record.identity.key.removeprefix("flake-lock-node:")
         if names.contains(name) -> return Err(TrustError.StaleSemanticLock("lock has duplicate node record `{name}`"))
-        names.push(name)
+        names.push(name.copy())
         node: trust_flake_parse_lock_node(record.identity.exact)
         if node.name != name -> return Err(TrustError.StaleSemanticLock("lock node record `{name}` names `{node.name}`"))
         nodes.push(node)
@@ -765,7 +765,7 @@ trust_flake_lock_registries: fn(lock: SemanticLockFile) -> [FlakeRegistryEntry] 
         if record.identity.kind != LockRecordKind.FlakeEvaluator || !record.identity.key.starts_with("flake-registry:") -> next
         alias: record.identity.key.removeprefix("flake-registry:")
         if aliases.contains(alias) -> return Err(TrustError.StaleSemanticLock("lock has duplicate registry record `{alias}`"))
-        aliases.push(alias)
+        aliases.push(alias.copy())
         entry: trust_flake_parse_registry(record.identity.exact)
         if entry.alias != alias -> return Err(TrustError.StaleSemanticLock("registry record `{alias}` names `{entry.alias}`"))
         entries.push(entry)

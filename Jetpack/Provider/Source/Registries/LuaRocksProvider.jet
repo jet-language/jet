@@ -227,7 +227,7 @@ LuaRocksResolver: struct {
             .None -> {}
         }
         if self.active.contains(name) -> return Err(RegistryError.Reason("LuaRocks dependency cycle includes `{name}`"))
-        self.active.push(name)
+        self.active.push(name.copy())
         provider_luarocks_require_manifest_version(self.manifest, name, version)
         path: files.join(self.scratch, "{name}-{version}.rockspec")
         self.authority.to_path("{self.repository}/{name}-{version}.rockspec", path, self.scratch)
@@ -345,14 +345,14 @@ LuaRocksOrderWalk: struct {
     visit: fn(&self, name: String) RegistryError! {
         if self.done.contains(name) -> return
         if self.active.contains(name) -> return Err(RegistryError.Reason("LuaRocks dependency cycle includes `{name}`"))
-        self.active.push(name)
+        self.active.push(name.copy())
         spec: self.specs.get(name) ?? return Err(RegistryError.Reason("missing resolved LuaRocks dependency `{name}`"))
         loop dependency in spec.dependencies {
             if dependency.name != "lua" -> self.visit(dependency.name)
         }
         _ := self.active.pop()
-        self.done.push(name)
-        self.out.push(name)
+        self.done.push(name.copy())
+        self.out.push(name.copy())
     }
 }
 
@@ -455,7 +455,7 @@ provider_luarocks_ensure_platform_supported: fn(platforms: [String]) RegistryErr
         if platform.starts_with("!") {
             if platform == ("!{host}") || (!windows && platform == "!unix") -> denied = true
         } else {
-            positive.push(platform)
+            positive.push(platform.copy())
         }
     }
     allowed := positive.len() == 0

@@ -134,7 +134,7 @@ sema_compute_panic_sites_are_compute_failures: fn(function_key: String, modules:
     local_panic := local_safe_panic || local_unsafe_panic
     safe := !local_panic || (local_safe_panic && !local_unsafe_panic)
     if sema_compute_has_panic_edge(function.effects.call_edges) && !local_panic -> safe = false
-    visiting.push(function_key)
+    visiting.push(function_key.copy())
     if safe {
         loop edge in modules[position.module_index].functions[position.row_index].effects.call_edges {
             if edge == "__jet_panic__" -> next
@@ -157,7 +157,7 @@ sema_compute_forbidden_effects: fn(effects: [String]) -> [String] Never! {
     result := [String]{}
     loop effect_name in effects {
         root: sema_effect_root(effect_name)
-        if root != "GPU" && root != "Mem" -> result.push(effect_name)
+        if root != "GPU" && root != "Mem" -> result.push(effect_name.copy())
     }
     result
 }

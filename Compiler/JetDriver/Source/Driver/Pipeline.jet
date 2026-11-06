@@ -318,13 +318,13 @@ jet_driver_summarize_dependency_reports: fn(load: JetDriverLoadResult, diagnosti
             if diagnostic.severity == DIAGNOSTIC_LINT && pkg_lint_policy_is_denied(entry_deny, diagnostic.code) {
                 kept.push(pkg_lint_e1293(diagnostic))
             } else {
-                kept.push(diagnostic)
+                kept.push(diagnostic.copy())
             }
             next
         }
         if diagnostic.severity != DIAGNOSTIC_ERROR -> next
         failing[owner] = true
-        held.push(diagnostic)
+        held.push(diagnostic.copy())
         held_owners.push(owner)
     }
     loop index in 0..<load.packages.len() {
@@ -853,7 +853,7 @@ jet_driver_comptime_wait_add: fn(dependencies: &[String], key: String) Never! {
     loop previous in dependencies {
         if previous == key -> return
     }
-    dependencies.push(key)
+    dependencies.push(key.copy())
 }
 
 // Codegen lowers a precise operation to its `Core/Math/Math.jet` helper by
@@ -972,7 +972,7 @@ jet_driver_comptime_function_closure: fn(
                 sema_comptime_failure_closure_add(graph, failure_closure, checked)
                 if index.checked_rows.get(checked_key) == None {
                     index.checked_rows[checked_key] = checked_functions.len()
-                    checked_functions.push(checked)
+                    checked_functions.push(checked.copy())
                 }
             }
         }
@@ -1080,7 +1080,7 @@ jet_driver_comptime_wait_cycle_from: fn(key: String, rows: [JetDriverComptimeWai
     loop previous in finished {
         if previous == key -> return false
     }
-    path.push(key)
+    path.push(key.copy())
     row := jet_driver_comptime_wait_row_find(rows, key)
     if row != None {
         wait_row: row ?? return false
@@ -1089,7 +1089,7 @@ jet_driver_comptime_wait_cycle_from: fn(key: String, rows: [JetDriverComptimeWai
         }
     }
     _ := path.pop()
-    finished.push(key)
+    finished.push(key.copy())
     false
 }
 
@@ -1424,7 +1424,7 @@ jet_driver_comptime_batch_add: fn(batch: &JetDriverComptimeBatch, source: SemaCo
     loop reversed.len() > 0 {
         function := reversed.pop() ?? { break }
         key: "{function.module_identity}\n{function.key}"
-        function_keys.push(key)
+        function_keys.push(key.copy())
         if batch.function_rows.get(key) != None -> next
         batch.function_rows[key] = batch.functions.len()
         batch.functions.push(function)
@@ -1446,7 +1446,7 @@ jet_driver_comptime_batch_single: fn(batch: JetDriverComptimeBatch, index: Int) 
     }
     if entry.plain == None && !jet_driver_comptime_entry_bare(entry.request, entry.function_keys) -> single.bare = false
     single.keys[entry.source.key] = true
-    single.entries.push(entry)
+    single.entries.push(entry.copy())
     single
 }
 
@@ -1647,7 +1647,7 @@ jet_driver_comptime_flush: fn(
         // program's own (a trap panics before `run`).
         failed_value: if eval_result.value == .Val(evaluated_value) -> evaluated_value == .Failed(_) else -> false
         if source.soft && eval_result.internal_problem == None && (eval_result.error != None || failed_value) {
-            flushed.demoted.push(source)
+            flushed.demoted.push(source.copy())
             next
         }
         if eval_result.error != None || eval_result.internal_problem != None {
@@ -1735,8 +1735,8 @@ jet_driver_merge_checked_text_functions: fn(graph: &SemaGraphResult, functions: 
         if duplicate -> next
         if !checked.complete -> return false
         if !sema_comptime_append_checked_function_to_module(checked, graph.modules[module_index]) -> return false
-        loop fact in checked.call_facts -> graph.call_facts.push(fact)
-        loop request in checked.calls -> graph.comptime_requests.push(request)
+        loop fact in checked.call_facts -> graph.call_facts.push(fact.copy())
+        loop request in checked.calls -> graph.comptime_requests.push(request.copy())
     }
     true
 }
@@ -1992,7 +1992,7 @@ jet_driver_comptime_run: fn(
                             span: source.span,
                             dependencies: previous_waits,
                         })
-                        next_pending.push(source)
+                        next_pending.push(source.copy())
                         next
                     }
                 }
@@ -2055,7 +2055,7 @@ jet_driver_comptime_run: fn(
                         span: source.span,
                         dependencies: checked_item.waiting_dependencies,
                     })
-                    next_pending.push(source)
+                    next_pending.push(source.copy())
                     next
                 }
                 startup_read: jet_driver_comptime_startup_read(checked_item.dependencies, startup)
@@ -2223,7 +2223,7 @@ jet_driver_comptime_run: fn(
                         span: source.span,
                         dependencies: dependencies,
                     })
-                    next_pending.push(source)
+                    next_pending.push(source.copy())
                     next
                 }
                 loop call in comptime_request.calls {
@@ -2703,7 +2703,7 @@ jet_driver_test_plan: fn(test_modules: [String:Bool], graph: SemaGraphResult, fu
         graph_module: graph.modules[module_index]
         if test_modules.get(graph_module.module_identity) == None -> next
         loop fact in graph_module.tests {
-            if checked.get(fact.function.key) != None -> tests.push(fact)
+            if checked.get(fact.function.key) != None -> tests.push(fact.copy())
         }
         loop constant in graph_module.constants {
             if constant.declaration.resolved_output == .Val(output) {
@@ -3938,7 +3938,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         module_keys := -1
         if name_rows_get_text(registered_function_keys.modules, graph_module.module_identity) == .Val(at) -> module_keys = at
         if graph_module.module_identity != canonical_effect_module_identity {
-            runtime_semantic_modules.push(graph_module)
+            runtime_semantic_modules.push(graph_module.copy())
             module_matches: loaded_identity_counts.get(graph_module.module_identity) ?? 0
             if module_matches != 1 {
                 load.diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a semantic module does not map to exactly one loaded source identity", "source, package, and module identities remain attached across graph registration", "retain the loader's exact module identity in each semantic result"))
@@ -4137,7 +4137,7 @@ jet_driver_required_effects: fn(functions: [FnBody], entry_key: String, startup_
         seen[index] = true
         cli: index == parser || (functions[index].name.starts_with("__jet_cli_run") && functions[index].key == entry_key)
         if !cli {
-            loop effect_name in functions[index].effects.direct -> required.push(effect_name)
+            loop effect_name in functions[index].effects.direct -> required.push(effect_name.copy())
         }
         loop edge in functions[index].effects.call_edges {
             callee: name_rows_get_text(by_key, edge) ?? next
@@ -4262,7 +4262,7 @@ jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, functions: [
     local := (loop _ in functions -> [String]{})
     loop index in order {
         loop effect_name in functions[index].effects.direct {
-            if !local[index].contains(effect_name) -> local[index].push(effect_name)
+            if !local[index].contains(effect_name) -> local[index].push(effect_name.copy())
         }
         if functions[index].effects.call_edges.contains(EFFECT_PANIC_EDGE) && !local[index].contains(AUTHORITY_PANIC_ROOT) -> local[index].push(AUTHORITY_PANIC_ROOT)
     }
@@ -4347,7 +4347,7 @@ jet_driver_effect_budget_diagnostics: fn(load: JetDriverLoadResult, functions: [
 // check, so it joins the diagnostics after the dependency summary.
 jet_driver_effect_budget_failure: fn(load: JetDriverLoadResult, budget: [Diagnostic], trace: JetDriverCompileTrace) -> JetDriverCompileResult Never! {
     result := jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Assemble), false, trace)
-    loop diagnostic in budget -> result.diagnostics.push(diagnostic)
+    loop diagnostic in budget -> result.diagnostics.push(diagnostic.copy())
     result
 }
 

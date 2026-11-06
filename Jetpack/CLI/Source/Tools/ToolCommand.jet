@@ -339,7 +339,7 @@ cli_tool_install: fn(verification: &StoreVerification, cache: &WorkspaceDeclarat
     }
     roots: pkg_resolve_roots()
     plan := RunPlan.empty(project_dir, cli_cwd_table(cache))
-    plan.refs.push(spec)
+    plan.refs.push(spec.copy())
     env := cli_compose_env_scoped(verification, theme, roots, parsed.flags, plan, RealizeScope.UserProfile, false) ?? return cli_exit_for(theme, err)
     lease: env.cache_leases.remove(0, .Slot) ?? {
         theme.error("`{spec.raw}` has no bin directory to install", "tool install projects package binaries onto PATH; this realization produced no `bin/`.", "pick a package that ships executables, or use `jetpack use <package> -- <command>` for a one-shot.")
@@ -551,7 +551,7 @@ cli_collect_manifest_bins: fn(receipt: ProfileInstallReceipt, entry: ToolManifes
         cli_validate_bin_name(bin)
         cli_validate_bin_name(member)
         if seen.contains(bin) -> return Err(CLIError.Other("duplicate user-tools bin `{bin}`"))
-        seen.push(bin)
+        seen.push(bin.copy())
         if !receipt.executable_members.contains(member) -> return Err(CLIError.Other("user-tools entry `{entry.name}` names missing executable member `{member}`"))
         pairs.push(ToolBinPair{bin: bin, member: member})
     }

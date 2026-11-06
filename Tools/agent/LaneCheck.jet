@@ -550,8 +550,8 @@ personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
 first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec, Time.Wait]> String Never! {
     if args.len() == 0 -> return ""
     argv := [String]{"git", "grep", "--no-index", "-I", "-P", "-n", "-m", "1"}
-    argv.extend(flags)
-    argv.extend(args)
+    argv.extend(flags.copy())
+    argv.extend(args.copy())
     argv.extend([String]{"--", file})
     receipt: process.cmd(argv).cwd(dir).output_limit(268435456).run() ?? return ""
     receipt.output.partition("\n").head

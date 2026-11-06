@@ -219,7 +219,7 @@ build_session_strings: fn(args: [BuildSessionValue], index: Int) -> [String]? {
         out := [String]{}
         loop value in values {
             if value == {
-                .Text(text) -> out.push(text)
+                .Text(text) -> out.push(text.copy())
                 else -> return None
             }
         }
@@ -564,7 +564,7 @@ build_session_contains_string: fn(values: [String], value: String) -> Bool Never
     false
 }
 build_session_append_unique: fn(values: &[String], value: String) Never! {
-    if !build_session_contains_string(values, value) -> values.push(value)
+    if !build_session_contains_string(values, value) -> values.push(value.copy())
 }
 
 // Build failures are values only for the checked BuildError constructors.

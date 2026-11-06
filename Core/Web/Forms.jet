@@ -253,7 +253,7 @@ input_exclude: fn(input: WebFormInput, name: String) -> WebFormInput WebFormErro
     fields := [WebFormFieldSpec]{}
     found := false
     loop item in input.fields {
-        if item.name == name -> found = true else -> fields.push(item)
+        if item.name == name -> found = true else -> fields.push(item.copy())
     }
     if !found -> return Err(WebFormError.Missing)
     if !fields_valid(fields) -> return Err(WebFormError.Invalid)
@@ -582,7 +582,7 @@ status_name: fn(status: WebFormStatus) -> String {
 
 copy_fields: fn(fields: [WebFormFieldSpec]) -> [WebFormFieldSpec] Never! {
     out := [WebFormFieldSpec]{ }
-    loop field in fields -> out.push(field)
+    loop field in fields -> out.push(field.copy())
     out
 }
 

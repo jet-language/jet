@@ -93,7 +93,7 @@ pkg_overlay_parse_keyed_overrides: fn(body: String) -> [PackageOverride] Overlay
         package: pkg_overlay_unquote(entry.before.trim())
         if package == "" -> return Err(OverlayError.Malformed("`overrides` package names cannot be empty"))
         if names.contains(package) -> return Err(OverlayError.Malformed("override `{package}` is declared more than once"))
-        names.push(package)
+        names.push(package.copy())
         record: entry.after.trim()
         if !record.starts_with("{{") -> return Err(OverlayError.Malformed("override `{package}` must use the standard `{{ … }}` record"))
         opened: record.removeprefix("{{")
@@ -512,7 +512,7 @@ pkg_overlay_exact_field_value: fn(body: String, field: String) -> String? Overla
                     else -> return Err(OverlayError.UnsupportedPolicy("workspace `policy.{name}` is unsupported; use `policy.deny` or subject-scoped `policy.grants`"))
                 }
                 if seen.contains(name) -> return Err(OverlayError.Malformed("workspace `policy.{name}` appears more than once"))
-                seen.push(name)
+                seen.push(name.copy())
                 if name == field -> values.push(parts.after.trim())
             }
             .None -> {

@@ -108,7 +108,7 @@ sema_error_conversion_path_exists: fn(edges: [SemaErrorConversionEdge], from_ty:
             if visited == current -> already = true
         }
         if already -> next
-        seen.push(current)
+        seen.push(current.copy())
         loop edge in edges {
             if edge.source != current -> next
             if edge.target == to_ty -> return true
@@ -124,7 +124,7 @@ sema_error_conversion_path_count: fn(edges: [SemaErrorConversionEdge], from_ty: 
         if name == from_ty -> return 0
     }
     inner := visiting
-    inner.push(from_ty)
+    inner.push(from_ty.copy())
     paths := 0
     loop edge in edges {
         if edge.source != from_ty -> next
@@ -138,7 +138,7 @@ sema_error_conversion_add_node: fn(nodes: &[String], name: String) Never! {
     loop node in nodes {
         if node == name -> return
     }
-    nodes.push(name)
+    nodes.push(name.copy())
 }
 
 sema_error_conversion_ambiguous_pair: fn(edges: [SemaErrorConversionEdge]) -> SemaErrorConversionEdge? {
@@ -208,7 +208,7 @@ sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication]
     } ?? false
     if !has_conversion -> return
     local_types := sema_error_conversion_local_types(items)
-    loop name in package_types -> local_types.push(name)
+    loop name in package_types -> local_types.push(name.copy())
     edges := [SemaErrorConversionEdge]{}
     output := [Item]{}
     // Each item moves from `items` into `output`, in order; a conversion is
@@ -359,7 +359,7 @@ sema_prelude_conversion_demand_keep: fn(state: Shared<SemaPreludeDemandWalk>, de
     loop kept in permit.value.demands {
         if kept.key == demand.key -> return
     }
-    permit.value.demands.push(demand)
+    permit.value.demands.push(demand.copy())
 }
 
 sema_prelude_demand_walk_take: fn(state: Shared<SemaPreludeDemandWalk>) -> [SemaPreludeConversionDemand] {
@@ -743,9 +743,9 @@ sema_check_function_failure_contracts: fn(func: Func, environment: SemaScopeEnvi
 // declared type mentions, in walk order.
 sema_public_failure_collect_named: fn(ty: Type, out: &[String]) Never! {
     if ty == {
-        .Named(name) -> out.push(name)
+        .Named(name) -> out.push(name.copy())
         .Apply(name, args) -> {
-            out.push(name)
+            out.push(name.copy())
             loop arg in args -> sema_public_failure_collect_named(arg, out)
         }
         .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_public_failure_collect_named(inner, out)

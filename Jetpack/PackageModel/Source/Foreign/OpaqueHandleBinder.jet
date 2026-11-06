@@ -35,7 +35,7 @@ LinkClosure: struct {
         links := [String]{}
         loop link in transitive {
             if link == primary || links.contains(link) -> next
-            links.push(link)
+            links.push(link.copy())
         }
         links.sort()
         LinkClosure{primary: primary, transitive: links}
@@ -44,7 +44,7 @@ LinkClosure: struct {
     // The complete deterministic link list, primary first.
     libraries: fn(self) -> [String] Never! {
         out := [String]{self.primary}
-        loop link in self.transitive -> out.push(link)
+        loop link in self.transitive -> out.push(link.copy())
         out
     }
 }
@@ -78,7 +78,7 @@ HandleOverlay: struct {
 
     with_link: fn(self, library: String) -> HandleOverlay Never! {
         out := self
-        out.links.push(library)
+        out.links.push(library.copy())
         out
     }
 
@@ -289,12 +289,12 @@ pkg_opaque_conventional_close_name: fn(function: String, typedef_name: String, s
         if raw == "" -> next
         stems.push(raw.to_lower())
         snake: pkg_opaque_camel_to_snake(raw)
-        stems.push(snake)
+        stems.push(snake.copy())
         parts: snake.split("_").to_list()
         prefix := ""
         loop index in 0..<parts.len() {
             prefix = if index == 0 -> parts[index] else -> "{prefix}_{parts[index]}"
-            stems.push(prefix)
+            stems.push(prefix.copy())
         }
     }
     wanted: function.to_lower()
@@ -382,7 +382,7 @@ pkg_opaque_resolve_alias: fn(name: String, aliases: [String: OpaqueAliasDecl], c
         .Other -> None
         .Alias(other) -> {
             chain := path
-            chain.push(name)
+            chain.push(name.copy())
             inner: pkg_opaque_resolve_alias(other, aliases, complete_tags, chain) ?? return None
             Val(OpaqueHandleShape{struct_tag: inner.struct_tag, pointer_depth: inner.pointer_depth + decl.pointer_depth})
         }

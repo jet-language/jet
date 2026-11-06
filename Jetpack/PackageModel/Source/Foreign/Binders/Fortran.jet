@@ -129,7 +129,7 @@ pkg_fortran_bind: fn(source_path: String, source: String, lib: String, cache_dir
     if has_arrays {
         pkg_binder_write(bridge_source, pkg_fortran_render_bridge(module_name, lib, routines), "could not write the Fortran array bridge")
         pkg_fortran_compile(bridge_source, bridge_object, cache_dir)
-        archive_command.push(bridge_object)
+        archive_command.push(bridge_object.copy())
     }
     output: pkg_binder_capture(archive_command, None, "ar", FORTRAN_TOOL_ACTION)
     if !output.success -> return Err(ForeignBindError.ToolFailed{tool: "ar", action: FORTRAN_TOOL_ACTION, detail: pkg_fortran_launder(output.stderr)})

@@ -1342,7 +1342,7 @@ jfmt_strip_optional_returns_in_body: fn(body: [Stmt]) -> [Stmt] Never! {
                 if value == .Val(inner) {
                     out.push(Stmt.Return{value: Val(jfmt_unwrap_redundant_optional_value(inner)), span: span})
                 } else {
-                    out.push(stmt)
+                    out.push(stmt.copy())
                 }
             }
             .Expr(expr) -> out.push(Stmt.Expr{expr: jfmt_strip_optional_returns_in_if(expr)})
@@ -1357,7 +1357,7 @@ jfmt_strip_optional_returns_in_body: fn(body: [Stmt]) -> [Stmt] Never! {
                 if else_body == .Val(inner) -> stripped_else = Val(jfmt_strip_optional_returns_in_body(inner))
                 out.push(Stmt.Switch{subject: subject, arms: stripped_arms.move(), else_body: stripped_else.move(), span: span})
             }
-            else -> out.push(stmt)
+            else -> out.push(stmt.copy())
         }
     }
     out
@@ -1426,7 +1426,7 @@ jfmt_strip_redundant_optional_returns: fn(items: [Item]) -> [Item] Never! {
                 updated.body = jfmt_strip_redundant_optional_returns(decl.body)
                 out.push(Item.GenericModule{value: updated})
             }
-            else -> out.push(item)
+            else -> out.push(item.copy())
         }
     }
     out
@@ -1647,7 +1647,7 @@ jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [To
     // Module-scoped `#Policy(...)` at a fixed position.
     module_policies := [PolicyDeclaration]{}
     loop declaration in prog.policy_declarations {
-        if jfmt_is_module_policy(declaration) -> module_policies.push(declaration)
+        if jfmt_is_module_policy(declaration) -> module_policies.push(declaration.copy())
     }
     if module_policies.len() > 0 {
         policy_span: module_policies[0].span

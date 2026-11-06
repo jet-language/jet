@@ -275,7 +275,7 @@ jet_driver_rust_foreign_record_type: fn(ty: Type, records: JetDriverRustForeignR
             if stack.contains(name) -> return None
             base: records.aliases.get(name) ?? return None
             next := stack
-            next.push(name)
+            next.push(name.copy())
             return jet_driver_rust_foreign_record_type(base, records, next)
         }
         .Apply(name, args) -> {

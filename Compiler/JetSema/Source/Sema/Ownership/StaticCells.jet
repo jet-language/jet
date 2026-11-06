@@ -43,7 +43,7 @@ sema_ownership_push_once: fn(diagnostic: Diagnostic, diagnostics: &[Diagnostic])
     loop previous in diagnostics {
         if previous.code == diagnostic.code && previous.span == diagnostic.span && previous.what == diagnostic.what -> return
     }
-    diagnostics.push(diagnostic)
+    diagnostics.push(diagnostic.copy())
 }
 
 // Rust `reject_static_mutable_borrow` for a static storage cell; any other

@@ -88,7 +88,7 @@ jet_cli_fill_effects: fn(function: FnBody, alias: String, facts: [JetCLISemEffec
             if fact.function == key {
                 required := [String]{}
                 loop row in fact.inferred {
-                    if row != "Panic" && row != "Mem" && !row.starts_with("Mem.") -> required.push(row)
+                    if row != "Panic" && row != "Mem" && !row.starts_with("Mem.") -> required.push(row.copy())
                 }
                 return if required.len() == 0 -> "none" else -> "[{required.join(", ")}]"
             }

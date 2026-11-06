@@ -420,7 +420,7 @@ parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
                 if definition.body == .Val(inner) -> updated.body = Val(parser_module_body_caps(inner.copy(), cap))
                 capped.push(Item.CodeModule{value: updated})
             }
-            else -> capped.push(item)
+            else -> capped.push(item.copy())
         }
     }
     capped
@@ -429,7 +429,7 @@ parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
 parser_func_with_cap: fn(definition: Func, cap: ModuleCap) -> Func Never! {
     updated := definition
     caps := [ModuleCap]{cap}
-    loop inner in definition.module_caps -> caps.push(inner)
+    loop inner in definition.module_caps -> caps.push(inner.copy())
     updated.module_caps = caps
     updated
 }

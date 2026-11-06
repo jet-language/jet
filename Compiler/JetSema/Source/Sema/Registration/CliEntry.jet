@@ -474,7 +474,7 @@ sema_cli_entry_label: fn(input: SemaCLIInput) -> String Never! {
 // which inputs argv named (`T.merge`).
 sema_cli_entry_parse: fn(lines: &[String], spec: SemaCLIEntrySpec, help_end: String, projection: Bool, marks: Bool) {
     if spec.table == .Val(table) {
-        lines.push(table)
+        lines.push(table.copy())
         lines.push("    __parsed: __jet_cli_args.{spec.parse}(__spec, __jet_cli_args.__cli_argv())")
         lines.push("    __status: __jet_cli_args.__cli_status(__parsed)")
         lines.push("    if __status == 0 {{")
@@ -756,7 +756,7 @@ sema_cli_entry_fallback: fn(input: SemaCLIInput, slot: Int) -> String? Never! {
 sema_cli_entry_bind: fn(lines: &[String], spec: SemaCLIEntrySpec, type_ref: String) {
     binder: if spec.assigned.len() > 0 -> " :=" else -> ":"
     lines.push("    __args{binder} {type_ref}{{{spec.literal.join(", ")}}}")
-    loop line in spec.assigned -> lines.push(line)
+    loop line in spec.assigned -> lines.push(line.copy())
 }
 
 // The wrapper of `wrapped` over `definition`, which the entry file names

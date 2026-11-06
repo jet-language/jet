@@ -128,7 +128,7 @@ sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegist
                 if !local.name.starts_with("__jet_http_mount_value_") -> next
                 row: sema_type_resolve_nominal_row(graph, body_type(tree, init), module_identity) ?? next
                 key: graph.modules[row.module_index].nominals[row.row].symbol.id.key
-                if !mounted.contains(key) -> mounted.push(key)
+                if !mounted.contains(key) -> mounted.push(key.copy())
             }
         }
     }

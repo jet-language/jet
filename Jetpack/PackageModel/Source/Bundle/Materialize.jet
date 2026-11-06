@@ -146,7 +146,7 @@ pkg_bundle_native_tree: fn(plan: &BundlePlan, stage: String, strip: Bool) Bundle
     loop file in plan.files {
         relative: pkg_bundle_native_relative(plan, file, strip)
         if seen.contains(relative) -> return Err(BundleMaterializeError{reason: "package plan emits duplicate materialized path `{relative}`"})
-        seen.push(relative)
+        seen.push(relative.copy())
         destination: files.join(stage, relative)
         pkg_bundle_native_free(destination)
         files.create_dir_all(files.dirname(destination)) ?? return Err(BundleMaterializeError{reason: "could not create package path `{destination}`: {err}"})

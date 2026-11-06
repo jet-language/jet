@@ -425,7 +425,7 @@ ir_intern_type: fn(m: &IRModule, key: String, row: IRType) -> Int Never! {
     found := name_rows_get(m.type_rows, full, full_hash) ?? -1
     if found < 0 {
         found = m.types.len()
-        m.types.push(row)
+        m.types.push(row.copy())
         m.type_keys.push(full.copy())
         name_rows_set_hashed(m.type_rows, full, full_hash, found)
     }
@@ -471,7 +471,7 @@ ir_intern_name: fn(m: &IRModule, text: String) -> Int Never! {
     if found >= 0 -> return found
     id: m.names.len()
     name_rows_set_hashed(m.name_rows, text, hash, id)
-    m.names.push(text)
+    m.names.push(text.copy())
     id
 }
 
@@ -494,7 +494,7 @@ ir_intern_bytes: fn(m: &IRModule, bytes: [U8]) -> Int Never! {
     found: name_rows_get(m.data_rows, key, hash) ?? -1
     if found >= 0 -> return found
     id: m.data.len()
-    m.data.push(bytes)
+    m.data.push(bytes.copy())
     name_rows_set_hashed(m.data_rows, key, hash, id)
     id
 }
@@ -503,7 +503,7 @@ ir_intern_bytes: fn(m: &IRModule, bytes: [U8]) -> Int Never! {
 // of the helper reports again (ir_helper_error).
 ir_helper_failed: fn(m: &IRModule, key: String, message: String) Never! {
     name_rows_set(m.helper_errors, key, m.helper_messages.len())
-    m.helper_messages.push(message)
+    m.helper_messages.push(message.copy())
 }
 
 ir_helper_error: fn(m: IRModule, key: String) -> String? Never! {
@@ -532,7 +532,7 @@ ir_function_new: fn(name: String, key: String, symbol: String, source_file: Stri
 ir_slot: fn(f: &IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> Int Never! {
     id: f.slot_type.len()
     f.slot_type.push(ty)
-    f.slot_kind.push(kind)
+    f.slot_kind.push(kind.copy())
     f.slot_name.push(name)
     f.slot_line.push(line)
     if kind == .Param -> f.param_count += 1
@@ -541,7 +541,7 @@ ir_slot: fn(f: &IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> 
 
 ir_emit: fn(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) -> Int Never! {
     at: f.op.len()
-    f.op.push(op)
+    f.op.push(op.copy())
     f.dst.push(dst)
     f.a.push(a)
     f.b.push(b)

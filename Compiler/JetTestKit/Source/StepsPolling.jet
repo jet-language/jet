@@ -68,7 +68,7 @@ kit_steps_poll: fn(step: KitStep, index: Int, context: KitStepCtx, previous: Kit
     attempt.action = ""
     state.replacements = kit_steps_replacements(step.replacements, context, state) ?? return kit_steps_action_error(state, "poll replacement token unavailable")
     rules := context.plan.json_normalize
-    loop rule in step.json_normalize -> rules.push(rule)
+    loop rule in step.json_normalize -> rules.push(rule.copy())
     interval: Int.parse(step.instruction) ?? return kit_steps_action_error(state, "invalid polling interval")
     deadline: kit_steps_answer_deadline(context.env, step.duration)
     started: time.instant()
