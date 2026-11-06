@@ -8,7 +8,7 @@ NATIVE_OVERLAY_EVENT_LOG_STATUS: String{"canonical events"}
 MAX_NATIVE_OVERLAY_EVENTS: Int{256}
 EVENT_LOG_NODES_PER_EVENT: Int{7}
 
-NativeOverlayCursor: struct { sequence: U64 }
+NativeOverlayCursor: struct { sequence: Int }
 
 NativeOverlayIdentity: struct {
     protocol: String
@@ -38,7 +38,7 @@ NativeOverlayActionRequest: struct {
     protocol: String
     session_id: String
     revision: String
-    sequence: U64
+    sequence: Int
     panel_id: String
     node_id: String
     action_id: String
@@ -52,7 +52,7 @@ NativeOverlaySelectionRequest: struct {
     protocol: String
     session_id: String
     revision: String
-    sequence: U64
+    sequence: Int
     panel_id: String
     item_key: String
 }
@@ -75,9 +75,9 @@ NativeOverlayAdapterError: enum {
     InvalidProtocol(expected: String, received: String)
     SessionMismatch(expected: String, received: String)
     InvalidRevision
-    InvalidSequence(sequence: U64)
+    InvalidSequence(sequence: Int)
     StaleRevision(expected: String, received: String)
-    StaleSequence(expected: U64, received: U64)
+    StaleSequence(expected: Int, received: Int)
     InvalidText(field: String)
     DuplicatePanel(panel_id: String)
     ReservedPanel(panel_id: String)
@@ -113,13 +113,13 @@ NativeOverlayAdapterError: enum {
 impl NativeOverlayAdapterError.Display { display: fn(&&self) -> String { self.message() } }
 
 // The current request context: the revision and cursor a request must name.
-NativeOverlayContext: struct { revision: String, sequence: U64 }
+NativeOverlayContext: struct { revision: String, sequence: Int }
 NativeOverlayRenderedPanels: struct { panels: [NativeOverlayPanelFact], dropped_for_nodes: Bool }
 
 NativeOverlayAdapter: struct {
     session_id: String
     revision: String?
-    sequence: U64?
+    sequence: Int?
     release_build: Bool
     // Oldest first; bounded by MAX_NATIVE_OVERLAY_EVENTS.
     event_facts: [JetDevtoolsEvent]
@@ -183,7 +183,7 @@ impl NativeOverlayAdapter {
         }
         events := projection.panels
         events.sort_by((left, right) -> (left.sequence() <=> right.sequence()).then(left.timestamp_ms <=> right.timestamp_ms).then(left.source() <=> right.source()).then(left.kind() <=> right.kind()).then(left.entity() <=> right.entity()))
-        previous_sequence := U64?{None}
+        previous_sequence := Int?{None}
         loop event in events {
             validate_event(event, projection)
             if previous_sequence == Val(event.sequence()) -> return Err(NativeOverlayAdapterError.InvalidSequence(sequence: event.sequence()))
@@ -211,7 +211,7 @@ impl NativeOverlayAdapter {
             rendered: self.render_panels(sequence)
             if rendered.dropped_for_nodes -> unavailable.push(make_unavailable(NATIVE_OVERLAY_EVENT_LOG_PANEL_ID, .NodeLimit))
             current: NativeOverlayEvent.new(JET_DEVTOOLS_PROTOCOL, self.session_id, projection.revision, sequence, projection.observed_at, rendered.panels)
-            _: current.validate() ?? return Err(NativeOverlayAdapterError.HostRejected(message: err))
+            _: current.validate() ?? return Err(NativeOverlayAdapterError.HostRejected(message: err.message))
             event = Val(current)
         } else {
             unavailable.push(make_unavailable("session", .EmptyStream))
@@ -260,7 +260,7 @@ impl NativeOverlayAdapter {
         sequence: self.sequence ?? return Err(NativeOverlayAdapterError.MissingProjection)
         NativeOverlayContext{revision: revision, sequence: sequence}
     }
-    validate_request_identity: fn(self, protocol: String, session_id: String, revision: String, sequence: U64) NativeOverlayAdapterError! {
+    validate_request_identity: fn(self, protocol: String, session_id: String, revision: String, sequence: Int) NativeOverlayAdapterError! {
         if protocol != JET_DEVTOOLS_PROTOCOL -> return Err(NativeOverlayAdapterError.InvalidProtocol(expected: JET_DEVTOOLS_PROTOCOL, received: protocol))
         if session_id != self.session_id -> return Err(NativeOverlayAdapterError.SessionMismatch(expected: self.session_id, received: session_id))
         context: self.current_context()
@@ -281,7 +281,7 @@ impl NativeOverlayAdapter {
         panel: self.typed_panels.get(panel_id) ?? return Err(NativeOverlayAdapterError.UnknownPanel(panel_id: panel_id))
         find_overlay_node(panel.nodes, node_id) ?? Err(NativeOverlayAdapterError.UnknownNode(node_id: node_id))
     }
-    render_panels: fn(self, sequence: U64) -> NativeOverlayRenderedPanels NativeOverlayAdapterError! {
+    render_panels: fn(self, sequence: Int) -> NativeOverlayRenderedPanels NativeOverlayAdapterError! {
         typed_node_count := 0
         panels := [NativeOverlayPanelFact]{}
         keys := self.typed_panels.keys().to_list()
@@ -317,7 +317,7 @@ node_from_event: fn(event: JetDevtoolsEvent) -> NativeOverlayNode NativeOverlayA
     if event.payload_json() == .Val(payload) -> children.push(NativeOverlayNode.text("payload", "payload").with_value(payload))
     NativeOverlayNode.new("event-{event.sequence()}", .Status, "event").with_value(event.entity()).with_status(event.kind()).with_children(children)
 }
-event_log_panel: fn(events: [JetDevtoolsEvent], sequence: U64) -> NativeOverlayPanelFact NativeOverlayAdapterError! {
+event_log_panel: fn(events: [JetDevtoolsEvent], sequence: Int) -> NativeOverlayPanelFact NativeOverlayAdapterError! {
     if sequence == 0 -> return Err(NativeOverlayAdapterError.InvalidSequence(sequence: sequence))
     if events.len() > MAX_NATIVE_OVERLAY_EVENTS || events.len() > MAX_OVERLAY_NODES / EVENT_LOG_NODES_PER_EVENT {
         return Err(NativeOverlayAdapterError.InvalidPanel(message: "native overlay event log exceeds its event or node budget"))
