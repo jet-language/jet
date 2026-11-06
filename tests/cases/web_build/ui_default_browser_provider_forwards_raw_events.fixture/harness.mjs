@@ -35,6 +35,8 @@ fire("dragenter", { dataTransfer: transfer({}) });
 const over = fire("dragover", { dataTransfer: transfer({}) });
 const drop = fire("drop", { dataTransfer: transfer({ "text/plain": "hel\u241flo\x1f", "text/uri-list": "# a comment\r\nhttps://jet-lang.dev/\r\n" }) });
 fire("dragleave", { dataTransfer: { dropEffect: "none", getData: () => "" } });
+// A page that stops polling: the host buffer fills and marks the overflow.
+for (let index = 0; index < 300; index += 1) fire("dragover", { dataTransfer: transfer({}) });
 instance.exports.jet_export_run();
 if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
 console.log(`dragover accepted: ${over.defaultPrevented}; drop accepted: ${drop.defaultPrevented}`);

@@ -136,47 +136,49 @@ function providerRecord(fields) {
 }
 
 // The page's default core.ui.host provider, installed when the page set none.
-// It forwards browser primitives only; Core decodes and judges every answer.
-// Composition events queue on 0 and drag/drop events on 1 for event_pop. The
-// clipboard is the text this page last observed through a paste, copy or cut,
-// or its own write: a browser lends the live clipboard only to a user gesture,
-// and a write's later refusal by the browser is not seen. File dialogs and
-// font shaping are absent: a file input answers later than the synchronous
-// seam and gives no filesystem path.
+// It forwards browser primitives only, raw event types and values included;
+// Core decodes and judges every answer. Composition events queue on 0 and
+// drag/drop events on 1 for event_pop, each in a host buffer of UI_QUEUE
+// records; a full buffer drops further events behind one empty record, which
+// Core reports as a full queue. The clipboard is the text this page last
+// observed through a paste, copy or cut, or its own write: a browser lends the
+// live clipboard only to a user gesture, and a write's later refusal by the
+// browser is not seen. File dialogs and font shaping are absent: a file input
+// answers later than the synchronous seam and gives no filesystem path.
+const UI_QUEUE = 256;
+
 function defaultUiProvider(doc) {
   const queues = [[], []];
   let clipboard = null;
-  const target = (event) => String(event.target?.id ?? "");
-  // The browser reports no caret inside a composition: it sits after the text.
-  const composition = (phase) => (event) => {
-    const text = event.data ?? "";
-    const kind = phase === "Commit" && text === "" ? "Cancel" : phase;
-    const caret = String(encoder.encode(text).length);
-    queues[0].push(providerRecord([target(event), kind, text, caret, caret, "", ""]));
+  const enqueue = (queue, fields) => {
+    const records = queues[queue];
+    if (records.length < UI_QUEUE) records.push(providerRecord(fields));
+    else if (records.at(-1) !== "") records.push("");
   };
-  doc.addEventListener("compositionstart", composition("Start"));
-  doc.addEventListener("compositionupdate", composition("Update"));
-  doc.addEventListener("compositionend", composition("Commit"));
+  const target = (event) => String(event.target?.id ?? "");
+  // A composition reports no caret or marked range of its own.
+  const composition = (event) => enqueue(0, [target(event), event.type, event.data ?? "", "", "", "", ""]);
+  doc.addEventListener("compositionstart", composition);
+  doc.addEventListener("compositionupdate", composition);
+  doc.addEventListener("compositionend", composition);
   // A page accepts a drop by cancelling dragover; the dropped data is
   // readable only on drop.
-  const drag = (phase) => (event) => {
-    if (phase === "Over" || phase === "Drop") event.preventDefault();
+  const drag = (event) => {
+    if (event.type === "dragover" || event.type === "drop") event.preventDefault();
     const data = event.dataTransfer;
-    const effect = data?.dropEffect ?? "none";
-    const fields = [target(event), phase, effect.charAt(0).toUpperCase() + effect.slice(1)];
-    if (phase === "Drop" && data) {
-      const text = data.getData("text/plain");
-      if (text !== "") fields.push("T" + text);
-      for (const line of data.getData("text/uri-list").split(/\r?\n/)) {
-        if (line !== "" && !line.startsWith("#")) fields.push("U" + line);
-      }
-    }
-    queues[1].push(providerRecord(fields));
+    const dropped = event.type === "drop" && data;
+    enqueue(1, [
+      target(event),
+      event.type,
+      data?.dropEffect ?? "none",
+      dropped ? data.getData("text/plain") : "",
+      dropped ? data.getData("text/uri-list") : "",
+    ]);
   };
-  doc.addEventListener("dragenter", drag("Enter"));
-  doc.addEventListener("dragover", drag("Over"));
-  doc.addEventListener("drop", drag("Drop"));
-  doc.addEventListener("dragleave", drag("Leave"));
+  doc.addEventListener("dragenter", drag);
+  doc.addEventListener("dragover", drag);
+  doc.addEventListener("drop", drag);
+  doc.addEventListener("dragleave", drag);
   // Paste carries the pasted text; copy and cut carry what the page set, else
   // the selection the browser copies.
   const observe = (event) => {

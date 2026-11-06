@@ -23,11 +23,19 @@ fn show_ime() {
     }
 }
 
-fn show_drop() {
-    if drag_drop.poll() == {
-        .Ok(event) -> print("drop: {event}")
-        .Err(error) -> print("drop: {error}")
+// Prints every drag/drop event but the dragover flood, which it counts.
+fn show_drops() {
+    over := 0
+    loop {
+        if drag_drop.poll() == {
+            .Ok(found) -> {
+                event :: found ?? break
+                if event.phase == .Over { over += 1 } else { print("drop: {event}") }
+            }
+            .Err(error) -> print("drop: {error}")
+        }
     }
+    print("drop: {over} dragover events")
 }
 
 fn run() {
@@ -54,5 +62,5 @@ fn run() {
     }
 
     loop _ in 0..<5 -> show_ime()
-    loop _ in 0..<5 -> show_drop()
+    show_drops()
 }

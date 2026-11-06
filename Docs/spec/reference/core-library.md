@@ -3695,8 +3695,12 @@ length-prefixed fields (`<decimal UTF-8 byte length>:<bytes>`). A native
 build's provider is headless and reports every capability absent, so each
 service fails with `CapabilityUnavailable` after Core validates the request.
 On the web, a page that installs no `globalThis.jetUiProvider` gets the
-runtime's default browser provider: composition events feed `ime.poll`,
-drag/drop events feed `drag_drop.poll`, and shortcuts and accessibility are
+runtime's default browser provider, which forwards raw composition and
+drag/drop events (event type, data, drop effect) to `ime.poll` and
+`drag_drop.poll`; Core maps each event type to its phase (a `compositionend`
+with no text cancels), places an unreported IME caret after the composition
+text in characters, reads URI items from `text/uri-list` lines, and reports a
+host buffer overflow as `QueueFull`. Shortcuts and accessibility are
 available. `clipboard.read_text` answers the clipboard text the page last
 observed (a paste, copy or cut, or its own `write_text`), because a browser
 lends the live clipboard only to a user gesture; before any is observed it

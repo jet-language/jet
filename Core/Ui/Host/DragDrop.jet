@@ -32,45 +32,43 @@ struct UIDragEvent {
 }
 
 // One raw event from the provider's drag/drop queue (queue 1, capability
-// code 3), a provider record of target, phase, operation, then one field per
-// item whose first character is its kind (`T` text, `U` URI) and the rest its
-// value. A browser item has no native path, so a provider never sends a file.
+// code 3), a provider record of target, the browser event type (`dragenter`,
+// `dragover`, `drop`, `dragleave`), the drop effect (`copy`, `move`, `link`),
+// and the dropped `text/plain` and `text/uri-list` data. Nonempty plain text
+// is one text item; each uri-list line that is neither empty nor a `#`
+// comment is one URI item. A browser item has no native path, so a provider
+// never sends a file. An empty record is the provider's mark that its queue
+// overflowed and dropped events.
 fn poll() -[IO]> UIDragEvent? UIHostError! {
     if !core.ui.host.__capability(3) -> return Err(UIHostError.CapabilityUnavailable{capability: "DragDrop"})
     raw :: core.ui.host.__event_pop(1) ?? return Ok(None)
+    if raw.len() == 0 -> return Err(UIHostError.QueueFull{service: "DragDrop"})
     fields :: core.ui.host.__provider_fields(raw) ?? return Err(drag_failure("a drag/drop event is not a provider record"))
-    if fields.len() < 3 -> return Err(drag_failure("a drag/drop event has at least 3 fields, not {fields.len()}"))
+    if fields.len() != 5 -> return Err(drag_failure("a drag/drop event has 5 fields, not {fields.len()}"))
     phase :: drag_phase(fields[1])
     operation :: drag_operation(fields[2])
     items := [UIDropItem]{}
-    loop index in 3..<fields.len() {
-        item :: fields[index]
-        value :: item.slice(1, item.len())
-        if item.starts_with("T") {
-            &items.push(UIDropItem.Text{value: value})
-        } else if item.starts_with("U") {
-            &items.push(UIDropItem.URI{value: value})
-        } else {
-            return Err(drag_failure("unknown drop item `{item}`"))
-        }
+    if fields[3].len() > 0 -> &items.push(UIDropItem.Text{value: fields[3].copy()})
+    loop line in fields[4].split("\n") {
+        uri :: line.trim()
+        if uri.len() > 0 && !uri.starts_with("#") -> &items.push(UIDropItem.URI{value: uri.copy()})
     }
     Ok(Val(UIDragEvent{target: UINodeID{value: fields[0].copy()}, phase: phase, operation: operation, items: items}))
 }
 
-fn drag_phase(text: String) -> UIDragPhase UIHostError! {
-    if text == "Enter" -> return Ok(UIDragPhase.Enter)
-    if text == "Over" -> return Ok(UIDragPhase.Over)
-    if text == "Drop" -> return Ok(UIDragPhase.Drop)
-    if text == "Leave" -> return Ok(UIDragPhase.Leave)
-    if text == "Cancel" -> return Ok(UIDragPhase.Cancel)
-    Err(drag_failure("unknown drag/drop phase `{text}`"))
+fn drag_phase(event: String) -> UIDragPhase UIHostError! {
+    if event == "dragenter" -> return Ok(UIDragPhase.Enter)
+    if event == "dragover" -> return Ok(UIDragPhase.Over)
+    if event == "drop" -> return Ok(UIDragPhase.Drop)
+    if event == "dragleave" -> return Ok(UIDragPhase.Leave)
+    Err(drag_failure("unknown drag/drop event `{event}`"))
 }
 
-fn drag_operation(text: String) -> UIDragOperation UIHostError! {
-    if text == "Copy" -> return Ok(UIDragOperation.Copy)
-    if text == "Move" -> return Ok(UIDragOperation.Move)
-    if text == "Link" -> return Ok(UIDragOperation.Link)
-    Err(drag_failure("unknown drag/drop operation `{text}`"))
+fn drag_operation(drop_effect: String) -> UIDragOperation UIHostError! {
+    if drop_effect == "copy" -> return Ok(UIDragOperation.Copy)
+    if drop_effect == "move" -> return Ok(UIDragOperation.Move)
+    if drop_effect == "link" -> return Ok(UIDragOperation.Link)
+    Err(drag_failure("unknown drag/drop operation `{drop_effect}`"))
 }
 
 fn drag_failure(message: String) -> UIHostError Never! {
