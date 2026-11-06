@@ -1548,9 +1548,15 @@ fn jet_cli_test_file(jet_argv: [String], file: String, color: Bool, verbose: Boo
 // RegistrationExplain.jet; only then is a syntax-shaped miss the E2106 typo
 // report. Build facts resolve their writer chain over the load of the named
 // file (BuildFactExplain.jet); `marker` sites and a policy with a source file
-// are load-only source queries; the views stay refused.
-fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool, json: Bool) -> JetCLIPlan Never! {
-    if jet_cli_has(jet_argv, "--reload") || jet_cli_has(jet_argv, "--web-graph") || jet_cli_has(jet_argv, "--cost") -> return jet_cli_not_ported("explain", color)
+// are load-only source queries; `--web-graph <file>` reports the application
+// graph of the checked entry (WebGraph.jet). The `--reload` and `--cost` views
+// stay refused.
+fn jet_cli_explain(jet_argv: [String], args: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    if jet_cli_has(jet_argv, "--reload") || jet_cli_has(jet_argv, "--cost") -> return jet_cli_not_ported("explain", color)
+    if jet_cli_has(jet_argv, "--web-graph") {
+        if args.len() < 2 -> return jet_cli_done("", "usage: jet explain --web-graph <file.jet>\n", JET_DRIVER_EXIT_USAGE)
+        return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "web-graph", file: jet_cli_inspect_absolute(args[1]), subject: None, json: json, color: false, threads: threads, notice: "", project: false}}
+    }
     if jet_cli_explain_diagnostic(args, color, json) == .Val(plan) -> return plan
     if args.len() == 2 && jet_cli_is_diagnostic_code(args[1]) -> return JetCLIPlan.Done{output: jet_driver_explain_code(Val(args[1]), color)}
     query :: args[1]
@@ -2028,7 +2034,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
                 else -> {}
             }
         }
-        "explain" -> return jet_cli_explain(jet_argv, args, color, json)
+        "explain" -> return jet_cli_explain(jet_argv, args, color, json, threads)
         "crash" -> return jet_cli_crash(args, color)
         "debug" -> return jet_cli_debug(jet_argv, args, color)
         "check" -> return jet_cli_check_settled(jet_argv, args, color, quiet, threads, json)

@@ -1505,7 +1505,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if job.action == "decisions" -> return jet_cli_inspect_decisions_host(job, source)
     if job.action == "graph" || job.action == "query" || job.action == "explain-build" -> return jet_cli_inspect_checked_build_host(job)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    semantic :: job.action == "rights" || job.action == "impact" || job.action == "shapes" || job.action == "expand"
+    semantic :: job.action == "rights" || job.action == "impact" || job.action == "shapes" || job.action == "expand" || job.action == "web-graph"
     mode :: if semantic -> JetDriverCompileMode.Doc else -> JetDriverCompileMode.Program
     watch :: cli_time.start()
     compiled :: jet_cli_compile_file(job.file, job.color, job.threads, mode)
@@ -1522,6 +1522,7 @@ fn jet_cli_inspect_run_job(job: JetCLIInspectJob) -> JetDriverVerbOutput {
                 job.action == "rights" -> output = jet_cli_inspect_rights(result, job.project, job.file, job.json)
                 job.action == "impact" -> output = jet_cli_inspect_impact_report(job, result, diagnostics.len(), watch.elapsed_millis())
                 job.action == "expand" -> output = jet_cli_inspect_expand_report(job, result, diagnostics.len(), watch.elapsed_millis())
+                job.action == "web-graph" -> output = jet_cli_web_graph_report(result, job.json)
                 else -> panic("inspect action has no canonical provider: {job.action}")
             }
             jet_cli_inspect_finish(job, ^output)
@@ -1699,9 +1700,8 @@ fn jet_cli_inspect_check_text(source: String, elapsed_ms: Int, diagnostics: Int)
 }
 
 // `run_expand` after the check: the selected lens projected from the checked
-// program (Expand.jet, ExpandFacts.jet). The web lens and the bare all-lens
-// view need the checked application graph the Doc result does not carry yet, so
-// they are refused rather than reported empty.
+// program (Expand.jet, ExpandFacts.jet, WebGraph.jet). The bare all-lens view
+// is refused rather than reported partially.
 fn jet_cli_inspect_expand_report(job: JetCLIInspectJob, result: JetDriverCompileResult, diagnostics: Int, elapsed_ms: Int) -> JetDriverVerbOutput {
     selection :: job.subject ?? return jet_cli_not_ported_output("inspect expand <all lenses>", false)
     index :: jet_cli_checked_semindex(result)
@@ -1710,6 +1710,7 @@ fn jet_cli_inspect_expand_report(job: JetCLIInspectJob, result: JetDriverCompile
         "inline" -> facts = jet_cli_expand_inline(result.doc_modules, job.json)
         "effects" -> facts = jet_cli_expand_effects(index)
         "derive" -> facts = jet_cli_expand_derive(index, result.doc_modules)
+        "web" -> facts = jet_cli_expand_web(result.doc_modules, result.entry_module_identity, job.json)
         "templates" -> facts = jet_cli_expand_templates(result.doc_modules)
         "callable-signature" -> facts = jet_cli_expand_callable(index, result.doc_modules)
         "memory" -> facts = jet_cli_expand_memory(result.doc_modules, index)
