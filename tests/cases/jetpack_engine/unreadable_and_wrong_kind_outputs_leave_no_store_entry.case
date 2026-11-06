@@ -10,7 +10,7 @@ mkdir: project
 mkdir: fixtures
 mkdir: root/unreadable
 chmod: root/unreadable 000
-when !dir-readable root/unreadable: write: fixtures/nixpkgs-greet.json unreadable.template
+when !dir-readable root/unreadable: write: fixtures/jetpack-greet.json unreadable.template
 when !dir-readable root/unreadable: step: jetpack use --prep greet@jetpack --no-color --offline
 when !dir-readable root/unreadable: env: JETPACK_FIXTURES={work}/fixtures
 when !dir-readable root/unreadable: exit: nonzero
@@ -25,7 +25,7 @@ chmod: root/unreadable 700
 spawn peer: jet run {work}/socket-peer.jet
 await: file ready
 capture: socket = text file socket.path
-write: fixtures/nixpkgs-greet.json socket.template
+write: fixtures/jetpack-greet.json socket.template
 step: jetpack use --prep greet@jetpack --no-color --offline
 env: JETPACK_FIXTURES={work}/fixtures
 exit: nonzero

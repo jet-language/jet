@@ -122,16 +122,15 @@ pkg_parse_common: fn(text: String, origin: String, config: Bool) -> PackageFacts
                 next
             }
         }
+        // The package's single `build: fn` may live here; only a record
+        // value of `build:` names build profiles.
+        if pkg_is_build_entry_decl(entry) -> next
         binding := ManifestEntry?{None}
         if pkg_split_package_binding(entry) == .Val(split) {
             if split.operator == "::" -> binding = Val(ManifestEntry{key: split.left.trim(), value: split.right.trim()})
         }
         if binding == None -> binding = pkg_split_field(entry)
-        found: binding ?? {
-            // The package's single `build: fn` may live here.
-            if pkg_is_build_entry_decl(entry) -> next
-            return Err(PackageParseError.MalformedField(entry))
-        }
+        found: binding ?? return Err(PackageParseError.MalformedField(entry))
         field: found.key
         value: found.value
         if seen.contains(field) {

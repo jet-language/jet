@@ -61,6 +61,7 @@ use {
         TOKEN_EQ,
         TOKEN_HASH,
         TOKEN_IDENT,
+        TOKEN_KW_FN,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
         TOKEN_LINE_COMMENT,
@@ -1285,6 +1286,12 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
                     }
                 }
                 "settings" | "build" -> {
+                    // `build: fn(b: Build)` is the package's build entry, which may live in
+                    // package.jet; only a record value names build profiles.
+                    if field == "build" && value_index < tokens.len() && tokens[value_index].kind == TOKEN_KW_FN {
+                        index += 1
+                        next
+                    }
                     open_index := value_index
                     if open_index < tokens.len() && tokens[open_index].kind == TOKEN_DOT -> open_index += 1
                     close_index: jet_driver_manifest_matching_brace(tokens, open_index) ?? {

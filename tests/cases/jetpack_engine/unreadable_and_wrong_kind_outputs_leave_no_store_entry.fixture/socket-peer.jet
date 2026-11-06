@@ -1,3 +1,7 @@
+package: {
+    name: "socket_peer"
+    authority: { allow: [Env, FS.Read, FS.Write, Net] }
+}
 // SETUP-PORT of jetpack_engine.rs:3210-3215,3225-3226: real short UNIX socket, held through build.
 use {
     net: core.net
@@ -16,7 +20,8 @@ run: fn() {
     }
     pid: process.current_pid()
     socket: files.join(sys.temp_dir(), "jpk-sock-{pid}")
-    listener: net.unix_listen(socket) ?? panic("bind real UNIX socket")
+    // The listener is held to the end of `run`, so the socket stays bound until the stop signal.
+    _listener: net.unix_listen(socket) ?? panic("bind real UNIX socket")
     files.write("socket.path", socket) ?? panic("socket path")
     files.write("ready.partial", "ready") ?? panic("ready temporary")
     files.rename("ready.partial", "ready") ?? panic("ready publish")
@@ -24,6 +29,5 @@ run: fn() {
         if files.exists("stop") -> break
         time.sleep(10ms)
     }
-    // Keep the listener alive until the stop signal, then process exit closes it.
-    print(listener.path)
+    print(socket)
 }
