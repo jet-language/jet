@@ -5016,28 +5016,28 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2120,
+      "line": 2177,
       "column": 5,
       "reason": "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2233,
+      "line": 2275,
       "column": 5,
       "reason": "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2242,
+      "line": 2284,
       "column": 5,
       "reason": "crypto expert: typed signing keys validate the Ed25519 seed width"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2248,
+      "line": 2290,
       "column": 5,
       "reason": "crypto expert: typed verification validates public key and signature widths before strict verification"
     },
@@ -10275,10 +10275,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Crypto/Crypto.jet | 715:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
 | Core | Core/Crypto/Crypto.jet | 1256:5 | "crypto expert: Argon2id password hashing" |
 | Core | Core/Crypto/Crypto.jet | 1283:5 | "crypto expert: Argon2id password verification" |
-| Core | Core/Crypto/Crypto.jet | 2120:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
-| Core | Core/Crypto/Crypto.jet | 2233:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
-| Core | Core/Crypto/Crypto.jet | 2242:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
-| Core | Core/Crypto/Crypto.jet | 2248:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/Crypto.jet | 2177:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
+| Core | Core/Crypto/Crypto.jet | 2275:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
+| Core | Core/Crypto/Crypto.jet | 2284:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
+| Core | Core/Crypto/Crypto.jet | 2290:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
 | Core | Core/Crypto/ExpertCt.jet | 13:5 | "Core fixed-limb workspace reserves its complete operation-owned word capacity before filling" |
 | Core | Core/Crypto/ExpertCt.jet | 39:5 | "Core fixed-limb extraction reserves its exact public output width before filling" |
 | Core | Core/Crypto/ExpertCt.jet | 325:5 | "Core Ed25519 hashing reserves the exact combined public part lengths before filling" |
@@ -10974,7 +10974,7 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file": "Core/Crypto/Crypto.jet", "function": "__vault_wrapped_bytes", "proof": "vault.__wrapped_bytes (vault.jet:187) returns an owned copy of the carrier's `encoded` field: the same authenticated wrapped container that WrappedVaultKey.from_bytes validated or the vault export produced. No unwrapped key or Secret is read, and the carrier stays intact. The `__` name is reserved (E0067 outside Core), so only Core and compiler lowering call it."},
   {"file": "Core/Crypto/Crypto.jet", "function": "__vault_unlock_recipient", "proof": "vault.__key_unlock_recipient (vault.jet:203-205) builds KeyUnlock{kind: 1, secret: identity.bytes[0..<len]}: a read View of the caller's X25519SecretKey bytes, not a copy, so no second copy of the identity exists and the owner keeps its zeroizing Close. The gate performs no raw memory operation; the view's lifetime is ordinary type checking of the view-carrying KeyUnlock (vault.jet:198-201; emitted as the borrowing JetVaultKeyUnlock<'_>, Emit/Types.jet:3201). Its consumer is vault.prepare_import_wrapped (vault.jet:275). Users reach it only as KeyUnlock.Recipient(identity) (BuiltinStatics.jet:146, 149)."},
   {"file": "Core/Crypto/Crypto.jet", "function": "__vault_unlock_passphrase", "proof": "vault.__key_unlock_passphrase (vault.jet:206-208) builds KeyUnlock{kind: 2, secret: passphrase.bytes[0..<len]}: a read View of the caller's Secret, not a copy, so the passphrase owner keeps its zeroizing Close. The gate performs no raw memory operation; the view's lifetime is ordinary type checking of the view-carrying KeyUnlock (vault.jet:198-201; emitted as the borrowing JetVaultKeyUnlock<'_>, Emit/Types.jet:3201). Its consumer is vault.prepare_import_wrapped (vault.jet:275). Users reach it only as KeyUnlock.Passphrase(secret) (BuiltinStatics.jet:147, 150)."},
-  {"file": "Core/Crypto/Crypto.jet", "function": "poly1305", "proof": "Not a core.crypto export (Core.jet:44), so its callers are crypto.jet's chacha_poly_seal (:2146) and chacha_poly_open (:2165). Both pass otk = chacha20_block(key, nonce, 0) (:2137, :2157), the RFC 8439 §2.6 one-time key, over the AEAD framing aad ∥ pad16 ∥ ct ∥ pad16 ∥ le64(aad) ∥ le64(ct); the 64-byte block covers the 32 key bytes fixedcrypto.poly1305 reads (expert_ct.jet:628). The key is therefore one-time per (key, nonce): xchacha_seal's callers use a random 24-byte nonce for the payload (:466, :506) and HKDF nonces under fresh ephemeral keys for wraps (:486-496, :1161-1174, :1190). open compares tags in constant time before decrypting (:2166)."},
+  {"file": "Core/Crypto/Crypto.jet", "function": "poly1305", "proof": "Not a core.crypto export (Core.jet:44), so its callers are crypto.jet's chacha_poly_seal (:2209) and chacha_poly_open (:2228). Both pass otk = chacha20_block(key, nonce, 0) (:2200, :2220), the RFC 8439 §2.6 one-time key, over the AEAD framing aad ∥ pad16 ∥ ct ∥ pad16 ∥ le64(aad) ∥ le64(ct); the 64-byte block covers the 32 key bytes fixedcrypto.poly1305 reads (expert_ct.jet:628). The key is therefore one-time per (key, nonce): xchacha_seal's callers use a random 24-byte nonce for the payload (:466, :506) and HKDF nonces under fresh ephemeral keys for wraps (:486-496, :1161-1174, :1190). open compares tags in constant time before decrypting (:2229)."},
   {"file": "Core/Crypto/Crypto.jet", "function": "x25519_scalarmult", "proof": "Not a core.crypto export (Core.jet:44). Its callers are x25519 (:1012), which first requires 32-byte secret and public keys (:1009-1010) and rejects an all-zero shared secret (:1013), x25519_public (:1019) after a 32-byte check (:1018), and X25519SecretKey.public_key (:251) with the fixed 32-byte base point. fixedcrypto.x25519 panics on any other width rather than reading past its inputs (expert_ct.jet:150), wipes its workspace (:201), and returns a fresh 32-byte list."},
   {"file": "Core/Crypto/Crypto.jet", "function": "ed25519_sign_raw", "proof": "Not a core.crypto export (Core.jet:44). Its only caller sign (:998) requires a 32-byte SigningKey seed first (:997). fixedcrypto.ed_sign hashes the seed into a private workspace, wipes it (expert_ct.jet:355-385), and returns the 64-byte signature; the seed is never copied out."},
   {"file": "Core/Crypto/Crypto.jet", "function": "ed25519_verify_raw", "proof": "Not a core.crypto export (Core.jet:44). Its only caller verify (:1005) requires a 32-byte public key and a 64-byte signature (:1002-1004); fixedcrypto.ed_verify rejects other widths itself (expert_ct.jet:512). Only public inputs are read and only a Bool returns."},

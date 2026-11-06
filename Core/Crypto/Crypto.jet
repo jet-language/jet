@@ -72,9 +72,9 @@ impl JetcTemp.Close {
 
 // Incremental SHA-256 uses the same compressor as the one-shot API. Pending
 // plaintext is secret-owned: one partial block, or two blocks during final padding.
-JetcHash: struct { state: [Int], pending: Secret, length: Int }
+JetcHash: struct { state: [U32], schedule: [U32], pending: Secret, length: Int }
 jetc_hash: fn() -> JetcHash Never! {
-    JetcHash{state: copy_ints(C_SHA256_IV), pending: Secret.from_bytes([U8]{}), length: 0}
+    JetcHash{state: sha256_state(C_SHA256_IV), schedule: sha256_schedule(), pending: Secret.from_bytes([U8]{}), length: 0}
 }
 jetc_hash_update: fn(hash: &JetcHash, data: [U8]) Never! {
     hash.length += data.len()
@@ -85,13 +85,13 @@ jetc_hash_update: fn(hash: &JetcHash, data: [U8]) Never! {
             offset += 1
         }
         if hash.pending.bytes.len() == 64 {
-            sha256_block(hash.state, hash.pending.bytes, 0)
+            sha256_block(hash.state, hash.schedule, hash.pending.bytes, 0)
             core.crypto.wipe(hash.pending.bytes)
             hash.pending.bytes = [U8]{}
         }
     }
     loop offset + 64 <= data.len() {
-        sha256_block(hash.state, data, offset)
+        sha256_block(hash.state, hash.schedule, data, offset)
         offset += 64
     }
     loop offset < data.len() {
@@ -104,10 +104,10 @@ jetc_hash_finish: fn(hash: &JetcHash) -> [U8] Never! {
     hash.pending.bytes.push(U8{128})
     loop hash.pending.bytes.len() %% 64 != 56 -> hash.pending.bytes.push(U8{0})
     loop b in be64(hash.length * 8) -> hash.pending.bytes.push(b)
-    loop offset in 0..<hash.pending.bytes.len(), 64 -> sha256_block(hash.state, hash.pending.bytes, offset)
+    loop offset in 0..<hash.pending.bytes.len(), 64 -> sha256_block(hash.state, hash.schedule, hash.pending.bytes, offset)
     core.crypto.wipe(hash.pending.bytes)
     hash.pending.bytes = [U8]{}
-    words_to_bytes(hash.state, 4)
+    sha256_bytes(hash.state)
 }
 
 C_MASK32: 4294967295
@@ -1373,11 +1373,11 @@ phc_b64_value: fn(b: U8) -> Int? {
 }
 
 
-C_SHA256_IV: [Int]{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
+C_SHA256_IV: [U32]{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19}
 
-C_SHA224_IV: [Int]{0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939, 0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4}
+C_SHA224_IV: [U32]{0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939, 0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4}
 
-C_SHA256_K: [Int]{
+C_SHA256_K: [U32]{
     0x428a2f98,
     0x71374491,
     0xb5c0fbcf,
@@ -1487,27 +1487,53 @@ rotr32: fn(x: Int, n: Int) -> Int Never! {
 
 sha256_raw: fn(data: [U8]) -> [U8] Never! { sha2_256(data, C_SHA256_IV) }
 
-sha2_256: fn(data: [U8], iv: [Int]) -> [U8] Never! {
+/// SHA-256 family (FIPS 180-4) over `U32` words with the given initial hash.
+/// The message schedule is one 64-word buffer reused by every block.
+sha2_256: fn(data: [U8], iv: [U32]) -> [U8] Never! {
     msg := copy_bytes(data)
     bit_len: data.len() * 8
     msg.push(U8{0x80})
     loop msg.len() % 64 != 56 -> msg.push(U8{0})
     loop b in be64(bit_len) -> msg.push(b)
-    state := copy_ints(iv)
-    loop off in 0..<msg.len(), 64 -> sha256_block(state, msg, off)
-    words_to_bytes(state, 4)
+    state := sha256_state(iv)
+    w := sha256_schedule()
+    loop off in 0..<msg.len(), 64 -> sha256_block(state, w, msg, off)
+    sha256_bytes(state)
 }
 
-sha256_block: fn(state: &[Int], msg: [U8], off: Int) Never! {
-    w := [Int]{}
-    loop t in 0..<16 {
-        i: off + t * 4
-        w.push(be32_word(msg, i))
+sha256_state: fn(iv: [U32]) -> [U32] Never! {
+    state := [U32]{}
+    loop word in iv -> state.push(word)
+    state
+}
+
+sha256_schedule: fn() -> [U32] Never! {
+    w := [U32]{}
+    loop _ in 0..<64 -> w.push(U32{0})
+    w
+}
+
+sha256_bytes: fn(state: [U32]) -> [U8] Never! {
+    out := [U8]{}
+    loop word in state {
+        loop i in 0..<4 -> out.push(U8{(word >> (24 - 8 * i)).bit_and(U32{255})})
     }
+    out
+}
+
+/// Big-endian word at `bytes[off]`.
+load_be32: fn(bytes: [U8], off: Int) -> U32 Never! {
+    (U32{bytes[off]} << 24).bit_or(U32{bytes[off + 1]} << 16).bit_or(U32{bytes[off + 2]} << 8).bit_or(U32{bytes[off + 3]})
+}
+
+/// One SHA-256 compression of the 64-byte block at `msg[off]` into `state`.
+#Arithmetic(.Wrapping)
+sha256_block: fn(state: &[U32], w: &[U32], msg: [U8], off: Int) Never! {
+    loop t in 0..<16 -> w[t] = load_be32(msg, off + t * 4)
     loop t in 16..<64 {
-        s0: rotr32(w[t - 15], 7).bit_xor(rotr32(w[t - 15], 18)).bit_xor((w[t - 15] >> 3))
-        s1: rotr32(w[t - 2], 17).bit_xor(rotr32(w[t - 2], 19)).bit_xor((w[t - 2] >> 10))
-        w.push(wrap32(w[t - 16] + s0 + w[t - 7] + s1))
+        s0: ((w[t - 15].rotate_right(7)).bit_xor(w[t - 15].rotate_right(18))).bit_xor((w[t - 15] >> 3))
+        s1: ((w[t - 2].rotate_right(17)).bit_xor(w[t - 2].rotate_right(19))).bit_xor((w[t - 2] >> 10))
+        w[t] = w[t - 16] + s0 + w[t - 7] + s1
     }
     a := state[0]
     b := state[1]
@@ -1518,29 +1544,28 @@ sha256_block: fn(state: &[Int], msg: [U8], off: Int) Never! {
     g := state[6]
     h := state[7]
     loop t in 0..<64 {
-        s1: rotr32(e, 6).bit_xor(rotr32(e, 11)).bit_xor(rotr32(e, 25))
-        ch: (e.bit_and(f)).bit_xor(((e.bit_xor(C_MASK32)).bit_and(g)))
-        temp1: wrap32(h + s1 + ch + C_SHA256_K[t] + w[t])
-        s0: rotr32(a, 2).bit_xor(rotr32(a, 13)).bit_xor(rotr32(a, 22))
+        s1: ((e.rotate_right(6)).bit_xor(e.rotate_right(11))).bit_xor(e.rotate_right(25))
+        ch: (e.bit_and(f)).bit_xor(((e.bit_xor(U32.MAX)).bit_and(g)))
+        temp1: h + s1 + ch + C_SHA256_K[t] + w[t]
+        s0: ((a.rotate_right(2)).bit_xor(a.rotate_right(13))).bit_xor(a.rotate_right(22))
         maj: (a.bit_and(b)).bit_xor((a.bit_and(c))).bit_xor((b.bit_and(c)))
-        temp2: wrap32(s0 + maj)
         h = g
         g = f
         f = e
-        e = wrap32(d + temp1)
+        e = d + temp1
         d = c
         c = b
         b = a
-        a = wrap32(temp1 + temp2)
+        a = temp1 + s0 + maj
     }
-    state[0] = wrap32(state[0] + a)
-    state[1] = wrap32(state[1] + b)
-    state[2] = wrap32(state[2] + c)
-    state[3] = wrap32(state[3] + d)
-    state[4] = wrap32(state[4] + e)
-    state[5] = wrap32(state[5] + f)
-    state[6] = wrap32(state[6] + g)
-    state[7] = wrap32(state[7] + h)
+    state[0] = state[0] + a
+    state[1] = state[1] + b
+    state[2] = state[2] + c
+    state[3] = state[3] + d
+    state[4] = state[4] + e
+    state[5] = state[5] + f
+    state[6] = state[6] + g
+    state[7] = state[7] + h
 }
 
 sha1_raw: fn(data: [U8]) -> [U8] {
@@ -2039,60 +2064,87 @@ keccak_f: fn(st: &[Int]) {
     }
 }
 
-/// RFC 8439 ChaCha20. `counter` is the 32-bit block counter.
-chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
-    st := [Int]{
-        0x61707865,
-        0x3320646e,
-        0x79622d32,
-        0x6b206574,
-        u32le(key, 0),
-        u32le(key, 4),
-        u32le(key, 8),
-        u32le(key, 12),
-        u32le(key, 16),
-        u32le(key, 20),
-        u32le(key, 24),
-        u32le(key, 28),
-        wrap32(counter),
-        u32le(nonce, 0),
-        u32le(nonce, 4),
-        u32le(nonce, 8),
+/// RFC 8439 ChaCha20 state: constants, key, 32-bit block counter, nonce.
+chacha20_state: fn(key: [U8], nonce: [U8], counter: Int) -> [U32] Never! {
+    [U32]{
+        U32{0x61707865},
+        U32{0x3320646e},
+        U32{0x79622d32},
+        U32{0x6b206574},
+        load_le32(key, 0),
+        load_le32(key, 4),
+        load_le32(key, 8),
+        load_le32(key, 12),
+        load_le32(key, 16),
+        load_le32(key, 20),
+        load_le32(key, 24),
+        load_le32(key, 28),
+        wrapping(U32{counter}),
+        load_le32(nonce, 0),
+        load_le32(nonce, 4),
+        load_le32(nonce, 8),
     }
-    w := copy_ints(st)
-    loop i in 0..<10 {
-        // column rounds
+}
+
+/// The sixteen-word working buffer every block of one call reuses.
+chacha20_words: fn() -> [U32] Never! {
+    w := [U32]{}
+    loop _ in 0..<16 -> w.push(U32{0})
+    w
+}
+
+/// The twenty ChaCha rounds of `state` into `w`, before the final addition.
+chacha20_rounds: fn(state: [U32], w: &[U32]) Never! {
+    loop i in 0..<16 -> w[i] = state[i]
+    loop _ in 0..<10 {
         qr(w, 0, 4, 8, 12)
         qr(w, 1, 5, 9, 13)
         qr(w, 2, 6, 10, 14)
         qr(w, 3, 7, 11, 15)
-        // diagonal
         qr(w, 0, 5, 10, 15)
         qr(w, 1, 6, 11, 12)
         qr(w, 2, 7, 8, 13)
         qr(w, 3, 4, 9, 14)
     }
-    loop i in 0..<16 -> w[i] = wrap32(w[i] + st[i])
+}
+
+#Arithmetic(.Wrapping)
+chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
+    state: chacha20_state(key, nonce, counter)
+    w := chacha20_words()
+    chacha20_rounds(state, w)
     out := [U8]{}
-    loop i in 0..<16 {
-        v: w[i]
-        out.push(wrapping(U8{v}))
-        out.push(wrapping(U8{v >> 8}))
-        out.push(wrapping(U8{v >> 16}))
-        out.push(wrapping(U8{v >> 24}))
-    }
+    loop i in 0..<16 -> push_le32(out, w[i] + state[i])
     out
 }
 
-qr: fn(s: &[Int], a: Int, b: Int, c: Int, d: Int) Never! {
-    s[a] = wrap32(s[a] + s[b])
-    s[d] = rotl32((s[d]).bit_xor(s[a]), 16)
-    s[c] = wrap32(s[c] + s[d])
-    s[b] = rotl32((s[b]).bit_xor(s[c]), 12)
-    s[a] = wrap32(s[a] + s[b])
-    s[d] = rotl32((s[d]).bit_xor(s[a]), 8)
-    s[c] = wrap32(s[c] + s[d])
-    s[b] = rotl32((s[b]).bit_xor(s[c]), 7)
+#Arithmetic(.Wrapping)
+qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
+    a := s[ia]
+    b := s[ib]
+    c := s[ic]
+    d := s[id]
+    a += b
+    d = (d.bit_xor(a)).rotate_left(16)
+    c += d
+    b = (b.bit_xor(c)).rotate_left(12)
+    a += b
+    d = (d.bit_xor(a)).rotate_left(8)
+    c += d
+    b = (b.bit_xor(c)).rotate_left(7)
+    s[ia] = a
+    s[ib] = b
+    s[ic] = c
+    s[id] = d
+}
+
+load_le32: fn(bytes: [U8], off: Int) -> U32 Never! {
+    if off + 3 >= bytes.len() -> return U32{0}
+    U32{bytes[off]}.bit_or(U32{bytes[off + 1]} << 8).bit_or(U32{bytes[off + 2]} << 16).bit_or(U32{bytes[off + 3]} << 24)
+}
+
+push_le32: fn(out: &[U8], value: U32) Never! {
+    loop k in 0..<4 -> out.push(U8{(value >> (8 * k)).bit_and(U32{255})})
 }
 
 u32le: fn(bytes: [U8], off: Int) -> Int Never! {
@@ -2100,20 +2152,25 @@ u32le: fn(bytes: [U8], off: Int) -> Int Never! {
     (((((u8_int(bytes[off])).bit_or((u8_int(bytes[off + 1]) << 8))).bit_or((u8_int(bytes[off + 2]) << 16))).bit_or((u8_int(bytes[off + 3]) << 24)))).bit_and(C_MASK32)
 }
 
+#Arithmetic(.Wrapping)
 chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never! {
+    state := chacha20_state(key, nonce, counter)
+    w := chacha20_words()
     out := [U8]{}
     i := 0
-    ctr := counter
-    loop {
-        if i >= plain.len() -> return out
-        block: chacha20_block(key, nonce, ctr)
-        ctr = ctr + 1
-        loop j in 0..<64 {
-            if i >= plain.len() -> return out
-            out.push(wrapping(U8{u8_int(plain[i]).bit_xor(u8_int(block[j]))}))
-            i = i + 1
+    loop i < plain.len() {
+        chacha20_rounds(state, w)
+        loop k in 0..<16 {
+            word: w[k] + state[k]
+            loop shift in 0..<4 {
+                if i >= plain.len() -> return out
+                out.push(plain[i].bit_xor(U8{(word >> (8 * shift)).bit_and(U32{255})}))
+                i += 1
+            }
         }
+        state[12] = state[12] + U32{1}
     }
+    out
 }
 
 poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! {
@@ -2174,45 +2231,30 @@ chacha_poly_open: fn(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
 }
 
 hchacha20: fn(key: [U8], nonce16: [U8]) -> [U8] Never! {
-    st := [Int]{
-        0x61707865,
-        0x3320646e,
-        0x79622d32,
-        0x6b206574,
-        u32le(key, 0),
-        u32le(key, 4),
-        u32le(key, 8),
-        u32le(key, 12),
-        u32le(key, 16),
-        u32le(key, 20),
-        u32le(key, 24),
-        u32le(key, 28),
-        u32le(nonce16, 0),
-        u32le(nonce16, 4),
-        u32le(nonce16, 8),
-        u32le(nonce16, 12),
+    state: [U32]{
+        U32{0x61707865},
+        U32{0x3320646e},
+        U32{0x79622d32},
+        U32{0x6b206574},
+        load_le32(key, 0),
+        load_le32(key, 4),
+        load_le32(key, 8),
+        load_le32(key, 12),
+        load_le32(key, 16),
+        load_le32(key, 20),
+        load_le32(key, 24),
+        load_le32(key, 28),
+        load_le32(nonce16, 0),
+        load_le32(nonce16, 4),
+        load_le32(nonce16, 8),
+        load_le32(nonce16, 12),
     }
-    loop i in 0..<10 {
-        qr(st, 0, 4, 8, 12)
-        qr(st, 1, 5, 9, 13)
-        qr(st, 2, 6, 10, 14)
-        qr(st, 3, 7, 11, 15)
-        qr(st, 0, 5, 10, 15)
-        qr(st, 1, 6, 11, 12)
-        qr(st, 2, 7, 8, 13)
-        qr(st, 3, 4, 9, 14)
-    }
+    w := chacha20_words()
+    chacha20_rounds(state, w)
     out := [U8]{}
-    loop k in 0..<4 -> hchacha_word(out, st[k])
-    loop k in 12..<16 -> hchacha_word(out, st[k])
+    loop k in 0..<4 -> push_le32(out, w[k])
+    loop k in 12..<16 -> push_le32(out, w[k])
     out
-}
-
-hchacha_word: fn(out: &[U8], v: Int) Never! {
-    out.push(wrapping(U8{v}))
-    out.push(wrapping(U8{v >> 8}))
-    out.push(wrapping(U8{v >> 16}))
-    out.push(wrapping(U8{v >> 24}))
 }
 
 xchacha_seal: fn(key: [U8], nonce24: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {

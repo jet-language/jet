@@ -15,8 +15,6 @@ use {
 
 C_AES_RCON: [U8]{1, 2, 4, 8, 16, 32, 64, 128, 27, 54}
 
-C_MASK32: 4294967295
-
 /// BLAKE2b initialization vector (RFC 7693 2.6).
 C_BLAKE2B_IV: [Int]{
     0x6a09e667f3bcc908,
@@ -29,24 +27,9 @@ C_BLAKE2B_IV: [Int]{
     0x5be0cd19137e2179,
 }
 
-wrap32: fn(n: Int) -> Int Never! { n.bit_and(C_MASK32) }
-
-rotl32: fn(x: Int, n: Int) -> Int Never! {
-    v: (x).bit_and(C_MASK32)
-    r: (n).bit_and(31)
-    if r == 0 -> return v
-    ((((v << r)).bit_or((v >> (32 - r))))).bit_and(C_MASK32)
-}
-
 copy_bytes: fn(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
     loop b in bytes -> out.push(b)
-    out
-}
-
-copy_ints: fn(values: [Int]) -> [Int] Never! {
-    out := [Int]{}
-    loop value in values -> out.push(value)
     out
 }
 
@@ -77,12 +60,13 @@ ed25519_sign_raw: fn(seed: [U8], msg: [U8]) -> [U8] Never! { ct.ed_sign(seed, ms
 ed25519_verify_raw: fn(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! { ct.ed_verify(pk, msg, sig) }
 
 
-chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
-    st := [Int]{
-        0x61707865,
-        0x3320646e,
-        0x79622d32,
-        0x6b206574,
+/// RFC 8439 ChaCha20 state: constants, key, 32-bit block counter, nonce.
+chacha20_state: fn(key: [U8], nonce: [U8], counter: Int) -> [U32] Never! {
+    [U32]{
+        U32{0x61707865},
+        U32{0x3320646e},
+        U32{0x79622d32},
+        U32{0x6b206574},
         u32le(key, 0),
         u32le(key, 4),
         u32le(key, 8),
@@ -91,12 +75,23 @@ chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
         u32le(key, 20),
         u32le(key, 24),
         u32le(key, 28),
-        wrap32(counter),
+        wrapping(U32{counter}),
         u32le(nonce, 0),
         u32le(nonce, 4),
         u32le(nonce, 8),
     }
-    w := copy_ints(st)
+}
+
+/// The sixteen-word working buffer every block of one call reuses.
+chacha20_words: fn() -> [U32] Never! {
+    w := [U32]{}
+    loop _ in 0..<16 -> w.push(U32{0})
+    w
+}
+
+/// The twenty ChaCha rounds of `state` into `w`, before the final addition.
+chacha20_rounds: fn(state: [U32], w: &[U32]) Never! {
+    loop i in 0..<16 -> w[i] = state[i]
     loop _ in 0..<10 {
         qr(w, 0, 4, 8, 12)
         qr(w, 1, 5, 9, 13)
@@ -107,48 +102,66 @@ chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
         qr(w, 2, 7, 8, 13)
         qr(w, 3, 4, 9, 14)
     }
-    loop i in 0..<16 -> w[i] = wrap32(w[i] + st[i])
+}
+
+#Arithmetic(.Wrapping)
+chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
+    state: chacha20_state(key, nonce, counter)
+    w := chacha20_words()
+    chacha20_rounds(state, w)
     out := [U8]{}
-    loop i in 0..<16 {
-        v: w[i]
-        out.push(wrapping(U8{v}))
-        out.push(wrapping(U8{v >> 8}))
-        out.push(wrapping(U8{v >> 16}))
-        out.push(wrapping(U8{v >> 24}))
-    }
+    loop i in 0..<16 -> push_u32le(out, w[i] + state[i])
     out
 }
 
-qr: fn(s: &[Int], a: Int, b: Int, c: Int, d: Int) Never! {
-    s[a] = wrap32(s[a] + s[b])
-    s[d] = rotl32((s[d]).bit_xor(s[a]), 16)
-    s[c] = wrap32(s[c] + s[d])
-    s[b] = rotl32((s[b]).bit_xor(s[c]), 12)
-    s[a] = wrap32(s[a] + s[b])
-    s[d] = rotl32((s[d]).bit_xor(s[a]), 8)
-    s[c] = wrap32(s[c] + s[d])
-    s[b] = rotl32((s[b]).bit_xor(s[c]), 7)
+#Arithmetic(.Wrapping)
+qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
+    a := s[ia]
+    b := s[ib]
+    c := s[ic]
+    d := s[id]
+    a += b
+    d = (d.bit_xor(a)).rotate_left(16)
+    c += d
+    b = (b.bit_xor(c)).rotate_left(12)
+    a += b
+    d = (d.bit_xor(a)).rotate_left(8)
+    c += d
+    b = (b.bit_xor(c)).rotate_left(7)
+    s[ia] = a
+    s[ib] = b
+    s[ic] = c
+    s[id] = d
 }
 
-u32le: fn(bytes: [U8], off: Int) -> Int Never! {
-    if off + 3 >= bytes.len() -> return 0
-    (((((u8_int(bytes[off])).bit_or((u8_int(bytes[off + 1]) << 8))).bit_or((u8_int(bytes[off + 2]) << 16))).bit_or((u8_int(bytes[off + 3]) << 24)))).bit_and(C_MASK32)
+u32le: fn(bytes: [U8], off: Int) -> U32 Never! {
+    if off + 3 >= bytes.len() -> return U32{0}
+    U32{bytes[off]}.bit_or(U32{bytes[off + 1]} << 8).bit_or(U32{bytes[off + 2]} << 16).bit_or(U32{bytes[off + 3]} << 24)
 }
 
+push_u32le: fn(out: &[U8], value: U32) Never! {
+    loop k in 0..<4 -> out.push(U8{(value >> (8 * k)).bit_and(U32{255})})
+}
+
+#Arithmetic(.Wrapping)
 chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never! {
+    state := chacha20_state(key, nonce, counter)
+    w := chacha20_words()
     out := [U8]{}
     i := 0
-    ctr := counter
-    loop {
-        if i >= plain.len() -> return out
-        block: chacha20_block(key, nonce, ctr)
-        ctr = ctr + 1
-        loop j in 0..<64 {
-            if i >= plain.len() -> return out
-            out.push(wrapping(U8{u8_int(plain[i]).bit_xor(u8_int(block[j]))}))
-            i = i + 1
+    loop i < plain.len() {
+        chacha20_rounds(state, w)
+        loop k in 0..<16 {
+            word: w[k] + state[k]
+            loop shift in 0..<4 {
+                if i >= plain.len() -> return out
+                out.push(plain[i].bit_xor(U8{(word >> (8 * shift)).bit_and(U32{255})}))
+                i += 1
+            }
         }
+        state[12] = state[12] + U32{1}
     }
+    out
 }
 
 poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! { ct.poly1305(key, data) }
@@ -197,11 +210,11 @@ chacha_poly_open: fn(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
 
 
 hchacha20: fn(key: [U8], nonce16: [U8]) -> [U8] Never! {
-    st := [Int]{
-        0x61707865,
-        0x3320646e,
-        0x79622d32,
-        0x6b206574,
+    state: [U32]{
+        U32{0x61707865},
+        U32{0x3320646e},
+        U32{0x79622d32},
+        U32{0x6b206574},
         u32le(key, 0),
         u32le(key, 4),
         u32le(key, 8),
@@ -215,27 +228,12 @@ hchacha20: fn(key: [U8], nonce16: [U8]) -> [U8] Never! {
         u32le(nonce16, 8),
         u32le(nonce16, 12),
     }
-    loop _ in 0..<10 {
-        qr(st, 0, 4, 8, 12)
-        qr(st, 1, 5, 9, 13)
-        qr(st, 2, 6, 10, 14)
-        qr(st, 3, 7, 11, 15)
-        qr(st, 0, 5, 10, 15)
-        qr(st, 1, 6, 11, 12)
-        qr(st, 2, 7, 8, 13)
-        qr(st, 3, 4, 9, 14)
-    }
+    w := chacha20_words()
+    chacha20_rounds(state, w)
     out := [U8]{}
-    loop k in 0..<4 -> hchacha_word(out, st[k])
-    loop k in 12..<16 -> hchacha_word(out, st[k])
+    loop k in 0..<4 -> push_u32le(out, w[k])
+    loop k in 12..<16 -> push_u32le(out, w[k])
     out
-}
-
-hchacha_word: fn(out: &[U8], value: Int) Never! {
-    out.push(wrapping(U8{value}))
-    out.push(wrapping(U8{value >> 8}))
-    out.push(wrapping(U8{value >> 16}))
-    out.push(wrapping(U8{value >> 24}))
 }
 
 xchacha_seal: fn(key: [U8], nonce24: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
@@ -533,8 +531,6 @@ gf128_mul: fn(x: &[U64], high: U64, low: U64) Never! {
     x[0] = zh
     x[1] = zl
 }
-
-u8_int: fn(b: U8) -> Int Never! { Int.from_u8(b) }
 
 
 // Six eight-plane banks, allocated once and reused by every round/block.
