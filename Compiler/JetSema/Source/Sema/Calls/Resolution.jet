@@ -262,6 +262,12 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
             if diagnostics.len() == 0 -> &diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
             return None
         }
+        // A distinct type is not a conversion function: its destination-owned
+        // conversion names the base, `UserID.from_int(value)`.
+        if symbol.kind == SymbolKind.Type && sema_scope_declaration_distinct(environment, program, symbol.id) == .Val(definition) {
+            &diagnostics.push(sema_error("E0753", span, "`{name}(value)` is not a distinct conversion", "explicit conversions are owned by the destination type and name their source", "write `{name}.{sema_call_distinct_base_method(definition.base)}(value)`"))
+            return None
+        }
         &diagnostics.push(sema_call_not_callable_value(name, ty, program, span))
         return None
     }

@@ -2105,6 +2105,18 @@ fn sema_expression_typed_literal_distinct_mismatch(head: Type, value: TExpr, env
     true
 }
 
+// D-DOTCTOR3=A / D-RANGETYPE1: an untyped numeric literal body elaborates
+// against a distinct head, so `UserID{42}` is the base conversion
+// `UserID.from_int(42)` and a range type checks the literal (E0135). A typed
+// value body (`CustomerID{n}`) keeps the E0753 mismatch.
+fn sema_expression_typed_literal_distinct_literal(head: Type, value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if sema_expression_typed_literal_written_integer(value) == None && !sema_expr_decimal_literal_operand(value, false) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    facts :: sema_expr_distinct_facts(head, environment, program, &scopes) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    owner :: sema_expression_type_symbol(&scopes, environment, program, facts.name) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    argument :: CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    sema_call_try_distinct_conversion(owner, facts.name, sema_call_distinct_base_method(facts.base), [CallArg]{argument}, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
 fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // An overflow word written around this literal (sema_call_check_special_overflow)
     // covers this conversion alone, so it is taken before the body is checked.
@@ -2246,6 +2258,8 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             if word == .Val(name) {
                 if sema_expression_typed_literal_word_literal(name, result_head, value, &diagnostics) -> return None
             }
+            distinct_literal := sema_expression_typed_literal_distinct_literal(result_head, value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if distinct_literal.handled -> return distinct_literal.value
             checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             checked :: checked_optional ?? return None
             if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, &diagnostics) -> return None
@@ -2275,6 +2289,8 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             if word == .Val(name) {
                 if sema_expression_typed_literal_word_literal(name, result_head, value, &diagnostics) -> return None
             }
+            distinct_literal := sema_expression_typed_literal_distinct_literal(result_head, value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if distinct_literal.handled -> return distinct_literal.value
             checked_optional := if sema_expression_typed_literal_value_needs_head(value, result_head) -> sema_check_expression(value, Val(result_head), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             checked :: checked_optional ?? return None
             if sema_expression_typed_literal_float_to_integer(result_head, checked.ty, checked.span, &diagnostics) -> return None

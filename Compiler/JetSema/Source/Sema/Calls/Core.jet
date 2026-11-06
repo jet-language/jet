@@ -198,16 +198,19 @@ fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, pro
 // Rust core_call expert policy: a raw `core.crypto.expert` primitive, or a
 // `core.crypto.vault` key-material operation outside the typed lifecycle,
 // runs only inside an audited `#Unsafe` region. The call already resolved
-// through the module's import, so the region is the remaining gate.
-fn sema_call_core_crypto_expert_gate(module_name: String, member: String, span: Span, context: SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
-    if context.unsafe_depth > 0 -> return
+// through the module's import, so the region is the remaining gate. True
+// when the call was refused: it has no result for later checks to judge.
+fn sema_call_core_crypto_expert_gate(module_name: String, member: String, span: Span, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if context.unsafe_depth > 0 -> return false
     if module_name == "core.crypto.expert" {
         &diagnostics.push(sema_error("E0510", span, "`core.crypto.expert.{member}` requires an audited `#Unsafe` region", "raw crypto primitives may only run inside an explicit expert-tier gate (I1)", "wrap the call in `#Unsafe(\"crypto expert: …\") {{ … }}` or use `crypto.seal`/`open` instead"))
-        return
+        return true
     }
     if module_name == "core.crypto.vault" && !sema_call_core_vault_safe_member(member) {
         &diagnostics.push(sema_error("E0510", span, "`{module_name}.{member}` requires an audited `#Unsafe` region", "raw key import may only run inside an explicit expert-tier gate (I1)", "wrap the call in `#Unsafe(\"vault key import: …\") {{ … }}`"))
+        return true
     }
+    false
 }
 
 // Rust `vault_comptime_denied` (raised:754 @ 6083377777): a `core.crypto.vault`

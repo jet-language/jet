@@ -3369,7 +3369,7 @@ fn sema_expr_core_module_method_checked(receiver: Expr, method: String, method_s
         reactive := sema_call_try_reactive_core_call(module_name, method, args, type_args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: reactive.handled, value: reactive.value}
     }
-    sema_call_core_crypto_expert_gate(module_name, method, method_span, context, &diagnostics)
+    if sema_call_core_crypto_expert_gate(module_name, method, method_span, context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     if sema_call_core_vault_build_time_gate(module_name, method, method_span, scopes, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     sema_call_core_unbuilt_note(module_name, method, method_span, environment, program, &unbuilt)
     if !nested && sema_call_core_variadic_print(environment, program, scopes, alias, method, args.len(), alias_span, &context) {
@@ -3904,6 +3904,12 @@ fn sema_expr_check_declared_method(receiver: Expr, receiver_value: TExpr, method
             }
         }
         argument_index += 1
+    }
+    // Core declares `Transform.then<Next>`, so a chain whose middle spaces
+    // differ reaches this declared call; it is E2521, not an uninferable `Next`.
+    if method == "then" && args.len() == 1 && argument_types[0] == .Val(next_type) {
+        // copy: `argument_types` stays live for the inference call below
+        if sema_call_geometry_report_transform_chain_mismatch(receiver_value.ty, method, [Type]{next_type.copy()}, method_span, environment, program, &diagnostics) -> return None
     }
     candidates := [SemaCallMethodCandidate]{}
     if args.len() == 1 && operator_trait == .Val(trait_name) {
@@ -5022,6 +5028,7 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
             core_math_operand = (left_core && sema_expr_math_leaf_name(lhs.ty) != None) || (right_core && sema_expr_math_leaf_name(rhs.ty) != None)
         }
     }
+    geometry_present :: sema_expr_geometry_is_point(lhs.ty) || sema_expr_geometry_is_delta(lhs.ty) || sema_expr_geometry_is_point(rhs.ty) || sema_expr_geometry_is_delta(rhs.ty)
     if source_operator && sema_expr_operator_trait(op) != None {
         before :: diagnostics.len()
         value :: sema_expr_check_operator(op, left, right, lhs, rhs, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, line)
@@ -5034,11 +5041,14 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
                 &diagnostics.push(sema_expr_math_shape_mismatch(op, lhs.ty, rhs.ty, span))
                 return None
             }
-            &diagnostics.push(sema_expr_missing_operator_hook(op, lhs.ty, span))
-            return None
+            // A Core point or displacement with no hook for this operand
+            // pair names its coordinate spaces (E2520 below), not a missing hook.
+            if !geometry_present {
+                &diagnostics.push(sema_expr_missing_operator_hook(op, lhs.ty, span))
+                return None
+            }
         }
     }
-    geometry_present := sema_expr_geometry_is_point(lhs.ty) || sema_expr_geometry_is_delta(lhs.ty) || sema_expr_geometry_is_point(rhs.ty) || sema_expr_geometry_is_delta(rhs.ty)
     geometry := sema_expr_check_geometry_binary(op, lhs, rhs, span, line, &diagnostics)
     if geometry != None -> return sema_expr_expected(geometry ?? lhs, expected, environment, program, &diagnostics)
     if geometry_present -> return None

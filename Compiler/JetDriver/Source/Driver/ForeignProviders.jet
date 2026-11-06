@@ -1286,7 +1286,8 @@ fn jet_driver_assemble_foreign_providers(snapshot: JetDriverAuthorizedSourceSnap
                         !jet_driver_foreign_same_signature(merged[index], surface.overlay_functions[overlay_index]) -> {
                             diagnostic :: jet_driver_diagnostic("E3205", surface.overlay_functions[overlay_index].name_span, "overlay `{surface.overlay_functions[overlay_index].name}` disagrees with the generated binding", "user `#Import module c.{surface.library}` may override bindgen symbols, but the signature must stay compatible when replacing", "match the generated signature, or rename your overlay function")
                             if {
-                                overlay_path != "" -> &diagnostics.push(diagnostic_with_source_path(^diagnostic, overlay_path, surface.overlay_functions[overlay_index].name_span.start))
+                                // The overlay's spans are relative to its own source file, as at its load (E3207/E3208).
+                                overlay_path != "" -> &diagnostics.push(diagnostic_with_source_path(^diagnostic, overlay_path, 0))
                                 else -> &diagnostics.push(diagnostic)
                             }
                         }
