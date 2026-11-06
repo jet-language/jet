@@ -2766,6 +2766,203 @@ sort_float_range: fn(values: &[Float], lo: Int, hi: Int) Never! {
     }
 }
 
+// rank_select_prototype (#3018): the private worst-case-linear selection with a
+// caller comparator. It permutes a list of input indices only, so `before`
+// reads every value where it lies (borrowed, never copied or moved) and the
+// input is unchanged. `before(a, b)` is a strict weak order. The first
+// comparator error stops the selection and returns unchanged: no comparison
+// follows it. The answer is the input index of the value at `rank` of the
+// order (0 <= rank < len).
+rank_select_prototype: fn<T, E>(values: View<T>, rank: Int, before: fn(T, T) -> Bool E!) -> Int E! {
+    if rank < 0 || rank >= values.len() -> panic("rank {rank} is outside 0..<{values.len()}")
+    order := [Int]{}
+    loop index in 0..<values.len() -> &order.push(index)
+    rank_select_range<T, E>(values, &order, 0, order.len(), rank, before)
+}
+
+// Selects over order[lo..<hi]. On return the indices before `rank` in the
+// range name values that are not after the answer, and the indices after it
+// name values that are not before it (the partition law).
+rank_select_range: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, rank: Int, before: fn(T, T) -> Bool E!) -> Int E! {
+    start := lo
+    end := hi
+    loop {
+        if end - start <= 5 {
+            rank_sort_small<T, E>(values, &order, start, end, before)
+            return order[rank]
+        }
+        pivot: rank_pivot<T, E>(values, &order, start, end, before)
+        // [start, less) before pivot, [less, more) equivalent, [more, end) after.
+        less := start
+        index := start
+        more := end
+        loop index < more {
+            current: order[index]
+            if {
+                before(values[current], values[pivot]) -> {
+                    order[index] = order[less]
+                    order[less] = current
+                    less = less + 1
+                    index = index + 1
+                }
+                before(values[pivot], values[current]) -> {
+                    more = more - 1
+                    order[index] = order[more]
+                    order[more] = current
+                }
+                else -> {
+                    index = index + 1
+                }
+            }
+        }
+        if {
+            rank < less -> {
+                end = less
+            }
+            rank >= more -> {
+                start = more
+            }
+            else -> {
+                return order[rank]
+            }
+        }
+    }
+}
+
+// Gathers the median of each group of five at the front of the range and
+// answers the input index of the median of those medians.
+rank_pivot: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, before: fn(T, T) -> Bool E!) -> Int E! {
+    count := 0
+    start := lo
+    loop start < hi {
+        end := start + 5
+        if end > hi -> end = hi
+        rank_sort_small<T, E>(values, &order, start, end, before)
+        middle: start + (end - start - 1) /% 2
+        median: order[middle]
+        order[middle] = order[lo + count]
+        order[lo + count] = median
+        count = count + 1
+        start = end
+    }
+    rank_select_range<T, E>(values, &order, lo, lo + count, lo + (count - 1) /% 2, before)
+}
+
+// Insertion sort of at most five indices by their values.
+rank_sort_small: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, before: fn(T, T) -> Bool E!) E! {
+    loop i in lo + 1..<hi {
+        j := i
+        loop j > lo {
+            if !before(values[order[j]], values[order[j - 1]]) -> break
+            current: order[j]
+            order[j] = order[j - 1]
+            order[j - 1] = current
+            j = j - 1
+        }
+    }
+}
+
+rank_test_values: fn(count: Int, seed: Int) -> [Int] Never! {
+    out := [Int]{}
+    state := seed
+    loop index in 0..<count {
+        state = (state * 1103515245 + 12345 + index) %% 2147483648
+        &out.push(state %% 97)
+    }
+    out
+}
+
+rank_test_before: fn(a: Int, b: Int, calls: &Int) -> Bool Never! {
+    calls += 1
+    a < b
+}
+
+rank_test_refusing: fn(a: Int, b: Int, calls: &Int, stop: Int) -> Bool DataError! {
+    calls += 1
+    if calls == stop -> return Err(data_error(DataErrorKind.InvalidArgument, "comparison {stop} refused", "rank_select"))
+    Ok(a < b)
+}
+
+rank_test_text_before: fn(a: String, b: String) -> Bool Never! { text_compare(a, b) < 0 }
+
+#Test("rank_select_prototype") {
+    // Boundaries and every rank of short, sorted, reversed, equal and mixed inputs.
+    cases := [[Int]]{[Int]{7}, [Int]{2, 1}, [Int]{5, 5, 5, 5, 5, 5, 5}}
+    ascending := [Int]{}
+    descending := [Int]{}
+    loop index in 0..<23 {
+        &ascending.push(index)
+        &descending.push(22 - index)
+    }
+    &cases.push(ascending)
+    &cases.push(descending)
+    &cases.push(rank_test_values(41, 3))
+    loop values in cases {
+        sorted := values.copy()
+        &sorted.sort()
+        view: values[0..<values.len()]
+        loop rank in 0..<values.len() {
+            calls := 0
+            order := [Int]{}
+            loop index in 0..<values.len() -> &order.push(index)
+            found: rank_select_range<Int, Never>(view, &order, 0, order.len(), rank, (a: Int, b: Int) -> rank_test_before(a, b, &calls))
+            assert_eq(values[found], sorted[rank])
+            // Partition law: nothing before the rank is after the answer, and
+            // nothing after it is before the answer.
+            loop index in 0..<rank -> assert(values[order[index]] <= values[found])
+            loop index in rank + 1..<order.len() -> assert(values[order[index]] >= values[found])
+            assert_eq(order.len(), values.len())
+        }
+        assert_eq(values.len(), sorted.len())
+    }
+
+    // Comparison bound: sorting a group of five takes at most 10 comparisons
+    // (2 per value) and a partition at most 2 per value, so T(n) <= T(n/5) +
+    // T(7n/10) + 4n, which is at most 40n, on random, sorted, reversed and
+    // equal inputs alike.
+    large: [[Int]]{rank_test_values(2000, 11), ascending.copy(), descending.copy()}
+    loop values in large {
+        view: values[0..<values.len()]
+        ranks: [Int]{0, values.len() /% 2, values.len() - 1}
+        loop rank in ranks {
+            calls := 0
+            _: rank_select_prototype<Int, Never>(view, rank, (a: Int, b: Int) -> rank_test_before(a, b, &calls))
+            assert(calls <= 40 * values.len())
+        }
+    }
+    same := [Int]{}
+    loop index in 0..<2000 -> &same.push(4)
+    same_calls := 0
+    _: rank_select_prototype<Int, Never>(same[0..<same.len()], 1000, (a: Int, b: Int) -> rank_test_before(a, b, &same_calls))
+    assert(same_calls <= 40 * same.len())
+
+    // Callback error order: the first refusal returns unchanged and no
+    // comparison follows it.
+    mixed: rank_test_values(300, 5)
+    stops: [Int]{1, 2, 17, 250}
+    loop stop in stops {
+        calls := 0
+        if rank_select_prototype<Int, DataError>(mixed[0..<mixed.len()], 150, (a: Int, b: Int) -> rank_test_refusing(a, b, &calls, stop)) == {
+            .Ok(_) -> assert(false)
+            .Err(error) -> assert_eq(error.reason, "comparison {stop} refused")
+        }
+        assert_eq(calls, stop)
+    }
+
+    // Borrowed values: owning text is compared where it lies and the input is unchanged.
+    words: [String]{"pear", "fig", "apple", "kiwi", "date", "fig", "plum", "lime", "banana", "cherry", "grape"}
+    before_words: words.copy()
+    loop rank in 0..<words.len() {
+        found: rank_select_prototype<String, Never>(words[0..<words.len()], rank, (a: String, b: String) -> rank_test_text_before(a, b))
+        smaller := 0
+        loop word in words {
+            if text_compare(word, words[found]) < 0 -> smaller = smaller + 1
+        }
+        assert(smaller <= rank)
+    }
+    assert_eq(words, before_words)
+}
+
 render_bar_text: fn(labels: [String], values: [Float]) -> String Never! {
     bounds: value_bounds(values)
     minimum: bounds.min
