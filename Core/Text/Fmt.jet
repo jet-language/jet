@@ -265,20 +265,27 @@ fn byte_slice(value: String, start: Int, end: Int) -> String Never! {
     String.from_bytes(slice_b(value.bytes(), start, end)) ?? ""
 }
 
-/// SI units (1000), one decimal below 10 and rounded at or above 10.
+/// SI units (1000), one decimal below 10 and rounded at or above 10, half
+/// away from zero, in exact Int arithmetic: no magnitude passes through Float.
 fn bytes(n: Int) -> String Never! {
     sign :: if n < 0 -> "-" else -> ""
     units :: ["B", "KB", "MB", "GB", "TB", "PB", "EB"]
-    size := Float{abs_int(n)}
+    size :: abs_int(n)
+    scale := 1
     unit := 0
-    loop size >= 1000.0 && unit + 1 < units.len() {
-        size /= 1000.0
+    loop unit + 1 < units.len() && size /% scale >= 1000 {
+        scale *= 1000
         unit += 1
     }
+    whole :: size /% scale
+    rest :: size %% scale
     shown :: if {
-        unit == 0 -> "{abs_int(n)}"
-        size >= 10.0 -> "{math.round(size)}"
-        else -> trim_point_zero(float_fixed(size, 1))
+        unit == 0 -> "{whole}"
+        whole >= 10 -> "{whole + (if rest * 2 >= scale -> 1 else -> 0)}"
+        else -> {
+            tenths :: (size * 20 + scale) /% (scale * 2)
+            if tenths %% 10 == 0 -> "{tenths /% 10}" else -> "{tenths /% 10}.{tenths %% 10}"
+        }
     }
     "{sign}{shown} {units[unit]}"
 }
