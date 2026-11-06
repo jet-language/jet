@@ -9,14 +9,13 @@ copy: {root}/Tools/editors/zed/languages/jet/highlights.scm Tools/editors/zed/la
 copy: Tools/editors/tree-sitter/grammar.js original.js
 step: jet self devtools grammars
 exit: 0
-step baseline: jet run oracle
+step baseline: jet run --allow=Env,FS.Read oracle
 env: S5_FILE={work}/Tools/editors/tree-sitter/grammar.js
 exit: 0
-capture: baseline stdout doc $
 copy: original.js Tools/editors/tree-sitter/grammar.js
-step: jet run seed
+step: jet run --allow=FS.Read,FS.Write seed
 exit: 0
-step: jet run oracle
+step: jet run --allow=Env,FS.Read oracle
 env: S5_FILE={work}/Tools/editors/tree-sitter/grammar.js
 exit: 0
-json: stdout doc $ != "{cap:baseline}"
+stdout: != baseline

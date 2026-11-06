@@ -91,7 +91,7 @@ come from the generated `BEGIN/END GENERATED JET SYNTAX HIGHLIGHTS` sections,
 rendered from the syntax registry
 ([`Highlights.jet`](../../../Compiler/JetFoundation/Data/Syntax/Highlights.jet)
 and the marker structs of [`Markers.jet`](../../../Compiler/Prelude/Markers.jet))
-by `node Tools/agent/editor-grammars.mjs --write`. Every string in
+by `jet self devtools grammars`. Every string in
 `highlights.scm` must be an anonymous grammar token. The LSP semantic overlay
 refines live coloring for
 ownership markers, rules, decorators, and effect rows; it does not change
@@ -110,7 +110,7 @@ then rerun `install.sh`.
 Useful repository checks, with `JET` naming an admitted Jet executable, are:
 
 ```sh
-node Tools/agent/editor-grammars.mjs --check
+Tools/agent/jet-env "$JET" self devtools grammars && git diff --exit-code -- Tools/editors
 Tools/agent/jet-env "$JET" test Compiler/JetLSP
 Tools/agent/jet-env "$JET" self lsp doctor
 Tools/agent/jet-env "$JET" self lsp --bench

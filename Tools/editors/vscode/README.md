@@ -152,7 +152,7 @@ parser: use feature sources and the language specification for accepted syntax.
 To regenerate the checked-in grammar while working on the repository:
 
 ```sh
-node Tools/agent/editor-grammars.mjs --write
+jet self devtools grammars
 ```
 
 ## Focused checks

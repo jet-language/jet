@@ -6591,8 +6591,9 @@ and audit become uniform.
 
 **D-HL1**: highlighting is generated lexical base plus semantic overlay.
 The syntax registry owns all user-typeable tokens;
-`node Tools/agent/editor-grammars.mjs --write` regenerates VS Code/TextMate,
-tree-sitter, and Zed generated sections, and `--check` fails on drift. LSP semantic tokens refine live editors for
+`jet self devtools grammars` regenerates VS Code/TextMate,
+tree-sitter, and Zed generated sections, and the
+`grammar/editor_grammars_match_generated_sections` case fails on drift. LSP semantic tokens refine live editors for
 ownership (`copy`, `^`, `&`) and markers; retired/foreign spellings are not
 colored as live syntax.
 

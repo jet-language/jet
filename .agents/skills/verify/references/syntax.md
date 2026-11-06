@@ -10,7 +10,7 @@ authoritative; this reference replaces a generic in-skill checklist.
   add a provisional entry without an approved decision ID.
 - For grammar or parser changes, inspect the relevant grammar and parser source,
   then regenerate and check the editor grammar sections:
-  `node Tools/agent/editor-grammars.mjs --write`. Do not treat that command
+  `jet self devtools grammars`, then `git diff -- Tools/editors`. Do not treat that command
   as runtime or tier evidence.
 - For diagnostics caused by syntax, use the canonical row in
   `Compiler/Prelude/Diagnostics.jet`, matching UI snapshot, and
