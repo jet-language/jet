@@ -8,20 +8,26 @@
 // record to. Replay: JET_PROVE_REPLAY_JOURNAL names the records the parent
 // wrote from the artifact, served in order instead of the OS, and
 // JET_PROVE_REPLAY_TRACE a file that gains `C` for each record served and one
-// `D` at the first read the next record does not answer. A later harness of
-// the same run (a rerun child) starts after the records the trace shows
+// `D` at the first read the next record does not answer, and, before each
+// replayed HTTP hop, `Q`, u64 LE length, and the hop's request as Core
+// encoded it, for the parent to check against the artifact. A later harness
+// of the same run (a rerun child) starts after the records the trace shows
 // served. After `D` every read fails, as an unrecorded authority would.
 //
 // A record: u8 kind, u64 LE request, u64 LE result, then, for an uppercase
 // kind, the result's bytes. Kinds: `R` Rand bytes (result = request), `r` a
 // Rand read the OS refused (result 0), `I` a stdin read of up to `request`
 // bytes that delivered `result` (0 at end of input), `i` one that failed
-// (result = errno).
+// (result = errno), `N` one HTTP hop (request 0) with the `result` bytes Core
+// encoded (Core/Http/Client.jet `__client_net_tape`; on replay, the parent's
+// shorter replay form).
 // Root48: lock0, mode8 (1 capture, 2 replay, 3 diverged), path16 (owned
 // journal or trace path), records24, length32, at40.
 PROVE_JOURNAL_HEAD :: I64{17}
 PROVE_JOURNAL_RAND :: I64{82}
 PROVE_JOURNAL_STDIN :: I64{73}
+PROVE_JOURNAL_NET :: I64{78}
+PROVE_JOURNAL_REQUEST :: I64{81}
 prove_journal_root := I64{0}
 
 fn rt_prove_journal_open() {
@@ -58,13 +64,18 @@ fn rt_prove_journal_open() {
         trap_store(wrapping(out + I64{8}), I64{0})
         if (jet_time_raw_zone_file_bytes(trace, out, wrapping(out + I64{8})) != I64{0}) {
             served :: trap_word(wrapping(out + I64{8}))
+            data :: trap_word(out)
             seen := I64{0}
             loop seen < served {
-                if (rt_text_byte(wrapping(trap_word(out) + seen)) != I64{67} || !rt_prove_journal_skip(root)) {
+                mark :: rt_text_byte(wrapping(data + seen))
+                if (mark == PROVE_JOURNAL_REQUEST && seen + I64{9} <= served) {
+                    seen += I64{9} + rt_prove_le(wrapping(data + seen + I64{1}))
+                } else if (mark != I64{67} || !rt_prove_journal_skip(root)) {
                     trap_store(wrapping(root + I64{8}), I64{3})
                     break
+                } else {
+                    seen += I64{1}
                 }
-                seen += I64{1}
             }
             if (served != I64{0}) -> jet_rt_free(trap_word(out), served, I64{8})
         }
@@ -190,6 +201,55 @@ fn rt_prove_stdin_terminal_read(into: I64, capacity: I64) -> I64 {
     }
     jet_rt_free(cell, I64{24}, I64{8})
     got
+}
+
+// Core/Http/Client.jet `__client_once` (its c.mbedtls import): 0 outside
+// `jet prove`, 1 capture, 2 replay (diverged included).
+#Export(c) fn jet_prove_net_mode() -> I64 {
+    root :: prove_journal_root
+    if (root == I64{0}) -> return I64{0}
+    if (trap_word(wrapping(root + I64{8})) == I64{1}) -> return I64{1}
+    I64{2}
+}
+
+// A capture appends one hop as an `N` record. `data` lends `length` packed
+// bytes for this call.
+#Export(c) fn jet_prove_net_record(data: I64, length: I64) {
+    root :: prove_journal_root
+    if (root == I64{0} || length <= I64{0}) -> return
+    sync_mutex_lock(root)
+    if (trap_word(wrapping(root + I64{8})) == I64{1}) -> rt_prove_journal_record(root, PROVE_JOURNAL_NET, I64{0}, length, data)
+    sync_mutex_unlock(root)
+}
+
+// A replay traces the hop's request (`Q`, u64 LE length, the `length` bytes
+// `data` lends) and serves the next `N` record: 1 with its bytes' address
+// and length stored in the `out` and `out_length` words (the loaded records
+// stay put for the run), 0 once the run diverged.
+#Export(c) fn jet_prove_net_take(data: I64, length: I64, out: I64, out_length: I64) -> I64 {
+    root :: prove_journal_root
+    if (root == I64{0} || length < I64{0}) -> return I64{0}
+    sync_mutex_lock(root)
+    served := I64{-1}
+    if (trap_word(wrapping(root + I64{8})) == I64{2}) {
+        total :: I64{9} + length
+        request :: jet_rt_alloc(total, I64{8})
+        trap_put(request, PROVE_JOURNAL_REQUEST)
+        rt_prove_put_le(wrapping(request + I64{1}), length)
+        test_copy_bytes(wrapping(request + I64{9}), data, length)
+        rt_prove_journal_write(root, request, total)
+        jet_rt_free(request, total, I64{8})
+        served = rt_prove_journal_take(root, PROVE_JOURNAL_NET, I64{0})
+    }
+    found := I64{0}
+    if (served >= I64{0}) {
+        records :: trap_word(wrapping(root + I64{24}))
+        trap_store(out, wrapping(records + served + PROVE_JOURNAL_HEAD))
+        trap_store(out_length, rt_prove_le(wrapping(records + served + I64{9})))
+        found = I64{1}
+    }
+    sync_mutex_unlock(root)
+    found
 }
 
 // The next record when it is a `kind` read (or its failed lowercase twin)

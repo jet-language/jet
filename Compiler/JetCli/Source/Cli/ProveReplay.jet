@@ -6,9 +6,9 @@
 // refusal here comes before a program runs and leaves no artifact. Capture
 // records one wall-clock value, which the run's programs read through
 // JET_CLI_REPLAY_TIME_ENV; replay hands them the recorded value the same way.
-// Sensitive capture also records each raw Rand read through the test
-// harness's journal (JetRuntime ProveJournal.jet), and replay serves them
-// back in order.
+// Sensitive capture also records each raw Rand read, stdin read and HTTP
+// client hop through the test harness's journal (JetRuntime
+// ProveJournal.jet), and replay serves them back in order.
 use {
     cli_files :: core.files
     cli_term :: core.term
@@ -36,16 +36,21 @@ JET_CLI_REPLAY_MAX_EXACT :: 9007199254740991
 // The largest signed 64-bit clock value.
 JET_CLI_REPLAY_MAX_I64 :: 9223372036854775807
 JET_CLI_REPLAY_ADAPTER :: "mir-v1"
-// Frame kinds: TimeWall, RandBits, IORead, IOChunk, IOEnd, and the RunAct
-// extension.
+// Frame kinds: TimeWall, RandBits, IORead, IOChunk, IOEnd, NetRequest,
+// NetDns, NetResponse, NetChunk, NetEnd, and the RunAct extension.
 JET_CLI_REPLAY_KIND_TIME :: 1
 JET_CLI_REPLAY_KIND_RAND :: 16
 JET_CLI_REPLAY_KIND_IO_READ :: 32
 JET_CLI_REPLAY_KIND_IO_CHUNK :: 33
 JET_CLI_REPLAY_KIND_IO_END :: 34
+JET_CLI_REPLAY_KIND_NET_REQUEST :: 48
+JET_CLI_REPLAY_KIND_NET_DNS :: 49
+JET_CLI_REPLAY_KIND_NET_RESPONSE :: 50
+JET_CLI_REPLAY_KIND_NET_CHUNK :: 51
+JET_CLI_REPLAY_KIND_NET_END :: 52
 JET_CLI_REPLAY_KIND_ACT :: 4097
 // The kinds this reader decodes.
-JET_CLI_REPLAY_DECODED_KINDS :: [Int]{JET_CLI_REPLAY_KIND_TIME, JET_CLI_REPLAY_KIND_RAND, JET_CLI_REPLAY_KIND_IO_READ, JET_CLI_REPLAY_KIND_IO_CHUNK, JET_CLI_REPLAY_KIND_IO_END, JET_CLI_REPLAY_KIND_ACT}
+JET_CLI_REPLAY_DECODED_KINDS :: [Int]{JET_CLI_REPLAY_KIND_TIME, JET_CLI_REPLAY_KIND_RAND, JET_CLI_REPLAY_KIND_IO_READ, JET_CLI_REPLAY_KIND_IO_CHUNK, JET_CLI_REPLAY_KIND_IO_END, JET_CLI_REPLAY_KIND_NET_REQUEST, JET_CLI_REPLAY_KIND_NET_DNS, JET_CLI_REPLAY_KIND_NET_RESPONSE, JET_CLI_REPLAY_KIND_NET_CHUNK, JET_CLI_REPLAY_KIND_NET_END, JET_CLI_REPLAY_KIND_ACT}
 // Every v1 registry kind: TimeWall, TimeMonotonic, TimeSleep, RandBits, the
 // I/O and network records, Outcome and GameEvent. A registered kind this
 // reader does not replay needs a newer reader (E3620).
@@ -64,6 +69,14 @@ JET_CLI_REPLAY_IO_CHUNK_BYTES :: 524288
 // (EPERM beside EACCES, EWOULDBLOCK is EAGAIN), cannot be replayed exactly.
 JET_CLI_REPLAY_IO_ERRORS :: [String]{"interrupted", "timed_out", "would_block", "broken_pipe", "connection_aborted", "connection_refused", "connection_reset", "not_connected", "address_in_use", "address_unavailable", "permission_denied", "not_found"}
 JET_CLI_REPLAY_IO_ERRNOS :: [Int]{4, 110, 11, 32, 103, 111, 104, 107, 98, 99, 13, 2}
+// The whole portable registry, which a NetEnd outcome names: Core's HTTP
+// client fails a replayed hop with the error's name as its message.
+JET_CLI_REPLAY_NET_ERRORS :: [String]{"interrupted", "timed_out", "would_block", "broken_pipe", "connection_aborted", "connection_refused", "connection_reset", "not_connected", "address_in_use", "address_unavailable", "permission_denied", "not_found", "unexpected_eof", "invalid_data"}
+// How far a hop got (Core/Http/Client.jet C_CLIENT_STAGE_*), as NetEnd's
+// `phase`.
+JET_CLI_REPLAY_NET_PHASES :: [String]{"resolve", "connect", "handshake", "exchange"}
+// The most bytes one NetChunk carries, as for IOChunk.
+JET_CLI_REPLAY_NET_CHUNK_BYTES :: 524288
 JET_CLI_REPLAY_IDENTITY_KEYS :: [String]{"abi", "build_digest", "core_abi", "entry", "execution_adapter", "lock_digest", "mir_identity", "mir_schema", "optimized_mir_hash", "profile", "semantic_mir_hash", "source_digest", "target_triple", "time_site_id"}
 JET_CLI_REPLAY_MIR_KEYS :: [String]{"core_ids", "function_ids", "identity_digest", "optimized_hash", "schema", "semantic_hash", "source_map", "target_facts"}
 // The runtime's wall-clock override (JetRuntime HostTime.jet
@@ -79,33 +92,42 @@ JET_CLI_REPLAY_TRACE_ENV :: "JET_PROVE_REPLAY_TRACE"
 // result's bytes for an uppercase kind. `R` is a Rand read the OS answered,
 // `r` one it refused; `I` is a stdin read of up to `request` bytes that
 // delivered `result` (0 at end of input), `i` one that failed with errno
-// `result`.
+// `result`; `N` is one HTTP client hop (request 0) with the `result` bytes
+// Core encoded (JetCLIReplayNetHop). A replay's trace holds `Q`, u64 LE
+// length and the request bytes of each hop the run made.
 JET_CLI_REPLAY_JOURNAL_HEAD :: 17
 JET_CLI_REPLAY_JOURNAL_RAND :: 82
 JET_CLI_REPLAY_JOURNAL_RAND_FAILED :: 114
 JET_CLI_REPLAY_JOURNAL_STDIN :: 73
 JET_CLI_REPLAY_JOURNAL_STDIN_FAILED :: 105
+JET_CLI_REPLAY_JOURNAL_NET :: 78
+JET_CLI_REPLAY_JOURNAL_REQUEST :: 81
 // The exact phrase a terminal types to consent to sensitive capture.
 JET_CLI_REPLAY_CONSENT :: "capture sensitive"
 
 // A verified artifact: its id, the target identity it is bound to, its
-// capture mode and roots, the one recorded wall-clock value, the Rand and
-// stdin reads in the order the run made them, and the exit status of the
-// captured run.
+// capture mode and roots, its privacy salt's bytes, the one recorded
+// wall-clock value, the Rand, stdin and HTTP reads in the order the run made
+// them, each HTTP hop's NetRequest, and the exit status of the captured run.
 struct JetCLIReplayArtifact {
     artifact_id: String
     identity: [CanonicalJSONField]
     sensitive: Bool
     roots: [String]
+    salt: [U8]
     unix_ns: Int
     reads: [JetCLIReplayRead]
+    requests: [JetCLIReplayNetSeen]
     status: Int
 }
 
 // One recorded raw read, as its journal record: `kind` `R` (Rand bytes),
-// `I` (stdin bytes, none at end of input) or `i` (a failed stdin read), the
-// site it answers, the count asked for, the count delivered (the errno for
-// `i`), and the delivered bytes.
+// `I` (stdin bytes, none at end of input), `i` (a failed stdin read) or `N`
+// (an HTTP hop), the site it answers, the count asked for, the count
+// delivered (the errno for `i`), and the delivered bytes. An `N` read's
+// bytes are Core's capture record in a capture and the replay form
+// (u64 LE stage, sends, stream length, the stream, then the ending) in a
+// verified artifact.
 struct JetCLIReplayRead {
     kind: Int
     site_id: String
@@ -114,15 +136,60 @@ struct JetCLIReplayRead {
     bytes: [U8]
 }
 
+// A recorded NetRequest frame: its sequence (the hop's `request_id`) and
+// its payload, which a replay's hop must match.
+struct JetCLIReplayNetSeen {
+    request_id: Int
+    payload: [U8]
+}
+
+// The HTTP hop a reader has open: its NetRequest's sequence and site,
+// whether its NetDns and NetResponse frames came, and the NetChunk bytes
+// so far.
+struct JetCLIReplayNetOpen {
+    request_id: Int
+    site_id: String
+    resolved: Bool
+    answered: Bool
+    chunks: Int
+    stream: [U8]
+}
+
+// One HTTP client hop as Core encodes it (Core/Http/Client.jet
+// `__client_net_tape`, u64 LE numbers, each text after its u64 length): the
+// request, then how far the hop got, the resolver's answers, the sends that
+// went out, every byte read, the reply the program saw, and the ending.
+struct JetCLIReplayNetHop {
+    hop: Int
+    method: String
+    scheme: String
+    host: String
+    port: Int
+    target: String
+    names: [String]
+    values: [String]
+    body: [U8]?
+    stage: Int
+    addresses: [[U8]]
+    sends: Int
+    stream: [U8]
+    answered: Bool
+    status: Int
+    reply_names: [String]
+    reply_values: [String]
+    ending: String
+}
+
 // A capture or replay whose checks passed: the wall-clock value the run's
 // programs read, the target identity, the capture mode and roots, the Time,
-// Rand and stdin site ids, and the replayed artifact.
+// Rand, stdin and HTTP site ids, and the replayed artifact.
 struct JetCLIReplayRun {
     time_ms: Int
     identity: [CanonicalJSONField]
     site_id: String
     rand_site_id: String
     io_site_id: String
+    net_site_id: String
     sensitive: Bool
     roots: [String]
     replayed: JetCLIReplayArtifact?
@@ -137,10 +204,12 @@ struct JetCLIReplayJournal {
 }
 
 // One reachable call the replay authority must model: `authority` is None for
-// an opaque boundary (an unknown callee, an unsafe or concurrent region).
+// an opaque boundary (an unknown callee, an unsafe or concurrent region), and
+// `owner` is the Core module it resolves to ("" when none does).
 struct JetCLIReplaySite {
     operation: String
     authority: Effect?
+    owner: String
 }
 
 // One failed artifact check: E3620 (an unsupported reader vocabulary), E3628
@@ -175,6 +244,7 @@ fn jet_cli_prove_replay_checks(identity: JetCLIProveIdentity, members: [JetCLIPr
     site_id :: jet_cli_replay_site_id(identity, members, sites)
     rand_site_id :: jet_cli_replay_rand_site_id(identity, members, sites)
     io_site_id :: jet_cli_replay_io_site_id(identity, members, sites)
+    net_site_id :: jet_cli_replay_net_site_id(identity, members, sites)
     expected :: jet_cli_replay_target_identity(identity, members, site_id)
     if capture == .Val(request) {
         if jet_cli_replay_capture_refusal(root, request, sites) == .Val(refusal) -> return Err(JetCLIProveStop{output: jet_cli_prove_refused(refusal, color, json)})
@@ -182,22 +252,43 @@ fn jet_cli_prove_replay_checks(identity: JetCLIProveIdentity, members: [JetCLIPr
         if request.sensitive {
             if jet_cli_replay_consent(identity, members, request, roots) == .Val(refusal) -> return Err(JetCLIProveStop{output: jet_cli_prove_refused(refusal, color, json)})
         }
-        return Ok(JetCLIReplayRun{time_ms: jet_cli_replay_clock_ms(), identity: expected, site_id: site_id, rand_site_id: rand_site_id, io_site_id: io_site_id, sensitive: request.sensitive, roots: roots, replayed: None})
+        return Ok(JetCLIReplayRun{time_ms: jet_cli_replay_clock_ms(), identity: expected, site_id: site_id, rand_site_id: rand_site_id, io_site_id: io_site_id, net_site_id: net_site_id, sensitive: request.sensitive, roots: roots, replayed: None})
     }
     raw :: replay ?? return Err(JetCLIProveStop{output: jet_cli_ice("prove replay checks ran without --capture or --replay")})
-    artifact :: jet_cli_replay_input(root, raw, sites, expected, rand_site_id, io_site_id) ?? return Err(JetCLIProveStop{output: jet_cli_prove_refused(err, color, json)})
-    Ok(JetCLIReplayRun{time_ms: artifact.unix_ns /% 1000000, identity: expected, site_id: site_id, rand_site_id: rand_site_id, io_site_id: io_site_id, sensitive: artifact.sensitive, roots: artifact.roots.copy(), replayed: Val(artifact)})
+    artifact :: jet_cli_replay_input(root, raw, sites, expected, rand_site_id, io_site_id, net_site_id) ?? return Err(JetCLIProveStop{output: jet_cli_prove_refused(err, color, json)})
+    Ok(JetCLIReplayRun{time_ms: artifact.unix_ns /% 1000000, identity: expected, site_id: site_id, rand_site_id: rand_site_id, io_site_id: io_site_id, net_site_id: net_site_id, sensitive: artifact.sensitive, roots: artifact.roots.copy(), replayed: Val(artifact)})
 }
 
 // The roots a capture records, in byte order: IO when a sensitive target
-// reaches the terminal builtins, Rand when it reaches Rand, and Time
-// always, since every capture pins the clock.
+// reaches the terminal builtins, Net when it reaches Core's HTTP client,
+// Rand when it reaches Rand, and Time always, since every capture pins the
+// clock.
 fn jet_cli_replay_capture_roots(sites: [JetCLIReplaySite], sensitive: Bool) -> [String] Never! {
     roots := [String]{}
     if sensitive && jet_cli_replay_reaches(sites, Effect.IO) -> &roots.push("IO")
+    if sensitive && jet_cli_replay_reaches_http(sites) -> &roots.push("Net")
     if sensitive && jet_cli_replay_reaches(sites, Effect.Rand) -> &roots.push("Rand")
     &roots.push("Time")
     roots
+}
+
+// A Net site the HTTP client's journal records: a request of Core's HTTP
+// client (core.http.client, or core.http's client calls), not a server, a
+// raw socket, or the build-time transport.
+fn jet_cli_replay_is_http_client(site: JetCLIReplaySite) -> Bool Never! {
+    authority :: site.authority ?? return false
+    if authority != Effect.Net -> return false
+    dot :: site.operation.rfind(".")
+    member :: if dot < 0 -> site.operation else -> site.operation.slice(dot + 1, site.operation.len())
+    if site.owner == "core.http.client" -> return !member.starts_with("jet_http_build_") && !member.starts_with("__")
+    site.owner == "core.http" && !member.starts_with("serve") && !member.starts_with("__")
+}
+
+fn jet_cli_replay_reaches_http(sites: [JetCLIReplaySite]) -> Bool Never! {
+    loop site in sites {
+        if jet_cli_replay_is_http_client(site) -> return true
+    }
+    false
 }
 
 fn jet_cli_replay_is_terminal_io(site: JetCLIReplaySite) -> Bool Never! {
@@ -226,8 +317,10 @@ fn jet_cli_replay_consent(identity: JetCLIProveIdentity, members: [JetCLIProveMe
     destination :: request.path ?? ".jet/replays/{stem}-<id>.jetproof-replay"
     disclosed := ""
     if roots.contains("IO") -> disclosed = "the text the program reads from stdin, "
+    if roots.contains("Net") -> disclosed = "{disclosed}the HTTP responses the program reads, with their DNS answers, "
     if roots.contains("Rand") -> disclosed = "{disclosed}the random bytes the program reads, "
-    cli_term.eprint("jet prove --capture-sensitive stores raw values from this run in a file that is not encrypted:\n  authorities: {roots.join(", ")}\n  hosts: none\n  byte limits: {JET_CLI_REPLAY_MAX_PAYLOAD} bytes per record, {JET_CLI_REPLAY_MAX_FRAMES} records, {JET_CLI_REPLAY_MAX_ARTIFACT} bytes per artifact\n  may disclose: {disclosed}paths, host names, panic text and run metadata\n  destination: {destination} (mode 0600)\nType `{JET_CLI_REPLAY_CONSENT}` to record it:")
+    hosts :: if roots.contains("Net") -> "the hosts the program's HTTP requests name, decided as it runs" else -> "none"
+    cli_term.eprint("jet prove --capture-sensitive stores raw values from this run in a file that is not encrypted:\n  authorities: {roots.join(", ")}\n  hosts: {hosts}\n  byte limits: {JET_CLI_REPLAY_MAX_PAYLOAD} bytes per record, {JET_CLI_REPLAY_MAX_FRAMES} records, {JET_CLI_REPLAY_MAX_ARTIFACT} bytes per artifact\n  may disclose: {disclosed}paths, host names, panic text and run metadata\n  destination: {destination} (mode 0600)\nType `{JET_CLI_REPLAY_CONSENT}` to record it:")
     input := cli_term.stdin()
     answer :: &input.read_line() ?? ""
     if answer.removesuffix("\n").removesuffix("\r") == JET_CLI_REPLAY_CONSENT -> return None
@@ -328,10 +421,22 @@ fn jet_cli_replay_site_digest(domain: String, identity: JetCLIProveIdentity, mem
     prove_crypto.sha256(out).hex()
 }
 
+// The site every NetRequest record answers: the target's HTTP client calls,
+// which the runtime sees as the hops Core makes, share one site named by
+// all of them, as Rand's do.
+fn jet_cli_replay_net_site_id(identity: JetCLIProveIdentity, members: [JetCLIProveMember], sites: [JetCLIReplaySite]) -> String Never! {
+    operations := [String]{}
+    loop site in sites {
+        if jet_cli_replay_is_http_client(site) -> &operations.push(site.operation.copy())
+    }
+    jet_cli_replay_site_digest("jet.replay.v1/net-site", identity, members, operations.join("\n"))
+}
+
 // The v1 bytes of one capture: the canonical header, the TimeWall frame,
-// then each raw read in the order the run made it (a RandBits frame, or an
+// then each raw read in the order the run made it (a RandBits frame, an
 // IORead frame followed by the IOChunk frames it delivered or the IOEnd that
-// ended it), and the footer, with the content id in place.
+// ended it, or an HTTP hop's Net frames), and the footer, with the content
+// id in place.
 fn jet_cli_replay_encode(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt: String, status: Int) -> [U8] Never! {
     header :: jet_cli_replay_header_bytes("0".repeat(24), run, salt, status)
     out := "JREPLAY".bytes()
@@ -353,6 +458,8 @@ fn jet_cli_replay_encode(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt: 
     kinds := [Int]{JET_CLI_REPLAY_KIND_TIME}
     rand_calls := 0
     io_calls := 0
+    net_calls := 0
+    salt_bytes :: replay_base64.decode_url(salt) ?? panic("the capture's privacy salt is base64url")
     loop read in reads {
         if read.kind == JET_CLI_REPLAY_JOURNAL_RAND {
             &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
@@ -363,6 +470,11 @@ fn jet_cli_replay_encode(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt: 
             })))
             &kinds.push(JET_CLI_REPLAY_KIND_RAND)
             rand_calls += 1
+            next
+        }
+        if read.kind == JET_CLI_REPLAY_JOURNAL_NET {
+            jet_cli_replay_net_frames(&payloads, &kinds, read, net_calls, salt_bytes)
+            net_calls += 1
             next
         }
         // Each read is its own stream, named by its IORead frame's sequence.
@@ -422,6 +534,197 @@ fn jet_cli_replay_encode(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt: 
     jet_cli_replay_put_le(&bytes, payload_bytes, 8)
     &bytes.extend(footer_hash)
     bytes
+}
+
+// The frames of one HTTP hop: NetRequest, NetDns once it resolved,
+// NetResponse when the program saw a reply, a NetChunk per 512 KiB it read,
+// and NetEnd. `request_id` is the NetRequest frame's sequence.
+fn jet_cli_replay_net_frames(payloads: &[[U8]], kinds: &[Int], read: JetCLIReplayRead, call: Int, salt: [U8]) Never! {
+    hop :: jet_cli_replay_net_hop(read.bytes) ?? panic("a Net journal record is checked when it is read")
+    request_id :: payloads.len()
+    &payloads.push(canonical_json_bytes(CanonicalJSON.Object(jet_cli_replay_net_request_fields(hop, call, request_id, read.site_id, salt))))
+    &kinds.push(JET_CLI_REPLAY_KIND_NET_REQUEST)
+    id :: jet_cli_replay_integer_field("request_id", request_id)
+    if hop.stage >= 1 {
+        addresses := [CanonicalJSON]{}
+        loop address in hop.addresses -> &addresses.push(CanonicalJSON.String(jet_cli_replay_ip_text(address)))
+        &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+            CanonicalJSONField{key: "addresses", value: CanonicalJSON.Array(addresses)},
+            id,
+        })))
+        &kinds.push(JET_CLI_REPLAY_KIND_NET_DNS)
+    }
+    if hop.answered {
+        headers := [CanonicalJSON]{}
+        loop (at, name) in hop.reply_names {
+            &headers.push(CanonicalJSON.Object([CanonicalJSONField]{jet_cli_replay_string("name", name), jet_cli_replay_string("value", hop.reply_values[at])}))
+        }
+        &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+            CanonicalJSONField{key: "headers", value: CanonicalJSON.Array(headers)},
+            id,
+            jet_cli_replay_integer_field("status", hop.status),
+        })))
+        &kinds.push(JET_CLI_REPLAY_KIND_NET_RESPONSE)
+    }
+    chunk := 0
+    loop chunk * JET_CLI_REPLAY_NET_CHUNK_BYTES < hop.stream.len() {
+        start :: chunk * JET_CLI_REPLAY_NET_CHUNK_BYTES
+        end :: if hop.stream.len() - start > JET_CLI_REPLAY_NET_CHUNK_BYTES -> start + JET_CLI_REPLAY_NET_CHUNK_BYTES else -> hop.stream.len()
+        &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+            CanonicalJSONField{key: "bytes", value: jet_cli_replay_bytes_value(hop.stream.slice(start, end))},
+            jet_cli_replay_integer_field("chunk_index", chunk),
+            id,
+        })))
+        &kinds.push(JET_CLI_REPLAY_KIND_NET_CHUNK)
+        chunk += 1
+    }
+    outcome :: if hop.ending == "eof" -> jet_cli_replay_io_outcome(None) else -> jet_cli_replay_io_outcome(Val(hop.ending))
+    &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+        jet_cli_replay_integer_field("chunks", chunk),
+        CanonicalJSONField{key: "outcome", value: outcome},
+        jet_cli_replay_string("phase", JET_CLI_REPLAY_NET_PHASES[hop.stage]),
+        id,
+        CanonicalJSONField{key: "sends", value: jet_cli_replay_uint(hop.sends)},
+        CanonicalJSONField{key: "total_bytes", value: jet_cli_replay_uint(hop.stream.len())},
+    })))
+    &kinds.push(JET_CLI_REPLAY_KIND_NET_END)
+}
+
+// A NetRequest's fields, in byte order. The body and each header field are
+// kept only as salted digests, so the artifact never holds them.
+fn jet_cli_replay_net_request_fields(hop: JetCLIReplayNetHop, call: Int, request_id: Int, site_id: String, salt: [U8]) -> [CanonicalJSONField] Never! {
+    body := CanonicalJSON.Null
+    if hop.body == .Val(bytes) -> body = CanonicalJSON.String(jet_cli_replay_net_digest("jet.replay.v1/net-body", salt, [[U8]]{bytes}))
+    headers := [CanonicalJSON]{}
+    loop (at, name) in hop.names {
+        digest :: jet_cli_replay_net_digest("jet.replay.v1/net-header", salt, [[U8]]{name.bytes(), hop.values[at].bytes()})
+        &headers.push(CanonicalJSON.Object([CanonicalJSONField]{jet_cli_replay_string("digest_sha256", digest), jet_cli_replay_string("name", name)}))
+    }
+    [CanonicalJSONField]{
+        CanonicalJSONField{key: "body_digest", value: body},
+        jet_cli_replay_integer_field("call_id", call),
+        CanonicalJSONField{key: "header_digests", value: CanonicalJSON.Array(headers)},
+        jet_cli_replay_string("host", hop.host),
+        jet_cli_replay_string("method", hop.method),
+        jet_cli_replay_string("path", hop.target),
+        jet_cli_replay_integer_field("port", hop.port),
+        jet_cli_replay_integer_field("redirect_index", hop.hop),
+        jet_cli_replay_integer_field("request_id", request_id),
+        jet_cli_replay_string("scheme", hop.scheme),
+        jet_cli_replay_string("site_id", site_id),
+    }
+}
+
+// SHA-256 hex of the domain, a NUL, the artifact's 32 salt bytes, then
+// each part after its u64 big-endian length.
+fn jet_cli_replay_net_digest(domain: String, salt: [U8], parts: [[U8]]) -> String Never! {
+    out := domain.bytes()
+    &out.push(U8{0})
+    &out.extend(salt)
+    loop part in parts {
+        loop step in 0..<8 {
+            shift :: 7 - step
+            rest := part.len()
+            loop _ in 0..<shift -> rest = rest /% 256
+            &out.push(U8.from_int(rest %% 256) ?? panic("replay digest byte"))
+        }
+        &out.extend(part)
+    }
+    prove_crypto.sha256(out).hex()
+}
+
+// A reader over Core's u64 LE numbers and length-prefixed byte strings;
+// `bad` once a read ran past the end or held a number above 2^32.
+struct JetCLIReplayCursor {
+    bytes: [U8]
+    at: Int
+    bad: Bool
+}
+
+fn jet_cli_replay_cursor_u64(cursor: &JetCLIReplayCursor) -> Int Never! {
+    if cursor.bad || cursor.at + 8 > cursor.bytes.len() {
+        cursor.bad = true
+        return 0
+    }
+    value :: jet_cli_replay_journal_u64(cursor.bytes, cursor.at)
+    cursor.at += 8
+    if value < 0 {
+        cursor.bad = true
+        return 0
+    }
+    value
+}
+
+fn jet_cli_replay_cursor_bytes(cursor: &JetCLIReplayCursor) -> [U8] Never! {
+    size :: jet_cli_replay_cursor_u64(&cursor)
+    if cursor.bad || size > cursor.bytes.len() - cursor.at {
+        cursor.bad = true
+        return [U8]{}
+    }
+    out :: cursor.bytes.slice(cursor.at, cursor.at + size)
+    cursor.at += size
+    out
+}
+
+fn jet_cli_replay_cursor_text(cursor: &JetCLIReplayCursor) -> String Never! {
+    bytes :: jet_cli_replay_cursor_bytes(&cursor)
+    text :: String.from_bytes(bytes) ?? {
+        cursor.bad = true
+        return ""
+    }
+    text
+}
+
+// The request part of a hop record (Core's `__client_net_request`), the
+// rest of the hop empty.
+fn jet_cli_replay_net_request_read(cursor: &JetCLIReplayCursor) -> JetCLIReplayNetHop Never! {
+    hop := JetCLIReplayNetHop{hop: 0, method: "", scheme: "", host: "", port: 0, target: "", names: [String]{}, values: [String]{}, body: None, stage: 0, addresses: [[U8]]{}, sends: 0, stream: [U8]{}, answered: false, status: 0, reply_names: [String]{}, reply_values: [String]{}, ending: ""}
+    hop.hop = jet_cli_replay_cursor_u64(&cursor)
+    hop.method = jet_cli_replay_cursor_text(&cursor)
+    hop.scheme = jet_cli_replay_cursor_text(&cursor)
+    hop.host = jet_cli_replay_cursor_text(&cursor)
+    hop.port = jet_cli_replay_cursor_u64(&cursor)
+    hop.target = jet_cli_replay_cursor_text(&cursor)
+    fields :: jet_cli_replay_cursor_u64(&cursor)
+    loop _ in 0..<fields {
+        if cursor.bad -> break
+        &hop.names.push(jet_cli_replay_cursor_text(&cursor))
+        &hop.values.push(jet_cli_replay_cursor_text(&cursor))
+    }
+    if jet_cli_replay_cursor_u64(&cursor) == 1 -> hop.body = Val(jet_cli_replay_cursor_bytes(&cursor))
+    hop
+}
+
+// One whole hop record as Core's `__client_net_tape` wrote it, or None
+// when it is malformed.
+fn jet_cli_replay_net_hop(bytes: [U8]) -> JetCLIReplayNetHop? Never! {
+    cursor := JetCLIReplayCursor{bytes: bytes.copy(), at: 0, bad: false}
+    hop := jet_cli_replay_net_request_read(&cursor)
+    hop.stage = jet_cli_replay_cursor_u64(&cursor)
+    count :: jet_cli_replay_cursor_u64(&cursor)
+    loop _ in 0..<count {
+        if cursor.bad -> break
+        address :: jet_cli_replay_cursor_bytes(&cursor)
+        if address.len() != 4 && address.len() != 16 -> cursor.bad = true
+        &hop.addresses.push(address)
+    }
+    hop.sends = jet_cli_replay_cursor_u64(&cursor)
+    hop.stream = jet_cli_replay_cursor_bytes(&cursor)
+    hop.answered = jet_cli_replay_cursor_u64(&cursor) == 1
+    if hop.answered {
+        hop.status = jet_cli_replay_cursor_u64(&cursor)
+        replies :: jet_cli_replay_cursor_u64(&cursor)
+        loop _ in 0..<replies {
+            if cursor.bad -> break
+            &hop.reply_names.push(jet_cli_replay_cursor_text(&cursor))
+            &hop.reply_values.push(jet_cli_replay_cursor_text(&cursor))
+        }
+    }
+    hop.ending = jet_cli_replay_cursor_text(&cursor)
+    if cursor.bad || cursor.at != bytes.len() || hop.stage < 0 || hop.stage >= JET_CLI_REPLAY_NET_PHASES.len() -> return None
+    if hop.scheme != "http" && hop.scheme != "https" -> return None
+    if (hop.stage < 2 && hop.ending == "eof") || (hop.answered && hop.stage != 3) || (hop.stream.len() > 0 && hop.stage < 2) -> return None
+    Val(hop)
 }
 
 // Canonical Jet `{"bits":64,"t":"uint","v":"<decimal>"}`.
@@ -512,7 +815,7 @@ fn jet_cli_replay_capture_write(identity: JetCLIProveIdentity, request: JetCLIPr
     reads :: jet_cli_replay_journal_reads(journal, run) ?? return Err(err)
     salt :: replay_random.token_urlsafe(32) ?? return Err(jet_cli_replay_unfinalized("the OS gave no randomness for the privacy salt"))
     bytes :: jet_cli_replay_encode(run, reads, salt, status)
-    verified :: jet_cli_replay_verify(bytes) ?? return Err(jet_cli_replay_unfinalized("the encoded artifact failed its own check: {err.why}"))
+    verified :: jet_cli_replay_verify(bytes) ?? return Err(jet_cli_replay_capture_fault(err))
     id :: verified.artifact_id
     entry :: jet_cli_replay_field_value(run.identity, "entry")
     name :: if request.path == None -> "{jet_cli_replay_entry_stem(entry)}-{id.slice(0, 12)}.jetproof-replay" else -> "{id}.jetproof-replay"
@@ -554,15 +857,17 @@ fn jet_cli_replay_journal_open(run: JetCLIReplayRun, folder: String) -> JetCLIRe
 
 // The raw reads a capture's harnesses journaled, in order: Rand reads as
 // RandBits records of the run's Rand site, stdin reads as IORead records of
-// its stdin site. A read the OS refused with no RandBits shape, or with an
-// errno outside the portable registry, cannot be modeled (E3625).
+// its stdin site, HTTP hops as Net records of its HTTP site. A read the OS
+// refused with no RandBits shape, an errno outside the portable registry,
+// or an HTTP failure with no portable name cannot be modeled (E3625).
 fn jet_cli_replay_journal_reads(journal: JetCLIReplayJournal, run: JetCLIReplayRun) -> [JetCLIReplayRead] JetCLIProveRefusal! {
     reads := [JetCLIReplayRead]{}
     if journal.capture == "" || !cli_files.exists(journal.capture) -> return Ok(reads)
     bytes :: cli_files.read_bytes(journal.capture) ?? return Err(jet_cli_replay_unfinalized("couldn't read the capture journal: {jet_cli_io_error_text(err)}"))
     at := 0
-    // The TimeWall frame, then one frame per Rand read, and per stdin read an
-    // IORead frame and its IOChunk frames or IOEnd frame.
+    // The TimeWall frame, then one frame per Rand read, per stdin read an
+    // IORead frame and its IOChunk frames or IOEnd frame, and per HTTP hop
+    // its Net frames.
     frames := 1
     loop at < bytes.len() {
         if at + JET_CLI_REPLAY_JOURNAL_HEAD > bytes.len() -> return Err(jet_cli_replay_unfinalized("the capture journal ends inside a record"))
@@ -574,6 +879,26 @@ fn jet_cli_replay_journal_reads(journal: JetCLIReplayJournal, run: JetCLIReplayR
         }
         if kind == JET_CLI_REPLAY_JOURNAL_STDIN_FAILED && jet_cli_replay_io_error_name(result) == None {
             return Err(jet_cli_replay_unmodeled("a stdin read that failed with OS error {result}", "an IOEnd record names only errors in the portable I/O registry, and this error has no exact name there", "capture again with stdin open on a terminal, a file or a pipe"))
+        }
+        if kind == JET_CLI_REPLAY_JOURNAL_NET {
+            begin :: at + JET_CLI_REPLAY_JOURNAL_HEAD
+            if request != 0 || result < 0 || result > bytes.len() - begin -> return Err(jet_cli_replay_unfinalized("the capture journal holds a malformed record"))
+            if !run.roots.contains("Net") {
+                return Err(jet_cli_replay_unmodeled("a raw read outside the capture's roots", "the run made an HTTP request through a call the capture did not see", "change the target so it makes HTTP requests only through calls its source names directly"))
+            }
+            record :: bytes.slice(begin, begin + result)
+            hop :: jet_cli_replay_net_hop(record) ?? return Err(jet_cli_replay_unfinalized("the capture journal holds a malformed HTTP record"))
+            if hop.ending == "unmapped" {
+                return Err(jet_cli_replay_unmodeled("an HTTP request that failed with no portable error", "the {JET_CLI_REPLAY_NET_PHASES[hop.stage]} step of an HTTP request failed in a way the portable error registry cannot name, such as a TLS certificate or protocol failure", "capture again once the request succeeds or fails with a network error such as a refused connection or a timeout"))
+            }
+            if hop.ending != "eof" && !JET_CLI_REPLAY_NET_ERRORS.contains(hop.ending) -> return Err(jet_cli_replay_unfinalized("the capture journal holds a malformed HTTP record"))
+            frames += 2 + (hop.stream.len() + JET_CLI_REPLAY_NET_CHUNK_BYTES - 1) /% JET_CLI_REPLAY_NET_CHUNK_BYTES
+            if hop.stage >= 1 -> frames += 1
+            if hop.answered -> frames += 1
+            if frames >= JET_CLI_REPLAY_MAX_FRAMES -> return Err(jet_cli_replay_refusal("E3628", "replay capture exceeded its artifact limit", "the run's random, stdin and HTTP reads need more than {JET_CLI_REPLAY_MAX_FRAMES - 1} records", "capture a target that makes fewer reads"))
+            &reads.push(JetCLIReplayRead{kind: kind, site_id: run.net_site_id.copy(), request: 0, result: result, bytes: record})
+            at = begin + result
+            next
         }
         start :: at + JET_CLI_REPLAY_JOURNAL_HEAD
         size :: if kind == JET_CLI_REPLAY_JOURNAL_STDIN_FAILED -> 0 else -> result
@@ -587,7 +912,7 @@ fn jet_cli_replay_journal_reads(journal: JetCLIReplayJournal, run: JetCLIReplayR
             return Err(jet_cli_replay_unmodeled("a raw read outside the capture's roots", "the run read {source} through a call the capture did not see", "change the target so it reads only through calls its source names directly"))
         }
         frames += if rand -> 1 else if kind == JET_CLI_REPLAY_JOURNAL_STDIN && result > 0 -> 1 + (result + JET_CLI_REPLAY_IO_CHUNK_BYTES - 1) /% JET_CLI_REPLAY_IO_CHUNK_BYTES else -> 2
-        if frames >= JET_CLI_REPLAY_MAX_FRAMES -> return Err(jet_cli_replay_refusal("E3628", "replay capture exceeded its artifact limit", "the run's random and stdin reads need more than {JET_CLI_REPLAY_MAX_FRAMES - 1} records", "capture a target that reads fewer random values or less input"))
+        if frames >= JET_CLI_REPLAY_MAX_FRAMES -> return Err(jet_cli_replay_refusal("E3628", "replay capture exceeded its artifact limit", "the run's random, stdin and HTTP reads need more than {JET_CLI_REPLAY_MAX_FRAMES - 1} records", "capture a target that makes fewer reads"))
         site_id :: if rand -> run.rand_site_id else -> run.io_site_id
         &reads.push(JetCLIReplayRead{kind: kind, site_id: site_id.copy(), request: request, result: result, bytes: bytes.slice(start, start + size)})
         at = start + size
@@ -622,22 +947,69 @@ fn jet_cli_replay_journal_stdin(path: String) -> [U8] Never! {
 }
 
 // A sensitive replay consumed every record in order, or it diverged: the
-// trace holds `C` for each record a harness was served and `D` where a read
-// asked for what the next record does not hold.
+// trace holds `C` for each record a harness was served, `D` where a read
+// asked for what the next record does not hold, and before each HTTP hop's
+// record `Q` with the request the replayed run made, which must match the
+// recorded NetRequest field for field.
 fn jet_cli_replay_journal_divergence(journal: JetCLIReplayJournal, artifact: JetCLIReplayArtifact) -> JetCLIProveRefusal? {
     if journal.records == "" -> return None
     trace :: if cli_files.exists(journal.trace) -> cli_files.read_bytes(journal.trace) ?? [U8]{} else -> [U8]{}
     served := 0
-    loop byte in trace {
-        if byte != (U8{67}) -> return Val(jet_cli_replay_diverged("raw read {served + 1} of the replayed run asked for a value the recording does not hold next"))
+    hops := 0
+    at := 0
+    loop at < trace.len() {
+        mark :: Int.from_u8(trace[at])
+        if mark == JET_CLI_REPLAY_JOURNAL_REQUEST {
+            size :: if at + 9 <= trace.len() -> jet_cli_replay_journal_u64(trace, at + 1) else -> -1
+            if size < 0 || size > trace.len() - at - 9 -> return Val(jet_cli_replay_diverged("the replay trace ends inside HTTP request {hops + 1}"))
+            if jet_cli_replay_net_divergence(trace.slice(at + 9, at + 9 + size), artifact, hops) == .Val(refusal) -> return Val(refusal)
+            hops += 1
+            at += 9 + size
+            next
+        }
+        if mark != 67 -> return Val(jet_cli_replay_diverged("raw read {served + 1} of the replayed run asked for a value the recording does not hold next"))
         served += 1
+        at += 1
     }
+    if hops != artifact.requests.len() -> return Val(jet_cli_replay_diverged("the replayed run made {hops} of the {artifact.requests.len()} recorded HTTP requests"))
     if served != artifact.reads.len() -> return Val(jet_cli_replay_diverged("the replayed run made {served} of the {artifact.reads.len()} recorded raw reads"))
+    None
+}
+
+// HTTP request `index` of a replayed run against the recorded NetRequest:
+// the same request, ids and salt give the same fields, so the first field
+// that differs names how the run diverged.
+fn jet_cli_replay_net_divergence(request: [U8], artifact: JetCLIReplayArtifact, index: Int) -> JetCLIProveRefusal? Never! {
+    if index >= artifact.requests.len() -> return Val(jet_cli_replay_diverged("the replayed run made HTTP request {index + 1}, but the recording holds {artifact.requests.len()}"))
+    seen :: artifact.requests[index]
+    cursor := JetCLIReplayCursor{bytes: request.copy(), at: 0, bad: false}
+    hop :: jet_cli_replay_net_request_read(&cursor)
+    if cursor.bad || cursor.at != request.len() -> return Val(jet_cli_replay_diverged("HTTP request {index + 1} of the replayed run reached the trace malformed"))
+    parsed :: jet_cli_replay_json(seen.payload, "NetRequest payload") ?? return Val(jet_cli_replay_diverged("the recorded HTTP request {index + 1} is not valid JSON"))
+    recorded :: if parsed == {
+        .Object(found) -> found.copy()
+        else -> [CanonicalJSONField]{}
+    }
+    fresh :: jet_cli_replay_net_request_fields(hop, index, seen.request_id, jet_cli_replay_field_value(recorded, "site_id"), artifact.salt)
+    loop field in fresh {
+        same := false
+        loop old in recorded {
+            if old.key == field.key -> same = canonical_json_bytes(old.value) == canonical_json_bytes(field.value)
+        }
+        if !same -> return Val(jet_cli_replay_diverged("HTTP request {index + 1} of the replayed run differs from the recording in `{field.key}`"))
+    }
     None
 }
 
 fn jet_cli_replay_diverged(why: String) -> JetCLIProveRefusal Never! {
     jet_cli_replay_refusal("E3623", "replay diverged from captured authority", why, "recapture and replay the matching target")
+}
+
+// A limit the encoded capture breaks is the run's (E3628); any other
+// failure of its own check is the writer's (E3629).
+fn jet_cli_replay_capture_fault(fault: JetCLIReplayFault) -> JetCLIProveRefusal Never! {
+    if fault.code == "E3628" -> return jet_cli_replay_fault_refusal(fault)
+    jet_cli_replay_unfinalized("the encoded artifact failed its own check: {fault.why}")
 }
 
 // Publishes `bytes` as `name` in the real folders `parts` below `root`,
@@ -707,10 +1079,17 @@ fn jet_cli_replay_capture_path_problem(path: String) -> String? Never! {
 
 // Capture records one `core.time.now` and refuses everything else it cannot
 // model; raw Rand, IO and Net need sensitive consent, and this adapter
-// records raw Rand and the terminal builtins' stdin (their output is live).
+// records raw Rand, the terminal builtins' stdin (their output is live) and
+// Core's HTTP client requests.
 fn jet_cli_replay_capture_preflight(sites: [JetCLIReplaySite], sensitive: Bool) -> JetCLIProveRefusal? Never! {
     if jet_cli_replay_time_count(sites) > 1 {
         return Val(jet_cli_replay_unmodeled("multiple core.time.now sites", "the current replay adapter has one bounded Time record and cannot prove request order for multiple sites", "capture one Time request per target, or route time through an injected deterministic input"))
+    }
+    // A request's headers and body are stored only as salted digests, but its
+    // host, path and query are stored as text. A target that reads Secret
+    // values could put one there, so it is refused before anything runs.
+    if sensitive && jet_cli_replay_reaches_http(sites) && jet_cli_replay_reaches(sites, Effect.Secret) {
+        return Val(jet_cli_replay_refusal("E3627", "replay capture refused sensitive data", "the target reads Secret values and makes HTTP requests, so a secret could reach a request's host, path or query, which the artifact stores as text", "capture a target that makes its HTTP requests without reading Secret values"))
     }
     loop site in sites {
         authority :: site.authority ?? return Val(jet_cli_replay_unmodeled(site.operation, "the reachable call shape is opaque to the replay authority", "route the operation through a supported deterministic input, or remove it from the captured target"))
@@ -720,7 +1099,10 @@ fn jet_cli_replay_capture_preflight(sites: [JetCLIReplaySite], sensitive: Bool) 
         }
         if authority == Effect.Rand || authority == Effect.IO || authority == Effect.Net {
             if !sensitive -> return Val(jet_cli_replay_refusal("E3627", "replay capture refused sensitive data", "safe capture reached raw {sema_taint_effect_name(authority)} at {site.operation}; untainted values still require sensitive-data consent", "inject deterministic data, or explicitly use --capture-sensitive"))
-            if authority == Effect.Rand || jet_cli_replay_is_terminal_io(site) -> next
+            if authority == Effect.Rand || jet_cli_replay_is_terminal_io(site) || jet_cli_replay_is_http_client(site) -> next
+        }
+        if authority == Effect.Net {
+            return Val(jet_cli_replay_unmodeled(site.operation, "replay capture records the requests of Core's HTTP client, not raw sockets, TLS streams, WebSockets or servers", "make the target's network calls through `core.http.client`, or change the capture target"))
         }
         return Val(jet_cli_replay_unmodeled(site.operation, "replay capture has no authority adapter for the {sema_taint_effect_name(authority)} effect", "route the operation through a supported deterministic input, or change the capture target"))
     }
@@ -737,7 +1119,7 @@ fn jet_cli_replay_unmodeled(operation: String, why: String, fix: String) -> JetC
 // artifact is verified whole, then bound to the current target's exact
 // identity (E3621), before any value could be injected; the target preflight
 // runs first when there is no artifact to read.
-fn jet_cli_replay_input(root: String, raw: String, sites: [JetCLIReplaySite], expected: [CanonicalJSONField], rand_site_id: String, io_site_id: String) -> JetCLIReplayArtifact JetCLIProveRefusal! {
+fn jet_cli_replay_input(root: String, raw: String, sites: [JetCLIReplaySite], expected: [CanonicalJSONField], rand_site_id: String, io_site_id: String, net_site_id: String) -> JetCLIReplayArtifact JetCLIProveRefusal! {
     index :: jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_refusal("E2105", "could not load the replay record index", err.message, "repair or remove the project's `.jet/records` index, then run the command again"))
     found :: jet_cli_record_index_find(index, "replay", raw, true)
     if found == None {
@@ -761,8 +1143,13 @@ fn jet_cli_replay_input(root: String, raw: String, sites: [JetCLIReplaySite], ex
         return Err(jet_cli_replay_refusal("E3623", "replay diverged from captured authority", "the target has no statically identified `core.time.now` call site for the captured Time record", "replay the matching target, or recapture a target with one supported Time call"))
     }
     loop read in artifact.reads {
-        if read.kind == JET_CLI_REPLAY_JOURNAL_RAND && read.site_id != rand_site_id -> return Err(jet_cli_replay_diverged("a recorded Rand value answers a different set of Rand call sites than the target's"))
-        if read.kind != JET_CLI_REPLAY_JOURNAL_RAND && read.site_id != io_site_id -> return Err(jet_cli_replay_diverged("a recorded stdin read answers a different set of stdin call sites than the target's"))
+        if read.kind == JET_CLI_REPLAY_JOURNAL_RAND {
+            if read.site_id != rand_site_id -> return Err(jet_cli_replay_diverged("a recorded Rand value answers a different set of Rand call sites than the target's"))
+        } else if read.kind == JET_CLI_REPLAY_JOURNAL_NET {
+            if read.site_id != net_site_id -> return Err(jet_cli_replay_diverged("a recorded HTTP request answers a different set of HTTP call sites than the target's"))
+        } else if read.site_id != io_site_id {
+            return Err(jet_cli_replay_diverged("a recorded stdin read answers a different set of stdin call sites than the target's"))
+        }
     }
     Ok(artifact)
 }
@@ -805,9 +1192,10 @@ fn jet_cli_replay_input_problem(raw: String) -> String? Never! {
 }
 
 // The one Time record replays one statically identified `core.time.now`
-// site, an artifact's Rand root replays every Rand site in read order, and
-// its IO root the terminal builtins (stdin in read order, output live); any
-// other reachable authority would run unrecorded.
+// site, an artifact's Rand root replays every Rand site in read order, its
+// IO root the terminal builtins (stdin in read order, output live), and its
+// Net root Core's HTTP client requests in order; any other reachable
+// authority would run unrecorded.
 fn jet_cli_replay_target_refusal(sites: [JetCLIReplaySite], roots: [String]) -> JetCLIProveRefusal? Never! {
     if jet_cli_replay_time_count(sites) > 1 {
         return Val(jet_cli_replay_refusal("E3623", "replay diverged from captured authority", "the target requests more than one `core.time.now` site, but the artifact has one bounded Time record", "recapture a target with one supported Time request, or route time through an injected deterministic input"))
@@ -818,6 +1206,7 @@ fn jet_cli_replay_target_refusal(sites: [JetCLIReplaySite], roots: [String]) -> 
         if site.authority == .Val(authority) {
             if authority == Effect.Rand && roots.contains("Rand") -> next
             if roots.contains("IO") && jet_cli_replay_is_terminal_io(site) -> next
+            if roots.contains("Net") && jet_cli_replay_is_http_client(site) -> next
             why = if authority == Effect.Time -> "replay reached unsupported Time operation at {site.operation}; the artifact records only `core.time.now`" else -> "replay reached unrecorded {sema_taint_effect_name(authority)} authority at {site.operation}"
         }
         return Val(jet_cli_replay_refusal("E3623", "replay diverged from captured authority", why, "recapture the target with every authority it reaches recorded, or remove the unrecorded boundary"))
@@ -891,6 +1280,8 @@ fn jet_cli_replay_verify(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault!
     stream := 0
     chunks := 0
     open := JetCLIReplayRead?{None}
+    net_calls := 0
+    net := JetCLIReplayNetOpen?{None}
     loop at < jend {
         if at + 15 > jend -> return Err(jet_cli_replay_corrupt("truncated frame header"))
         if frames >= JET_CLI_REPLAY_MAX_FRAMES -> return Err(jet_cli_replay_limit("replay artifact exceeds the {JET_CLI_REPLAY_MAX_FRAMES}-frame limit"))
@@ -920,6 +1311,10 @@ fn jet_cli_replay_verify(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault!
             }
         }
         if open == None && (kind == JET_CLI_REPLAY_KIND_IO_CHUNK || kind == JET_CLI_REPLAY_KIND_IO_END) -> return Err(jet_cli_replay_corrupt("an IOChunk or IOEnd frame has no open IORead"))
+        // An HTTP hop's frames run from its NetRequest to its NetEnd.
+        net_frame :: kind == JET_CLI_REPLAY_KIND_NET_DNS || kind == JET_CLI_REPLAY_KIND_NET_RESPONSE || kind == JET_CLI_REPLAY_KIND_NET_CHUNK || kind == JET_CLI_REPLAY_KIND_NET_END
+        if net != None && !net_frame -> return Err(jet_cli_replay_corrupt("a NetRequest frame must be followed by its frames up to one NetEnd frame"))
+        if net == None && net_frame -> return Err(jet_cli_replay_corrupt("a NetDns, NetResponse, NetChunk or NetEnd frame has no open NetRequest"))
         if kind == JET_CLI_REPLAY_KIND_TIME {
             time_frames += 1
             artifact.unix_ns = jet_cli_replay_time_payload(payload)
@@ -945,6 +1340,36 @@ fn jet_cli_replay_verify(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault!
             ended :: jet_cli_replay_io_end_payload(payload, read, stream)
             &artifact.reads.push(ended)
             open = None
+        } else if kind == JET_CLI_REPLAY_KIND_NET_REQUEST {
+            if !artifact.roots.contains("Net") -> return Err(jet_cli_replay_corrupt("a NetRequest frame needs the capture root `Net`"))
+            site :: jet_cli_replay_net_request_payload(payload, net_calls, frames)
+            &artifact.requests.push(JetCLIReplayNetSeen{request_id: frames, payload: payload.copy()})
+            net = Val(JetCLIReplayNetOpen{request_id: frames, site_id: site, resolved: false, answered: false, chunks: 0, stream: [U8]{}})
+            net_calls += 1
+        } else if kind == JET_CLI_REPLAY_KIND_NET_DNS {
+            hop := net ?? return Err(jet_cli_replay_corrupt("a NetDns frame has no open NetRequest"))
+            if hop.resolved || hop.answered || hop.chunks > 0 -> return Err(jet_cli_replay_corrupt("a NetDns frame must come right after its NetRequest"))
+            jet_cli_replay_net_dns_payload(payload, hop.request_id)
+            hop.resolved = true
+            net = Val(hop)
+        } else if kind == JET_CLI_REPLAY_KIND_NET_RESPONSE {
+            hop := net ?? return Err(jet_cli_replay_corrupt("a NetResponse frame has no open NetRequest"))
+            if !hop.resolved || hop.answered || hop.chunks > 0 -> return Err(jet_cli_replay_corrupt("a NetResponse frame must follow its NetDns frame, before any NetChunk"))
+            jet_cli_replay_net_response_payload(payload, hop.request_id)
+            hop.answered = true
+            net = Val(hop)
+        } else if kind == JET_CLI_REPLAY_KIND_NET_CHUNK {
+            hop := net ?? return Err(jet_cli_replay_corrupt("a NetChunk frame has no open NetRequest"))
+            if !hop.resolved -> return Err(jet_cli_replay_corrupt("a NetChunk frame must follow its NetDns frame"))
+            bytes_read :: jet_cli_replay_net_chunk_payload(payload, hop.request_id, hop.chunks)
+            &hop.stream.extend(bytes_read)
+            hop.chunks += 1
+            net = Val(hop)
+        } else if kind == JET_CLI_REPLAY_KIND_NET_END {
+            hop :: net ?? return Err(jet_cli_replay_corrupt("a NetEnd frame has no open NetRequest"))
+            ended :: jet_cli_replay_net_end_payload(payload, hop)
+            &artifact.reads.push(ended)
+            net = None
         } else {
             jet_cli_replay_act_payload(payload)
         }
@@ -957,6 +1382,7 @@ fn jet_cli_replay_verify(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault!
         delivered :: open ?? return Err(jet_cli_replay_corrupt("an IORead frame has no stream"))
         &artifact.reads.push(delivered)
     }
+    if net != None -> return Err(jet_cli_replay_corrupt("a NetRequest frame must be followed by its frames up to one NetEnd frame"))
     if time_frames == 0 -> return Err(jet_cli_replay_limit("replay artifact contains no Time authority"))
     if time_frames > 1 -> return Err(jet_cli_replay_corrupt("replay must contain exactly one consumed Time frame"))
     if !jet_cli_replay_le_is(bytes, jend + 4, frames) || !jet_cli_replay_le_is(bytes, jend + 12, payload_bytes) -> return Err(jet_cli_replay_corrupt("replay footer counts do not match frames"))
@@ -1002,7 +1428,6 @@ fn jet_cli_replay_header(fields: [CanonicalJSONField]) -> JetCLIReplayArtifact J
         loop (index, root) in roots {
             if !([String]{"IO", "Net", "Rand", "Time"}).contains(root) -> return Err(jet_cli_replay_corrupt("header capture root `{root}` is not an authority"))
             if index > 0 && roots[index - 1] >= root -> return Err(jet_cli_replay_corrupt("header capture roots must be distinct and in byte order"))
-            if root == "Net" -> return Err(jet_cli_replay_unsupported("this reader replays the IO, Rand and Time roots, not `Net`"))
         }
         if !roots.contains("Time") -> return Err(jet_cli_replay_corrupt("sensitive capture roots must include `Time`"))
     }
@@ -1016,7 +1441,8 @@ fn jet_cli_replay_header(fields: [CanonicalJSONField]) -> JetCLIReplayArtifact J
     if outcome != "exit" && outcome != "panic" -> return Err(jet_cli_replay_corrupt("header run outcome `{outcome}` is invalid"))
     if status < 0 || status > 255 -> return Err(jet_cli_replay_corrupt("header run status is not an exit status"))
     if (outcome == "panic") != (status == JET_CLI_EXIT_RUNTIME_STOP) -> return Err(jet_cli_replay_corrupt("header run outcome and status disagree"))
-    Ok(JetCLIReplayArtifact{artifact_id: artifact_id, identity: identity, sensitive: mode == "sensitive", roots: roots, unix_ns: 0, reads: [JetCLIReplayRead]{}, status: status})
+    salt_bytes :: replay_base64.decode_url(salt) ?? return Err(jet_cli_replay_corrupt("header privacy_salt is not 32 bytes of unpadded base64url"))
+    Ok(JetCLIReplayArtifact{artifact_id: artifact_id, identity: identity, sensitive: mode == "sensitive", roots: roots, salt: salt_bytes, unix_ns: 0, reads: [JetCLIReplayRead]{}, requests: [JetCLIReplayNetSeen]{}, status: status})
 }
 
 // The target identity a replay is bound to.
@@ -1185,6 +1611,203 @@ fn jet_cli_replay_io_end_payload(payload: [U8], open: JetCLIReplayRead, stream: 
     name :: jet_cli_replay_text(outcome, "error", "IOEnd outcome")
     errno :: jet_cli_replay_io_errno(name) ?? return Err(jet_cli_replay_corrupt("IOEnd outcome error `{name}` is not a portable I/O error this reader replays"))
     Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_STDIN_FAILED, site_id: open.site_id.copy(), request: open.request, result: errno, bytes: [U8]{}})
+}
+
+// A NetRequest record: `{body_digest, call_id, header_digests, host, method,
+// path, port, redirect_index, request_id, scheme, site_id}`, with the body
+// and each header field as a salted digest (null for no body), `call_id`
+// the hop's place among the HTTP hops, `redirect_index` its place in its
+// redirect chain and `request_id` its own frame sequence. Returns its site.
+fn jet_cli_replay_net_request_payload(payload: [U8], call: Int, sequence: Int) -> String JetCLIReplayFault! {
+    what :: "NetRequest payload"
+    fields :: jet_cli_replay_payload_fields(payload, what, [String]{"body_digest", "call_id", "header_digests", "host", "method", "path", "port", "redirect_index", "request_id", "scheme", "site_id"})
+    if !jet_cli_replay_integer_is(fields, "call_id", "{call}") -> return Err(jet_cli_replay_corrupt("NetRequest payload call_id is out of order"))
+    jet_cli_replay_net_id(fields, what, sequence)
+    site :: jet_cli_replay_payload_site(fields, what)
+    scheme :: jet_cli_replay_text(fields, "scheme", what)
+    if scheme != "http" && scheme != "https" -> return Err(jet_cli_replay_corrupt("{what} scheme `{scheme}` is neither http nor https"))
+    method :: jet_cli_replay_text(fields, "method", what)
+    if method == "" -> return Err(jet_cli_replay_corrupt("{what} method is empty"))
+    _ :: jet_cli_replay_text(fields, "host", what)
+    _ :: jet_cli_replay_text(fields, "path", what)
+    port :: Int.parse(jet_cli_replay_integer(fields, "port") ?? "-1") ?? -1
+    if port < 1 || port > 65535 -> return Err(jet_cli_replay_corrupt("{what} port is not a TCP port"))
+    redirect :: Int.parse(jet_cli_replay_integer(fields, "redirect_index") ?? "-1") ?? -1
+    if redirect < 0 -> return Err(jet_cli_replay_corrupt("{what} redirect_index is not a count"))
+    loop field in fields {
+        if field.key != "body_digest" -> next
+        valid :: if field.value == {
+            .Null -> true
+            .String(text) -> jet_cli_replay_lower_hex(text, 64)
+            else -> false
+        }
+        if !valid -> return Err(jet_cli_replay_corrupt("{what} body_digest is neither null nor a SHA-256 digest"))
+    }
+    loop entry in jet_cli_replay_net_pairs(fields, "header_digests", [String]{"digest_sha256", "name"}, what) {
+        if !jet_cli_replay_lower_hex(jet_cli_replay_field_value(entry, "digest_sha256"), 64) -> return Err(jet_cli_replay_corrupt("{what} header digest is not a SHA-256 digest"))
+    }
+    Ok(site)
+}
+
+// A NetDns record: `{addresses, request_id}`, the resolver's answers in
+// order as canonical IP text.
+fn jet_cli_replay_net_dns_payload(payload: [U8], request: Int) JetCLIReplayFault! {
+    what :: "NetDns payload"
+    fields :: jet_cli_replay_payload_fields(payload, what, [String]{"addresses", "request_id"})
+    jet_cli_replay_net_id(fields, what, request)
+    loop item in jet_cli_replay_array(fields, "addresses", what) {
+        address :: if item == {
+            .String(text) -> text.copy()
+            else -> {
+                return Err(jet_cli_replay_corrupt("{what} addresses must be strings"))
+            }
+        }
+        if jet_cli_replay_ip_bytes(address) == None -> return Err(jet_cli_replay_corrupt("{what} address `{address}` is not canonical IP text"))
+    }
+}
+
+// A NetResponse record: `{headers, request_id, status}`, the reply the
+// program saw, for readers; replay parses the recorded bytes again.
+fn jet_cli_replay_net_response_payload(payload: [U8], request: Int) JetCLIReplayFault! {
+    what :: "NetResponse payload"
+    fields :: jet_cli_replay_payload_fields(payload, what, [String]{"headers", "request_id", "status"})
+    jet_cli_replay_net_id(fields, what, request)
+    status :: Int.parse(jet_cli_replay_integer(fields, "status") ?? "-1") ?? -1
+    if status < 100 || status > 999 -> return Err(jet_cli_replay_corrupt("{what} status is not an HTTP status"))
+    _ :: jet_cli_replay_net_pairs(fields, "headers", [String]{"name", "value"}, what)
+}
+
+// A NetChunk record: `{bytes, chunk_index, request_id}`, the hop's next
+// bytes read. Returns them.
+fn jet_cli_replay_net_chunk_payload(payload: [U8], request: Int, chunk: Int) -> [U8] JetCLIReplayFault! {
+    what :: "NetChunk payload"
+    fields :: jet_cli_replay_payload_fields(payload, what, [String]{"bytes", "chunk_index", "request_id"})
+    if !jet_cli_replay_integer_is(fields, "chunk_index", "{chunk}") -> return Err(jet_cli_replay_corrupt("NetChunk payload chunk_index is out of order"))
+    jet_cli_replay_net_id(fields, what, request)
+    bytes :: jet_cli_replay_payload_bytes(fields, "bytes", what)
+    if bytes.len() == 0 || bytes.len() > JET_CLI_REPLAY_NET_CHUNK_BYTES -> return Err(jet_cli_replay_corrupt("NetChunk payload holds no bytes or more than one chunk"))
+    Ok(bytes)
+}
+
+// A NetEnd record: `{chunks, outcome, phase, request_id, sends, total_bytes}`,
+// ending the open hop where it stopped (`phase`), after `sends` writes,
+// at the end of what it read (`eof`) or with a portable error. Returns the
+// hop as the replay record Core reads: u64 LE stage, sends and stream
+// length, the stream, then the ending.
+fn jet_cli_replay_net_end_payload(payload: [U8], open: JetCLIReplayNetOpen) -> JetCLIReplayRead JetCLIReplayFault! {
+    what :: "NetEnd payload"
+    fields :: jet_cli_replay_payload_fields(payload, what, [String]{"chunks", "outcome", "phase", "request_id", "sends", "total_bytes"})
+    jet_cli_replay_net_id(fields, what, open.request_id)
+    total :: jet_cli_replay_payload_uint(fields, "total_bytes", what)
+    full :: (total + JET_CLI_REPLAY_NET_CHUNK_BYTES - 1) /% JET_CLI_REPLAY_NET_CHUNK_BYTES
+    if !jet_cli_replay_integer_is(fields, "chunks", "{open.chunks}") || total != open.stream.len() || open.chunks != full -> return Err(jet_cli_replay_corrupt("NetEnd payload counts disagree with the hop's NetChunk frames"))
+    sends :: jet_cli_replay_payload_uint(fields, "sends", what)
+    phase :: jet_cli_replay_text(fields, "phase", what)
+    stage := -1
+    loop (at, name) in JET_CLI_REPLAY_NET_PHASES {
+        if name == phase -> stage = at
+    }
+    if stage < 0 -> return Err(jet_cli_replay_corrupt("{what} phase `{phase}` is not a hop phase"))
+    if open.resolved != (stage >= 1) || (open.answered && stage != 3) || (open.chunks > 0 && stage < 2) -> return Err(jet_cli_replay_corrupt("{what} phase disagrees with the hop's frames"))
+    outcome :: jet_cli_replay_object(fields, "outcome", what)
+    jet_cli_replay_keys(outcome, "NetEnd outcome", [String]{"kind"}, [String]{"error"}, "E3622")
+    form :: jet_cli_replay_text(outcome, "kind", "NetEnd outcome")
+    ending := "eof"
+    if form == "error" && outcome.len() == 2 {
+        ending = jet_cli_replay_text(outcome, "error", "NetEnd outcome")
+        if !JET_CLI_REPLAY_NET_ERRORS.contains(ending) -> return Err(jet_cli_replay_corrupt("NetEnd outcome error `{ending}` is not a portable error"))
+    } else if form != "eof" || outcome.len() != 1 {
+        return Err(jet_cli_replay_corrupt("NetEnd outcome is neither `eof` nor an error"))
+    }
+    // Resolving and connecting end only in an error; a proxy tunnel that
+    // fails while the hop is in its handshake phase may end at `eof`.
+    if stage < 2 && ending == "eof" -> return Err(jet_cli_replay_corrupt("{what} ends a hop that stopped before connecting without an error"))
+    record := [U8]{}
+    jet_cli_replay_put_le(&record, stage, 8)
+    jet_cli_replay_put_le(&record, sends, 8)
+    jet_cli_replay_put_le(&record, open.stream.len(), 8)
+    &record.extend(open.stream)
+    &record.extend(ending.bytes())
+    Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_NET, site_id: open.site_id.copy(), request: 0, result: record.len(), bytes: record})
+}
+
+// A Net record's `request_id`: the sequence of its hop's NetRequest frame.
+fn jet_cli_replay_net_id(fields: [CanonicalJSONField], what: String, request: Int) JetCLIReplayFault! {
+    if !jet_cli_replay_integer_is(fields, "request_id", "{request}") -> return Err(jet_cli_replay_corrupt("{what} request_id is not its NetRequest's sequence {request}"))
+}
+
+// A record's array of objects with exactly the text fields `keys`.
+fn jet_cli_replay_net_pairs(fields: [CanonicalJSONField], key: String, keys: [String], what: String) -> [[CanonicalJSONField]] JetCLIReplayFault! {
+    entries := [[CanonicalJSONField]]{}
+    loop item in jet_cli_replay_array(fields, key, what) {
+        entry :: if item == {
+            .Object(found) -> found.copy()
+            else -> {
+                return Err(jet_cli_replay_corrupt("{what} {key} must hold objects"))
+            }
+        }
+        jet_cli_replay_keys(entry, "{what} {key}", keys, [String]{}, "E3622")
+        loop name in keys {
+            _ :: jet_cli_replay_text(entry, name, "{what} {key}")
+        }
+        &entries.push(entry)
+    }
+    Ok(entries)
+}
+
+fn jet_cli_replay_array(fields: [CanonicalJSONField], key: String, name: String) -> [CanonicalJSON] JetCLIReplayFault! {
+    loop field in fields {
+        if field.key != key -> next
+        if field.value == .Array(items) -> return Ok(items.copy())
+    }
+    Err(jet_cli_replay_corrupt("{name} `{key}` must be an array"))
+}
+
+// An address the resolver answered, 4 or 16 network-order octets, as text:
+// dotted decimal, or eight lowercase hex groups without leading zeros.
+fn jet_cli_replay_ip_text(address: [U8]) -> String Never! {
+    if address.len() == 4 -> return "{Int.from_u8(address[0])}.{Int.from_u8(address[1])}.{Int.from_u8(address[2])}.{Int.from_u8(address[3])}"
+    digits :: "0123456789abcdef"
+    groups := [String]{}
+    loop at in 0..<(address.len() /% 2) {
+        rest := Int.from_u8(address[2 * at]) * 256 + Int.from_u8(address[2 * at + 1])
+        group := ""
+        loop {
+            group = "{digits.slice(rest %% 16, rest %% 16 + 1)}{group}"
+            rest = rest /% 16
+            if rest == 0 -> break
+        }
+        &groups.push(group)
+    }
+    groups.join(":")
+}
+
+// The octets of canonical IP text (jet_cli_replay_ip_text), or None.
+fn jet_cli_replay_ip_bytes(text: String) -> [U8]? Never! {
+    out := [U8]{}
+    if text.contains(".") {
+        parts :: text.split(".").to_list()
+        if parts.len() != 4 -> return None
+        loop part in parts {
+            if !jet_cli_replay_digits(part) || (part.len() > 1 && part.starts_with("0")) -> return None
+            value :: Int.parse(part) ?? return None
+            &out.push(U8.from_int(value) ?? return None)
+        }
+        return Val(out)
+    }
+    parts :: text.split(":").to_list()
+    if parts.len() != 8 -> return None
+    loop part in parts {
+        if part.len() > 4 || (part.len() > 1 && part.starts_with("0")) || !jet_cli_replay_lower_hex(part, part.len()) -> return None
+        value := 0
+        loop byte in part.bytes() {
+            code :: Int.from_u8(byte)
+            value = value * 16 + (if code <= 57 -> code - 48 else -> code - 87)
+        }
+        &out.push(U8.from_int(value /% 256) ?? return None)
+        &out.push(U8.from_int(value %% 256) ?? return None)
+    }
+    Val(out)
 }
 
 // A record payload's object, with exactly `keys`.
@@ -1556,7 +2179,7 @@ fn jet_cli_replay_items(items: [Item], aliases: [String:String], locals: [String
 }
 
 fn jet_cli_replay_boundary(operation: String, sites: &[JetCLIReplaySite]) {
-    &sites.push(JetCLIReplaySite{operation: operation, authority: None})
+    &sites.push(JetCLIReplaySite{operation: operation, authority: None, owner: ""})
 }
 
 fn jet_cli_replay_block(body: [Stmt], aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
@@ -1888,7 +2511,7 @@ fn jet_cli_replay_call(name: String, aliases: [String:String], locals: [String],
     if dot < 0 {
         if locals.contains(name) -> return
         if JET_CLI_REPLAY_IO_BUILTINS.contains(name) {
-            &sites.push(JetCLIReplaySite{operation: name, authority: Val(Effect.IO)})
+            &sites.push(JetCLIReplaySite{operation: name, authority: Val(Effect.IO), owner: ""})
             return
         }
         if aliases.get(name) == None {
@@ -1898,8 +2521,9 @@ fn jet_cli_replay_call(name: String, aliases: [String:String], locals: [String],
         target :: aliases.get(name) ?? return
         member_dot :: target.rfind(".")
         if member_dot < 0 -> return
-        authority :: sema_taint_core_effect(target.slice(0, member_dot), target.slice(member_dot + 1, target.len())) ?? return
-        &sites.push(JetCLIReplaySite{operation: target, authority: Val(authority)})
+        home :: target.slice(0, member_dot)
+        authority :: sema_taint_core_effect(home, target.slice(member_dot + 1, target.len())) ?? return
+        &sites.push(JetCLIReplaySite{operation: target, authority: Val(authority), owner: home})
         return
     }
     head :: name.slice(0, dot)
@@ -1908,7 +2532,7 @@ fn jet_cli_replay_call(name: String, aliases: [String:String], locals: [String],
     resolved :: owner ?? head
     authority :: sema_taint_core_effect(resolved, member)
     if authority == .Val(found) {
-        &sites.push(JetCLIReplaySite{operation: name, authority: Val(found)})
+        &sites.push(JetCLIReplaySite{operation: name, authority: Val(found), owner: resolved})
         return
     }
     if owner == None -> jet_cli_replay_boundary(name, &sites)
@@ -1924,7 +2548,7 @@ fn jet_cli_replay_method(receiver: Expr, method: String, aliases: [String:String
         return
     }
     authority :: sema_taint_core_effect(owner, method) ?? return
-    &sites.push(JetCLIReplaySite{operation: "{owner}.{method}", authority: Val(authority)})
+    &sites.push(JetCLIReplaySite{operation: "{owner}.{method}", authority: Val(authority), owner: owner})
 }
 
 // `a.b.c` with `a` an import alias: the aliased module with `.b.c` appended.

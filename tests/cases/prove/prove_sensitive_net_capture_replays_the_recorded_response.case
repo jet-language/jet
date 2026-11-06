@@ -1,0 +1,30 @@
+# A sensitive capture records the HTTP response a test read from a live
+# peer, and its replay serves it back with the peer gone: the failing index
+# the response body made at capture is the one replay sees.
+fixture: prove_sensitive_net_capture_replays_the_recorded_response.fixture
+requires: os:unix
+env: JET_STORE_DIR={work}/store
+env: NO_COLOR=1
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: main.jet main.template
+step: jet prove main.jet --capture-sensitive
+pty: true
+stdin: prove_sensitive_rand_consent.stdin
+exit: 70
+stdout: ~ "may disclose: the HTTP responses the program reads, with their DNS answers" # the disclosure names the recorded responses
+stdout: ~ "position 13 doesn't exist" # the response body picks an index past the one-item list
+capture: artifact = text stdout.after_first("REPLAY   captured ").line(0).trim
+wait: peer
+exit: 0
+file: {cap:artifact} ~ "\"roots\":[\"Net\",\"Time\"]" # the header names the recorded Net root
+file: {cap:artifact} ~ "\"method\":\"GET\"" # the NetRequest frame names the request's method
+file: {cap:artifact} ~ "\"path\":\"/greeting\"" # and its target
+step: jet prove main.jet --replay {cap:artifact}
+exit: 70
+stdout+stderr: ~ "position 13 doesn't exist" # replay serves the recorded response with no peer listening
+stdout+stderr: ~ "REPLAY   reproduced" # the replay made the recorded request and consumed every record
