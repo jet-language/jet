@@ -2498,6 +2498,8 @@ fn sema_registration_index_source_impls(graph: &SemaRegistrationGraph) Never! {
 // (Rust `opmix_allows_builtin_impl`): an operator hook on a built-in
 // type belongs to the package that declares the other operand, so
 // `impl Int.Mul(Price)` is legal when this module declares `Price`.
+// An imported operand (`impl Int.Sub(lib.Foreign)`) is not a built-in
+// target error: the orphan rule (E0902) judges which package owns it.
 // `items` are the module's program items.
 fn sema_registration_opmix_builtin_impl(items: [Item], definition: ImplDef) -> Bool {
     if definition.type_name.contains(".") -> return false
@@ -2507,6 +2509,7 @@ fn sema_registration_opmix_builtin_impl(items: [Item], definition: ImplDef) -> B
     rhs :: definition.operator_rhs ?? return false
     if rhs == .Named(rhs_name) {
         if rhs_name == definition.type_name -> return false
+        if rhs_name.contains(".") -> return true
         loop item_index in 0..<items.len() {
             if sema_registration_declared_type_name(items[item_index]) == rhs_name -> return true
         }

@@ -2989,6 +2989,28 @@ fn sema_checked_validate_trait_contract(graph: SemaRegistrationGraph, module_row
             listed :: missing.join(", ")
             &diagnostics.push(sema_error("E0906", span, "`impl …: {trait_name}` is missing {listed}", "every `{trait_name}` method must appear in the impl block", "add the missing method signatures and bodies"))
         }
+        // E0913: an associated type the trait declares and the impl leaves
+        // unset. The method contract names that type, so it is not compared.
+        unset := [String]{}
+        trait_item :: sema_registration_nominal_source_item(graph.modules[trait_ref.module_index].nominals[trait_ref.row].source)
+        if trait_item == .Val(item) {
+            if item == .Trait(definition) {
+                loop declared in definition.assoc_types {
+                    bound := false
+                    loop written in associated_type_impls {
+                        if written.name == declared.name {
+                            bound = true
+                            break
+                        }
+                    }
+                    if !bound -> &unset.push(declared.name)
+                }
+            }
+        }
+        if unset.len() > 0 {
+            &diagnostics.push(sema_owned_unbound(trait_name, unset, span))
+            return
+        }
     }
     // The trait writes its associated types abstractly (`-> Elem`) and its
     // implementer as `Self`; the impl writes the concrete types it binds

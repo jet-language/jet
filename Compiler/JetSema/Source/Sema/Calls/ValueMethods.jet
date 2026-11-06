@@ -308,6 +308,17 @@ fn sema_call_try_value_method(receiver: Expr, receiver_value: TExpr, method: Str
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     labels_valid := sema_value_method_check_labels(method, args, &diagnostics)
+    // `a.pow(b)` across float widths is the same E0109 as the operator, over
+    // both operands, not a parameter mismatch on `b`.
+    if method == "pow" && args.len() == 1 && (receiver_value.ty == Type.Float || receiver_value.ty == Type.Float32) {
+        probe_diagnostics := [Diagnostic]{}
+        if sema_probe_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) == .Val(exponent) {
+            if sema_expr_pow_widths_mixed(receiver_value.ty, exponent.ty) {
+                &diagnostics.push(sema_expr_pow_width_mismatch(Span{start: receiver_value.span.start, end: expr_span(args[0].expr).end}))
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+        }
+    }
     typed := [TExpr]{}
     params := [SemaCallParam]{}
     loop (index, argument) in args {
