@@ -379,13 +379,14 @@ fn jet_cli_compile_emit(file: String, source: String, color: Bool, json: Bool, t
     output
 }
 
-// `jet eval <file>`: the entry checks for the interpreter (Eval mode under
+// `jet eval <file>`: the entry checks for a native root run (Eval mode under
 // `--pure`, where the driver adds the transitive E3401 purity walk from `run`)
 // and stops before lowering; the checked program builds as slot IR from `run`,
-// which runs natively in the compile's comptime child (not the generated entry,
-// which drops a valued result). What the program printed is program output:
-// before the value, or on stderr under `--json` so stdout stays one `eval`
-// document.
+// which runs natively at O0 in the compile's runtime child (not the generated
+// entry, which drops a valued result). That child admits standard output, as
+// a run does; any other ambient effect is refused (E3401). What the program
+// printed is program output: before the value, or on stderr under `--json` so
+// stdout stays one `eval` document.
 fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> JetDriverVerbOutput {
     source :: cli_files.read(file) ?? return jet_cli_report_output("", "E2105", "couldn't read `{file}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -424,13 +425,17 @@ fn jet_cli_eval_result(file: String, source: String, color: Bool, json: Bool, re
     jet_plugin_link(&built.program, jet_driver_entry_root_path(snapshot))
     entry :: name_rows_value(built.program.function_rows, entry_key) ?? jet_cli_finish(jet_cli_ice("the slot IR of `{file}` has no `run` function"))
     config := jet_cli_eval_config()
+    config.runtime_execution = true
     config.eval_entry = true
     program := jet_eval_native_load(JetEvalIRComptime{code: ^built.program, layouts: shared [IRProgram]{^layouts}, items: [Int]{entry}, build_failures: [String]{}}, config)
     evaluated :: jet_eval_native_run(&program, 0, [TComptimeValue]{}, config, span)
     if evaluated.error == .Val(failure) {
-        jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, [Diagnostic]{failure.diagnostic}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+        report :: diagnostic_render_all(file, source, [Diagnostic]{failure.diagnostic}, color)
+        jet_cli_finish(if json -> JetDriverVerbOutput{stdout: "", stderr: "{evaluated.stdout}{report}", exit_code: JET_DRIVER_EXIT_USER_ERROR} else -> JetDriverVerbOutput{stdout: evaluated.stdout, stderr: report, exit_code: JET_DRIVER_EXIT_USER_ERROR})
     }
     if evaluated.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem.message))
+    // The program exited before `run` returned: what it printed, and its status.
+    if evaluated.exit_code == .Val(code) -> jet_cli_finish(if json -> JetDriverVerbOutput{stdout: "", stderr: "{evaluated.stdout}{evaluated.stderr}", exit_code: code} else -> JetDriverVerbOutput{stdout: evaluated.stdout, stderr: evaluated.stderr, exit_code: code})
     data :: evaluated.value ?? jet_cli_finish(jet_cli_ice("evaluating `run` in `{file}` produced no value"))
     value :: sema_user_template_ct_value(data) ?? jet_cli_finish(jet_cli_ice("the value of `run` in `{file}` is not compile-time data"))
     if json {
