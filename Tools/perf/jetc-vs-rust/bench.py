@@ -52,7 +52,7 @@ def prepare(row, out):
     if not (root / 'package.jet').exists():
         (root / 'package.jet').write_text(
             f'name: "bench_{row["name"].replace("-", "_")}"\n'
-            'version: "0.0.1"\nedition: "2028"\n')
+            'version: "0.0.1"\nedition: "2026"\n')
     # Record the exact input, not just the live checkout's name.
     provenance = {str(p.relative_to(root)): digest(p) for p in sorted(root.rglob('*.jet'))}
     (root / 'provenance.json').write_text(json.dumps(provenance, indent=2) + '\n')

@@ -41,7 +41,7 @@ if (mode === 'assemble') {
         + '\nrun: fn() {\n    scoped()\n    tasks.yield_now()\n    panic("cancellation was not delivered")\n}\n';
     }
     writeFileSync(join(unit, 'Source/Fixture.jet'), source);
-    writeFileSync(join(unit, 'package.jet'), 'name: "trap_source_fixture"\nversion: "0.0.1"\nedition: "2028"\n');
+    writeFileSync(join(unit, 'package.jet'), 'name: "trap_source_fixture"\nversion: "0.0.1"\nedition: "2026"\n');
     if (!c.native) writeFileSync(join(unit, 'exports.list'), 'run\n');
     writeFileSync(join(unit, 'source.receipt.json'), JSON.stringify({ sourcePath, native: c.native, task: c.task, cleanupPanic: c.cleanupPanic ?? false }, null, 2) + '\n');
   }
