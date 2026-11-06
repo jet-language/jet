@@ -108,6 +108,21 @@ fn kit_test_steps_env() -> KitEnv {
     files.remove_all(root) ?? panic("remove artifact scratch")
 }
 
+#Test("a package build entry names its artifact for its default executable") {
+    root :: kit_test_core_scratch("build-entry")
+    kit_exec_write(files.join(root, "chosen/package.jet"), "name: \"chosen\"\n")
+    kit_exec_write(files.join(root, "chosen/run.jet"), "fn run() {{}}\n")
+    kit_exec_write(files.join(root, "chosen/tools/build.jet"), "fn build(b: Build) {{\n    helper :: b.add_executable(\"helper\", [\"run.jet\"], [])\n    app :: b.add_executable(\n    \"app\",\n    [\"run.jet\"],\n    [],\n    )\n    b.default(app)\n}}\n")
+    kit_exec_write(files.join(root, "single/package.jet"), "name: \"single\"\n")
+    kit_exec_write(files.join(root, "single/run.jet"), "fn build(builder: Build) {{\n    builder.add_executable(\"tool\", [\"run.jet\"], [])\n}}\n\nfn run() {{}}\n")
+    kit_exec_write(files.join(root, "generated/package.jet"), "name: \"generated\"\n")
+    kit_exec_write(files.join(root, "generated/run.jet"), "fn build(b: Build) {{\n    b.generate(\"facts\") {{\n        fn facts() -> String {{ \"\" }}\n    }}\n}}\n\nfn run() {{}}\n")
+    assert_eq(kit_steps_artifact("chosen/run.jet", root, ""), files.join(root, "chosen/.jet/build/app"))
+    assert_eq(kit_steps_artifact("single/run.jet", root, ""), files.join(root, "single/.jet/build/tool"))
+    assert_eq(kit_steps_artifact("generated/run.jet", root, ""), files.join(root, "generated/.jet/build/run"))
+    files.remove_all(root) ?? panic("remove build entry scratch")
+}
+
 #Test("a bare package build names its artifact for the run output's entry file") {
     root :: kit_test_core_scratch("manifest-entry")
     kit_exec_write(files.join(root, "selected/package.jet"), "name: \"selected\"\noutputs: {{\n    tool: .Executable{{ entry: helper.go }},\n    release: .Executable{{\n        entry: main.launch // the run output\n    }}\n}}\ndefaults: {{\n    run: release\n}}\n")

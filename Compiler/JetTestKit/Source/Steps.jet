@@ -1134,13 +1134,17 @@ fn kit_steps_exit_status(expected: String, code: Int) -> KitVerdict {
 
 // The public build contract places executable artifacts beside the staged
 // project root; progress output is not a machine-readable artifact receipt.
+// A package whose build entry registers an executable writes it under that
+// target's name; any other entry builds under its file stem.
 fn kit_steps_artifact(entry: String, source: String, artifact: String) -> String {
     directory :: files.dirname(files.join(source, entry))
     root := directory
+    packaged := false
     ancestor := directory
     loop {
         if files.exists(files.join(ancestor, "package.jet")) {
             root = ancestor
+            packaged = true
             break
         }
         if ancestor == source -> break
@@ -1148,9 +1152,89 @@ fn kit_steps_artifact(entry: String, source: String, artifact: String) -> String
         if parent == ancestor -> break
         ancestor = parent
     }
+    if artifact != "" -> return files.join(files.join(root, ".jet/build"), artifact)
+    sources := [String]{}
+    if packaged {
+        kit_steps_package_sources(root, &sources)
+        &sources.push(files.join(root, "package.jet"))
+    } else {
+        &sources.push(files.join(source, entry))
+    }
+    loop path in sources {
+        text :: files.read(path) ?? next
+        if kit_steps_build_entry_executable(text) == .Val(target) -> return files.join(files.join(root, ".jet/build"), target)
+    }
     name :: files.basename(entry)
     stem :: if name.ends_with(".jet") -> kit_steps_byte_slice(name, 0, name.count_bytes() - 4) else -> name
-    files.join(files.join(root, ".jet/build"), if artifact == "" -> stem else -> artifact)
+    files.join(files.join(root, ".jet/build"), stem)
+}
+
+// The `.jet` sources of the package under `directory` that may declare its
+// build entry: dot names, `target`, `build`, `node_modules`, `bin` and nested
+// packages stay out, as the package source walk skips them.
+fn kit_steps_package_sources(directory: String, sources: &[String]) {
+    entries := files.list_dir(directory) ?? return
+    &entries.sort_by(entry -> entry.name)
+    loop entry in entries {
+        if entry.name.starts_with(".") || kit_expect_named(["target", "build", "node_modules", "bin"], entry.name) -> next
+        if entry.is_dir {
+            if !files.exists(files.join(entry.path, "package.jet")) -> kit_steps_package_sources(entry.path, &sources)
+        } else if entry.name.ends_with(".jet") && entry.name != "package.jet" {
+            &sources.push(entry.path.copy())
+        }
+    }
+}
+
+// The executable `text`'s build entry `fn build(b: Build)` builds by default:
+// the `b.default(handle)` target, else its one `b.add_executable` target.
+// None when `text` declares no entry or the entry registers no executable.
+fn kit_steps_build_entry_executable(text: String) -> String? {
+    lines :: text.split("\n").to_list()
+    index := 0
+    builder := ""
+    loop index < lines.len() {
+        line :: lines[index]
+        index += 1
+        if line.split_once("fn build(") == .Val(opened) && opened.before == "" && opened.after.split_once(")") == .Val(params) && params.before.split_once(":") == .Val(typed) {
+            if !typed.before.contains(",") && typed.after.trim() == "Build" {
+                builder = typed.before.trim().copy()
+                break
+            }
+        }
+    }
+    if builder == "" -> return None
+    handles := [String]{}
+    names := [String]{}
+    selected := ""
+    loop index < lines.len() {
+        line :: lines[index]
+        index += 1
+        if line == "}}" -> break
+        if line.split_once("{builder}.default(") == .Val(chosen) && chosen.after.split_once(")") == .Val(handle) {
+            selected = handle.before.trim().copy()
+            next
+        }
+        call :: line.split_once("{builder}.add_executable(") ?? next
+        handle :: if call.before.split_once("::") == .Val(bound) -> bound.before.trim().copy() else -> ""
+        // The target name is the call's first string, on its line or a later one.
+        rest := call.after.copy()
+        cursor := index
+        loop !rest.contains("\"") && cursor < lines.len() {
+            rest = lines[cursor].copy()
+            cursor += 1
+        }
+        quoted :: rest.split_once("\"") ?? next
+        name :: quoted.after.split_once("\"") ?? next
+        &handles.push(handle)
+        &names.push(name.before.copy())
+    }
+    if selected != "" {
+        loop position in 0..<handles.len() {
+            if handles[position] == selected -> return Val(names[position].copy())
+        }
+    }
+    if names.len() == 1 -> return Val(names[0].copy())
+    None
 }
 
 fn kit_steps_context(plan: KitPlan, id: String, env: KitEnv, work: String, scratch: String, snapshots: String, bless: KitBless) -> KitStepCtx {
