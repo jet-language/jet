@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6615,
-    "rev": 93732,
+    "nextNum": 6616,
+    "rev": 93743,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73470,82 +73470,6 @@
       "goals": []
     },
     {
-      "id": "c0qem1md",
-      "num": 6057,
-      "title": "Ladder L-19 (CLI apps): Raw argv has three names; #Job vs #CLI command precedence unwritten",
-      "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-19; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: Raw argv has three names; #Job vs #CLI command precedence unwritten\n\nEvidence: SD:343; SD:393; script_mode.jet:14; Process.jet:76-78; D-JOB-SUBCMD1 SD:7172,7280\n\nAudit action: unify names. The fix needs an owner choice of spelling or behaviour, so it goes on a ballot before code.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P3",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-03",
-          "by": "Main",
-          "text": "Seed-free rework of the argv cutover: the intrinsic keeps its seed-known row name core.process.argv; fn argv leaves Process.jet; sema refuses core.process.argv outside <corelib>/ sources with E1004 (hint: process.args() and sys.executable()); the generated #CLI entry reads the start vector through the Core-internal core.args.__cli_argv(). Finding to resolve: core.args.decode_argv(argv) still skips element 0, so decode_argv(process.args()) would drop the first user word."
-        },
-        {
-          "at": "2026-11-03",
-          "by": "Main",
-          "text": "Start-name dispatch needs no ballot: releases ship the aliases as hard links (cc-driver.md), and through a hard link sys.executable() returns the alias path (probe: hard link prints .../hard-cc, symlink resolves to the target). The compiler and Jetpack entries dispatch on the basename of sys.executable(), matching the ratified rule that the program path comes from sys.executable(); the alias case moves from symlinks to hard links. Card question q0khv0gh withdrawn."
-        },
-        {
-          "at": "2026-11-03",
-          "by": "Main",
-          "text": "c2 second blocker, found by building it: stage 1 is compiled by the pinned seed a0_025, which type-checks the tree's Core with its own export table. That table knows only the public intrinsic core.process argv (dispatcher row jet_std_io_args), so a Core that calls the private core.process.__argv() fails with E1004 (.chain s1 key 88029e078107b565), and a non-Core caller of __argv fails with E0067. Removing the public name therefore needs either a seed cut or a two-step bootstrap: (1) land a compiler whose registry also routes core.process __argv, (2) cut a seed, (3) land the Core switch that removes argv. No seeds tonight, so c2 is parked. Full parked patch (100 files, placeholder entries marked do-not-land): $JET_SCRATCH_ROOT/lanes/Main/unitarg/argv-one-parked.patch on base 2ba0d540c4."
-        },
-        {
-          "at": "2026-11-03",
-          "by": "Main",
-          "text": "c2 (D-ARGV-ONE1=A cutover) is implemented in export tree $JET_SCRATCH_ROOT/lanes/Main/argv (base 2ba0d540c4) and NOT landed. Done there: public process.argv() removed (Core.jet exports and owns, StructureRegistry, CoreSurfaceInventory, CoreHostSignatures, CoreCalls ambient row, ledger script); private core.process.__argv() for Core's own help and #CLI entry; ArgsSpec.parse and parse_or_exit take process.args() with 0-based indexing; E1304 what/why/fix name the argument list and process.args(); L0515 retired (sema check, registry row, coverage row, ui_lint snapshot, diagnostic_snapshots step and fixture removed; TSV row marked retired); corpus policy rules retargeted to process.args, with the argv().skip(1) builder-view rule retired and finding Fex-core-2 kept under raw-cli-fixed-shape; Examples, agent-eval programs, about 40 test fixtures and their outputs, Tools/perf/olevels/sweep.mjs, LintPlanted.jet and the spec prose migrated. decode_argv (explicit vector) is intentionally unchanged. BLOCKED on owner question q0khv0gh: the compiler's jet-cc/jet-cxx aliases and Jetpack's jetpack-nix-index/jetpack-trust-root personalities dispatch on the start name via symlinks, and sys.executable() resolves the link, so the two entry files (Compiler/JetCli/run.jet, Jetpack/run.jet) and tests/guards/cc_driver_hosts.jet carry a do-not-land placeholder until the ruling. Still owed after the ruling: stage-1 build, regenerate CoreSourceOwned/CoreCallRows, args_spec_bad_parse_arity.stderr re-bless, lane-check, focused cases/ui/golden runs, one wave."
-        },
-        {
-          "at": "2026-10-29",
-          "text": "All decisions ratified; advanced out of deciding."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "An owner ballot on L-19 is ratified.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "The L-19 ballot D-ARGV-ONE1 was ratified with option A on 2026-10-29 (decision show D-ARGV-ONE1: status ratified, outcome A): process.args() is the one raw argument list and sys.executable() is the program path. Its 'fixed under every option' section also fixes the #Job/#CLI command clash as a check error naming both lines.",
-          "at": "2026-11-03T10:48:15.903Z"
-        },
-        {
-          "n": 2,
-          "text": "The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 16057bca5c (Main-20). One raw argv name: process.args(). process.argv is refused with E1004 (UI tests/ui process_argv_removed snapshot); L0515 retired; Core keeps core.process.argv() only inside process.args() and the #CLI parser. #Job vs #CLI precedence: a #Job whose name clashes with a #CLI command is E0928 (UI E0928_job_cli_command_clash snapshot). Rung goldens: process.args() in 16 examples, #CLI in 9, #Job in 4, all passing in wave 40 (0 golden regressions).",
-          "at": "2026-11-03T21:40:39.390Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "ladder",
-        "cli-apps"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-28T18:07:16.979Z",
-      "updated": "2026-11-03T21:40:41.083Z",
-      "updatedBy": "Main",
-      "goals": [],
-      "completedAt": "2026-11-03T21:40:41.083Z"
-    },
-    {
       "id": "c0fvnyiq",
       "num": 6060,
       "title": "Mutation testing and coverage-guided fuzzing for jet test",
@@ -76178,7 +76102,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T05:50:11.021Z",
-      "updated": "2026-11-06T21:35:38.480Z",
+      "updated": "2026-11-06T21:44:42.885Z",
       "updatedBy": "Main"
     },
     {
@@ -77414,7 +77338,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-06T21:36:37.231Z",
+      "updated": "2026-11-06T21:44:41.712Z",
       "updatedBy": "Main"
     },
     {
@@ -96353,6 +96277,106 @@
       "needsAcceptance": false,
       "created": "2026-11-06T21:37:13.788Z",
       "updated": "2026-11-06T21:38:17.299Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0bbj6h3",
+      "num": 6615,
+      "title": "D-HOST-LEAF1=E: the runtime is an ordinary library that Core uses",
+      "body": "Owner ratified D-HOST-LEAF1 option E on 2026-11-06. jet_runtime becomes an ordinary library: Core and any package write use rt: jet.runtime.time and call rt.sleep_ns(duration.ns). No marker, no symbol string, no hand-written manifest. Internals stay hidden by pub. Amended by the adversarial review (Docs/audits/2026-11-06-d-host-leaf1-option-e-review.md): a declared effect row on a pub runtime function introduces its effects, and the interface is generated from source with the runtime pack. This card builds the runtime side. The #6151 criteria (c4-c41) and #6111 c1/c2 that waited on the host-leaf ballot are unblocked by E and stay on their cards: they remove Core's privileges, which E's ordinary-library model makes possible.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Docs/audits/2026-11-06-d-host-leaf1-option-e-review.md is on dev and its verdict holds within the stated limits; its two amendments (declared effect rows on pub runtime functions are the introducing leaves; the runtime interface is generated from source with the runtime pack) are part of E.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:43:26.872Z"
+        },
+        {
+          "n": 2,
+          "text": "A census lists every CoreCallRecord field (borrow_mask, fallibility, effect_kind, effect_leaf, capability contract, pure_route, coverage, aot_direct, native_int_result, frame_accesses, sink_class, ui_capabilities, marker, authority) and gives each either its home in the runtime's Jet signature or a proof that nothing reads it, so it can be deleted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:43:28.080Z"
+        },
+        {
+          "n": 3,
+          "text": "Building the runtime pack also generates the jet_runtime interface (each pub function's Jet signature and effect row) from the runtime source and embeds it in jet. A check fails the pack build when the interface and the source disagree. No hand-written copy exists. The measured compile time of a hello-world jet check with the interface loaded is recorded and no slower than before the change.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:43:29.088Z"
+        },
+        {
+          "n": 4,
+          "text": "Every runtime function Core calls is a pub function of jet_runtime with a Jet name, Jet types (Int, not I64; typed handles) and a declared effect row. A generated comparison over every bound function proves each declared row equals the effect_kind and effect_leaf the compiler row held before the cutover, with zero differences.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:43:30.015Z"
+        },
+        {
+          "n": 5,
+          "text": "Core reaches the runtime only through ordinary use of jet.runtime modules. The dispatcher_row lines in Compiler/Prelude/Core.jet, the bound CoreCallRows, the IRRoute carrier rows for those functions and their RuntimeStopExports entries are deleted, and every in-repository caller is migrated in one cutover. Goldens prove o0, o1 and o2 for one call in each Core module that called the runtime.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:43:30.998Z"
+        },
+        {
+          "n": 6,
+          "text": "A safe package that names a runtime function that isn't pub fails with the ordinary visibility diagnostic, and reaching a runtime C symbol needs #Import(c) inside #Unsafe. Proof: a UI snapshot for each.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:43:31.970Z"
+        },
+        {
+          "n": 7,
+          "text": "The web tier provides no runtime function as a JavaScript reimplementation: it runs jet_runtime compiled for the web, or its JavaScript host only marshals values into the same runtime code (I9). Until then, no public text says every tier runs one runtime.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:43:32.929Z"
+        }
+      ],
+      "refs": [
+        "6151",
+        "6111"
+      ],
+      "tags": [
+        "runtime",
+        "owner-direction"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T21:43:21.231Z",
+      "updated": "2026-11-06T21:44:51.398Z",
       "updatedBy": "Main"
     }
   ],
@@ -150761,207 +150785,6 @@
       "ratifiedAt": "2026-10-28"
     },
     {
-      "id": "D-ARGV-ONE1",
-      "cardId": "c0qem1md",
-      "group": "api",
-      "title": "`process.args()` is the one raw argument list; the program path comes from `sys.executable()`",
-      "situation": "A Jet program reads its raw command-line words through two functions. One puts the program name first, and one does not. Agreed texts name a third, which is really the argument parser library. Most examples use the form with the program name and skip it by hand. A few use the other. A job and a command with one name both pass the check. An agreed rule forbids that, so it is fixed as a defect. The vote picks one raw function.",
-      "gist": "Should `process.args()`, the user's words only, be the one raw argument list?",
-      "lesson": "Yes: `process.args()` gives the user's words; `sys.executable()` gives the program path.",
-      "explainer": "",
-      "story": "Sam's first script loops over `process.args()` and greets each name. No index arithmetic, and no program name in the output.",
-      "inWild": "Option          First word         Like\nA args only     the user's first   Deno, Java, C#, Dart\nB argv only     program path       Python, Go, Rust, C\nC both          either             no peer",
-      "detail": "WHAT WE BUILD\n- Core/Process/Process.jet:76-78: `args()` stays (`args_from_argv`, :441-444); public `argv()` is removed with no alias; the intrinsic stays private to Core.\n- `ArgsSpec.parse` takes `process.args()`; its E1304 hint names it. L0515 retires. The program path is `core.sys.executable() -[Env]> String` (Core/Sys/Sys.jet:302); there is no `core.os`.\n- Migration: 67 files move from `process.argv()`: 14 examples, 44 tests, 5 Tools, 3 Compiler and 1 Core (BallotReview-2 count).\n\nFIXED UNDER EVERY OPTION (no vote)\n- Job and command clash: D-JOB-SUBCMD1=C reserves job names in the shared command table. Yet `#Job(.Ship) fn deploy()` beside a `#CLI` command `deploy` passes (probes q01, r18). The fix is a check error naming both lines; different visibility still clashes; `.Internal` jobs never clash.\n- Seen in passing (need defect cards): `jet run job_runner.jet -- greet` runs `fn run`, not the job (q02). A typed `fn run(args: T)` gives E2105 \"has no fn run to build\" (q02).\n\nEVIDENCE (r14 jet)\n- r12: `process.args()`, `process.argv()` and `sys.executable()` all work with `--allow=Env`.\n\nIDS\nUnder A amends S12 (SD:342-343): the raw entry becomes `core.process.args`. D-SHAPE-CLI1=A's `core.args` is the ArgsSpec parser of D-ARGS1, not a raw list. Fixed: D-CLI-GLOBAL1=E, D-JOB-SUBCMD1=C (SD:7172-7181). Hosts #6057 (L-19).",
-      "options": [
-        {
-          "key": "A",
-          "name": "Only `process.args()`",
-          "detail": "The user's words, with no program name. The program path comes from `sys.executable()`. Gains: A first loop has no off-by-one. One raw function to learn. Matches what `#CLI` parses. Losses: About 67 files move from `argv()`. Tools that act on their start name lose it.",
-          "technical": "`process.args()` returns the words after the program name and after a selected job word. `process.argv()` leaves the public API with no alias; the intrinsic stays private to Core. `ArgsSpec.parse` takes `process.args()`, and its E1304 hint names it. Lint L0515 retires.",
-          "code": "// A: one raw function, user words only\nfn run() {\n    loop w in process.args() -> print(\"hello {w}\")\n}\n// program path: sys.executable()"
-        },
-        {
-          "key": "B",
-          "name": "Only `process.argv()`",
-          "detail": "Keep the program name first, as C, Go and Python do, and remove `args()`. Gains: Familiar to C, Go, Python and Rust users. Losses: Every raw loop skips word zero by hand. The program path is in two places.",
-          "technical": "`process.args()` is removed with no alias. L0515 is removed; the jet CLI entry and core docs move to `argv()`.",
-          "code": "// B: one raw function, program name first\nfn run() {\n    all :: process.argv()   // all[0] is the program path\n    // every raw loop skips all[0] by hand\n}"
-        },
-        {
-          "key": "C",
-          "name": "Keep both, with a lint",
-          "detail": "Keep both functions. Today's lint suggests `args()` where `argv()` skips word zero. Gains: No migration. Losses: Two functions for one job. Examples keep teaching both.",
-          "technical": "Both functions stay. L0515 keeps nudging toward `args()`.",
-          "code": "// C: keep both; a lint prefers args()\nall :: process.argv()      // L0515: prefer process.args()\nwords :: process.args()"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Deno",
-          "note": "Deno.args is the user's words; Deno.execPath() is the program. Source: https://docs.deno.com/api/deno/~/Deno.args",
-          "code": "// Deno\nfor (const name of Deno.args) console.log(name);\nconsole.log(Deno.execPath());"
-        },
-        {
-          "lang": "Java",
-          "note": "main receives the user's words only. Source: https://docs.oracle.com/javase/tutorial/essential/environment/cmdLineArgs.html",
-          "code": "// Java\npublic static void main(String[] args) {\n    for (String name : args) System.out.println(name);\n}"
-        },
-        {
-          "lang": "C#",
-          "note": "Main receives the user's words only. Source: https://learn.microsoft.com/dotnet/csharp/fundamentals/program-structure/main-command-line",
-          "code": "// C#\nstatic void Main(string[] args) {\n    foreach (var name in args) Console.WriteLine(name);\n}"
-        },
-        {
-          "lang": "Python",
-          "note": "sys.argv[0] is the script, so loops skip it. Source: https://docs.python.org/3/library/sys.html#sys.argv",
-          "code": "# Python\nfor name in sys.argv[1:]:\n    print(f\"hello {name}\")"
-        },
-        {
-          "lang": "Go",
-          "note": "os.Args[0] is the program. Source: https://pkg.go.dev/os#pkg-variables",
-          "code": "// Go\nfor _, name := range os.Args[1:] {\n    fmt.Println(name)\n}"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "A program wants the user's words. Handing them over directly removes the classic off-by-one, and the program path already has a home.",
-        "gains": [
-          "No off-by-one in the first loop.",
-          "One raw function, matching what `#CLI` sees.",
-          "The program path has one home."
-        ],
-        "losses": [
-          {
-            "loss": "About 67 files move from `argv()`.",
-            "mitigation": "Each is a mechanical edit that drops a skip of word zero."
-          },
-          {
-            "loss": "Tools that act on their start name lose it.",
-            "mitigation": "Few tools need it; `sys.executable()` covers help text and relaunching."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Every raw loop must skip word zero by hand."
-          },
-          {
-            "key": "C",
-            "reason": "It keeps two functions and a lint to choose between them."
-          }
-        ],
-        "tradeoff": "A one-time migration, for raw arguments with no off-by-one."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotReview. I attacked the migration size, the peer table and what A takes away; a fresh count finds 67 files using `argv()`, not 81. A also hides the name a program was started as, so that loss is now stated, and option C's Node and Bun peers were wrong."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should `process.args()`, the user's words only, be the one raw argument list?",
-        "lesson": "Yes: `process.args()` gives the user's words; `sys.executable()` gives the program path.",
-        "trio": {
-          "current": {
-            "note": "Today: two functions that differ only by the program name.",
-            "code": "// Today\nall :: process.argv()     // program name first\nwords :: process.args()   // the user's words only\n// 14 examples use argv() and skip word zero by hand"
-          },
-          "wild": {
-            "lang": "Deno",
-            "note": "Deno.args holds only the user's words.",
-            "code": "// Deno\nfor (const name of Deno.args) console.log(`hello ${name}`);\n// program path: Deno.execPath()"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Only `process.args()`",
-            "gist": "The user's words, with no program name. The program path comes from `sys.executable()`.",
-            "gains": [
-              "A first loop has no off-by-one.",
-              "One raw function to learn.",
-              "Matches what `#CLI` parses."
-            ],
-            "losses": [
-              "About 67 files move from `argv()`.",
-              "Tools that act on their start name lose it."
-            ],
-            "proposed": {
-              "code": "// A: one raw function, user words only\nfn run() {\n    loop w in process.args() -> print(\"hello {w}\")\n}\n// program path: sys.executable()"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Only `process.argv()`",
-            "gist": "Keep the program name first, as C, Go and Python do, and remove `args()`.",
-            "gains": [
-              "Familiar to C, Go, Python and Rust users."
-            ],
-            "losses": [
-              "Every raw loop skips word zero by hand.",
-              "The program path is in two places."
-            ],
-            "proposed": {
-              "code": "// B: one raw function, program name first\nfn run() {\n    all :: process.argv()   // all[0] is the program path\n    // every raw loop skips all[0] by hand\n}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Keep both, with a lint",
-            "gist": "Keep both functions. Today's lint suggests `args()` where `argv()` skips word zero.",
-            "gains": [
-              "No migration."
-            ],
-            "losses": [
-              "Two functions for one job.",
-              "Examples keep teaching both."
-            ],
-            "proposed": {
-              "code": "// C: keep both; a lint prefers args()\nall :: process.argv()      // L0515: prefer process.args()\nwords :: process.args()"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A program wants the user's words. Handing them over directly removes the classic off-by-one, and the program path already has a home.",
-          "gains": [
-            "No off-by-one in the first loop.",
-            "One raw function, matching what `#CLI` sees.",
-            "The program path has one home."
-          ],
-          "losses": [
-            {
-              "loss": "About 67 files move from `argv()`.",
-              "mitigation": "Each is a mechanical edit that drops a skip of word zero."
-            },
-            {
-              "loss": "Tools that act on their start name lose it.",
-              "mitigation": "Few tools need it; `sys.executable()` covers help text and relaunching."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Every raw loop must skip word zero by hand."
-            },
-            {
-              "key": "C",
-              "reason": "It keeps two functions and a lint to choose between them."
-            }
-          ],
-          "tradeoff": "A one-time migration, for raw arguments with no off-by-one."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-29T01:54:29.686Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-29"
-    },
-    {
       "id": "D-LADDER-LAW1",
       "cardId": "c0qz3x03",
       "group": "design",
@@ -181574,26 +181397,26 @@
       "id": "D-CUT-6111",
       "cardId": "c07ybrc0",
       "group": "scope",
-      "title": "Card #6111: rule on 1 proposed criterion cut",
+      "title": "Card #6111: rule on 3 proposed criteria cuts",
       "situation": "",
-      "gist": "Should these 1 criterion leave card #6111?",
+      "gist": "Should these 3 criteria leave card #6111?",
       "lesson": "Each row below is one criterion of card #6111 that a lane proposes to cut. Every row shows its full text, the reason and where the work would go. Approve all, or approve and name the rows to keep in a comment.",
       "explainer": "",
-      "story": "The card cannot close while these criterion stay open. The lane that owns the card judged each one out of scope, superseded or already covered elsewhere. You decide each row.",
+      "story": "The card cannot close while these criteria stay open. The lane that owns the card judged each one out of scope, superseded or already covered elsewhere. You decide each row.",
       "inWild": "Teams prune a backlog by moving out-of-scope items to follow-up tickets, so a milestone closes on what it promised.",
-      "detail": "The rows, with full text:\n\n```text\ncard\nCRITERION: criterion\nWHY CUT:   text\nGOES TO:   reason\n```",
+      "detail": "The rows, with full text:\n\n```text\nc4\nCRITERION: (was #4337 c1) Closed by burn-down consolidation: merged into #4287; criteria carried there as [#4337] [precut audit: merged into #4287 (deleted); the same text is met on archived #4328 c1, judged with those rows; no dev test, golden, case or snapshot proves this today]\nWHY CUT:   A consolidation note, not a code criterion: merged into #4287, and the same text is met on archived #4328 c1. The owner should rule it met-by-consolidation or retire it.\nGOES TO:   (nowhere: dropped)\n```\n\n```text\nc5\nCRITERION: (was #4353 c1) Closed by burn-down consolidation: merged into #4381; criteria carried there as [#4353] [precut audit: merged into #4381 (deleted); the same text is met on archived #4314 c1, #4335 c1, #4355 c1 and 4 more, judged with those rows; no dev test, golden, case or…]\nWHY CUT:   A consolidation note, not a code criterion: merged into #4381, and the same text is met on archived #4314 c1, #4335 c1 and others. The owner should rule it met-by-consolidation or retire it.\nGOES TO:   (nowhere: dropped)\n```\n\n```text\nc3\nCRITERION: (from #6113 Runtime exports: generate the 752 jet_rt_handle_{clone,drop,) Every handle carrier has its clone, drop and show helpers generated from one table, and the R4 handle-helper census reports 0 rows.\nWHY CUT:   Not mechanical; it needs a layout design that belongs to c2. Census on 2026-11-06: LintPlanted.jet --route-gaps, run on dev b3bb441ae9 plus the c42/c43 lane edits against the s1 runtime.exports of vb-c92bf872eb. It finds 389 missing handle helpers on 173 carriers: drop 168, clone 140, eq 44, show 20, debug 9, display 8. The rows are in 6111-c3-handle-census.tsv. None of the 173 carriers has any native export: no jet_rt_record_new/get/tag and no route builds one. So no Jet runtime layout exists to generate drop/clone/show from. 98 of them have an IR_GENERATED_RECORDS member-kind schema. A generator could emit their whole record family (new/get/tag plus the handle helpers), but it would first have to fix a native layout and Text/Option/List ownership rules that c2's route exports must then follow. The other 75 (JetChain, JetCounter, JetOrderedMap, sockets, UI backends, …) have no schema at all: IR_HANDLE_FIELDS lists only the fields readable in place, not whole layouts. Their helpers can exist only once c2 implements those types, or c2 retires the rows. The existing hand-written helpers (AllocError.jet, ClockHandle.jet, ByteHandles.jet, …) each own a bespoke layout, so folding them into one table is the same layout decision. Owner: decide the native record layout with c2 (ballot A), or rule c3 into c2.\nGOES TO:   (nowhere: dropped)\n```",
       "options": [
         {
           "key": "A",
           "name": "Approve the cuts as listed",
           "detail": "Every row leaves the card as listed. Name any row to keep in a comment, and it stays open.",
-          "code": "cut card"
+          "code": "cut c4\ncut c5\ncut c3"
         },
         {
           "key": "B",
           "name": "Keep every row",
           "detail": "Every row stays on the card and must be built before the card can close.",
-          "code": "keep card"
+          "code": "keep c4, c5, c3"
         }
       ],
       "comparisons": [],
@@ -181621,17 +181444,17 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "Should these 1 criterion leave card #6111?",
+        "gist": "Should these 3 criteria leave card #6111?",
         "lesson": "Each row is one criterion a lane proposes to cut, shown in full with its reason and destination. Approve all, or approve and name rows to keep.",
         "trio": {
           "current": {
             "note": "The rows as they stand on the card.",
-            "code": "card  criterion"
+            "code": "c4    (was #4337 c1) Closed by burn-down consolidation: merged into …\nc5    (was #4353 c1) Closed by burn-down consolidation: merged into …\nc3    (from #6113 Runtime exports: generate the 752 jet_rt_handle_{clone,drop,) Every …"
           },
           "wild": {
             "lang": "text",
             "note": "Where each row would go.",
-            "code": "card  -> reason"
+            "code": "c4    -> dropped\nc5    -> dropped\nc3    -> dropped"
           }
         },
         "options": [
@@ -181646,7 +181469,7 @@
               "Cut work moves out"
             ],
             "proposed": {
-              "code": "cut card"
+              "code": "cut c4\ncut c5\ncut c3"
             }
           },
           {
@@ -181660,7 +181483,7 @@
               "The card stays open"
             ],
             "proposed": {
-              "code": "keep card"
+              "code": "keep c4, c5, c3"
             }
           }
         ],
@@ -181693,26 +181516,26 @@
       "id": "D-CUT-6151",
       "cardId": "c0w1wcfc",
       "group": "scope",
-      "title": "Card #6151: rule on 1 proposed criterion cut",
+      "title": "Card #6151: rule on 2 proposed criteria cuts",
       "situation": "",
-      "gist": "Should these 1 criterion leave card #6151?",
+      "gist": "Should these 2 criteria leave card #6151?",
       "lesson": "Each row below is one criterion of card #6151 that a lane proposes to cut. Every row shows its full text, the reason and where the work would go. Approve all, or approve and name the rows to keep in a comment.",
       "explainer": "",
-      "story": "The card cannot close while these criterion stay open. The lane that owns the card judged each one out of scope, superseded or already covered elsewhere. You decide each row.",
+      "story": "The card cannot close while these criteria stay open. The lane that owns the card judged each one out of scope, superseded or already covered elsewhere. You decide each row.",
       "inWild": "Teams prune a backlog by moving out-of-scope items to follow-up tickets, so a milestone closes on what it promised.",
-      "detail": "The rows, with full text:\n\n```text\ncard\nCRITERION: criterion\nWHY CUT:   text\nGOES TO:   reason\n```",
+      "detail": "The rows, with full text:\n\n```text\nc46\nCRITERION: (was #6255) No source-owned to_array/to_* conversion remains in core.math, and callers are migrated\nWHY CUT:   No destination-owned spelling exists for these targets. Under D-SHAPE-CONVERT1 the replacement for `v.to_array()` / `Fraction.to_float()` / `Decimal.to_string()` is `[T#N].from_*`, `Float.from_fraction` or `String.from_decimal`, and Core source cannot declare statics on builtin [T#N], Float or String. Docs/spec/syntax-decisions.md:3853 (D-SIMD3) and core-library.md:2256-2295 (D-FIXARR1) ratify from_array/to_array. The owner must choose the spelling.\nGOES TO:   (nowhere: dropped)\n```\n\n```text\nc47\nCRITERION: (was #6255) golden/ui/cases compare loses 0 rows\nWHY CUT:   A Main-run proof row (golden/ui/cases compare) for its sibling criteria; it cannot be met until those land.\nGOES TO:   (nowhere: dropped)\n```",
       "options": [
         {
           "key": "A",
           "name": "Approve the cuts as listed",
           "detail": "Every row leaves the card as listed. Name any row to keep in a comment, and it stays open.",
-          "code": "cut card"
+          "code": "cut c46\ncut c47"
         },
         {
           "key": "B",
           "name": "Keep every row",
           "detail": "Every row stays on the card and must be built before the card can close.",
-          "code": "keep card"
+          "code": "keep c46, c47"
         }
       ],
       "comparisons": [],
@@ -181740,17 +181563,17 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "Should these 1 criterion leave card #6151?",
+        "gist": "Should these 2 criteria leave card #6151?",
         "lesson": "Each row is one criterion a lane proposes to cut, shown in full with its reason and destination. Approve all, or approve and name rows to keep.",
         "trio": {
           "current": {
             "note": "The rows as they stand on the card.",
-            "code": "card  criterion"
+            "code": "c46   (was #6255) No source-owned to_array/to_* conversion remains in core.math, …\nc47   (was #6255) golden/ui/cases compare loses 0 rows"
           },
           "wild": {
             "lang": "text",
             "note": "Where each row would go.",
-            "code": "card  -> reason"
+            "code": "c46   -> dropped\nc47   -> dropped"
           }
         },
         "options": [
@@ -181765,7 +181588,7 @@
               "Cut work moves out"
             ],
             "proposed": {
-              "code": "cut card"
+              "code": "cut c46\ncut c47"
             }
           },
           {
@@ -181779,7 +181602,7 @@
               "The card stays open"
             ],
             "proposed": {
-              "code": "keep card"
+              "code": "keep c46, c47"
             }
           }
         ],
@@ -185851,6 +185674,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T21:44:51.398Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bbj6h3",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-06T21:44:42.885Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-CUT-6111",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T21:44:41.712Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-CUT-6151",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T21:43:32.929Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bbj6h3",
+      "note": "#7 The web tier provides no runtime function as a JavaScript re"
+    },
+    {
+      "at": "2026-11-06T21:43:31.970Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bbj6h3",
+      "note": "#6 A safe package that names a runtime function that isn't pub "
+    },
+    {
+      "at": "2026-11-06T21:43:30.998Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bbj6h3",
+      "note": "#5 Core reaches the runtime only through ordinary use of jet.ru"
+    },
+    {
+      "at": "2026-11-06T21:43:30.015Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bbj6h3",
+      "note": "#4 Every runtime function Core calls is a pub function of jet_r"
+    },
+    {
+      "at": "2026-11-06T21:43:29.088Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bbj6h3",
+      "note": "#3 Building the runtime pack also generates the jet_runtime int"
+    },
+    {
+      "at": "2026-11-06T21:43:28.081Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bbj6h3",
+      "note": "#2 A census lists every CoreCallRecord field (borrow_mask, fall"
+    },
+    {
+      "at": "2026-11-06T21:43:26.872Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0bbj6h3",
+      "note": "#1 Docs/audits/2026-11-06-d-host-leaf1-option-e-review.md is on"
+    },
+    {
+      "at": "2026-11-06T21:43:21.231Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0bbj6h3",
+      "note": "D-HOST-LEAF1=E: the runtime is an ordinary library that Core uses"
+    },
     {
       "at": "2026-11-06T21:38:17.299Z",
       "by": "Main",

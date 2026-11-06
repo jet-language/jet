@@ -12872,6 +12872,208 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-30",
       "retiredAt": "2026-11-06T14:25:11.678Z"
+    },
+    {
+      "id": "D-ARGV-ONE1",
+      "cardId": "c0qem1md",
+      "group": "api",
+      "title": "`process.args()` is the one raw argument list; the program path comes from `sys.executable()`",
+      "situation": "A Jet program reads its raw command-line words through two functions. One puts the program name first, and one does not. Agreed texts name a third, which is really the argument parser library. Most examples use the form with the program name and skip it by hand. A few use the other. A job and a command with one name both pass the check. An agreed rule forbids that, so it is fixed as a defect. The vote picks one raw function.",
+      "gist": "Should `process.args()`, the user's words only, be the one raw argument list?",
+      "lesson": "Yes: `process.args()` gives the user's words; `sys.executable()` gives the program path.",
+      "explainer": "",
+      "story": "Sam's first script loops over `process.args()` and greets each name. No index arithmetic, and no program name in the output.",
+      "inWild": "Option          First word         Like\nA args only     the user's first   Deno, Java, C#, Dart\nB argv only     program path       Python, Go, Rust, C\nC both          either             no peer",
+      "detail": "WHAT WE BUILD\n- Core/Process/Process.jet:76-78: `args()` stays (`args_from_argv`, :441-444); public `argv()` is removed with no alias; the intrinsic stays private to Core.\n- `ArgsSpec.parse` takes `process.args()`; its E1304 hint names it. L0515 retires. The program path is `core.sys.executable() -[Env]> String` (Core/Sys/Sys.jet:302); there is no `core.os`.\n- Migration: 67 files move from `process.argv()`: 14 examples, 44 tests, 5 Tools, 3 Compiler and 1 Core (BallotReview-2 count).\n\nFIXED UNDER EVERY OPTION (no vote)\n- Job and command clash: D-JOB-SUBCMD1=C reserves job names in the shared command table. Yet `#Job(.Ship) fn deploy()` beside a `#CLI` command `deploy` passes (probes q01, r18). The fix is a check error naming both lines; different visibility still clashes; `.Internal` jobs never clash.\n- Seen in passing (need defect cards): `jet run job_runner.jet -- greet` runs `fn run`, not the job (q02). A typed `fn run(args: T)` gives E2105 \"has no fn run to build\" (q02).\n\nEVIDENCE (r14 jet)\n- r12: `process.args()`, `process.argv()` and `sys.executable()` all work with `--allow=Env`.\n\nIDS\nUnder A amends S12 (SD:342-343): the raw entry becomes `core.process.args`. D-SHAPE-CLI1=A's `core.args` is the ArgsSpec parser of D-ARGS1, not a raw list. Fixed: D-CLI-GLOBAL1=E, D-JOB-SUBCMD1=C (SD:7172-7181). Hosts #6057 (L-19).",
+      "options": [
+        {
+          "key": "A",
+          "name": "Only `process.args()`",
+          "detail": "The user's words, with no program name. The program path comes from `sys.executable()`. Gains: A first loop has no off-by-one. One raw function to learn. Matches what `#CLI` parses. Losses: About 67 files move from `argv()`. Tools that act on their start name lose it.",
+          "technical": "`process.args()` returns the words after the program name and after a selected job word. `process.argv()` leaves the public API with no alias; the intrinsic stays private to Core. `ArgsSpec.parse` takes `process.args()`, and its E1304 hint names it. Lint L0515 retires.",
+          "code": "// A: one raw function, user words only\nfn run() {\n    loop w in process.args() -> print(\"hello {w}\")\n}\n// program path: sys.executable()"
+        },
+        {
+          "key": "B",
+          "name": "Only `process.argv()`",
+          "detail": "Keep the program name first, as C, Go and Python do, and remove `args()`. Gains: Familiar to C, Go, Python and Rust users. Losses: Every raw loop skips word zero by hand. The program path is in two places.",
+          "technical": "`process.args()` is removed with no alias. L0515 is removed; the jet CLI entry and core docs move to `argv()`.",
+          "code": "// B: one raw function, program name first\nfn run() {\n    all :: process.argv()   // all[0] is the program path\n    // every raw loop skips all[0] by hand\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep both, with a lint",
+          "detail": "Keep both functions. Today's lint suggests `args()` where `argv()` skips word zero. Gains: No migration. Losses: Two functions for one job. Examples keep teaching both.",
+          "technical": "Both functions stay. L0515 keeps nudging toward `args()`.",
+          "code": "// C: keep both; a lint prefers args()\nall :: process.argv()      // L0515: prefer process.args()\nwords :: process.args()"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "Deno.args is the user's words; Deno.execPath() is the program. Source: https://docs.deno.com/api/deno/~/Deno.args",
+          "code": "// Deno\nfor (const name of Deno.args) console.log(name);\nconsole.log(Deno.execPath());"
+        },
+        {
+          "lang": "Java",
+          "note": "main receives the user's words only. Source: https://docs.oracle.com/javase/tutorial/essential/environment/cmdLineArgs.html",
+          "code": "// Java\npublic static void main(String[] args) {\n    for (String name : args) System.out.println(name);\n}"
+        },
+        {
+          "lang": "C#",
+          "note": "Main receives the user's words only. Source: https://learn.microsoft.com/dotnet/csharp/fundamentals/program-structure/main-command-line",
+          "code": "// C#\nstatic void Main(string[] args) {\n    foreach (var name in args) Console.WriteLine(name);\n}"
+        },
+        {
+          "lang": "Python",
+          "note": "sys.argv[0] is the script, so loops skip it. Source: https://docs.python.org/3/library/sys.html#sys.argv",
+          "code": "# Python\nfor name in sys.argv[1:]:\n    print(f\"hello {name}\")"
+        },
+        {
+          "lang": "Go",
+          "note": "os.Args[0] is the program. Source: https://pkg.go.dev/os#pkg-variables",
+          "code": "// Go\nfor _, name := range os.Args[1:] {\n    fmt.Println(name)\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A program wants the user's words. Handing them over directly removes the classic off-by-one, and the program path already has a home.",
+        "gains": [
+          "No off-by-one in the first loop.",
+          "One raw function, matching what `#CLI` sees.",
+          "The program path has one home."
+        ],
+        "losses": [
+          {
+            "loss": "About 67 files move from `argv()`.",
+            "mitigation": "Each is a mechanical edit that drops a skip of word zero."
+          },
+          {
+            "loss": "Tools that act on their start name lose it.",
+            "mitigation": "Few tools need it; `sys.executable()` covers help text and relaunching."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Every raw loop must skip word zero by hand."
+          },
+          {
+            "key": "C",
+            "reason": "It keeps two functions and a lint to choose between them."
+          }
+        ],
+        "tradeoff": "A one-time migration, for raw arguments with no off-by-one."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotReview. I attacked the migration size, the peer table and what A takes away; a fresh count finds 67 files using `argv()`, not 81. A also hides the name a program was started as, so that loss is now stated, and option C's Node and Bun peers were wrong."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should `process.args()`, the user's words only, be the one raw argument list?",
+        "lesson": "Yes: `process.args()` gives the user's words; `sys.executable()` gives the program path.",
+        "trio": {
+          "current": {
+            "note": "Today: two functions that differ only by the program name.",
+            "code": "// Today\nall :: process.argv()     // program name first\nwords :: process.args()   // the user's words only\n// 14 examples use argv() and skip word zero by hand"
+          },
+          "wild": {
+            "lang": "Deno",
+            "note": "Deno.args holds only the user's words.",
+            "code": "// Deno\nfor (const name of Deno.args) console.log(`hello ${name}`);\n// program path: Deno.execPath()"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Only `process.args()`",
+            "gist": "The user's words, with no program name. The program path comes from `sys.executable()`.",
+            "gains": [
+              "A first loop has no off-by-one.",
+              "One raw function to learn.",
+              "Matches what `#CLI` parses."
+            ],
+            "losses": [
+              "About 67 files move from `argv()`.",
+              "Tools that act on their start name lose it."
+            ],
+            "proposed": {
+              "code": "// A: one raw function, user words only\nfn run() {\n    loop w in process.args() -> print(\"hello {w}\")\n}\n// program path: sys.executable()"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Only `process.argv()`",
+            "gist": "Keep the program name first, as C, Go and Python do, and remove `args()`.",
+            "gains": [
+              "Familiar to C, Go, Python and Rust users."
+            ],
+            "losses": [
+              "Every raw loop skips word zero by hand.",
+              "The program path is in two places."
+            ],
+            "proposed": {
+              "code": "// B: one raw function, program name first\nfn run() {\n    all :: process.argv()   // all[0] is the program path\n    // every raw loop skips all[0] by hand\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep both, with a lint",
+            "gist": "Keep both functions. Today's lint suggests `args()` where `argv()` skips word zero.",
+            "gains": [
+              "No migration."
+            ],
+            "losses": [
+              "Two functions for one job.",
+              "Examples keep teaching both."
+            ],
+            "proposed": {
+              "code": "// C: keep both; a lint prefers args()\nall :: process.argv()      // L0515: prefer process.args()\nwords :: process.args()"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A program wants the user's words. Handing them over directly removes the classic off-by-one, and the program path already has a home.",
+          "gains": [
+            "No off-by-one in the first loop.",
+            "One raw function, matching what `#CLI` sees.",
+            "The program path has one home."
+          ],
+          "losses": [
+            {
+              "loss": "About 67 files move from `argv()`.",
+              "mitigation": "Each is a mechanical edit that drops a skip of word zero."
+            },
+            {
+              "loss": "Tools that act on their start name lose it.",
+              "mitigation": "Few tools need it; `sys.executable()` covers help text and relaunching."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Every raw loop must skip word zero by hand."
+            },
+            {
+              "key": "C",
+              "reason": "It keeps two functions and a lint to choose between them."
+            }
+          ],
+          "tradeoff": "A one-time migration, for raw arguments with no off-by-one."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-29T01:54:29.686Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-29",
+      "retiredAt": "2026-11-06T21:43:21.371Z"
     }
   ]
 }

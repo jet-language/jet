@@ -83501,6 +83501,84 @@
       "completedAt": "2026-11-03T12:06:27.468Z",
       "questions": [],
       "retiredAt": "2026-11-06T14:25:11.677Z"
+    },
+    {
+      "id": "c0qem1md",
+      "num": 6057,
+      "title": "Ladder L-19 (CLI apps): Raw argv has three names; #Job vs #CLI command precedence unwritten",
+      "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-19; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: Raw argv has three names; #Job vs #CLI command precedence unwritten\n\nEvidence: SD:343; SD:393; script_mode.jet:14; Process.jet:76-78; D-JOB-SUBCMD1 SD:7172,7280\n\nAudit action: unify names. The fix needs an owner choice of spelling or behaviour, so it goes on a ballot before code.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-03",
+          "by": "Main",
+          "text": "Seed-free rework of the argv cutover: the intrinsic keeps its seed-known row name core.process.argv; fn argv leaves Process.jet; sema refuses core.process.argv outside <corelib>/ sources with E1004 (hint: process.args() and sys.executable()); the generated #CLI entry reads the start vector through the Core-internal core.args.__cli_argv(). Finding to resolve: core.args.decode_argv(argv) still skips element 0, so decode_argv(process.args()) would drop the first user word."
+        },
+        {
+          "at": "2026-11-03",
+          "by": "Main",
+          "text": "Start-name dispatch needs no ballot: releases ship the aliases as hard links (cc-driver.md), and through a hard link sys.executable() returns the alias path (probe: hard link prints .../hard-cc, symlink resolves to the target). The compiler and Jetpack entries dispatch on the basename of sys.executable(), matching the ratified rule that the program path comes from sys.executable(); the alias case moves from symlinks to hard links. Card question q0khv0gh withdrawn."
+        },
+        {
+          "at": "2026-11-03",
+          "by": "Main",
+          "text": "c2 second blocker, found by building it: stage 1 is compiled by the pinned seed a0_025, which type-checks the tree's Core with its own export table. That table knows only the public intrinsic core.process argv (dispatcher row jet_std_io_args), so a Core that calls the private core.process.__argv() fails with E1004 (.chain s1 key 88029e078107b565), and a non-Core caller of __argv fails with E0067. Removing the public name therefore needs either a seed cut or a two-step bootstrap: (1) land a compiler whose registry also routes core.process __argv, (2) cut a seed, (3) land the Core switch that removes argv. No seeds tonight, so c2 is parked. Full parked patch (100 files, placeholder entries marked do-not-land): $JET_SCRATCH_ROOT/lanes/Main/unitarg/argv-one-parked.patch on base 2ba0d540c4."
+        },
+        {
+          "at": "2026-11-03",
+          "by": "Main",
+          "text": "c2 (D-ARGV-ONE1=A cutover) is implemented in export tree $JET_SCRATCH_ROOT/lanes/Main/argv (base 2ba0d540c4) and NOT landed. Done there: public process.argv() removed (Core.jet exports and owns, StructureRegistry, CoreSurfaceInventory, CoreHostSignatures, CoreCalls ambient row, ledger script); private core.process.__argv() for Core's own help and #CLI entry; ArgsSpec.parse and parse_or_exit take process.args() with 0-based indexing; E1304 what/why/fix name the argument list and process.args(); L0515 retired (sema check, registry row, coverage row, ui_lint snapshot, diagnostic_snapshots step and fixture removed; TSV row marked retired); corpus policy rules retargeted to process.args, with the argv().skip(1) builder-view rule retired and finding Fex-core-2 kept under raw-cli-fixed-shape; Examples, agent-eval programs, about 40 test fixtures and their outputs, Tools/perf/olevels/sweep.mjs, LintPlanted.jet and the spec prose migrated. decode_argv (explicit vector) is intentionally unchanged. BLOCKED on owner question q0khv0gh: the compiler's jet-cc/jet-cxx aliases and Jetpack's jetpack-nix-index/jetpack-trust-root personalities dispatch on the start name via symlinks, and sys.executable() resolves the link, so the two entry files (Compiler/JetCli/run.jet, Jetpack/run.jet) and tests/guards/cc_driver_hosts.jet carry a do-not-land placeholder until the ruling. Still owed after the ruling: stage-1 build, regenerate CoreSourceOwned/CoreCallRows, args_spec_bad_parse_arity.stderr re-bless, lane-check, focused cases/ui/golden runs, one wave."
+        },
+        {
+          "at": "2026-10-29",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An owner ballot on L-19 is ratified.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The L-19 ballot D-ARGV-ONE1 was ratified with option A on 2026-10-29 (decision show D-ARGV-ONE1: status ratified, outcome A): process.args() is the one raw argument list and sys.executable() is the program path. Its 'fixed under every option' section also fixes the #Job/#CLI command clash as a check error naming both lines.",
+          "at": "2026-11-03T10:48:15.903Z"
+        },
+        {
+          "n": 2,
+          "text": "The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 16057bca5c (Main-20). One raw argv name: process.args(). process.argv is refused with E1004 (UI tests/ui process_argv_removed snapshot); L0515 retired; Core keeps core.process.argv() only inside process.args() and the #CLI parser. #Job vs #CLI precedence: a #Job whose name clashes with a #CLI command is E0928 (UI E0928_job_cli_command_clash snapshot). Rung goldens: process.args() in 16 examples, #CLI in 9, #Job in 4, all passing in wave 40 (0 golden regressions).",
+          "at": "2026-11-03T21:40:39.390Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ladder",
+        "cli-apps"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T18:07:16.979Z",
+      "updated": "2026-11-03T21:40:41.083Z",
+      "updatedBy": "Main",
+      "goals": [],
+      "completedAt": "2026-11-03T21:40:41.083Z",
+      "questions": [],
+      "retiredAt": "2026-11-06T21:43:21.370Z"
     }
   ]
 }
