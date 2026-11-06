@@ -1,0 +1,74 @@
+// Rust crates/jetpack/src/JetOS/entry.rs and commands.rs: the `jet os`
+// dispatcher. This engine builds the read-only verbs `check` and `plan`;
+// generation building, activation, import, image and VM verbs are refused by
+// name until their engine lands.
+
+// `jet os <verb> <host>|<host>@<root>`.
+jetos_main: fn(theme: Theme, verb: String?, args: [String], flags: JetOSFlags) -[IO, FS, Env, Time.Wait]> Int Never! {
+    target: args.get(0) ?? ""
+    if verb == {
+        .Val(name) -> if name == {
+            OS_VERB_CHECK -> jetos_cmd_check(theme, target)
+            OS_VERB_PLAN -> jetos_cmd_plan(theme, target, flags)
+            "help" | "--help" | "-h" -> {
+                print(jetos_usage())
+                EXIT_OK
+            }
+            else -> {
+                if OS_VERBS.contains(name) {
+                    theme.error("`jet os {name}` is not built in this jetpack", "this jetpack builds the jetos verbs {OS_BUILT_VERBS.join(", ")}.", "run `jet os plan <host>` to read the checked plan.")
+                } else {
+                    theme.error("`{name}` is not a jetos verb", "jetos verbs are: {OS_VERBS.join(", ")}.", "run `jet os help`.")
+                }
+                EXIT_USAGE
+            }
+        }
+        .None -> {
+            print(jetos_usage())
+            EXIT_USAGE
+        }
+    }
+}
+
+jetos_usage: fn() -> String Never! {
+    "jet os {OS_BUILT_VERBS.join("|")} <host>|host@root"
+}
+
+// `jet os check <host>`: the Package projects and its System is selected.
+jetos_cmd_check: fn(theme: Theme, raw: String) -[IO, FS, Env, Time.Wait]> Int Never! {
+    target: jetos_parse_target(theme, raw) ?? return EXIT_USAGE
+    loaded: jetos_load_target(theme, target) ?? return EXIT_USAGE
+    theme.ok("jetos {theme.bold(loaded.system.name)} checked ({loaded.system.target})")
+    EXIT_OK
+}
+
+// `jet os plan <host>`: the exact checked plan, without building.
+jetos_cmd_plan: fn(theme: Theme, raw: String, flags: JetOSFlags) -[IO, FS, Env, Time.Wait]> Int Never! {
+    target: jetos_parse_target(theme, raw) ?? return EXIT_USAGE
+    loaded: jetos_load_target(theme, target) ?? return EXIT_USAGE
+    plan: jetos_render_plan_json(loaded.system, loaded.plan.graph_identity)
+    if !flags.json {
+        theme.graph_identity(loaded.plan.graph_identity)
+        theme.ok("jetos plan for {theme.bold(loaded.system.name)}")
+    }
+    print(plan)
+    EXIT_OK
+}
+
+// Rust generation_files.rs render_plan_json before realization: the closure
+// is empty until a generation build realizes the packages.
+jetos_render_plan_json: fn(system: SystemPlan, graph_identity: String) -> String Never! {
+    packages := [String]{}
+    loop package in system.packages {
+        reference: if package.source == "" -> package.name else -> "{package.name}@{package.source}"
+        packages.push("{{\"name\":{foundation_json_quote(package.name)},\"source\":{foundation_json_quote(package.source)},\"ref\":{foundation_json_quote(reference)}}}")
+    }
+    services: loop service in system.services -> jetos_service_plan_json(service)
+    options: loop option in system.options -> "{{\"key\":{foundation_json_quote(option.key)},\"value\":{foundation_json_quote(option.value)}}}"
+    "{{\"host\":{foundation_json_quote(system.name)},\"target\":{foundation_json_quote(system.target)},\"graph_identity\":{foundation_json_quote(graph_identity)},\"boot\":{jetos_boot_profile(system).to_json()},\"packages\":[{packages.join(",")}],\"closure\":[],\"services\":[{services.join(",")}],\"options\":[{options.join(",")}]}}"
+}
+
+jetos_service_plan_json: fn(service: ServicePlan) -> String Never! {
+    fields: loop field in service.extra -> "{{\"key\":{foundation_json_quote(field.key)},\"value\":{foundation_json_quote(field.value)}}}"
+    "{{\"name\":{foundation_json_quote(service.name)},\"enable\":{if service.enable -> "true" else -> "false"},\"fields\":[{fields.join(",")}]}}"
+}

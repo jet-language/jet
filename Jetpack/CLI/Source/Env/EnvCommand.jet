@@ -128,7 +128,6 @@ cli_cmd_env_project: fn(verification: &StoreVerification, cache: &WorkspaceDecla
     cli_validate_declared_secrets_with_reuse(theme, project_dir, plan.secrets, plan.environment.active_environment, reuse_verified_store) ?? return cli_exit_for(theme, err)
     cli_env_timing_mark(timing, ready_started, "secrets-validated")
     fingerprints: cli_environment_entry_definition_fingerprint(project_dir, parsed.flags.preset, parsed.flags.environment, plan, secret_identity)
-    inherited_loader_path: sys.get("LD_LIBRARY_PATH")
     receipt_matches_plan: if previous_receipt == {
         .Val(receipt) -> cli_env_entry_matches_plan(receipt, plan)
         .None -> false
@@ -136,7 +135,7 @@ cli_cmd_env_project: fn(verification: &StoreVerification, cache: &WorkspaceDecla
     warm := [VerifiedRealization]?{None}
     if !flags.prep && receipt_matches_plan {
         receipt: previous_receipt ?? panic("a matching receipt exists")
-        warm = if store_reuse_verified_environment(&verification, roots, receipt.stamp, project_dir, fingerprints.definition, inherited_loader_path, receipt.packages, flags.local_nix_catalog != None) == {
+        warm = if store_reuse_verified_environment(verification, roots, receipt.stamp, project_dir, fingerprints.definition, receipt.packages, flags.local_nix_catalog != None) == {
             .Val(found) -> Val(found)
             .None -> None
             .Err(_) -> None
@@ -183,13 +182,13 @@ cli_cmd_env_project: fn(verification: &StoreVerification, cache: &WorkspaceDecla
     cli_env_timing_mark(timing, ready_started, "env-composed")
     if flags.prep {
         cli_auto_clean_after_success(&verification, theme, roots)
-        cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) ?? theme.detail("couldn't record env entry: {err.message()}")
+        cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, secret_identity ?? "", stats) ?? theme.detail("couldn't record env entry: {err.message()}")
         return EXIT_OK
     }
     entry: cli_find_project_entry(project_dir)
     cli_run_lifecycle_hooks(&verification, &cache, theme, parsed, roots, project_dir, entry, &env, plan.environment.lifecycle.on_enter, "on_enter") ?? return cli_exit_for(theme, err)
     cli_env_timing_mark(timing, ready_started, "lifecycle-hooks")
-    cli_announce_env_ready(theme, project_dir, roots, warm_reused, time.elapsed(ready_started), fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) ?? theme.detail("couldn't record env entry: {err.message()}")
+    cli_announce_env_ready(theme, project_dir, roots, warm_reused, time.elapsed(ready_started), fingerprints.definition, secret_identity ?? "", stats) ?? theme.detail("couldn't record env entry: {err.message()}")
     cli_env_timing_mark(timing, ready_started, "announced")
     command: parsed.command ?? [String]{}
     code: if {
@@ -202,7 +201,7 @@ cli_cmd_env_project: fn(verification: &StoreVerification, cache: &WorkspaceDecla
         // A warm entry reused its exact receipt; its stats realized nothing,
         // so a rewrite would record an empty selection set.
         if !warm_reused {
-            cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", stats) ?? theme.detail("couldn't refresh env entry: {err.message()}")
+            cli_record_env_entry_receipt(theme, project_dir, roots, fingerprints.definition, secret_identity ?? "", stats) ?? theme.detail("couldn't refresh env entry: {err.message()}")
         }
     }
     code

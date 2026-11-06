@@ -120,12 +120,12 @@ store_report_integrity: fn(theme: Theme, failure: IntegrityFailure) Never! -[IO,
 // Rehydrate a previously verified project environment after its composite
 // stamp still matches. This deliberately skips provider and per-entry
 // verification; any stamp mutation falls back to the unchanged cold path.
-store_reuse_verified_environment: fn(verification: &StoreVerification, roots: HangarRoots, expected_stamp: String, project: String, definition_fingerprint: String, inherited_loader_path: String?, selections: [EnvironmentSelection], allow_local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
+store_reuse_verified_environment: fn(verification: &StoreVerification, roots: HangarRoots, expected_stamp: String, project: String, definition_fingerprint: String, selections: [EnvironmentSelection], allow_local_nix_catalog: Bool) -> [VerifiedRealization]? StoreError! {
     if selections.len() == 0 -> return Ok(None)
     hangar_lock: env_runtime_lock(roots.root, "hangar")
     entries: store_list_read_only(roots)
     index: EnvironmentEntryIndex.from_entries_for_selections(entries, selections)
-    actual_stamp: store_environment_entry_stamp_with_index(roots, project, definition_fingerprint, inherited_loader_path, selections, index)
+    actual_stamp: store_environment_entry_stamp_with_index(roots, project, definition_fingerprint, selections, index)
     if actual_stamp != expected_stamp -> return Ok(None)
     selected := [StoreEntry]{}
     loop selection in selections {
@@ -269,8 +269,14 @@ store_record_realized_in_transaction: fn(roots: HangarRoots, realized: Realized,
     }
     cache_identity := realized.cache_identity
     if producer.provider == "nix" {
+        // The Nix cache key is the entry's policy identity; the producer's
+        // policy facts name the same key so cache reuse and publication see
+        // one policy.
         cache_key: producer.facts.get("nix.cache.key")
-        if cache_key == .Val(key) -> cache_identity.policy_fingerprint = key
+        if cache_key == .Val(key) {
+            cache_identity.policy_fingerprint = key
+            producer.policy_facts = "policy={key}\nplatform={cache_identity.platform}"
+        }
     }
     &producer.bind_cache_provenance(realized.reference, realized.envelope.output_hash, cache_identity, realized.references)
     provider_refresh_provider_facts(&producer, realized.reference) ?? return Err(StoreError.Other("{err}"))

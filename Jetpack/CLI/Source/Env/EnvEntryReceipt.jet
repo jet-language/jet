@@ -256,18 +256,18 @@ cli_format_env_changes: fn(previous: [(name: String, version: String)], current:
 
 // Print the ready banner, then record the receipt unless this entry reused
 // an exact one.
-cli_announce_env_ready: fn(theme: Theme, project_dir: String, roots: HangarRoots, warm_reused: Bool, elapsed: time.Duration, definition_fingerprint: String, inherited_loader_path: String?, secret_identity: String, stats: EnvReadyStats) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
+cli_announce_env_ready: fn(theme: Theme, project_dir: String, roots: HangarRoots, warm_reused: Bool, elapsed: time.Duration, definition_fingerprint: String, secret_identity: String, stats: EnvReadyStats) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
     theme.status(cli_format_env_ready(elapsed, stats.cache_hit_percent()))
     if warm_reused -> return
-    cli_record_env_entry_receipt(theme, project_dir, roots, definition_fingerprint, inherited_loader_path, secret_identity, stats)
+    cli_record_env_entry_receipt(theme, project_dir, roots, definition_fingerprint, secret_identity, stats)
 }
 
 // Stamp the realized selections, report what changed since the previous
 // receipt, and rewrite the receipt when anything differs.
-cli_record_env_entry_receipt: fn(theme: Theme, project_dir: String, roots: HangarRoots, definition_fingerprint: String, inherited_loader_path: String?, secret_identity: String, stats: EnvReadyStats) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
+cli_record_env_entry_receipt: fn(theme: Theme, project_dir: String, roots: HangarRoots, definition_fingerprint: String, secret_identity: String, stats: EnvReadyStats) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
     current: stats.realized_set()
     selections: stats.realized_entries()
-    stamp: store_environment_entry_stamp(roots, project_dir, definition_fingerprint, inherited_loader_path, selections) ?? return Err(CLIError.Store(err))
+    stamp: store_environment_entry_stamp(roots, project_dir, definition_fingerprint, selections) ?? return Err(CLIError.Store(err))
     if cli_read_env_entry_receipt(project_dir) == .Val(previous) {
         previous_display := [(name: String, version: String)]{}
         loop package in previous.packages {

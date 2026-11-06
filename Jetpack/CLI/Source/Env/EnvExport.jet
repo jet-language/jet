@@ -139,12 +139,11 @@ cli_env_export_activate: fn(verification: &StoreVerification, cache: &WorkspaceD
         .Val(receipt) -> cli_env_entry_matches_plan(receipt, plan)
         .None -> false
     }
-    inherited_loader_path: sys.get("LD_LIBRARY_PATH")
     local_catalog: parsed.flags.local_nix_catalog != None
     warm := [VerifiedRealization]?{None}
     if receipt_matches_plan {
         receipt: previous_receipt ?? panic("a matching receipt exists")
-        warm = if store_reuse_verified_environment(&verification, roots, receipt.stamp, root, fingerprints.definition, inherited_loader_path, receipt.packages, local_catalog) == {
+        warm = if store_reuse_verified_environment(verification, roots, receipt.stamp, root, fingerprints.definition, receipt.packages, local_catalog) == {
             .Val(found) -> Val(found)
             .None -> None
             .Err(_) -> None
@@ -202,7 +201,7 @@ cli_env_export_activate: fn(verification: &StoreVerification, cache: &WorkspaceD
     }
     script = "{script}{rendered}"
     if !warm_reused {
-        cli_record_env_entry_receipt(theme, root, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", composed.stats) ?? theme.detail("couldn't record env entry: {err.message()}")
+        cli_record_env_entry_receipt(theme, root, roots, fingerprints.definition, secret_identity ?? "", composed.stats) ?? theme.detail("couldn't record env entry: {err.message()}")
     }
     if watched_reload_ready -> env_hook_clear_watch_reload(root)
     Ok(script)

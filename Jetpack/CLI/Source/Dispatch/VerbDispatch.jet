@@ -1,7 +1,7 @@
 // The jetpack verb dispatcher, ported from jetpack::CLI::parse::main. It
 // refuses any flag the verb does not take, runs the user-tools drift check
-// before mutating commands, and routes one typed verb to its command. JetOS
-// verbs (`os`, `user`, `studio`, `push`) are not part of this port.
+// before mutating commands, and routes one typed verb to its command. The
+// JetOS verbs `user`, `studio` and `push` are not part of this port.
 
 // Every verb this dispatcher routes.
 JetpackVerb: enum {
@@ -34,6 +34,7 @@ JetpackVerb: enum {
     Browser
     Split
     Fold
+    OS
     Help
 
     parse: fn(text: String) -> JetpackVerb? Never! {
@@ -67,6 +68,7 @@ JetpackVerb: enum {
             BROWSER_SUBCOMMAND -> Val(JetpackVerb.Browser)
             TRANSITION_SPLIT_VERB -> Val(JetpackVerb.Split)
             TRANSITION_FOLD_VERB -> Val(JetpackVerb.Fold)
+            OS_SUBCOMMAND -> Val(JetpackVerb.OS)
             "help" | "--help" | "-h" -> Val(JetpackVerb.Help)
             else -> None
         }
@@ -164,6 +166,7 @@ cli_dispatch_verb: fn(verification: &StoreVerification, verb: JetpackVerb, theme
         .Browser -> cli_cmd_browser(&verification, theme, parsed)
         .Split -> cli_cmd_split(theme, parsed)
         .Fold -> cli_cmd_fold(theme, parsed)
+        .OS -> cli_cmd_os(theme, parsed)
         .Help -> {
             help_theme: Theme.resolve_for(color, term.stdout().is_tty())
             print(cli_usage_with_color(help_theme.color))

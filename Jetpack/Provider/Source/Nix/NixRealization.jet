@@ -311,7 +311,10 @@ provider_record_nix_lock_after_store: fn(verification: &StoreVerification, ctx: 
     if !files.is_dir(project) -> return Ok(entry)
     if entry.reference == "" || entry.envelope.output_hash == "" -> return Ok(entry)
     producer: ProducerRecord.decode(entry.producer_record) ?? return Ok(entry)
-    nix_realization: producer.provider == "nix" && entry.cache_identity.source_fingerprint == entry.envelope.output_hash && entry.cache_identity.recipe_fingerprint == pkg_sha256_hex(PROVIDER_NIX_RECIPE_ID.bytes())
+    // A project lock pins a catalog closure, so only an index-backed
+    // realization (one carrying its signed index revision) publishes one; a
+    // fixture provider result has no catalog to pin.
+    nix_realization: producer.provider == "nix" && producer.facts.has_key("nix.index.revision") && entry.cache_identity.source_fingerprint == entry.envelope.output_hash && entry.cache_identity.recipe_fingerprint == pkg_sha256_hex(PROVIDER_NIX_RECIPE_ID.bytes())
     local_native: producer.facts.has_key("nix.fallback.provenance") || provider_is_local_native(producer.facts, producer.provider)
     if !nix_realization && !local_native -> return Ok(entry)
 
@@ -533,6 +536,9 @@ provider_finalize_nix_realization: fn(verification: &StoreVerification, spec: Re
     }
     identity: provider_prepare_nix_identity(&verification, spec, table, ctx, realized)
     finalized := realized
+    // The envelope carries the primary output's byte digest, the same digest
+    // Store registration recomputes; a provider-side spelling never stands in.
+    finalized.envelope.output_hash = provider_primary_nix_output_digest(identity.named_output_digests) ?? return Err(ProviderError.BadOutput("Nix provider returned no non-empty `out` or `bin` output"))
     finalized.cache_identity = identity.cache_identity
     previous: realized.producer
     prepared: provider_prepared_nix_facts(identity)

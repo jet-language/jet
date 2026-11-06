@@ -185,11 +185,15 @@ store_append_stat_failure: fn(stamp: &[U8], error: IOError, missing: String, fai
     store_append_environment_stamp_field(&stamp, store_io_kind_name(error).bytes())
 }
 
-store_environment_entry_stamp_with_index: fn(roots: HangarRoots, project: String, definition_fingerprint: String, inherited_loader_path: String?, selections: [EnvironmentSelection], index: EnvironmentEntryIndex) -> String StoreError! {
+// The composite warm-entry stamp: Store state, the environment definition,
+// the project and every selected entry's seal. The shell's inherited loader
+// path is not an input: entry composes it fresh, so it never invalidates a
+// verified closure.
+store_environment_entry_stamp_with_index: fn(roots: HangarRoots, project: String, definition_fingerprint: String, selections: [EnvironmentSelection], index: EnvironmentEntryIndex) -> String StoreError! {
     store_stamp: store_wal_state_stamp(roots)
-    canonical := "jetpack-env-entry-v4".bytes()
+    canonical := "jetpack-env-entry-v5".bytes()
     &canonical.push(U8{0})
-    header: [String]{store_stamp, definition_fingerprint, project, inherited_loader_path ?? ""}
+    header: [String]{store_stamp, definition_fingerprint, project}
     loop field in header -> store_append_environment_stamp_field(&canonical, field.bytes())
     ordered := selections.copy()
     &ordered.sort_by(selection -> selection.key())
@@ -215,8 +219,8 @@ store_environment_entry_stamp_with_index: fn(roots: HangarRoots, project: String
     Ok(store_sha256_hex(canonical))
 }
 
-store_environment_entry_stamp: fn(roots: HangarRoots, project: String, definition_fingerprint: String, inherited_loader_path: String?, selections: [EnvironmentSelection]) -> String StoreError! {
+store_environment_entry_stamp: fn(roots: HangarRoots, project: String, definition_fingerprint: String, selections: [EnvironmentSelection]) -> String StoreError! {
     entries: store_list_read_only(roots)
     index: EnvironmentEntryIndex.from_entries_for_selections(entries, selections)
-    store_environment_entry_stamp_with_index(roots, project, definition_fingerprint, inherited_loader_path, selections, index)
+    store_environment_entry_stamp_with_index(roots, project, definition_fingerprint, selections, index)
 }

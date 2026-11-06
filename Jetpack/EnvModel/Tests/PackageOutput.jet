@@ -1,0 +1,58 @@
+// Rust jet-env-model ModuleEval/PackageOutput.rs tests (lines 556-654).
+use {
+    jet_env_model.[envmodel_project_package_outputs]
+    jet_pkg_model.[PackageFacts, Pkg]
+}
+
+envmodel_test_output_facts: fn(source: String) -> PackageFacts Never! {
+    PackageFacts.parse(source, "package.jet") ?? panic("package parses: {err}")
+}
+
+envmodel_test_output_error: fn(source: String) -> String Never! {
+    if envmodel_project_package_outputs(envmodel_test_output_facts(source)) == {
+        .Ok(_) -> panic("the projection must fail")
+        .Err(error) -> error.text()
+    }
+}
+
+#Test("Package outputs project System and Fleet facts with a stable identity") {
+    facts: envmodel_test_output_facts("name: \"demo\"\noutputs: {{\n    workstation: System{{\n        name: \"workstation\"\n        target: linux.x64\n        packages: [ripgrep, \"fd@nixpkgs\", ripgrep]\n        services: {{ ssh: {{ enable: true, ports: [22] }} }}\n        options: {{ network: {{ hostName: \"workstation\" }} }}\n    }}\n    prod: Fleet{{ hosts: {{ edge: \"system.workstation\" }} }}\n}}")
+    first: envmodel_project_package_outputs(facts) ?? panic("projects: {err.text()}")
+    second: envmodel_project_package_outputs(facts) ?? panic("projects: {err.text()}")
+    assert_eq(first.graph_identity, second.graph_identity)
+    assert_eq(first.graph_identity, facts.semantic_digest())
+    assert_eq(first.systems.len(), 1)
+    assert_eq(first.systems[0].packages, [Pkg]{Pkg.new("jetpack", "ripgrep"), Pkg.new("nixpkgs", "fd")})
+    assert_eq(first.systems[0].services[0].name, "ssh")
+    assert_eq(first.systems[0].services[0].extra[0].key, "ports")
+    assert_eq(first.systems[0].services[0].extra[0].value, "[22]")
+    assert_eq(first.systems[0].options[0].key, "network.hostName")
+    assert_eq(first.systems[0].options[0].value, "workstation")
+    assert_eq(first.fleets[0].name, "prod")
+    assert_eq(first.fleets[0].hosts[0].name, "edge")
+    assert_eq(first.fleets[0].hosts[0].system, "workstation")
+}
+
+#Test("a System service without enable is refused at its path") {
+    rendered: envmodel_test_output_error("name: \"demo\"\noutputs: {{ host: System{{ target: linux.x64, services: {{ ssh: {{}} }} }} }}")
+    assert(rendered.contains("outputs.host.services.ssh.enable"), rendered)
+}
+
+#Test("a Fleet host that could escape generation storage is refused") {
+    rendered: envmodel_test_output_error("name: \"demo\"\noutputs: {{\n    workstation: System{{ target: linux.x64 }}\n    prod: Fleet{{ hosts: {{ \"../escape\": system.workstation }} }}\n}}")
+    assert(rendered.contains("../escape"), rendered)
+    assert(rendered.contains("safe path component"), rendered)
+}
+
+#Test("duplicate Fleet names and colliding host paths are refused") {
+    duplicate: envmodel_test_output_error("name: \"demo\"\noutputs: {{\n    workstation: System{{ target: linux.x64 }}\n    blue: Fleet{{ name: \"prod\", hosts: {{ edge: system.workstation }} }}\n    green: Fleet{{ name: \"prod\", hosts: {{ other: system.workstation }} }}\n}}")
+    assert(duplicate.contains("fleet prod is declared more than once"), duplicate)
+    collision: envmodel_test_output_error("name: \"demo\"\noutputs: {{\n    workstation: System{{ target: linux.x64 }}\n    laptop: System{{ target: linux.arm64 }}\n    blue: Fleet{{ hosts: {{ edge: system.workstation }} }}\n    green: Fleet{{ hosts: {{ edge: system.laptop }} }}\n}}")
+    assert(collision.contains("outputs.green.hosts.edge"), collision)
+    assert(collision.contains("collides with Fleet host"), collision)
+}
+
+#Test("an unknown System target is refused at its path") {
+    rendered: envmodel_test_output_error("name: \"demo\"\noutputs: {{ host: System{{ target: linux.riscv }} }}")
+    assert_eq(rendered, "outputs.host.target: unknown target linux.riscv; use linux.x64 or linux.arm64")
+}

@@ -289,10 +289,7 @@ cli_update_user_tools: fn(verification: &StoreVerification, theme: Theme, parsed
 }
 
 cli_update_user_tools_with_plan: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation, has_other_plan: Bool, apply_other: fn() -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never!) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
-    if parsed.flags.offline {
-        theme.error("cannot update user-tools offline", "channel movement needs the configured source metadata or a captured fixture", "remove `--offline` and run `jetpack update tools` again")
-        return EXIT_USAGE
-    }
+    if parsed.flags.offline -> return cli_offline_refusal(theme, "update")
     outcome: cli_update_user_tools_locked(&verification, theme, parsed, &confirmation, has_other_plan, apply_other) ?? return cli_report_tool_profile_error(theme, err)
     if outcome == {
         .Applied(changed) -> {
@@ -454,7 +451,7 @@ cli_report_collide: fn(theme: Theme, bin: String, job: String, path: String, raw
         TOOL_DIAG_COLLIDE,
         "`{bin}` is already a job in {rel}",
         "the project job `{job}` wins in this directory, so the global tool would be shadowed here (JPK-TOOL-COLLIDE).",
-        "install under a different bin name  ->  jetpack tool install {raw} {TOOL_FLAG_AS} <other>\n     or just run it once                  ->  jetpack use {raw} -- <command>"
+        "install under a different bin name with `jetpack tool install {raw} {TOOL_FLAG_AS} <other>`, or run it once with `jetpack use {raw} -- <command>`"
     )
 }
 
