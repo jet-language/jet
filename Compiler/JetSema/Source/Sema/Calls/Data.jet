@@ -1330,16 +1330,6 @@ fn sema_data_args_decode(args: [CallArg], type_args: [Type], span: Span, expecte
     SemaDirectSpecialCheck{handled: true, value: sema_check_expression(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
 }
 
-// `args.decode<T>()` is compiler-owned with no Core registry row: its body is
-// the `#CLI` expansion of `T`, so (like `ui.mount`) it resolves through the
-// import before the registry route.
-fn sema_call_try_args_decode(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    if module_name != "core.args" || member != "decode" -> return SemaDirectSpecialCheck{handled: false, value: None}
-    imported :: sema_call_core_import_target(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
-    if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return SemaDirectSpecialCheck{handled: false, value: None}
-    sema_data_args_decode(args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-}
-
 // The Core calls whose typed decode contract lives here.
 fn sema_data_core_decode_member(module_name: String, member: String) -> Bool Never! {
     if module_name != "core.db" && !module_name.starts_with("core.encoding.") -> return false
@@ -1770,6 +1760,7 @@ fn sema_data_core_check_typed(module_name: String, member: String, args: [CallAr
 }
 
 fn sema_call_try_data_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if module_name == "core.args" && member == "decode" && type_args.len() == 1 -> return sema_data_args_decode(args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if module_name == "core.data.stream" -> return sema_call_try_data_stream_core_call(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     reader_writer :: sema_data_core_try_reader_writer(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if reader_writer == .Val(result) -> return result

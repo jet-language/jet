@@ -634,37 +634,19 @@ fn ir_host_value_row(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
 // `#Impure` block. The span places a build host call's record and failure
 // at the call, not at the invocation.
 fn ir_host_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, member: String, values: [Int], span: Span) -> Int Never! {
-    words := [Int]{}
-    loop value in values {
-        word :: ir_expr(&m, p, &b, value)
-        if ir_failed(b) -> return -1
-        if word < 0 {
-            operand_span :: ir_body_node(p, b, value).span
-            ir_fail(&b, operand_span, "Unit operand of a compiler host method")
-            return -1
-        }
-        &words.push(word)
-    }
-    answer :: ir_host_method_words(&m, p, &b, ty, member, words, span)
-    loop word in words -> ir_release(&m, &b, word)
-    answer
-}
-
-// ir_host_method over operand slots `words` already evaluated, which stay
-// the caller's.
-fn ir_host_method_words(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, member: String, words: [Int], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     string_row :: ir_string_row(&m)
     member_text :: ir_temp(&m, &b, string_row)
     ir_emit(&b.f, IROp.ConstText, member_text, ir_intern_text(&m, member), -1, -1, b.line)
     impure :: if b.impure > 0 -> 1 else -> 0
     operands := [Int]{member_text, ir_word_const(&m, &b, impure), ir_word_const(&m, &b, span.start), ir_word_const(&m, &b, span.end)}
-    loop word in words {
-        // A host route names each operand's type row by its intern key.
-        &operands.push(ir_host_row_key(&m, &b, b.f.slot_type[word]))
-        &operands.push(word)
+    words := [Int]{}
+    loop value in values {
+        if !ir_host_operand(&m, p, &b, value, &operands, &words) -> return -1
     }
-    ir_host_route(&m, &b, 1, row, operands)
+    answer :: ir_host_route(&m, &b, 1, row, operands)
+    loop word in words -> ir_release(&m, &b, word)
+    answer
 }
 
 // Comptime constant `key`, whose value holds a compiler value
@@ -719,6 +701,22 @@ fn ir_host_route(m: &IRModule, b: &IRBuilder, kind: Int, row: Int, operands: [In
         return ir_load_at(&m, &b, cell, 0, row)
     }
     ir_runtime(&m, &b, "jet_comptime_host", [Int]{kind_word, area, count_word}, row)
+}
+
+// Appends operand `operand`'s type row and word to a host method's operands.
+fn ir_host_operand(m: &IRModule, p: IRProgram, b: &IRBuilder, operand: Int, operands: &[Int], words: &[Int]) -> Bool Never! {
+    word :: ir_expr(&m, p, &b, operand)
+    if ir_failed(b) -> return false
+    if word < 0 {
+        operand_span :: ir_body_node(p, b, operand).span
+        ir_fail(&b, operand_span, "Unit operand of a compiler host method")
+        return false
+    }
+    word_row :: b.f.slot_type[word]
+    &operands.push(ir_host_row_key(&m, &b, word_row))
+    &operands.push(word)
+    &words.push(word)
+    true
 }
 
 // A host route names an operand's type row by its intern key, a text the
@@ -3037,33 +3035,22 @@ fn ir_try_reraise(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conve
             ir_release(&m, &b, payload)
         }
         .Typed(function_name, _, target) -> {
-            if (ir_host_value_row(m, p, source_row) ?? "") == "BuildError" && ir_default_err(p, target) {
-                // A BuildError is a compiler value whose record already is a
-                // default Err with its typed identity and details; the
-                // compiler answers it as that Err rather than through the
-                // Prelude's message-only conversion.
-                converted = ir_host_method_words(&m, p, &b, target, "BuildError.into_err", [Int]{payload}, span)
-                if ir_failed(b) -> return -1
+            row :: ir_function_row(p, function_name) ?? return ir_fail_slot(&b, span, "error conversion {function_name} outside the checked program")
+            callee :: ir_function_id(&m, p, function_name, [Type]{}) ?? return ir_fail_slot(&b, span, "call of {function_name}")
+            routine_return :: ir_executable_return(p.functions[row]) ?? return ir_fail_slot(&b, span, "error conversion {function_name} without a result")
+            returned_row :: ir_value_type(&m, p, routine_return) ?? return ir_type_fail(&b, span, routine_return)
+            returned :: ir_fresh_temp(&m, &b, returned_row)
+            start :: ir_args(&b.f, [Int]{payload})
+            ir_emit(&b.f, IROp.Call, returned, callee, start, 1, b.line)
+            ir_stop_check(&m, &b)
+            b.fresh[payload] = false
+            converted = returned
+            if ir_untag(routine_return) == .Result(_, _) {
+                target_row :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
+                converted_value :: ir_load_at(&m, &b, returned, 8, target_row)
+                converted = ir_own(&m, p, &b, converted_value)
                 b.fresh[converted] = true
-                ir_release(&m, &b, payload)
-            } else {
-                row :: ir_function_row(p, function_name) ?? return ir_fail_slot(&b, span, "error conversion {function_name} outside the checked program")
-                callee :: ir_function_id(&m, p, function_name, [Type]{}) ?? return ir_fail_slot(&b, span, "call of {function_name}")
-                routine_return :: ir_executable_return(p.functions[row]) ?? return ir_fail_slot(&b, span, "error conversion {function_name} without a result")
-                returned_row :: ir_value_type(&m, p, routine_return) ?? return ir_type_fail(&b, span, routine_return)
-                returned :: ir_fresh_temp(&m, &b, returned_row)
-                start :: ir_args(&b.f, [Int]{payload})
-                ir_emit(&b.f, IROp.Call, returned, callee, start, 1, b.line)
-                ir_stop_check(&m, &b)
-                b.fresh[payload] = false
-                converted = returned
-                if ir_untag(routine_return) == .Result(_, _) {
-                    target_row :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
-                    converted_value :: ir_load_at(&m, &b, returned, 8, target_row)
-                    converted = ir_own(&m, p, &b, converted_value)
-                    b.fresh[converted] = true
-                    ir_release(&m, &b, returned)
-                }
+                ir_release(&m, &b, returned)
             }
             if ir_default_err(p, target) {
                 string_row :: ir_string_row(&m)

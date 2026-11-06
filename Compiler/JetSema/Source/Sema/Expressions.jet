@@ -3330,8 +3330,6 @@ fn sema_expr_core_module_method_checked(receiver: Expr, method: String, method_s
     if guard.handled -> return SemaMethodSpecialCheck{handled: true, value: guard.value}
     mount := sema_call_try_ui_mount(module_name, method, alias, alias_span, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if mount.handled -> return SemaMethodSpecialCheck{handled: true, value: mount.value}
-    decode := sema_call_try_args_decode(module_name, method, alias, alias_span, args, type_args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if decode.handled -> return SemaMethodSpecialCheck{handled: true, value: decode.value}
     if !nested {
         live := sema_call_try_live(module_name, method, alias, alias_span, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if live.handled -> return SemaMethodSpecialCheck{handled: true, value: live.value}

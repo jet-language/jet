@@ -274,8 +274,10 @@ fn typed_records(text: String) -> [[String]] TypedCSVError! {
     Ok(^parser.rows)
 }
 
-fn parse(text: String) -> Dyn EncodingError! {
-    physical :: parse_rows(text, true)
+/// `rows` lifted into `Dyn`: one array of text cells per record, under the
+/// same delimiter, header and blank-record options.
+fn parse(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: Bool{true}) -> Dyn EncodingError! {
+    physical :: rows(text, delimiter, header, skip_blank) ?? return Err(err)
     items := [Dyn]{}
     loop row in physical {
         fields := [Dyn]{}
@@ -465,7 +467,8 @@ fn parse_rows_with(text: String, delimiter: [U8], skip_blank: Bool) -> [CSVRow] 
                 start = i
                 next
             }
-            return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "characters after a closing CSV quote must be a delimiter or line break"))
+            name :: if width == 1 && first == 44 -> "comma" else -> "delimiter"
+            return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "only quote, {name}, CRLF, LF, or EOF may follow a closing quote"))
         }
         if n == 34 {
             if i != start -> return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "a quoted CSV field must begin with a quote"))
@@ -504,7 +507,7 @@ fn parse_rows_with(text: String, delimiter: [U8], skip_blank: Bool) -> [CSVRow] 
             column += 1
         }
     }
-    if quoted -> return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "unterminated quoted CSV field"))
+    if quoted -> return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "quoted field ended before its closing quote"))
     if closed || i > start || fields.len() > 0 {
         if closed {
             &fields.push(field_text(^field))

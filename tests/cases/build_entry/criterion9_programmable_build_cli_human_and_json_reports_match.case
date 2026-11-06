@@ -3,13 +3,13 @@
 fixture: fixtures/duplicate-target
 step: jet build main.jet
 exit: nonzero
-stderr: ~ Error [jet.BuildPlanFailed]: Build plan is invalid: target name `app` is registered twice # Original human BuildError message assertion; the human renderer sentence-cases the What.
+stderr: ~ Error [jet.BuildPlanFailed]: build plan is invalid: target name `app` is registered twice # Original human BuildError message assertion.
 stderr: ~ More: jet-lang.dev/e/E3502 # Original diagnostic URL assertion.
 step: jet build main.jet --json
 exit: nonzero
-json: machine doc $.reports[?code="E3502"] #>= 1
-json: machine doc $.reports[?code="E3502"][0].what = "Build plan is invalid: target name `app` is registered twice"
+json: stderr doc $.code = "E3502"
+json: stderr doc $.what = "build plan is invalid: target name `app` is registered twice"
 # Exact what preserves original human/JSON message relation without accepting unrelated prose.
-json: machine doc $.reports[?code="E3502"][0].build_error.typed_identity = "BuildError::DuplicateTargetName"
-json: machine doc $.reports[?code="E3502"][0].build_error.details.variant = "DuplicateTargetName"
-json: machine doc $.reports[?code="E3502"][0].build_error.details.fields.value = "app"
+json: stderr doc $.build_error.typed_identity = "BuildError::DuplicateTargetName"
+json: stderr doc $.build_error.details.variant = "DuplicateTargetName"
+json: stderr doc $.build_error.details.fields.value = "app"

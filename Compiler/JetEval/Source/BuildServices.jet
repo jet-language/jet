@@ -164,10 +164,7 @@ fn jet_eval_build_field_present(data: TComptimeValue, name: String) -> TComptime
 }
 
 fn jet_eval_build_failed_diagnostic(value: TComptimeValue, fallback: Span) -> Diagnostic? Never! {
-    if value == .Failed(.Told(told)) {
-        // An error union member keeps its record as the union case's payload.
-        error := told
-        if told == .Enum(_, _, cases) && cases.len() == 1 -> error = cases[0].value
+    if value == .Failed(.Told(error)) {
         if error == .Struct(name, _) {
             if name != "Err" -> return None
         } else { return None }

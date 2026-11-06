@@ -433,11 +433,6 @@ fn pbkdf2_hmac(password: [U8], salt: [U8], iterations: Int, key_len: Int) -> [U8
     Ok(out)
 }
 
-// Zeroes the buffer in place. The qualified call is deliberate: inside this
-// package it selects the primitive Core route, so this public entry owns the
-// user-facing signature.
-fn wipe(bytes: &[U8]) Never! { core.crypto.wipe(&bytes) }
-
 fn constant_time_equal_bytes(a: [U8], b: [U8]) -> Bool Never! {
     diff := 0
     if a.len() != b.len() -> diff = 1
