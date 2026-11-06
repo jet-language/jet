@@ -993,6 +993,14 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
         if diagnostics.len() > diagnostics_before -> return SemaMethodSpecialCheck{handled: true, value: None}
         distinct := sema_call_try_distinct_conversion(owner_symbol, type_name, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if distinct.handled -> return distinct
+        // D-METAREFLECT1: inside comptime, `T.reflect()` on a declared type is
+        // that type's TypeInfo handle, the record `$name`/`$fields` read from.
+        if method == "reflect" && args.len() == 0 && type_args.len() == 0 && static_args.len() == 0 && scopes.comptime_execution_depth > 0 {
+            if sema_fact_type_info(Val(owner_symbol), type_name, environment, program) == .Val(info) {
+                folded :: sema_tree_node(sema_fact_named("TypeInfo"), TExprKind.CtLit{value: sema_fact_declared_value(info)}, span)
+                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, &diagnostics)}
+            }
+        }
         // Declared statics win; a canonical Core or compiler owner then falls back to its built-in rows.
         if !generic_owner_method && sema_expr_canonical_type_binding(type_name, scopes) {
             builtin := sema_call_try_builtin_static(type_name, owner_symbol.module_name, method, static_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
