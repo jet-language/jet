@@ -4403,6 +4403,7 @@ subquery from another table) is refused.
 | `decode<T: Decode>(row: [String: DBValue]) -[DB]> T [FieldError]!` | `T` | Decode a row into a typed value. A field's column is its `Rename(db:)` name, else its shared name. |
 | `transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Execute a checked transaction. |
 | `migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Apply a migration under its checksum. |
+| `scope.live(sql: SQL) -[DB.Read]> Live<[[String: DBValue]], DBError> DBError!` | binding | Bind one policy-checked `SELECT` in the shared `core.web` live registry; read it with `core.web.state`. |
 
 Scoped connection and pool handles provide checked `query`, `query_one`,
 `execute`, lease, commit, rollback, and close operations. A policy expression
@@ -4411,6 +4412,17 @@ with a table identifier. Policy text has a bounded size. Schema and transaction
 control belong to the migration/control path, not to arbitrary interpolated
 application values. Migrations record their name and checksum so a changed
 migration cannot silently replace an applied one.
+
+`DBScope.live` (D-LIVEQUERY1, #1158) refuses any statement other than one
+`SELECT` and applies the scope's policy before binding, so a refused query
+fails at the call. The binding is identified by the scope's user, the
+policy-applied SQL and its bound values: the same query from the same user
+returns the same binding, and another user's gets its own. `core.web.state`
+runs the query on first read and again, with the policy applied anew, after a
+scope write (`execute`, `transaction`, `migrate`) to the table it reads, or
+after a rollback that undid one. A write to another table leaves it current.
+No WebSocket transport carries these results yet (core.net.ws, #4957), so
+`live_stats()` keeps reporting `ws_pushes=0`.
 
 Rows are inspectable `[String: DBValue]` maps. The closed value carrier has
 `Null`, `Int`, `Float`, `Text`, `Bool`, and `Blob([U8])` variants; SQLite Boolean

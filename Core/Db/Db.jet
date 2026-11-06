@@ -20,6 +20,9 @@ use {
     encoding :: core.encoding
     core.encoding.[Dyn]
     stream :: __core_encoding_stream
+    // DBScope.live bindings share core.web's process-wide live registry.
+    web :: core.web
+    core.web.[Live]
 }
 
 // core.db owns its SQL values, typed row selection and conversion. The private
@@ -665,10 +668,12 @@ fn __policy_apply(sql: SQL, policy: RowPolicy, user: String, allow_schema: Bool)
 
 // One SQLite connection shared by a DBConnection and every scope derived from
 // it. `close` shuts the driver down in place for all of them. `path` is the
-// location it was opened at, for display.
+// location it was opened at, for display. `written` names the tables written
+// since the last begin or commit, so a rollback can re-run their live bindings.
 struct __DBState {
     driver: __Driver
     path: String
+    written: [String]
 }
 
 struct DBConnection { state: Shared<__DBState> }
@@ -680,7 +685,7 @@ struct DBScope {
 
 fn __db_open(path: String, failure: String) -> DBConnection Never! {
     driver := __driver_open(path) ?? panic(failure)
-    DBConnection{state: shared __DBState{driver: ^driver, path: path.copy()}}
+    DBConnection{state: shared __DBState{driver: ^driver, path: path.copy(), written: [String]{}}}
 }
 fn open(path: String) -[DB]> DBConnection Never! { __db_open(path, "database open failed") }
 fn open_memory() -[DB]> DBConnection Never! { __db_open(":memory:", "in-memory database open failed") }
@@ -688,18 +693,26 @@ fn open_memory() -[DB]> DBConnection Never! { __db_open(":memory:", "in-memory d
 fn __db_begin(state: Shared<__DBState>, immediate: Bool) -> Bool Never! {
     guard := state.guard_edit()
     if raw(guard.value.driver) == (U64{0}) -> return false
-    if immediate -> return __driver_begin_immediate(guard.value.driver)
-    __driver_begin(guard.value.driver)
+    began :: if immediate -> __driver_begin_immediate(guard.value.driver) else -> __driver_begin(guard.value.driver)
+    if began -> guard.value.written = [String]{}
+    began
 }
 fn __db_commit(state: Shared<__DBState>) -> Bool Never! {
     guard := state.guard_edit()
     if raw(guard.value.driver) == (U64{0}) -> return false
-    __driver_commit(guard.value.driver)
+    committed :: __driver_commit(guard.value.driver)
+    if committed -> guard.value.written = [String]{}
+    committed
 }
+// A rollback undoes the writes since the last begin, so every live binding
+// over a table they touched re-runs on its next read.
 fn __db_rollback(state: Shared<__DBState>) -> Bool Never! {
     guard := state.guard_edit()
     if raw(guard.value.driver) == (U64{0}) -> return false
-    __driver_rollback(guard.value.driver)
+    rolled :: __driver_rollback(guard.value.driver)
+    loop table in guard.value.written -> web.__live_invalidate_all(__live_source(table))
+    guard.value.written = [String]{}
+    rolled
 }
 fn __db_shutdown(state: Shared<__DBState>) -> Bool Never! {
     guard := state.guard_edit()
@@ -725,11 +738,17 @@ impl DBConnection.Display {
     }
 }
 
+// A write marks every live binding over its table for a re-run.
 fn __scope_execute(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBError! {
     scoped :: __policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
     guard := scope.state.guard_edit()
     if raw(guard.value.driver) == (U64{0}) -> return Err(__db_closed())
-    __driver_execute(&guard.value.driver, scoped.text, scoped.values)
+    changed :: __driver_execute(&guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
+    if __sql_table(scoped) == .Val(table) {
+        if !guard.value.written.contains(table) -> &guard.value.written.push(table.copy())
+        web.__live_invalidate_all(__live_source(table))
+    }
+    Ok(changed)
 }
 fn __scope_query(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String: DBValue]] DBError! {
     scoped :: __policy_apply(sql, scope.policy, scope.user, allow_schema) ?? return Err(err)
@@ -738,8 +757,48 @@ fn __scope_query(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String: DBVa
     __driver_query(&guard.value.driver, scoped.text, scoped.values)
 }
 
+// ---- live queries (D-LIVEQUERY1, #1158) ----------------------------------
+
+// A DBScope.live binding's source in the shared live registry names the table
+// its SELECT reads; a write to that table re-runs every binding over it.
+fn __live_source(table: String) -> String Never! { "core.db.live:{table}" }
+
+// The table `sql` reads or writes: the target of SELECT, INSERT, UPDATE or
+// DELETE, or of CREATE, ALTER or DROP TABLE. None when it names no table.
+fn __sql_table(sql: SQL) -> String? Never! {
+    tokens :: __sql_tokens(sql.text.bytes())
+    if tokens.len() == 0 -> return None
+    kind :: tokens[0].word.copy()
+    if kind == "create" || kind == "alter" || kind == "drop" {
+        at := __sql_word_index(tokens, "table")
+        if at < 0 -> return None
+        at += 1
+        loop at < tokens.len() && (tokens[at].word == "if" || tokens[at].word == "not" || tokens[at].word == "exists") { at += 1 }
+        if at >= tokens.len() -> return None
+        return Val(tokens[at].word.copy())
+    }
+    if kind != "select" && kind != "insert" && kind != "update" && kind != "delete" -> return None
+    target :: __sql_target_index(tokens, kind)
+    if target < 0 -> return None
+    Val(tokens[target].word.copy())
+}
+
 impl DBScope {
     fn query(self, sql: SQL) -[DB.Read]> [[String: DBValue]] DBError! { __scope_query(self, sql, false) }
+    // A live binding over one policy-checked SELECT. `core.web.state` reads
+    // it; each re-run applies this scope's policy again, and a write to the
+    // table it reads (or a rollback of one) re-runs it on the next read. The
+    // user, the policy-applied SQL and its values identify the binding.
+    fn live(self, sql: SQL) -[DB.Read]> Live<[[String: DBValue]], DBError> DBError! {
+        scoped :: __policy_apply(sql, self.policy, self.user, false) ?? return Err(err)
+        tokens :: __sql_tokens(scoped.text.bytes())
+        if tokens.len() == 0 || tokens[0].word != "select" -> return Err(__db_error("a live query must be one SELECT"))
+        key := [String]{web.__live_arg<String>(self.user), web.__live_arg<String>(scoped.text)}
+        loop value in scoped.values -> &key.push(web.__live_arg<DBValue>(value))
+        scope :: self.copy()
+        query :: sql.copy()
+        Ok(web.__live_bind<[[String: DBValue]], DBError>(__live_source(__sql_table(scoped) ?? ""), key, () -> __scope_query(scope, query, false)))
+    }
     fn query_one(self, sql: SQL) -[DB.Read]> [String: DBValue]? DBError! {
         rows := __scope_query(self, sql, false) ?? return Err(err)
         if rows.len() == 0 -> return Ok(None)
