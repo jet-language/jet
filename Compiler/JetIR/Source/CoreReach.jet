@@ -188,12 +188,15 @@ fn ir_process_line_reader(owner: String) -> String Never! {
 // Whether an authored inherent Core method named `name` is one lowering
 // selects by its owner type, with no keyed call in a kept caller's checked
 // body: the renderers and the comparison Build.jet's owner tables take
-// (`display`, `show`, `compare`, `close`), a line reader
+// (`display`, `show`, `debug`, `compare`, `close`), a line reader
 // (ir_line_reader_key) and an encoding reader's `next`
 // (ir_encoding_reader_next_key). A compile that lowers checks each up front
-// under Core demand (driver jet_driver_core_lowering_roots).
+// under Core demand (driver jet_driver_core_lowering_roots). `debug` is the
+// user Debug implementation ir_render_debug_impl selects for `{value:Debug}`;
+// unrooted, a Core type's own `impl Debug` is pruned and the value renders in
+// the derived struct form instead.
 fn ir_core_method_lowered_by_owner(name: String) -> Bool Never! {
-    name == "display" || name == "show" || name == "compare" || name == "close" || name == "read_line" || name == "next"
+    name == "display" || name == "show" || name == "debug" || name == "compare" || name == "close" || name == "read_line" || name == "next"
 }
 
 fn ir_core_reach_add(keys: &[String], key: String) Never! {
