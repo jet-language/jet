@@ -3,10 +3,10 @@
 // no narrowing round. Native LowerRoute533 carries raw word, flags, borrowed E4
 // text, raw line; the seed Rust CAbiRoutes17253 adapter uses its own JetCString
 // text header.
-fn numeric_widen_stop(file: I64, line: I64) {
+fn numeric_widen_stop(target_f32: Bool, file: I64, line: I64) {
     trap_header(I64{1})
-    // Exact JET_NUMERIC_WIDEN_TRAP text; generated little-endian word literals.
-    trap_write_static(rt_static_text("whole number cannot cross into the decimal without losing precision"))
+    // Exact text of the lowering's inline widening stop (BuildTypes.jet).
+    trap_write_static(if target_f32 -> rt_static_text("whole number has no exact F32; approx(x) rounds it to the nearest F32") else -> rt_static_text("whole number has no exact Float; approx(x) rounds it to the nearest Float"))
     trap_msg_message_end()
     trap_context(sync_load(file), sync_load(wrapping(file + I64{8})), trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer(I64{1})
@@ -34,7 +34,7 @@ fn numeric_widen_stop(file: I64, line: I64) {
     }
     if (significant > precision && trailing < significant - precision) {
         // The stop is published: the caller's stop point takes it.
-        numeric_widen_stop(file, line)
+        numeric_widen_stop(target_f32, file, line)
         return 0.0
     }
     if (signed || raw >= I64{0}) -> return Float{raw}

@@ -4140,7 +4140,8 @@ fn ir_checked_widen(m: &IRModule, b: &IRBuilder, value: Int, target: Int, line: 
     inexact :: ir_bool_op(&m, &b, IROp.Ge, odd, limit)
     ir_open_if(&b.f, inexact, b.line)
     args := ir_location(&m, &b, line)
-    loop arg in ir_static_text(&m, &b, "whole number cannot cross into the decimal without losing precision") -> &args.push(arg)
+    stop_text :: if single -> "whole number has no exact F32; approx(x) rounds it to the nearest F32" else -> "whole number has no exact Float; approx(x) rounds it to the nearest Float"
+    loop arg in ir_static_text(&m, &b, stop_text) -> &args.push(arg)
     _ :: ir_runtime(&m, &b, "jet_rt_numeric_stop", args, -1)
     ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
     ir_end(&b.f, b.line)
