@@ -12704,6 +12704,174 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-31",
       "retiredAt": "2026-11-05T23:01:04.023Z"
+    },
+    {
+      "id": "D-EFFECT-RUNGS1",
+      "cardId": "c0rzkb53",
+      "group": "effects",
+      "title": "A module's effect cap is `#FX(...)` on its `module` line",
+      "situation": "Jet limits what code may do at four levels: a block, a function, a package and a single run. A module has no limit of its own, so a team that wants its pricing code never to touch the network or files must repeat the promise on every function. Writing the same `#FX` marker on a module line is accepted today but silently does nothing. The vote decides where a module's cap is written. We recommend the `#FX` marker on the module line, the way a block already takes it.",
+      "gist": "Where should a cap on what one module of code may do be written?",
+      "lesson": "An effect is a kind of power, such as network or file access. Jet caps effects on a block with `#FX(...)` and on a function with its row. A package caps them with `authority:`, and a run with `--deny`. Modules are the missing step. A module cap covers every function inside, so the promise is written once and checked everywhere.",
+      "explainer": "",
+      "story": "Ana's shop app keeps its price rules in `module pricing`. The team promises that pricing never reaches the network or the disk, so prices are reproducible in tests. Today that promise lives in a code-review checklist, and a helper that reads a file slipped in last month.",
+      "inWild": "// Rust: a lint level written on a module declaration covers everything inside.\n// https://doc.rust-lang.org/reference/attributes/diagnostics.html\n#[forbid(unsafe_code)]\nmod pricing;",
+      "detail": "Provenance. Card c0rzkb53. Folded into the D-EFFECT-LIMITS1 package ballot, which the owner rejected; this is its module question alone. Ratified and not on this ballot: function rows in the arrow (D-SHAPE8=A), `#FX` on blocks (D-ABILITY-NAME2=A) and denials through calls (D-PROP1). Also settled: inferred rows (D-EFFECT-OMIT1=A) and package `authority:` (D-AUTH-AMBIENT3=A, D-AUTHORITY-DENYROW1=A).\n\nWhat the probes found, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx. modcap.jet: `#FX(!Net, !FS)` above `module pricing { }` parses. modcap_breach.jet: the same cap over a function that reads a file checks clean, so the marker is accepted and ignored today.\n\nfn_marker.jet: `#FX(!FS)` above a `fn` is an internal compiler error (\"the function marker `#FX` is not supported by the self-hosted checker yet\"). rungs_a/run.jet is option A's program; it checks clean today because the cap is ignored. These findings are notes for existing cards, not new cards.\n\nCentral review. A lead who wants one place still has it: package `authority.deny` applies to every module, and `jet explain effects --caps` lists each module cap with its file and line.\n\nReads with the related ballots. D-EFFTYPE-MODEL1 asks whether types and traits get their own cap; under A here, a type's promise comes from its module's cap. D-EFFTYPE-USES1 puts the same `#FX` above an `effect` declaration with the same \"at most\" meaning. D-MARK-SCOPE1 already lets `#Policy` sit on module lines; A here gives `#FX` the same place. D-EFFTYPE-TARGET1 adds the artifact limit below the package.",
+      "options": [
+        {
+          "key": "A",
+          "name": "`#FX` on the module line",
+          "detail": "A module takes the `#FX(...)` marker on the line above its `module` declaration, exactly as a block takes it. The cap covers every function inside, including nested modules. An inner cap or function row may only tighten it.\n\nThe cap sits in the parent file, so code inside the module cannot loosen its own cap. `#Policy` already sits on module lines the same way. `jet explain effects` lists every cap in force, nearest first.",
+          "technical": "Ladder after A: `#FX` block, `-[ ]>` function, `#FX` module, package `authority:`, run `--allow/--deny`. The marker already parses on module declarations (probe/fx/modcap.jet) but sema ignores it: probe/fx/modcap_breach.jet reads a file under `#FX(!Net, !FS)` and checks clean.\n\nA makes the module cap a ceiling plus denials, the function-row rule (Effects/Checks.jet:2207-2219). E0712 and E0749 gain the cap line as a secondary label. D-MARK-SCOPE1 matrix mode for `#FX` on modules: tighten (intersect). Grants stay site-bound: `#FX(grant: …)` is still block-only. Note: `#FX` above a `fn` today is an internal compiler error (probe/fx/fn_marker.jet), not a refusal; a function's limit is its row.",
+          "code": "// run.jet\n#FX(!Net, !FS)\nmodule pricing\n\n// run.jet: the beginner path, the same under every option\nfn run() {\n    text :: read_file(\"prices.md\")\n    print(pricing.total(text))\n}\n\n// pricing.jet\nfn total(text: String) -> Int {\n    sum := 0\n    loop line in text.lines() -> sum += Int.parse(line) ?? 0\n    sum\n}\n\n// a helper that reads a file is refused where it is written:\n// fn rates() -> String { fs.read(\"rates.txt\") ?? \"\" }\n// error[E0749]: module `pricing` denies `FS`\n//   --> pricing.jet:7  (cap at run.jet:1)"
+        },
+        {
+          "key": "B",
+          "name": "Caps in package `authority:`",
+          "detail": "The package file's `authority:` gains a `modules:` table naming each module and its cap. The project's rights and its module caps then sit in one file that one person can review, as Deno and LavaMoat keep policy in one place.\n\nThe cost is that each module name appears twice. A module renamed in code keeps no cap until package.jet is updated, so the checker must refuse unknown names.",
+          "technical": "New `authority.modules: { path: { allow?, deny? } }` in package.jet, parsed beside allow, deny and grants (packages/typed_settings/package.jet shape). Unknown module paths are an error. D-TEAMPOLICY1's parsed-but-unenforced `policy.effects` is retired into it.",
+          "code": "// package.jet\nname: \"shop\"\nversion: \"1.0.0\"\nauthority: {\n    allow: [FS.Read, IO]\n    modules: { pricing: { deny: [Net, FS] } }      // new field\n}\n\n// run.jet\nmodule pricing\n\n// run.jet: the beginner path, the same under every option\nfn run() {\n    text :: read_file(\"prices.md\")\n    print(pricing.total(text))\n}"
+        },
+        {
+          "key": "C",
+          "name": "Rows on each function",
+          "detail": "Modules stay without a cap. A team that wants pricing free of network and files writes `-[!Net, !FS]>` on each function, as Koka and Flix put every effect on functions. Callers see the promise exactly where they look.\n\nThe promise is repeated on every function, and a helper added without a row is inferred instead of capped. The silent marker on module lines becomes an error.",
+          "technical": "Today's rule kept. `#FX` on a module declaration becomes a refusal naming the per-function row as the fix, closing the silent no-op found in probe/fx/modcap_breach.jet.",
+          "code": "// run.jet\nmodule pricing\n\n// run.jet: the beginner path, the same under every option\nfn run() {\n    text :: read_file(\"prices.md\")\n    print(pricing.total(text))\n}\n\n// pricing.jet\nfn total(text: String) -[!Net, !FS]> Int {\n    sum := 0\n    loop line in text.lines() -> sum += Int.parse(line) ?? 0\n    sum\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Lint levels on a `mod` line cover the whole module; forbid cannot be loosened inside. Source: Rust reference, lint attributes.",
+          "code": "#[forbid(unsafe_code)]\nmod pricing;"
+        },
+        {
+          "lang": "Deno",
+          "note": "Permissions are listed in one config for the whole program, as option B lists caps. Source: https://docs.deno.com/runtime/fundamentals/security/",
+          "code": "\"permissions\": { \"default\": { \"net\": false, \"read\": [\"./data\"] } }"
+        },
+        {
+          "lang": "Koka",
+          "note": "Effects live only on function types; there is no module-level limit, as in option C. Source: https://koka-lang.github.io/koka/doc/book.html",
+          "code": "fun total(s : string) : total int"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A adds the missing step with the marker blocks already use, written once where the module is declared. Code inside cannot loosen it, and beginners never see it.",
+        "gains": [
+          "One promise covers every function in the module.",
+          "The marker that silently did nothing now works."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B writes each module name twice, and a rename silently drops the cap until package.jet is fixed."
+          },
+          {
+            "key": "C",
+            "reason": "C repeats the promise on every function, and a new helper slips past it."
+          }
+        ],
+        "tradeoff": "Caps live beside the modules they cover rather than in one file; `jet explain effects` gathers them."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx. `jet check modcap.jet` and `jet check modcap_breach.jet` both pass, which shows the cap is ignored today. `jet check fn_marker.jet` is an internal compiler error. `jet check rungs_a/run.jet` passes.",
+      "surface": {
+        "gist": "Where should a cap on what one module of code may do be written?",
+        "lesson": "An effect is a kind of power, such as network or file access. Jet caps effects on a block with `#FX(...)` and on a function with its row. A package caps them with `authority:`, and a run with `--deny`. Modules are the missing step. A module cap covers every function inside, so the promise is written once and checked everywhere.",
+        "trio": {
+          "current": {
+            "note": "The marker is accepted on a module line but not enforced, so the file read below compiles.",
+            "code": "#FX(!Net, !FS)\nmodule pricing      // accepted, silently ignored\n\n// pricing.jet\nfn total(path: String) -> Int {\n    fs.read(path) ?? \"\"    // compiles today\n    …\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "An attribute on `mod` applies to the whole module and cannot be loosened inside it with forbid. See the Rust reference, lint attributes.",
+            "code": "#[forbid(unsafe_code)]\nmod pricing;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "`#FX` on the module line",
+            "gist": "The cap sits above the `module` line in the parent file, as on a block.",
+            "gains": [
+              "The same marker on a block and a module.",
+              "Code inside cannot loosen its own cap.",
+              "Beginners write nothing."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "// run.jet\n#FX(!Net, !FS)\nmodule pricing\n\n// pricing.jet: a file read is now refused\nfn total(path: String) -> Int {\n    fs.read(path) ?? \"\"\n//  ^ error: module `pricing` denies `FS` (run.jet:1)\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Caps in package `authority:`",
+            "gist": "Module caps join allow and deny in the package file, in one place.",
+            "gains": [
+              "Every cap in the project is in one file.",
+              "A lead reviews all limits in one diff."
+            ],
+            "losses": [
+              "Module names are written twice: in code and in package.jet.",
+              "A renamed module silently loses its cap until the file is fixed."
+            ],
+            "proposed": {
+              "code": "// package.jet\nauthority: {\n    allow: [FS.Read, IO]\n    modules: { pricing: { deny: [Net, FS] } }      // new field\n}\n\n// run.jet: unchanged\nmodule pricing"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Rows on each function",
+            "gist": "No module step: each public function in the module carries its own row.",
+            "gains": [
+              "Nothing new in the language.",
+              "Every promise is on the function a caller reads."
+            ],
+            "losses": [
+              "The promise is repeated on every function.",
+              "A new helper without a row is not covered."
+            ],
+            "proposed": {
+              "code": "// pricing.jet: each function states its own limit\nfn total(text: String) -[!Net, !FS]> Int { … }\nfn discount(code: String) -[!Net, !FS]> Int { … }\nfn tax(region: String) -[!Net, !FS]> Int { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A adds the missing step with the marker blocks already use, written once where the module is declared. Code inside cannot loosen it, and beginners never see it.",
+          "gains": [
+            "One promise covers every function in the module.",
+            "The marker that silently did nothing now works."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B writes each module name twice, and a rename silently drops the cap until package.jet is fixed."
+            },
+            {
+              "key": "C",
+              "reason": "C repeats the promise on every function, and a new helper slips past it."
+            }
+          ],
+          "tradeoff": "Caps live beside the modules they cover rather than in one file; `jet explain effects` gathers them."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T00:35:17.253Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-06T14:25:11.678Z"
     }
   ]
 }

@@ -83443,6 +83443,64 @@
       "completedAt": "2026-11-03T03:52:25.556Z",
       "questions": [],
       "retiredAt": "2026-11-06T03:58:23.215Z"
+    },
+    {
+      "id": "c0rzkb53",
+      "num": 6046,
+      "title": "Ladder L-08 (Effects/authority): Effect vocabulary differs per rung (-[E]>, #Abilities, authority, policy.effects, --gate, JET_ORG_UNSAFE_POLICY); grants advertised then rejected; stale effects: prose",
+      "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-08; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: Effect vocabulary differs per rung (-[E]>, #Abilities, authority, policy.effects, --gate, JET_ORG_UNSAFE_POLICY); grants advertised then rejected; stale effects: prose\n\nEvidence: PackageParse.jet:208; Loader.jet:346-383; Blocks/Policy.jet:124-134; GatePolicy.jet:41-63; SD:3326; SD:2569\n\nAudit action: unify names. The fix needs an owner choice of spelling or behaviour, so it goes on a ballot before code.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-10-30",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An owner ballot on L-08 is ratified.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The L-08 ballot D-EFFECT-RUNGS1 was ratified with option A on 2026-10-30 (decision show D-EFFECT-RUNGS1: status ratified, outcome A). It sets one vocabulary for every rung: an #FX block, a -[ ]> function row, an #FX module cap, package authority:, and run --allow/--deny.",
+          "at": "2026-11-03T10:40:52.957Z"
+        },
+        {
+          "n": 2,
+          "text": "The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Ratified option A: #FX(...) block, -[...]> function, #FX above a module line, package authority:, run --allow/--deny. Old spellings: #Abilities and #Caps are parse E0927 'is retired' (case syntax_reconciliation/retired_authority_types_and_markers_keep_exact_teaching_diagnostics). Since ebadfb51e6 (Main-21), jet explain '#Abilities'/'#Caps' teach the retirement and the #FX rungs (case explain_syntax/retired_effect_markers_teach_the_fx_rungs, PASS on the new compiler, FAIL on base a74e5258af). #FX above a fn is now E0355 instead of an exit-101 ICE (UI effects/fx_on_function_is_e0355, PASS; base ERROR). policy.effects was retired in a74e5258af (Main-19). No #Abilities, #Caps or policy.effects in Docs/spec, Examples, Core, Jetpack or Compiler except the retirement rows and tests; no effects: manifest prose in Docs/spec or Examples. Per-rung goldens and snapshots: block, golden effects/effect_authority, UI effect_authority_out_of_set (E0712), cases effects/authority_region_erases_to_plain_block and grant_lowers_like_authority_region; function, golden effect_prohibition, UI crypto_expert_nonce_effect_prohibition_precedence and panic_effect_prohibition (E0749); module, golden effects/module_cap, UI effects/module_cap_ceiling_is_e0712, module_cap_denial_is_e0749 (cap line as secondary label), module_cap_unknown_effect_is_e0119, module_cap_within_set_ok; package, authority_denied; run, authority_allow_flag and authority_deny_flag. Full UI on Main-21 vs base: one changed row (the new snapshot). The listing promise of jet explain effects is split to #6551.",
+          "at": "2026-11-03T12:06:25.870Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ladder",
+        "effects-authority"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T18:07:06.191Z",
+      "updated": "2026-11-03T12:06:27.468Z",
+      "updatedBy": "Main",
+      "goals": [],
+      "completedAt": "2026-11-03T12:06:27.468Z",
+      "questions": [],
+      "retiredAt": "2026-11-06T14:25:11.677Z"
     }
   ]
 }

@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6610,
-    "rev": 93050,
+    "rev": 93075,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -36788,6 +36788,11 @@
       "assignee": "Main",
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "HANDOFF (CoreOwnership lane wound down at the owner's roster cut to 3). Landed, unverified until Main's next batch: a8446d5347 c9; 8cc53255fc c12 part (CORE_CALL_AMBIENT_ROUTES removed); fe108d1ea5+ca3c169d18 c6; 9d641c51f7+28ce346b82 RuntimeStopExports regen; d22c6d2926 c7. Believed met, need verification: c4/c5 (SQLite jobs.queue, job_queue golden+case). Open: c1-c3 untouched; c8 data_loader raw JSON (E0904/E0112/E0905); c10/c11 fold into c12. c12 (web storage on localStorage/sessionStorage per spec.md:3565, headless/native in-memory) is written but NOT landed, in old syntax at JET_SCRATCH_ROOT/lanes/CoreOwnership/a1 (base a5d77ac873; diff each file against a5d77ac873, not 551afcca78). Files: Core.jet 5 core.web.storage __store_{present,get,set,remove,clear} rows, CorePlatformSignatures, CoreSurfaceInventory, StructureRegistry, IR_HOST_PROVIDER, RuntimeRoutes, new JetRuntime/Source/WebStorageProvider.jet (+sources.list), JetWeb Host.jet, Core/Web/Storage{,/Local,/Session}.jet. Port: apply to HEAD, jet fix a standalone copy, regenerate CoreSourceRows, check-core-surface-ledger --write-core-call-registry and --write, gen-runtime-stop-exports --write, all from a clean export, never the worktree. Staged unrun case + doc paragraph: JET_SCRATCH_ROOT/lanes/Main/handoff-3550-c12. Also drop dead storageGet/fallbackStorage in Prelude/Web/DomRuntime.js. Open owner question: a write the browser refuses (quota) is dropped silently; spec is silent and there is no error channel."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 3 criteria from archived #3519: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -37243,9 +37248,9 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:04.333Z",
-      "updated": "2026-11-04T23:49:22.051Z",
+      "updated": "2026-11-06T11:05:54.367Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-04T23:49:22.051Z",
+      "claimedAt": "2026-11-06T11:05:54.367Z",
       "goals": [
         "G3"
       ]
@@ -51656,7 +51661,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-05T10:55:41.702Z",
-      "updated": "2026-11-06T02:01:08.918Z",
+      "updated": "2026-11-06T11:11:57.778Z",
       "updatedBy": "Main",
       "goals": [
         "G1",
@@ -56028,6 +56033,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Superseded: D-DECL-BINDING1=B (2026-11-01) and D-DECL-COLON1=A replaced D-DECL-FORM2=A's keyword-first rule. Named declarations are now name-first (Point: struct { … }, area: fn(…) { … }), landed in 6b9210090e. Do not follow this card's 'keep keyword-first, no name-first codemod' plan."
+        },
+        {
           "at": "2026-10-07",
           "by": "Pip",
           "text": "D-DECL-FORM2=A ratified; application contract updated. No implementation/build/test or closure receipt claimed. Owners: unowned (DeclStyle1 research only; no live declaration implementation owner in STREAMS/branch census). Latest owner #29 permits only minimal port seams both halves, dies at cutover; #31 requires actual Jet ports."
@@ -56095,8 +56105,8 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-07T14:24:51.467Z",
-      "updated": "2026-11-01T00:58:24.617Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-06T11:37:10.404Z",
+      "updatedBy": "Main",
       "goals": []
     },
     {
@@ -68552,8 +68562,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:19:21.465Z",
-      "updated": "2026-11-04T23:40:48.344Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-06T14:25:39.863Z",
+      "updatedBy": "agent",
       "goals": []
     },
     {
@@ -72580,62 +72590,6 @@
       "updated": "2026-10-31T14:23:40.420Z",
       "updatedBy": "Main",
       "goals": []
-    },
-    {
-      "id": "c0rzkb53",
-      "num": 6046,
-      "title": "Ladder L-08 (Effects/authority): Effect vocabulary differs per rung (-[E]>, #Abilities, authority, policy.effects, --gate, JET_ORG_UNSAFE_POLICY); grants advertised then rejected; stale effects: prose",
-      "body": "From the ladder audit (Docs/audits/ladder-audit-2026-10-28.md, finding L-08; dev d9bed7c), philosophy pillar 4, \"Ladders, Not Cliffs\", tempered by pillar 2.\n\nFinding: Effect vocabulary differs per rung (-[E]>, #Abilities, authority, policy.effects, --gate, JET_ORG_UNSAFE_POLICY); grants advertised then rejected; stale effects: prose\n\nEvidence: PackageParse.jet:208; Loader.jet:346-383; Blocks/Policy.jet:124-134; GatePolicy.jet:41-63; SD:3326; SD:2569\n\nAudit action: unify names. The fix needs an owner choice of spelling or behaviour, so it goes on a ballot before code.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-10-30",
-          "text": "All decisions ratified; advanced out of deciding."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "An owner ballot on L-08 is ratified.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "The L-08 ballot D-EFFECT-RUNGS1 was ratified with option A on 2026-10-30 (decision show D-EFFECT-RUNGS1: status ratified, outcome A). It sets one vocabulary for every rung: an #FX block, a -[ ]> function row, an #FX module cap, package authority:, and run --allow/--deny.",
-          "at": "2026-11-03T10:40:52.957Z"
-        },
-        {
-          "n": 2,
-          "text": "The chosen spelling or behaviour is the only one in code, examples, tests and Docs/spec, and each rung shows it with a golden or snapshot.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Ratified option A: #FX(...) block, -[...]> function, #FX above a module line, package authority:, run --allow/--deny. Old spellings: #Abilities and #Caps are parse E0927 'is retired' (case syntax_reconciliation/retired_authority_types_and_markers_keep_exact_teaching_diagnostics). Since ebadfb51e6 (Main-21), jet explain '#Abilities'/'#Caps' teach the retirement and the #FX rungs (case explain_syntax/retired_effect_markers_teach_the_fx_rungs, PASS on the new compiler, FAIL on base a74e5258af). #FX above a fn is now E0355 instead of an exit-101 ICE (UI effects/fx_on_function_is_e0355, PASS; base ERROR). policy.effects was retired in a74e5258af (Main-19). No #Abilities, #Caps or policy.effects in Docs/spec, Examples, Core, Jetpack or Compiler except the retirement rows and tests; no effects: manifest prose in Docs/spec or Examples. Per-rung goldens and snapshots: block, golden effects/effect_authority, UI effect_authority_out_of_set (E0712), cases effects/authority_region_erases_to_plain_block and grant_lowers_like_authority_region; function, golden effect_prohibition, UI crypto_expert_nonce_effect_prohibition_precedence and panic_effect_prohibition (E0749); module, golden effects/module_cap, UI effects/module_cap_ceiling_is_e0712, module_cap_denial_is_e0749 (cap line as secondary label), module_cap_unknown_effect_is_e0119, module_cap_within_set_ok; package, authority_denied; run, authority_allow_flag and authority_deny_flag. Full UI on Main-21 vs base: one changed row (the new snapshot). The listing promise of jet explain effects is split to #6551.",
-          "at": "2026-11-03T12:06:25.870Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "ladder",
-        "effects-authority"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-28T18:07:06.191Z",
-      "updated": "2026-11-03T12:06:27.468Z",
-      "updatedBy": "Main",
-      "goals": [],
-      "completedAt": "2026-11-03T12:06:27.468Z"
     },
     {
       "id": "c0mhdm27",
@@ -78272,6 +78226,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner order (greenfield): the replaced lambda form gets no teaching diagnostic or jet fix edit. Once converted, it is simply not Jet. c2 is read as: every in-repo lambda is migrated, and the old form is no longer parsed."
+        },
+        {
           "at": "2026-11-01",
           "by": "Main",
           "text": "Both lambda ballots are ratified (SHAPE1=C: fn(n) { ... } with types from context; STORED1=A: a stored lambda writes parameter/result types). Criteria 1-3 reopened (their earlier meets cited ballot material, not code); implementation of C is pending."
@@ -78326,8 +78285,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T20:27:37.698Z",
-      "updated": "2026-11-01T03:28:59.133Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-06T14:25:16.605Z",
+      "updatedBy": "agent"
     },
     {
       "id": "c0ui9zol",
@@ -86978,6 +86937,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "HANDOFF (GoldenRoots3 lane wound down at the owner's roster cut to 3). Landed this session, unverified until Main's next batch: 1c05762b06, 50318440cf, adcd4aecc5, 5ee0d1586e. ROOTS: R1/R2/R3 parser, unblocked by B-D (6b9210090e), not started. R4 not started: on s1 ffi_bind_missing (E3208), ffi_boundary_evidence (E3216), ffi_inline_c_mismatch (E3222), computed_enum_range (E0035 4:13) print nothing. R5: comptime_int_pow_negative prints nothing (want E3010 6:1). R6: jet build --target=web exits 0 for task.group and sys.getenv; sema_web_host_check_core_usage (CheckProgram.jet:125) needs target_machine.name==wasm.browser, which the --target=web build never reaches. Wire the target through the driver, then refuse a fn holding TStmt.TaskGroup at its name span (WebConstructNotSupported). R10 left: pattern_ratified_map_alias_duplicate needs comptime constant values in body checks; function_contract_laundering misses the 2nd E0771 11:20 (a call with an argument error yields no type); inline_module_return_type_mismatch and identifier_casing. R11 project_check missing_effect_facts E2391 not started. R7 notes: local_owned_view_return gets no E0433 when callee has its own E2305 (sema_effect_check_discarded, Effects/Checks.jet ~3249, needs the callee effect node); multi_trait_receiver_2 names items__va0 (VariadicBounds.jet:115/124 unroll slot), expected also has a duplicated E0202; open_dynamic_trait_view_dispatch misses E2305 6:21 before E0750; whole_place_alias wants E0204 9:15, gets nothing; aggregate_view_slot E0212 vs E2305; mutable_view_extraction E0121 vs E0111/E0112; named_write_window_2 E0110+E0212 vs E0205; builtin_and_composite_receivers E0204+E0224+E0108 vs OptionalWhereValueExpected+E0224; move_lambda_capture_5 extra E0212; vault_key_unlock_outlives_owner misses E2305 10:12; arrow_batch_use_after_move E0904 vs E0121. Golden dirs without expected output: foundations/bridges (needs cargo), capabilities (FS.Read authority undecided, guest Plugin E0102), exact (E0360 T: Add, E0120), units (E0113 unit quotient), lowlevel/opaque_handles (E3203). block_callback_return rows: sema_stmt_check_open_callback_return (Statements.jet:7116) judges against the enclosing fn; the expected success row doesn't reach context.callback_return_row. 31 more case FAILs untriaged (list in JET_SCRATCH_ROOT/lanes/Main/vb2/GoldenRoots3.tsv). Not done: #5971 c34 Core part, cli_parts_budget colliding and cffi c_member s1 checks. Scratch: JET_SCRATCH_ROOT/lanes/GoldenRoots3 (tk.sh, cs.sh, snap.sh, kf.mjs)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Partial, afa5ffac85 (GoldenRoots3): 19 ui rows KF→PASS, all 19 removed from KF; full ui on e30a4b7640+patch: KF 130, PASS 2241, FAIL 0 ($JET_SCRATCH_ROOT/lanes/GoldenRoots3/r28.txt). Ported: E0963; E0119 SQL row header; E0106 marker collision; E0905/E0312 derive blocking; E2411; E0921 shared; E3203 C fn value; D-EFFDBREAD1; E3405 on jet build (jet build now sets request.artifact_build for SemaBuildFacts). Also lands the orphan-impl body fix. Main's review: the fixture edits match the spec (Dyn index, upper exists, explicit Err route). Open: cffi_abi_function_value pins the type display 'fn(I32) -> I32 Never!' for an infallible fn type, a printer defect. Golden and cases A/B were not run for the jet build artifact_build change."
         },
         {
@@ -87298,7 +87262,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T07:25:24.208Z",
-      "updated": "2026-11-06T08:52:01.466Z",
+      "updated": "2026-11-06T11:07:04.217Z",
       "updatedBy": "Main"
     },
     {
@@ -90387,6 +90351,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner ruling: import rows switch to alias: path (use { alias: path }, use alias: path) with the #6586 name: value cutover, which carries them. c2-c6 met (f2898ba8d5). c1 is open only for comptime use (D-COMPTIME-USE1=A, unbuilt), assigned to Builder5 in the alias: path spelling; the seed requirement is met by a0_027 (dfc887571e) once it is shown to contain 1620f05362."
+        },
+        {
           "at": "2026-11-02",
           "by": "Main",
           "text": "Correction: the wave 33 landing log for c2 came from CardClose-63, which did NOT land (stale on f251c88891 at Compiler/JetCli/Tests/SourceTransaction.jet). Step 2 is rebased as CardClose-63b onto the wave 33 tree (dev 190f826022): the stale hunk is replaced by the same codemod (useblock/migrate.mjs) on the current file, plus the two fixtures wave 33 added; a full-tree codemod --check then changes 0 files; lane-check CHECK OK. It runs in wave 34 now. c1 still needs D-COMPTIME-USE1=A (ratified): `comptime use { … }` with comptime-only bindings, a registered diagnostic with a UI snapshot, and compile-time-only modules kept out of the link set. None of that exists yet."
@@ -90484,7 +90453,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T12:40:05.857Z",
-      "updated": "2026-11-06T10:25:14.946Z",
+      "updated": "2026-11-06T10:25:37.957Z",
       "updatedBy": "Main"
     },
     {
@@ -93606,6 +93575,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Owner order (greenfield): retired spellings get no teaching diagnostics. After the one-time conversion, ::, &x/^x call marks and ^ take are simply not Jet, and fall through to the ordinary parse and type errors. There is no registered retired-form code, UI snapshot or jet fix rewrite. Codes that exist only to teach the old call marks are deleted. c6 is read as: the parser no longer accepts the old forms, with no dedicated diagnostic."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Seed a0_027 released and rotated: dev dfc887571e, which contains A2 cced341fd5; s2==s3 4f1306092c375912. Every gate PASSES: chain, cc-pack, pack, jetpack, jetpack-engine. golden 4754 rows (0 lost), ui 2420 (0 lost), cases 4492 (0 lost); 27 gains over a0_026. The B–D landing window is open."
         },
         {
@@ -93702,7 +93676,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T02:04:25.306Z",
-      "updated": "2026-11-06T09:11:11.103Z",
+      "updated": "2026-11-06T11:42:59.931Z",
       "updatedBy": "Main"
     },
     {
@@ -94667,7 +94641,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -94686,11 +94660,11 @@
         {
           "n": 1,
           "text": "Each cases, ui and golden row runs with a fresh HOME, JET_HOME and XDG dirs under its scratch directory. A planted case that writes $HOME/.jet/probe leaves the real home untouched (proven by stat before and after a full pkg-filter run). The kit refuses a run whose HOME resolves to the real user home.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T09:29:31.974Z"
+          "evidence": "Main batch on dev b92dd6f004 (contains 701afcf26b), s1 chain FIXED_POINT. The quick profile's JetTestKit/Tests pass 'cases run each row with its own HOME, JET_HOME and XDG roots under its scratch' and 'cases refuse a row whose HOME or JET_HOME is the invoking user's before it runs'. Two full --filter=pkg cases runs with HOME, JET_HOME and XDG_CONFIG/DATA/STATE pointed at a stand-in home holding .jet/lock, .jet/keys/jet.ed25519 and a registry-index row: a recursive lstat+sha256 digest is identical before and after both runs (4be57bd3..., f99c92c7..., 13 entries each), so package cases that write HOME/.jet leave the invoking home untouched.",
+          "at": "2026-11-06T10:57:21.588Z"
         }
       ],
       "refs": [],
@@ -94701,8 +94675,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T09:29:25.988Z",
-      "updated": "2026-11-06T09:31:29.299Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-06T10:57:27.291Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T10:57:27.291Z"
     },
     {
       "id": "c0j5iuv5",
@@ -152553,173 +152528,6 @@
       "ratifiedAt": "2026-10-30"
     },
     {
-      "id": "D-EFFECT-RUNGS1",
-      "cardId": "c0rzkb53",
-      "group": "effects",
-      "title": "A module's effect cap is `#FX(...)` on its `module` line",
-      "situation": "Jet limits what code may do at four levels: a block, a function, a package and a single run. A module has no limit of its own, so a team that wants its pricing code never to touch the network or files must repeat the promise on every function. Writing the same `#FX` marker on a module line is accepted today but silently does nothing. The vote decides where a module's cap is written. We recommend the `#FX` marker on the module line, the way a block already takes it.",
-      "gist": "Where should a cap on what one module of code may do be written?",
-      "lesson": "An effect is a kind of power, such as network or file access. Jet caps effects on a block with `#FX(...)` and on a function with its row. A package caps them with `authority:`, and a run with `--deny`. Modules are the missing step. A module cap covers every function inside, so the promise is written once and checked everywhere.",
-      "explainer": "",
-      "story": "Ana's shop app keeps its price rules in `module pricing`. The team promises that pricing never reaches the network or the disk, so prices are reproducible in tests. Today that promise lives in a code-review checklist, and a helper that reads a file slipped in last month.",
-      "inWild": "// Rust: a lint level written on a module declaration covers everything inside.\n// https://doc.rust-lang.org/reference/attributes/diagnostics.html\n#[forbid(unsafe_code)]\nmod pricing;",
-      "detail": "Provenance. Card c0rzkb53. Folded into the D-EFFECT-LIMITS1 package ballot, which the owner rejected; this is its module question alone. Ratified and not on this ballot: function rows in the arrow (D-SHAPE8=A), `#FX` on blocks (D-ABILITY-NAME2=A) and denials through calls (D-PROP1). Also settled: inferred rows (D-EFFECT-OMIT1=A) and package `authority:` (D-AUTH-AMBIENT3=A, D-AUTHORITY-DENYROW1=A).\n\nWhat the probes found, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx. modcap.jet: `#FX(!Net, !FS)` above `module pricing { }` parses. modcap_breach.jet: the same cap over a function that reads a file checks clean, so the marker is accepted and ignored today.\n\nfn_marker.jet: `#FX(!FS)` above a `fn` is an internal compiler error (\"the function marker `#FX` is not supported by the self-hosted checker yet\"). rungs_a/run.jet is option A's program; it checks clean today because the cap is ignored. These findings are notes for existing cards, not new cards.\n\nCentral review. A lead who wants one place still has it: package `authority.deny` applies to every module, and `jet explain effects --caps` lists each module cap with its file and line.\n\nReads with the related ballots. D-EFFTYPE-MODEL1 asks whether types and traits get their own cap; under A here, a type's promise comes from its module's cap. D-EFFTYPE-USES1 puts the same `#FX` above an `effect` declaration with the same \"at most\" meaning. D-MARK-SCOPE1 already lets `#Policy` sit on module lines; A here gives `#FX` the same place. D-EFFTYPE-TARGET1 adds the artifact limit below the package.",
-      "options": [
-        {
-          "key": "A",
-          "name": "`#FX` on the module line",
-          "detail": "A module takes the `#FX(...)` marker on the line above its `module` declaration, exactly as a block takes it. The cap covers every function inside, including nested modules. An inner cap or function row may only tighten it.\n\nThe cap sits in the parent file, so code inside the module cannot loosen its own cap. `#Policy` already sits on module lines the same way. `jet explain effects` lists every cap in force, nearest first.",
-          "technical": "Ladder after A: `#FX` block, `-[ ]>` function, `#FX` module, package `authority:`, run `--allow/--deny`. The marker already parses on module declarations (probe/fx/modcap.jet) but sema ignores it: probe/fx/modcap_breach.jet reads a file under `#FX(!Net, !FS)` and checks clean.\n\nA makes the module cap a ceiling plus denials, the function-row rule (Effects/Checks.jet:2207-2219). E0712 and E0749 gain the cap line as a secondary label. D-MARK-SCOPE1 matrix mode for `#FX` on modules: tighten (intersect). Grants stay site-bound: `#FX(grant: …)` is still block-only. Note: `#FX` above a `fn` today is an internal compiler error (probe/fx/fn_marker.jet), not a refusal; a function's limit is its row.",
-          "code": "// run.jet\n#FX(!Net, !FS)\nmodule pricing\n\n// run.jet: the beginner path, the same under every option\nfn run() {\n    text :: read_file(\"prices.md\")\n    print(pricing.total(text))\n}\n\n// pricing.jet\nfn total(text: String) -> Int {\n    sum := 0\n    loop line in text.lines() -> sum += Int.parse(line) ?? 0\n    sum\n}\n\n// a helper that reads a file is refused where it is written:\n// fn rates() -> String { fs.read(\"rates.txt\") ?? \"\" }\n// error[E0749]: module `pricing` denies `FS`\n//   --> pricing.jet:7  (cap at run.jet:1)"
-        },
-        {
-          "key": "B",
-          "name": "Caps in package `authority:`",
-          "detail": "The package file's `authority:` gains a `modules:` table naming each module and its cap. The project's rights and its module caps then sit in one file that one person can review, as Deno and LavaMoat keep policy in one place.\n\nThe cost is that each module name appears twice. A module renamed in code keeps no cap until package.jet is updated, so the checker must refuse unknown names.",
-          "technical": "New `authority.modules: { path: { allow?, deny? } }` in package.jet, parsed beside allow, deny and grants (packages/typed_settings/package.jet shape). Unknown module paths are an error. D-TEAMPOLICY1's parsed-but-unenforced `policy.effects` is retired into it.",
-          "code": "// package.jet\nname: \"shop\"\nversion: \"1.0.0\"\nauthority: {\n    allow: [FS.Read, IO]\n    modules: { pricing: { deny: [Net, FS] } }      // new field\n}\n\n// run.jet\nmodule pricing\n\n// run.jet: the beginner path, the same under every option\nfn run() {\n    text :: read_file(\"prices.md\")\n    print(pricing.total(text))\n}"
-        },
-        {
-          "key": "C",
-          "name": "Rows on each function",
-          "detail": "Modules stay without a cap. A team that wants pricing free of network and files writes `-[!Net, !FS]>` on each function, as Koka and Flix put every effect on functions. Callers see the promise exactly where they look.\n\nThe promise is repeated on every function, and a helper added without a row is inferred instead of capped. The silent marker on module lines becomes an error.",
-          "technical": "Today's rule kept. `#FX` on a module declaration becomes a refusal naming the per-function row as the fix, closing the silent no-op found in probe/fx/modcap_breach.jet.",
-          "code": "// run.jet\nmodule pricing\n\n// run.jet: the beginner path, the same under every option\nfn run() {\n    text :: read_file(\"prices.md\")\n    print(pricing.total(text))\n}\n\n// pricing.jet\nfn total(text: String) -[!Net, !FS]> Int {\n    sum := 0\n    loop line in text.lines() -> sum += Int.parse(line) ?? 0\n    sum\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "Lint levels on a `mod` line cover the whole module; forbid cannot be loosened inside. Source: Rust reference, lint attributes.",
-          "code": "#[forbid(unsafe_code)]\nmod pricing;"
-        },
-        {
-          "lang": "Deno",
-          "note": "Permissions are listed in one config for the whole program, as option B lists caps. Source: https://docs.deno.com/runtime/fundamentals/security/",
-          "code": "\"permissions\": { \"default\": { \"net\": false, \"read\": [\"./data\"] } }"
-        },
-        {
-          "lang": "Koka",
-          "note": "Effects live only on function types; there is no module-level limit, as in option C. Source: https://koka-lang.github.io/koka/doc/book.html",
-          "code": "fun total(s : string) : total int"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A adds the missing step with the marker blocks already use, written once where the module is declared. Code inside cannot loosen it, and beginners never see it.",
-        "gains": [
-          "One promise covers every function in the module.",
-          "The marker that silently did nothing now works."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B writes each module name twice, and a rename silently drops the cap until package.jet is fixed."
-          },
-          {
-            "key": "C",
-            "reason": "C repeats the promise on every function, and a new helper slips past it."
-          }
-        ],
-        "tradeoff": "Caps live beside the modules they cover rather than in one file; `jet explain effects` gathers them."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": "Use the dev jet from $JET_SCRATCH_ROOT/discovery/base/latest with JET_TOOLCHAIN_ROOT set to the dev worktree, in $JET_SCRATCH_ROOT/lanes/Main/q/bd/probe/fx. `jet check modcap.jet` and `jet check modcap_breach.jet` both pass, which shows the cap is ignored today. `jet check fn_marker.jet` is an internal compiler error. `jet check rungs_a/run.jet` passes.",
-      "surface": {
-        "gist": "Where should a cap on what one module of code may do be written?",
-        "lesson": "An effect is a kind of power, such as network or file access. Jet caps effects on a block with `#FX(...)` and on a function with its row. A package caps them with `authority:`, and a run with `--deny`. Modules are the missing step. A module cap covers every function inside, so the promise is written once and checked everywhere.",
-        "trio": {
-          "current": {
-            "note": "The marker is accepted on a module line but not enforced, so the file read below compiles.",
-            "code": "#FX(!Net, !FS)\nmodule pricing      // accepted, silently ignored\n\n// pricing.jet\nfn total(path: String) -> Int {\n    fs.read(path) ?? \"\"    // compiles today\n    …\n}"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "An attribute on `mod` applies to the whole module and cannot be loosened inside it with forbid. See the Rust reference, lint attributes.",
-            "code": "#[forbid(unsafe_code)]\nmod pricing;"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "`#FX` on the module line",
-            "gist": "The cap sits above the `module` line in the parent file, as on a block.",
-            "gains": [
-              "The same marker on a block and a module.",
-              "Code inside cannot loosen its own cap.",
-              "Beginners write nothing."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "// run.jet\n#FX(!Net, !FS)\nmodule pricing\n\n// pricing.jet: a file read is now refused\nfn total(path: String) -> Int {\n    fs.read(path) ?? \"\"\n//  ^ error: module `pricing` denies `FS` (run.jet:1)\n}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Caps in package `authority:`",
-            "gist": "Module caps join allow and deny in the package file, in one place.",
-            "gains": [
-              "Every cap in the project is in one file.",
-              "A lead reviews all limits in one diff."
-            ],
-            "losses": [
-              "Module names are written twice: in code and in package.jet.",
-              "A renamed module silently loses its cap until the file is fixed."
-            ],
-            "proposed": {
-              "code": "// package.jet\nauthority: {\n    allow: [FS.Read, IO]\n    modules: { pricing: { deny: [Net, FS] } }      // new field\n}\n\n// run.jet: unchanged\nmodule pricing"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Rows on each function",
-            "gist": "No module step: each public function in the module carries its own row.",
-            "gains": [
-              "Nothing new in the language.",
-              "Every promise is on the function a caller reads."
-            ],
-            "losses": [
-              "The promise is repeated on every function.",
-              "A new helper without a row is not covered."
-            ],
-            "proposed": {
-              "code": "// pricing.jet: each function states its own limit\nfn total(text: String) -[!Net, !FS]> Int { … }\nfn discount(code: String) -[!Net, !FS]> Int { … }\nfn tax(region: String) -[!Net, !FS]> Int { … }"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A adds the missing step with the marker blocks already use, written once where the module is declared. Code inside cannot loosen it, and beginners never see it.",
-          "gains": [
-            "One promise covers every function in the module.",
-            "The marker that silently did nothing now works."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B writes each module name twice, and a rename silently drops the cap until package.jet is fixed."
-            },
-            {
-              "key": "C",
-              "reason": "C repeats the promise on every function, and a new helper slips past it."
-            }
-          ],
-          "tradeoff": "Caps live beside the modules they cover rather than in one file; `jet explain effects` gathers them."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-30T00:35:17.253Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-30"
-    },
-    {
       "id": "D-MARKER-REFLECT1",
       "cardId": "c03pi177",
       "group": "markers",
@@ -175314,6 +175122,1504 @@
       "created": "2026-11-06T09:52:27.293Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-06"
+    },
+    {
+      "id": "D-G12-SCOPE1",
+      "cardId": "c0max8v8",
+      "group": "other",
+      "title": "Finish G1 and G2 sooner by moving the feature backlogs to the goals that own them",
+      "situation": "G1 has 18 open cards and G2 has 9. The backlog cards are #6418 unbuilt CLI commands (12/141), #6419 unbuilt Core APIs (27/52) and #5454 failing ported Rust tests (1/92). They also include test-toolkit features #6012, #6015, #6060 and #6064, and in G2 #6425 silent checker families (0/7). With only three agents running, these backlogs would keep both goals open for a long time after the hand-off work itself is done.",
+      "gist": "Should the feature-backlog cards leave G1 and G2, with every row they block kept as a tracked known failure?",
+      "lesson": "G1 is hand-off and durability, and G2 is finishing Rust removal. Both still hold cards that are really feature backlogs, such as unbuilt CLI commands and unbuilt Core APIs. G1 also says every golden, ui and cases row must pass. About 1,100 rows are known-failing today, and almost all of them wait on a feature from one of those backlogs. So G1 and G2 cannot finish until those features are built.",
+      "explainer": "",
+      "story": "The hand-off work is nearly done: #6564 is at 20 of 23 criteria and test.jet is at 60 of 66. G1 still shows 18 open cards. Most of the remaining criteria sit in #6418 with 141 criteria and #5454 with 92.",
+      "inWild": "Rust's release trains ship when the train leaves. Unfinished features stay behind their own tracking issues instead of holding the release.\n// https://doc.rust-lang.org/book/appendix-07-nightly-rust.html",
+      "detail": "Under A nothing is deleted. Every affected row stays a KNOWN-FAILING row that names its card. The release gate still refuses any new or untracked failure.\n\nG1 then finishes on hand-off work: #6564, #6035, #4599, #6003, #6096 and the small kit and witness cards. G2 finishes on #4717 and #3590 after reconciling their criteria against today's code, plus #6096, #6599 and #6600. Criteria for unbuilt features move onto #6418 or #6419.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Move the backlogs and count tracked known failures",
+          "detail": "Move #6418, #6012, #6015, #6060, #6064 and #6425 to G5. Move #5454 to G3, #6605 to G10, #6582 to G9 and #6604 to G7. #6419 leaves G1 and stays in G3. G1's row rule becomes: every row passes or is known-failing on an open card in a later goal.",
+          "technical": "Goal membership edits plus one amendment to G1's text. The release gate already counts KNOWN-FAILING rows apart and refuses growth of untracked failures. A known-failing row must name a card in a later goal; no row may be untracked, ERROR or TIMEOUT.",
+          "code": "G1 row rule, after:\n  every golden, ui and cases row passes,\n  or is KNOWN-FAILING on an open card in a later goal;\n  no row is untracked, ERROR or TIMEOUT"
+        },
+        {
+          "key": "B",
+          "name": "Move the cards but keep every row passing",
+          "detail": "The same cards move, but G1 still needs every row to pass. The moved features' rows stay red, so G1 still waits on them. Only the card count drops.",
+          "technical": "Goal membership edits only.",
+          "code": "G1 row rule, unchanged:\n  every golden, ui and cases row passes;\n  no row is skipped, unsupported or an internal error"
+        },
+        {
+          "key": "C",
+          "name": "Keep G1 and G2 as they are",
+          "detail": "G1 and G2 finish only after the CLI commands, Core APIs, test-toolkit features and checker families are all built.",
+          "technical": "No change.",
+          "code": "No change to G1, G2 or card membership"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "G1 is about hand-off and durability, and the backlogs are features. Tracked known failures keep every gap visible on a card while the hand-off work finishes now.",
+        "gains": [
+          "G1 and G2 can close on the work they are actually about.",
+          "Every unbuilt feature keeps its card and its known-failing rows."
+        ],
+        "losses": [
+          {
+            "loss": "'Every row passes' stops being a G1 exit condition.",
+            "mitigation": "The release gate still refuses any untracked, ERROR or TIMEOUT row, and every known failure names an open card."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B moves the cards but G1 still waits on the same red rows."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps G1 and G2 open until every backlog feature is built."
+          }
+        ],
+        "tradeoff": "G1 and G2 finish on their own work, while unbuilt features finish under the goals that own them."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": "Owner question 2026-11-06: which big blockers can go in later stages so G1 and G2 finish soonest",
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should the feature-backlog cards leave G1 and G2, with every row they block kept as a tracked known failure?",
+        "lesson": "G1 and G2 still hold feature backlogs, and G1 says every row must pass. About 1,100 rows are known-failing today, almost all waiting on a backlog feature. So neither goal can finish until those features are built.",
+        "trio": {
+          "current": {
+            "note": "G1 needs every row to pass, so it waits on every unbuilt feature.",
+            "code": "G1: every golden, ui and cases row passes;\n    no row is skipped, unsupported or an internal error\nopen: #6418 12/141, #6419 27/52, #5454 1/92, ..."
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust ships on a release train; unfinished features stay behind their own tracking issues. See https://doc.rust-lang.org/book/appendix-07-nightly-rust.html.",
+            "code": "// feature gated, tracked separately\n#![feature(unfinished_thing)]  // tracking issue #NNNN"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Move backlogs, count tracked failures",
+            "gist": "Backlog cards move to their own goals; a row may be known-failing if it names an open later card.",
+            "gains": [
+              "G1 and G2 close on their own work.",
+              "Every gap stays on a card."
+            ],
+            "losses": [
+              "'Every row passes' is no longer a G1 exit condition."
+            ],
+            "proposed": {
+              "code": "every row passes,\nor is KNOWN-FAILING on an open card in a later goal;\nno row is untracked, ERROR or TIMEOUT"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Move cards, keep every row passing",
+            "gist": "Only the card count drops; G1 still waits on the same red rows.",
+            "gains": [
+              "The strict row rule stays."
+            ],
+            "losses": [
+              "G1 still waits on every backlog feature."
+            ],
+            "proposed": {
+              "code": "every golden, ui and cases row passes"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No change",
+            "gist": "G1 and G2 wait until every backlog feature is built.",
+            "gains": [
+              "No goal edits."
+            ],
+            "losses": [
+              "G1 and G2 stay open for a long time."
+            ],
+            "proposed": {
+              "code": "unchanged"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "G1 is about hand-off and durability, and the backlogs are features. Tracked known failures keep every gap visible while the hand-off work finishes now.",
+          "gains": [
+            "G1 and G2 close on their own work."
+          ],
+          "losses": [
+            {
+              "loss": "'Every row passes' stops being a G1 exit condition.",
+              "mitigation": "The release gate still refuses any untracked, ERROR or TIMEOUT row."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B moves the cards but G1 still waits on the same red rows."
+            },
+            {
+              "key": "C",
+              "reason": "C keeps G1 and G2 open until every backlog feature is built."
+            }
+          ],
+          "tradeoff": "G1 and G2 finish on their own work; features finish under the goals that own them."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T11:11:57.778Z"
+    },
+    {
+      "id": "D-ENUM-DOT1",
+      "cardId": "c0rqt0kq",
+      "group": "syntax",
+      "title": "Enum declarations write each case with its leading dot, as values and patterns already do",
+      "situation": "Enum declarations write case names bare, while values and case patterns use dots. A dotted declaration is refused by the current compiler, so copying a case into its declaration needs an edit. This vote decides whether declared cases also start with a dot. We recommend dots for labelled cases, leaving bare type names available if the separate shared-case vote passes.",
+      "gist": "Should enum declarations write each case with a leading dot, like values and patterns?",
+      "lesson": "An enum lists possible cases. Today declarations use bare names on separate lines; values and case patterns use a leading dot. This vote changes only case declarations, not comma layout or type identity.",
+      "explainer": "",
+      "story": "Dmitri copies .Paused from a match arm into an enum declaration. The compiler refuses the dot even though his value and case pattern use it.",
+      "inWild": "Swift declares cases with case and uses contextual dotted values or patterns. Its manual illustrates enum CompassPoint and switch directionToHead with .south. Source: https://docs.swift.org/latest/documentation/the-swift-programming-language/enumerations/",
+      "detail": "WHAT THIS DECIDES\n\nAdd a dot to labelled case declarations, including payload cases and nested groups. Methods, marker lines and type cases are not labelled declarations.\n\nCHECKED TODAY\n\nSolBallotReview's enum_dot.jet gives E0003 at .Fast; enum_comma.jet gives E0003 at the comma. These are independent parser limitations. Compiler/JetParser/Source/Parser/Patterns.jet:597-607 reports E0367 for a bare payload constructor such as Circle(n), not every uppercase name. A bare unit name can parse as a comparison expression; the earlier claim that Fast -> always gets E0367 was false.\n\nDEPENDENCIES\n\nD-DECL-COLON1=A illustrated bare enum cases; A amends that spelling. D-BRACE-LAYOUT1 decides one-line comma bodies independently. Without it, dotted declarations use separate lines. D-ALT-CASES1 depends on this vote for enum type cases: Int denotes a type case, .Int a labelled case. A alone adds neither type cases nor encoding changes.\n\nMigration adds dots from parsed case declarations, never method names. Preserve comments and nested groups. A missing dot receives a registered diagnostic and edit. B is cohesive and familiar but needs two contextual spellings.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Dot everywhere",
+          "detail": "Each case line in an enum body starts with a dot. A bare case line gets an error that adds it.",
+          "technical": "Amends the case spelling in D-DECL-COLON1's enum example.",
+          "code": "Mode: enum { .Fast, .Safe, .Paused }\nrun: fn() { print(Mode.Paused) }\n// Proposed dots; one-line commas depend on the layout vote."
+        },
+        {
+          "key": "B",
+          "name": "Bare in declarations",
+          "detail": "Declarations write the bare name; values and patterns keep the dot.",
+          "technical": "No change.",
+          "code": "Mode: enum { Fast, Safe, Paused }\nrun: fn() { print(Mode.Paused) }\n// Bare declarations; one-line commas depend on the layout vote."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A case already needs its dot when built and matched. Writing it the same way in the declaration gives one spelling and makes copying between them work.",
+        "gains": [
+          "One spelling per case.",
+          "Copying a case just works.",
+          "Bare names stay free for type cases."
+        ],
+        "losses": [
+          {
+            "loss": "One more character per case line.",
+            "mitigation": "jet fix adds every dot; a missing dot gets an error whose fix adds it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A case keeps two spellings, and copying it between a match and its declaration fails."
+          }
+        ],
+        "tradeoff": "One character per case line, in exchange for one spelling of every case."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Re-probed both forms separately, since the original probe mixed two errors, and stated them apart. Reproduced dotted-declaration and comma failures, and confirmed E0367 for payload patterns rather than every bare unit name."
+      },
+      "checkInstructions": "SolBallotReview checked enum_dot.jet and enum_comma.jet: separate E0003 errors at dot and comma. Source Patterns.jet:597-607 limits E0367 to recognized bare constructor heads. Require independent dot/layout tests and nested group migration.",
+      "surface": {
+        "gist": "Should enum declarations write each case with a leading dot, like values and patterns?",
+        "lesson": "An enum lists possible cases. Today declarations use bare names on separate lines; values and case patterns use a leading dot. This vote changes only case declarations, not comma layout or type identity.",
+        "trio": {
+          "current": {
+            "note": "Today a dotted case declaration is refused.",
+            "code": "Mode: enum {\n    .Fast\n    .Safe\n}\n// E0003: expected a name, found `.`"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "Swift writes the dot in values and patterns, and case in declarations.",
+            "code": "// docs.swift.org, Enumerations\nenum Mode { case fast, safe }\nswitch m { case .fast: go() default: wait() }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Dot everywhere",
+            "gist": "Declarations write .Fast, matching values and patterns.",
+            "gains": [
+              "One spelling for a case everywhere.",
+              "Copying a case between match and declaration works."
+            ],
+            "losses": [
+              "One more character per case line."
+            ],
+            "proposed": {
+              "code": "Mode: enum { .Fast, .Safe, .Paused }\nrun: fn() { print(Mode.Paused) }\n// Proposed: same dotted case spelling in declarations."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Bare in declarations",
+            "gist": "Keep Mode: enum { Fast, Safe } as today.",
+            "gains": [
+              "Familiar from Swift, Rust and Zig declarations."
+            ],
+            "losses": [
+              "Two spellings for one case name.",
+              "Copying between match and declaration fails."
+            ],
+            "proposed": {
+              "code": "Mode: enum { Fast, Safe, Paused }\nrun: fn() { print(Mode.Paused) }\n// Comma layout depends on the separate layout vote."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A case already needs its dot when built and matched. Writing it the same way in the declaration gives one spelling and makes copying between them work.",
+          "gains": [
+            "One spelling per case.",
+            "Copying a case just works.",
+            "Bare names stay free for type cases."
+          ],
+          "losses": [
+            {
+              "loss": "One more character per case line.",
+              "mitigation": "jet fix adds every dot; a missing dot gets an error whose fix adds it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A case keeps two spellings, and copying it between a match and its declaration fails."
+            }
+          ],
+          "tradeoff": "One character per case line, in exchange for one spelling of every case."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "One more character per case line.",
+          "attempts": [
+            "Accept both dotted and bare declarations: rejected, it keeps two spellings.",
+            "Drop the dot from values and patterns instead: rejected, the dot keeps a case apart from a variable in patterns."
+          ],
+          "result": "Kept as one negligible loss: one character, written by jet fix and by the error's fix."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:11.540Z"
+    },
+    {
+      "id": "D-A11Y-EXPORT1",
+      "cardId": "c0u5tm84",
+      "group": "gui",
+      "title": "One accessibility provider contract, using AccessKit on supported desktops",
+      "situation": "Drawn controls need an accessibility description so assistive tools can find and operate them. Jet has four view roles, but its native host provider reports accessibility unavailable. This vote chooses whether to reuse desktop adapters or write every adapter in Jet. We recommend AccessKit behind the existing provider contract on supported desktops, with Jet providers for phones and semantic elements on the web.",
+      "gist": "Should Jet reuse AccessKit's desktop adapters behind one accessibility provider contract?",
+      "lesson": "A provider translates one logical view tree into a system's accessibility interface. Different platform adapters are implementations of that contract, not different state or view models. Both choices still need complete roles, focus, actions and manual assistive-tool acceptance.",
+      "explainer": "",
+      "story": "Hana needs a Pay button that a keyboard user and a screen-reader user can both find and activate. The same action must run whichever adapter exposes it.",
+      "inWild": "AccessKit describes itself as accessibility infrastructure for custom-drawn toolkits. Its published adapters cover macOS, Unix and Windows, and it offers C bindings and prebuilt libraries. Source: https://accesskit.dev/",
+      "detail": "OWNER GATE\n\nA approves a pinned AccessKit desktop dependency and its C bridge. This is a new dependency choice, not a second accessibility mechanism. D-CORE-PROVIDER1=A supplies one replaceable provider contract; D-UI-HOME1 keeps system services in core.ui.host and views in the ui package. D-UI-VIEW1's ui.app/state model stays unchanged.\n\nCHECKED TODAY\n\nCore/Ui/Ui.jet:39-44 lists Button, Container, Label and TextInput. Jetpack/Provider/Batteries/gui/gui.jet:542-548 wraps accessibility metadata. Compiler/JetRuntime/Source/UiHostProvider.jet:17-25 reports every native capability absent. SolBallotReview compiled and ran ui_values.jet for view construction and ui_gtk_clean.jet for the unavailable GTK result. These checks do not establish browser screen-reader behavior.\n\nRESEARCH AND CORRECTION\n\nhttps://accesskit.dev/ lists macOS, Unix and Windows adapters, C/Python bindings, prebuilt C libraries, and users including egui and Slint. That page does not list phone adapters; A does not assume they exist. The earlier claim that binding AccessKit needs every user's machine to build Rust was false: prebuilt C-interface libraries are available. Local source rebuilds still require the upstream toolchain. An upstream project can be pinned or patched; fixes need not wait indefinitely for a release.\n\nBRIDGE AND AUTHORITY\n\nD-FFI-RUST1=A currently authorizes static user helpers only on x86_64 Linux. A explicitly extends that scope for this first-party desktop accessibility provider, not arbitrary Rust helpers. Approve the I6 bridge here: pinned source/version and license, reproducible per-target C-interface artifacts, signed distribution, typed ownership and callback lifetimes, no extra user toolchain, and normal provider availability diagnostics. Do not claim this bridge has been implemented or verified. Linux packaging must meet the existing static deployment contract or return for a separate linking decision; no hidden dynamic-loader exception.\n\nONE CONTRACT\n\nOne logical tree owns identity, role, label, state, reading order, focus and actions. A desktop provider forwards it through AccessKit; phone providers marshal it directly; web uses semantic elements under D-ONEAPP-WEBOUT1. A target selects one provider, never two competing trees. Provider callbacks invoke the same checked actions.\n\nSHARED ACCEPTANCE\n\nCompare normalized semantic projections, not byte-identical platform trees or exact speech strings. Require focus traversal, action dispatch, live updates, editable text, virtualized lists and manual checks with platform assistive tools. D-A11YGATE1=B keeps optional accessibility linting separate from runtime correctness. Test gates do not magically remove adapter bugs; that obligation is shared by A and B.\n\nB avoids an outside dependency and gives Jet all adapter code, but copying role tables alone cannot make five exports a negligible maintenance cost. A reuses maintained desktop adapters without pretending they cover phones.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Reuse desktop adapters",
+          "detail": "AccessKit supplies supported desktop adapters through one typed provider bridge. Jet supplies phone providers; web uses semantic elements.",
+          "technical": "Explicit first-party desktop exception to D-FFI-RUST1 with the pinned C-interface bridge and I6 dependency acceptance above.",
+          "code": "ui.button(\"Pay\", on_click: pay)\n// Proposed logical projection: Button, name Pay, action invoke.\n// Desktop: AccessKit provider; phone: Jet provider."
+        },
+        {
+          "key": "B",
+          "name": "Write every adapter in Jet",
+          "detail": "Jet implements Windows, macOS, Linux, iOS and Android exports behind the same provider contract, without AccessKit.",
+          "technical": "No new foreign dependency; the same logical tree and acceptance apply.",
+          "code": "ui.button(\"Pay\", on_click: pay)\n// Same logical projection and action.\n// All native adapters are Jet implementations."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Reuse maintained desktop adapters without changing the view model. Keep one provider contract and own only the platforms that need it.",
+        "gains": [
+          "Reuses desktop accessibility work.",
+          "Keeps one logical tree and action model.",
+          "Users need no Rust toolchain."
+        ],
+        "losses": [
+          {
+            "loss": "The desktop provider adds a pinned foreign dependency.",
+            "mitigation": "Ship signed reproducible bridge artifacts; inspect the pinned source and dependency manifest."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It avoids a dependency but makes Jet responsible for every native accessibility adapter."
+          }
+        ],
+        "tradeoff": "Accept one bounded desktop dependency instead of independently maintaining every adapter."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Repaired the same overclaimed screen-reader gate and noted that AccessKit has no iOS adapter. Checked provider source, UI probes and AccessKit's adapter/C-binding list; replaced misleading all-Jet advocacy with desktop adapter reuse behind one provider contract."
+      },
+      "checkInstructions": "SolBallotReview checked the cited source, native UI probes, D-FFI-RUST1, D-CORE-PROVIDER1, D-A11YGATE1 and AccessKit's published adapter/binding list. Before shipping, prove the authorized bridge, Linux static packaging, callback ownership and normalized accessibility actions on each target.",
+      "surface": {
+        "gist": "Should Jet reuse AccessKit's desktop adapters behind one accessibility provider contract?",
+        "lesson": "A provider translates one logical tree into a system interface. AccessKit offers desktop adapters and C bindings, not a complete phone solution. Both options still owe correct focus, actions, text editing and assistive-tool acceptance.",
+        "trio": {
+          "current": {
+            "note": "The view tree has four roles; the native host reports capabilities absent.",
+            "code": "use ui: core.ui\nrun: fn() {\n    button: ui.button(\"Pay\")\n}\n// Native provider capability returns false."
+          },
+          "wild": {
+            "lang": "AccessKit",
+            "note": "The published adapter list covers macOS, Unix and Windows; C bindings include prebuilt libraries.",
+            "code": "// accesskit.dev\n// One tree -> macOS, Unix or Windows adapter\n// C bindings can connect a non-Rust toolkit."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Reuse desktop adapters",
+            "gist": "Use AccessKit on supported desktops and Jet providers on phones.",
+            "gains": [
+              "Reuses maintained desktop adapters.",
+              "One view tree; no user Rust toolchain."
+            ],
+            "losses": [
+              "Adds a pinned foreign desktop dependency."
+            ],
+            "proposed": {
+              "code": "ui.button(\"Pay\", on_click: pay)\n// Desktop: AccessKit provider.\n// Phone: Jet provider; same logical action."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Write every adapter in Jet",
+            "gist": "Jet owns every native export behind the same provider contract.",
+            "gains": [
+              "No outside adapter dependency."
+            ],
+            "losses": [
+              "Jet maintains every native accessibility adapter."
+            ],
+            "proposed": {
+              "code": "ui.button(\"Pay\", on_click: pay)\n// Every native adapter written in Jet.\n// Same tree, focus and action acceptance."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Reuse maintained desktop adapters without changing the view model. Keep one provider contract and own only the platforms that need it.",
+          "gains": [
+            "Reuses desktop accessibility work.",
+            "Keeps one logical tree and action model.",
+            "Users need no Rust toolchain."
+          ],
+          "losses": [
+            {
+              "loss": "The desktop provider adds a pinned foreign dependency.",
+              "mitigation": "Ship signed reproducible bridge artifacts; inspect the pinned source and dependency manifest."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It avoids a dependency but makes Jet responsible for every native accessibility adapter."
+            }
+          ],
+          "tradeoff": "Accept one bounded desktop dependency instead of independently maintaining every adapter."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A dependency might require users to install Rust.",
+          "attempts": [
+            "Use the C interface with signed per-target artifacts, reproducible from the pinned upstream source."
+          ],
+          "result": "No user toolchain requirement; source rebuilds still use the upstream toolchain."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:24.492Z"
+    },
+    {
+      "id": "D-GPU-UI1",
+      "cardId": "c0u5tm84",
+      "group": "gui",
+      "title": "Phones switch to graphics drawing only if a paired cell proves the win",
+      "situation": "A drawn app can use the main processor or a graphics processor. The approved default is software drawing, and the current seed refuses phone runs. No paired evidence yet shows a battery or frame-time win for graphics drawing. We recommend building the phone graphics path behind a paired software comparison, and switching the phone default only if it strictly wins every required metric.",
+      "gist": "Should phones default to graphics drawing only after a paired comparison proves the required win?",
+      "lesson": "Software and graphics processors can render the same scene. Which costs less depends on workload, device and driver. This phone-default proposal needs paired evidence; browser acceleration and static desktop GPU deployment are not promised.",
+      "explainer": "",
+      "story": "Jun wants smooth reading-app scrolling without wasting battery. He needs a matched comparison of the same scene, not an assumption that using a graphics processor guarantees a win.",
+      "inWild": "Flutter's Impeller is the default on iOS and Android API 29+; Android devices without suitable Vulkan support fall back to OpenGL. Source: https://docs.flutter.dev/perf/impeller",
+      "detail": "OWNER GATE\n\nA changes D-RAYLIB-DRIVER-LOAD1=A's software default for iOS and Android only. Desktop software defaults remain; static deployment specifically means Linux, not dependency-free macOS/Windows. Browser canvas acceleration is selected by the browser and is not guaranteed by this vote. D-GAME-PLATFORM1's owner renamed ray to video.\n\nCHECKED TODAY\n\nSolBallotReview checked union.jet with ios/android target flags successfully; checking alone does not establish executable target support. Running that file with either target gave E2104, jet run --target is not built yet. No GPU prototype, phone benchmark or battery measurement was supplied or run.\n\nCANDIDATE, NOT RESULT\n\nA proposes a GPU compositor using the same semantic scene and text results as software. Cached CPU coverage masks and integer blending are one candidate technique, not proof of identical output or lower energy. Fractional positions, transforms, clipping, antialiasing, color space and compositing must remain correct; integer snapping must not erase fractional layout or animation. Compare both paths' frames and actions for the same input trace. A missing graphics capability uses the ordinary provider availability policy; no silent lost view is acceptable.\n\nREQUIRED PAIRED CELL\n\nThe phone default changes only after the canonical performance manifest records a candidate/plain two-program cell for this software/GPU design. Use identical app, fonts, viewport, refresh rate, scene trace and correctness on representative iOS and Android devices. Record hardware, driver, thermal state and repeated-run uncertainty.\n\nMeasure cycles and bytes under the standing gate, plus frame latency and energy for the battery claim. A must strictly beat the plain form under AGENTS.md:189-192; retain every losing metric, never an average hiding a loss. If it does not win, keep software and revise the recommendation.\n\nFAIR OPTIONS\n\nB retains known policy and avoids mandatory graphics startup for light apps. C benefits desktop workloads too and is not inferior merely because it needs a backend; compare it on actual desktop workloads before extending the default. A's advantage is narrower deployment scope, not an unmeasured speed or battery result.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Measure, then GPU on phones",
+          "detail": "Build the phone graphics path and its paired software cell. Phones switch to it by default only if it strictly wins every required metric; desktops keep software with explicit GPU opt-in.",
+          "technical": "A conditional phone-only default amendment; until the cell passes, D-RAYLIB-DRIVER-LOAD1 stands unchanged.",
+          "code": "$ jet build club.jet --target=ios\ndrawing    gpu (Metal, system)\n$ jet build club.jet --target=linux\ndrawing    software (static, one file)"
+        },
+        {
+          "key": "B",
+          "name": "Software everywhere",
+          "detail": "All targets draw in software; the GPU stays a later opt-in everywhere.",
+          "technical": "D-RAYLIB-DRIVER-LOAD1 unchanged.",
+          "code": "$ jet build club.jet --target=ios\ndrawing    software"
+        },
+        {
+          "key": "C",
+          "name": "GPU where the system ships it",
+          "detail": "Phones, macOS and Windows draw with Metal, Vulkan or Direct3D by default. Only Linux stays software-drawn and static, because its drivers vary.",
+          "technical": "Amends D-RAYLIB-DRIVER-LOAD1 for every target except Linux. Adds a Direct3D backend; Metal is shared with iOS.",
+          "code": "$ jet build club.jet --target=macos\ndrawing    gpu (Metal, system)\n$ jet build club.jet --target=linux\ndrawing    software (static, one file)"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A decides the rule now and lets evidence decide the default. Nothing changes for users until the paired cell strictly wins, and desktop policy stays as ratified.",
+        "gains": [
+          "Limits any default change to phones.",
+          "Keeps desktop software policy.",
+          "Lets measured evidence, not assumption, flip the default."
+        ],
+        "losses": [
+          {
+            "loss": "The graphics path and its cell may never become the default.",
+            "mitigation": "Build the paired cell first, on one phone scene, before investing in the full graphics path."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It rules out a measured battery and latency win before anyone measures it."
+          },
+          {
+            "key": "C",
+            "reason": "It changes desktop defaults too, without matched desktop evidence."
+          }
+        ],
+        "tradeoff": "Work on a measured candidate, in exchange for a default that changes only when the evidence wins."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Checked target refusal and graphics policy; removed unmeasured energy, speed and pixel guarantees and specified the canonical paired-cell gate. Main then made A a measurement rule: the phone default switches only after the paired software cell strictly wins."
+      },
+      "checkInstructions": "SolBallotReview checked union.jet and observed E2104 from ios/android runs. No builds, GPU cell or phone measurement ran. The paired cell must pass the standing gate before the phone default changes.",
+      "surface": {
+        "gist": "Should phones default to graphics drawing only after a paired comparison proves the required win?",
+        "lesson": "Software and graphics processors can render the same scene. Which costs less depends on workload, device and driver. This vote changes phone defaults only after a paired comparison; it does not guarantee browser acceleration or static desktop GPU builds.",
+        "trio": {
+          "current": {
+            "note": "The current seed checks source but refuses phone runs.",
+            "code": "$ jet run union.jet --target=ios\nError [jet.InvalidCommandInput]: `jet run --target` is not built yet\nMore: jet-lang.dev/e/E2104"
+          },
+          "wild": {
+            "lang": "Flutter",
+            "note": "Impeller is default on iOS and Android API 29+; unsupported Android devices use OpenGL.",
+            "code": "# docs.flutter.dev/perf/impeller\n# iOS: Impeller; Android API 29+: Impeller when supported"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Measure, then GPU on phones",
+            "gist": "Measure a phone graphics default; keep desktop software policy.",
+            "gains": [
+              "Narrows the default change to phones.",
+              "Keeps the existing desktop default."
+            ],
+            "losses": [
+              "The candidate's advantage is not yet measured."
+            ],
+            "proposed": {
+              "code": "$ jet build club.jet --target=ios\ndrawing    gpu (Metal, system)\n$ jet build club.jet --target=linux\ndrawing    software (static, one file)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Software everywhere",
+            "gist": "Keep the ruling as written: software drawing on every target.",
+            "gains": [
+              "One drawing path everywhere."
+            ],
+            "losses": [
+              "May cost more energy on heavy scenes; unmeasured.",
+              "May have higher frame latency; unmeasured."
+            ],
+            "proposed": {
+              "code": "$ jet build club.jet --target=ios\ndrawing    software"
+            }
+          },
+          {
+            "key": "C",
+            "name": "GPU where the system ships it",
+            "gist": "Phones, macOS and Windows use the graphics chip; only Linux stays software-drawn.",
+            "gains": [
+              "Graphics acceleration available without separately installing a system API."
+            ],
+            "losses": [
+              "Changes desktop defaults without matched evidence.",
+              "Driver behavior still needs correctness checks."
+            ],
+            "proposed": {
+              "code": "$ jet build club.jet --target=macos\ndrawing    gpu (Metal, system)\n$ jet build club.jet --target=linux\ndrawing    software (static, one file)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A decides the rule now and lets evidence decide the default. Nothing changes for users until the paired cell strictly wins, and desktop policy stays as ratified.",
+          "gains": [
+            "Limits any default change to phones.",
+            "Keeps desktop software policy.",
+            "Lets measured evidence, not assumption, flip the default."
+          ],
+          "losses": [
+            {
+              "loss": "The graphics path and its cell may never become the default.",
+              "mitigation": "Build the paired cell first, on one phone scene, before investing in the full graphics path."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It rules out a measured battery and latency win before anyone measures it."
+            },
+            {
+              "key": "C",
+              "reason": "It changes desktop defaults too, without matched desktop evidence."
+            }
+          ],
+          "tradeoff": "Work on a measured candidate, in exchange for a default that changes only when the evidence wins."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "GPU and software frame equivalence is unproven.",
+          "attempts": [
+            "Accept small differences with a tolerance: rejected, it breaks exact golden tests.",
+            "Make frame equivalence and every paired metric conditions of the default switch."
+          ],
+          "result": "Removed as a user risk: the default switches only after equivalence and the paired cell pass. Residual: exploratory work."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:26.732Z"
+    },
+    {
+      "id": "D-I18N1",
+      "cardId": "c0u5tm84",
+      "group": "stdlib",
+      "title": "Extract provable view literals and use one message model for translation",
+      "situation": "Apps need translated phrases and language-specific formatting, but Jet currently offers a helper choosing between two supplied word forms. Literal extraction can reduce manual keys; it cannot infer every message flowing through arbitrary functions. This vote chooses a first-party extraction and message workflow, not a claim that translation already works. We recommend automatic extraction where provable, explicit message values elsewhere, and reviewed catalogs for plurals and context.",
+      "gist": "Should Jet collect view text for translation automatically, instead of keys written by hand?",
+      "lesson": "Extraction collects phrases, not translations. Authors still review plural categories and ambiguous meanings. A handles simple view literals automatically and uses explicit message values for indirect text; arbitrary string helpers are not assumed analyzable.",
+      "explainer": "",
+      "story": "Sofia built a clinic booking app in English. A Portuguese clinic wants it next month, and she does not want to wrap two hundred phrases in lookup calls first.",
+      "inWild": "Lingui extracts supported static message calls and macros, including explicit keys, but documents limits on dynamic expressions and following variables through arbitrary code. Source: https://lingui.dev/guides/message-extraction",
+      "detail": "OWNER GATE\n\nAdd a shipped localization workflow, jet i18n, and one message representation in ui. It remains package code under D-UI-HOME1, using public compiler-library APIs under D-EXTEND-ARCH1. No private compiler recognition of the names ui.text or core.ui is permitted. The extractor is a compiler-library client, and generated message construction uses the same public API as handwritten message values.\n\nCHECKED TODAY\n\nCore/Text/Fmt.jet:31-34 chooses singular for abs(n)==1 and many otherwise, then includes the count. It does not add an English suffix. SolBallotReview's fmt_clean.jet checked and ran, printing 1 booking and 2 bookings. Searches found no Core localization implementation; that observation is not a proof that no third-party package exists.\n\nA'S BOUNDARY\n\nExtract literals and interpolations at view text/label call sites, constants and helpers only where static analysis proves their message identity. Do not promise complete arbitrary interprocedural dataflow analysis. Dynamic database text is data. ui.message preserves a message descriptor through helpers; a String-returning helper can lose descriptor information and gets an extraction report, not guessed translation. ui.verbatim explicitly marks nonlocalized literal text. Automatic and explicit forms lower to the same message/catalog lookup, not two translation engines.\n\nPreserve typed interpolation values until formatting; never build catalogs from already formatted runtime strings. Numbers and dates follow a selected locale; identifiers and room numbers are not automatically plural counts. A plural argument explicitly identifies the controlling count. Catalogs, including the source language, supply and review every required plural category; no singular is guessed by stripping a suffix. Every view text/label API supports context metadata, not only text.\n\nOne source phrase can have multiple meanings. Explicit context separates them. Extraction lists unresolved dynamic sites, context collisions and missing plural categories. The default remains readable source text; localized release acceptance checks required catalogs, safe interpolation and fallback behavior.\n\nEDITED TEXT\n\nView function and argument position are hints, not stable identity across refactors. Match exact phrase/context first; retain fuzzy candidates for translator review, never activate a possibly wrong old translation automatically. Moved and edited phrases remain unmatched in the report. Use source-language fallback until approved, and keep obsolete entries recoverable.\n\nFAIR OPTIONS\n\nExplicit keys survive text edits and can also be extracted automatically, as Lingui documents: https://lingui.dev/guides/message-extraction. Packages can scan code or use public compiler APIs; they are not inherently unable to find phrases. A favors the shipped default workflow; B favors stable author keys; C leaves selection to users. Runtime locale and text-size behavior remain shared across targets.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Collect view text automatically",
+          "detail": "Extract provable view literals automatically; public message values carry indirect text. Catalogs supply reviewed plural forms and context.",
+          "technical": "Compiler-library extractor, one package message representation and locale rules; explicit plural count, not every Int hole.",
+          "code": "ui.text(\"{count} bookings today\", plural: count)\n// Proposed: count selects reviewed catalog plural forms.\n$ jet i18n --add=pt\n# generates a catalog for translator review"
+        },
+        {
+          "key": "B",
+          "name": "Explicit keys",
+          "detail": "Authors write t(\"bookings_today\", count: count) and keep a key file per language.",
+          "technical": "A ui lookup function and key files.",
+          "code": "ui.text(t(\"bookings_today\", count: count))\n// en: bookings_today = \"{count} bookings today\""
+        },
+        {
+          "key": "C",
+          "name": "Leave it to packages",
+          "detail": "Core offers nothing beyond the English plural helper; translation is a package choice.",
+          "technical": "No Core change.",
+          "code": "use some_i18n_package\nui.text(tr(\"{count} bookings today\", count))"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Automatic extraction removes routine keys without pretending all dynamic text is statically known. Explicit messages and catalogs use the same lookup mechanism.",
+        "gains": [
+          "Simple view literals need no keys.",
+          "Reviewed plurals and typed interpolation.",
+          "One message mechanism for indirect text."
+        ],
+        "losses": [
+          {
+            "loss": "One phrase with two meanings shares a translation until given a context.",
+            "mitigation": "jet i18n lists every place a phrase appears, and a context argument splits it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Every phrase must be wrapped by hand, and keys drift from their text."
+          },
+          {
+            "key": "C",
+            "reason": "Packages can extract phrases too, but users must choose and configure the workflow."
+          }
+        ],
+        "tradeoff": "Source phrases identify messages; edited text needs translation review rather than silent reuse."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Tightened which text is collected and how translations match, by view and argument rather than line. Ran the plural helper and checked extraction research; repaired arbitrary-dataflow, integer-plural, translation-reuse and compiler-privilege claims."
+      },
+      "checkInstructions": "Read Core/Text/Fmt.jet:31-34. Search Core for translation support (none). tower decision list shows no decision on translation or plurals.",
+      "surface": {
+        "gist": "Should Jet collect view text for translation automatically, instead of keys written by hand?",
+        "lesson": "Extraction collects phrases, not translations. Authors still review plural categories and ambiguous meanings. A handles simple view literals automatically and uses explicit message values for indirect text; existing plain-string helpers are not assumed analyzable.",
+        "trio": {
+          "current": {
+            "note": "Today Jet has only an English plural helper.",
+            "code": "// Core/Text/Fmt.jet:31\nplural: fn(n: Int, singular: String, many: String) -> String Never! {\n    word: if abs_int(n) == 1 -> singular else -> many\n    \"{grouped_int(n)} {word}\"\n}"
+          },
+          "wild": {
+            "lang": "Lingui",
+            "note": "Lingui extracts static messages and documents limits on dynamic expressions.",
+            "code": "// lingui.dev/guides/message-extraction\nt`Message`;\n// Dynamic values require explicit supported patterns."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Collect view text automatically",
+            "gist": "The compiler collects view text; jet i18n writes catalogs.",
+            "gains": [
+              "Simple view literals need no manual keys.",
+              "Plurals follow each language's rules."
+            ],
+            "losses": [
+              "One phrase with two meanings shares a translation until given a context."
+            ],
+            "proposed": {
+              "code": "ui.text(\"{count} bookings today\", plural: count)\n$ jet i18n --add=pt\n# proposed: catalog with plural categories for review"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Explicit keys",
+            "gist": "Wrap each phrase in a lookup call with a key.",
+            "gains": [
+              "Keys survive English wording changes."
+            ],
+            "losses": [
+              "Every phrase must be wrapped by hand.",
+              "Keys drift from the text they name."
+            ],
+            "proposed": {
+              "code": "ui.text(t(\"bookings_today\", count: count))"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Leave it to packages",
+            "gist": "No translation support in Jet; packages provide it.",
+            "gains": [
+              "Nothing new in Jet."
+            ],
+            "losses": [
+              "Each package invents its own scheme.",
+              "Users choose and configure the extraction workflow."
+            ],
+            "proposed": {
+              "code": "use some_i18n_package\nui.text(tr(\"{count} bookings today\", count))"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Automatic extraction removes routine keys without pretending all dynamic text is statically known. Explicit messages and catalogs use the same lookup mechanism.",
+          "gains": [
+            "Simple view literals need no keys.",
+            "Reviewed plurals and typed interpolation.",
+            "One message mechanism for indirect text."
+          ],
+          "losses": [
+            {
+              "loss": "One phrase with two meanings shares a translation until given a context.",
+              "mitigation": "jet i18n lists every place a phrase appears, and a context argument splits it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Every phrase must be wrapped by hand, and keys drift from their text."
+            },
+            {
+              "key": "C",
+              "reason": "Packages can extract phrases too, but users must choose and configure the workflow."
+            }
+          ],
+          "tradeoff": "Source phrases identify messages; edited text needs translation review rather than silent reuse."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Editing English text could orphan its translations.",
+          "attempts": [
+            "Require hand keys for phrases expected to change: rejected, it brings back keys.",
+            "Use view/argument hints only for fuzzy candidates; source-language fallback remains active until a translator approves."
+          ],
+          "result": "No silent wrong-phrase reuse. Ambiguous and edited phrases remain visible for review, with source-language fallback."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:29.061Z"
+    },
+    {
+      "id": "D-LAYOUT2",
+      "cardId": "c0u5tm84",
+      "group": "gui",
+      "title": "Screens lay out with rows, columns, grids and stacks; the constraint solver stays for experts",
+      "situation": "Jet's box constructor stacks children vertically, while the approved equation solver is a separate layout surface. Apps need rows, grids, wrapping and scrolling without writing a solver program. This vote chooses default UI layout and keeps custom layouts on one shared layout protocol. We recommend typed containers; browser-owned CSS layout depends on the separate presentation exception, not a silent second implementation of shared semantics.",
+      "gist": "Should screens lay out with rows, columns, grids and stacks, keeping the equation solver for experts?",
+      "lesson": "Layout controls sizes and placement. Typed containers cover common screens; a solver expresses relationships. Similar container names across toolkits do not imply identical algorithms. Today the checked Jet box example stacks vertically and measures 15.0 by 2.0.",
+      "explainer": "",
+      "story": "Sam builds a signup form. On a laptop the labels sit left of the fields in two columns; on a phone the form is one column. He wants that with no equations and no per-device code.",
+      "inWild": "Flutter describes constraints flowing down, sizes flowing up and parents setting positions, and explicitly distinguishes this box model from HTML layout. Source: https://docs.flutter.dev/ui/layout/constraints",
+      "detail": "OWNER GATE\n\nA replaces D-LAYOUT1=A's built-in constraint surface with typed ui containers and retains the solver behind the same custom-layout protocol. D-UI-HOME1 places this in the ui package. Container layout and custom solver layout return the same geometry facts; neither adds another state or event model.\n\nCHECKED TODAY\n\nCore/Ui/Ui.jet:71-76 defines SizeConstraint; :132-146 stacks boxes and uses terminal-cell text dimensions. SolBallotReview's ui_values.jet checked and ran, printing 15.0 x 2.0. Examples/features/ui/layout_basic.jet:16-31 uses Layout separately. No claim that all layout everywhere is absent follows from this.\n\nA'S PUBLIC CONTRACT\n\nrow/column offer gap, padding, start/end alignment, justification, wrapping, grow and shrink. grid offers fixed/auto/fraction tracks, minimum track sizes, row-major placement and explicit spans. stack overlays; scroll handles overflow. Values use logical pixels, percentages, fractions and font-relative em. Unsupported properties are errors, never silently approximated CSS. Text scaling changes the font-relative inputs, not the meaning of em.\n\nNative targets share one Jet implementation of these rules. Browser CSS layout is permitted only by D-ONEAPP-WEBOUT1=A's explicit I9 presentation exception. Without it, use shared computed geometry on the web and revise the native-CSS claim before ratifying this ballot. Compare logical reading/focus order and no-lost-content behavior across targets, not an unsupported promise that all differences are rounding.\n\nAdaptive classes use container width: Compact below 600, Medium at least 600 and below 840, Expanded at least 840 logical pixels. Fractional widths have no gap. Start/end follow writing direction. Test zero/negative constraints, unbounded scroll axes, intrinsic text, zoom, long translations, right-to-left text and nested containers.\n\nFAIR ALTERNATIVES\n\nB can offer beginner row/grid presets that lower to its solver; it need not force equations on every beginner. It recomputes on resize rather than making reflow impossible. A favors a smaller ordinary container model while B favors one relational constraint model. C can have typed properties; its actual extra scope is selectors, cascade and a broad CSS grammar, not inevitable unsafe strings or a measured browser-sized binary.\n\nResearch: Flutter's constraint guide explicitly distinguishes its box model from HTML: https://docs.flutter.dev/ui/layout/constraints. Similar container names do not imply identical algorithms. This vote makes no performance claim.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Rows, columns, grids, stacks",
+          "detail": "Built-in row, column, grid, stack and scroll, following the CSS flex and grid rules on drawn targets and emitted as CSS on the web. D-LAYOUT1's solver becomes a library behind one custom layout view.",
+          "technical": "A CSS flex and grid subset on drawn targets, checked against browser fixtures. CSS flex and grid output on the web. Amends D-LAYOUT1 from built-in surface to expert library.",
+          "code": "signup: fn(name: &ui.State<String>, email: &ui.State<String>) -> ui.Node {\n    ui.grid([\n        ui.text(\"Name\"), ui.text_input(name),\n        ui.text(\"Email\"), ui.text_input(email),\n    ], columns: [.Auto, .Fraction(1)], gap: 16)\n}"
+        },
+        {
+          "key": "B",
+          "name": "The equation solver, built in",
+          "detail": "Keep the solver as the underlying model; row/grid presets generate constraints, and experts write relations directly.",
+          "technical": "Cassowary per frame or at compile time for static layouts; the web gets absolute positions or a solver in the page.",
+          "code": "form: Layout{\n    label.width >= 80.0,\n    label.right + 16.0 == input.left,\n    label.width + 16.0 + input.width == self.width,\n}"
+        },
+        {
+          "key": "C",
+          "name": "Full CSS",
+          "detail": "Every target implements CSS layout, selectors and the cascade, as a browser does.",
+          "technical": "A CSS engine in every drawn target.",
+          "code": "ui.box([\n    ui.text(\"Name\"), ui.text_input(name),\n], style: \"display: grid; grid-template-columns: auto 1fr; gap: 16px\")"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Typed containers cover ordinary screens directly, while a custom layout uses the same geometry protocol. Browser CSS requires the explicit presentation exception.",
+        "gains": [
+          "Simple screens need no equations.",
+          "Web pages reflow natively.",
+          "The solver remains for experts."
+        ],
+        "losses": [
+          {
+            "loss": "Browser-owned layout can differ from native geometry.",
+            "mitigation": "Check zoom, long text and reading order; reject hidden content and unreachable focused controls."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Presets can hide equations, but all layout still depends on the relational solver model."
+          },
+          {
+            "key": "C",
+            "reason": "It offers familiar web styling but adds selectors and cascade beyond ordinary app containers."
+          }
+        ],
+        "tradeoff": "The solver moves from the default layout to an expert tool, in exchange for layouts that map onto the web."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Removed the unsupported one-pass layout claim, settled the width-class breakpoints at 600 and 840, and added the loss that drawn targets reimplement a CSS subset that can drift. Reproduced box dimensions, checked the solver ruling, repaired fractional breakpoints and strengthened solver/CSS alternatives."
+      },
+      "checkInstructions": "Read Core/Ui/Ui.jet:71-76,132-141 and Examples/features/ui/layout_basic.jet:16-31. Probe: the trio's current code with jet run --allow=Browser printed 15.0 x 2.0. Decisions: D-LAYOUT1, D-UI-HOME1.",
+      "surface": {
+        "gist": "Should screens lay out with rows, columns, grids and stacks, keeping the equation solver for experts?",
+        "lesson": "Layout decides each view's position and size. Rows, columns and grids are common tools, not proof that CSS and Flutter use the same algorithm. A solver can express label.right + 16 == input.left. Today's box stacks children; the proposed view API needs explicit placement primitives.",
+        "trio": {
+          "current": {
+            "note": "Today a box only stacks children top to bottom; there is no row or grid.",
+            "code": "use ui: core.ui\nrun: fn() {\n    tree: ui.box([ui.text(\"Clicked 0 times\"), ui.button(\"Add one\")])\n    print(\"{tree.width} x {tree.height}\")\n}\n// 15.0 x 2.0"
+          },
+          "wild": {
+            "lang": "Flutter",
+            "note": "Flutter uses constraints and widget composition, not HTML's layout algorithm.",
+            "code": "// docs.flutter.dev/ui/layout/constraints\nRow(children: const [Text('Name'), Text('Ada')])"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Rows, columns, grids, stacks",
+            "gist": "Flex and grid layout, like CSS; the solver is an expert view.",
+            "gains": [
+              "Known from CSS, Flutter, SwiftUI and Compose.",
+              "Typed rules can map to browser CSS."
+            ],
+            "losses": [
+              "Browser and native text layout can differ."
+            ],
+            "proposed": {
+              "code": "ui.grid([\n    ui.text(\"Name\"), ui.text_input(name),\n    ui.text(\"Email\"), ui.text_input(email),\n], columns: [.Auto, .Fraction(1)], gap: 16)\n// Browser CSS requires the presentation exception."
+            }
+          },
+          {
+            "key": "B",
+            "name": "The equation solver, built in",
+            "gist": "Keep the ratified solver as the layout of every screen.",
+            "gains": [
+              "Expresses any relation between views."
+            ],
+            "losses": [
+              "All container presets depend on the solver model.",
+              "Browser adaptation requires geometry recomputation."
+            ],
+            "proposed": {
+              "code": "form: Layout{\n    label.width >= 80.0,\n    label.right + 16.0 == input.left,\n    label.width + 16.0 + input.width == self.width,\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Full CSS",
+            "gist": "Use the whole CSS layout and style language on every target.",
+            "gains": [
+              "Web developers already know it."
+            ],
+            "losses": [
+              "Adds selectors and cascade beyond containers.",
+              "Broader style rules for teams to reason about."
+            ],
+            "proposed": {
+              "code": "ui.box([\n    ui.text(\"Name\"), ui.text_input(name),\n], style: \"display: grid; grid-template-columns: auto 1fr\")"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Typed containers cover ordinary screens directly, while a custom layout uses the same geometry protocol. Browser CSS requires the explicit presentation exception.",
+          "gains": [
+            "Simple screens need no equations.",
+            "Web pages reflow natively.",
+            "The solver remains for experts."
+          ],
+          "losses": [
+            {
+              "loss": "Browser-owned layout can differ from native geometry.",
+              "mitigation": "Check zoom, long text and reading order; reject hidden content and unreachable focused controls."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Presets can hide equations, but all layout still depends on the relational solver model."
+            },
+            {
+              "key": "C",
+              "reason": "It offers familiar web styling but adds selectors and cascade beyond ordinary app containers."
+            }
+          ],
+          "tradeoff": "The solver moves from the default layout to an expert tool, in exchange for layouts that map onto the web."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Relational layouts, such as equal label widths across rows (removed).",
+          "attempts": [
+            "Add an alignment-guide feature to rows: rejected, a second mechanism for what grids already do.",
+            "Cover it with grid auto tracks, and keep the solver behind one custom layout view: adopted."
+          ],
+          "result": "Removed: the common case is a grid; the rare case keeps the ratified solver."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:31.416Z"
+    },
+    {
+      "id": "D-MOBILE-UNDEFER1",
+      "cardId": "c0u5tm84",
+      "group": "gui",
+      "title": "Phone apps follow Linux and web, with an early one-phone pilot of native contracts",
+      "situation": "Phone platform work remains deferred, and current phone runs are refused. A shared app needs an explicit condition for restarting that work, not an implied delivery date. We recommend full phone bring-up after Linux and web app acceptance, within the approved compiler-target order. A bounded pilot on one phone tests native text input, lifecycle, safe areas and screen readers before the shared view contracts freeze.",
+      "gist": "Should phone apps follow Linux and web, with an early one-phone pilot that tests native input and lifecycle?",
+      "lesson": "A restart gate is not a release promise. Linux and web prove shared behavior, not native phone lifecycle or input. The approved compiler-target order remains binding. Browser access cannot erase later native validation.",
+      "explainer": "",
+      "story": "Tomas leads a small team. He wants Jet on phones, but he would rather have a working Linux window and web page first than three half-finished targets at once.",
+      "inWild": "JetBrains announced Compose Multiplatform for iOS stable in version 1.8.0 in May 2025, including accessibility, navigation and native text-editing integration. Source: https://blog.jetbrains.com/kotlin/2025/05/compose-multiplatform-1-8-0-released-compose-multiplatform-for-ios-is-stable-and-production-ready/",
+      "detail": "OWNER GATE\n\nAmend D-VERDICT-480-1's mobile-native deferral with a measurable restart condition. D-NATIVEUI3 retains phone support, signing and store upload. D-TARGET-ORDER1=A specifically orders wasm32-wasip2, then aarch64, then embedded bring-up; a browser page alone is not proof that the entire WebAssembly target obligation passed.\n\nCHECKED TODAY\n\nSolBallotReview checked union.jet for ios/android successfully, but its phone runs gave E2104. Checking source is not an executable target proof. No phone build ran during this review.\n\nA'S CONDITION\n\nOne booking app must pass state, navigation, input, normalized accessibility and golden-view acceptance as a real Linux window and a browser app. Use the renderer and web presentation actually approved by their ballots; neither a drawn renderer nor DOM may be assumed if its vote loses. Compiler WebAssembly and ARM64 prerequisites retain their ratified order. This condition authorizes beginning native phone integration, not shipping phone targets before their own complete acceptance.\n\nValidate portable app logic and phone-sized responsive fixtures while building the shared base. Do not claim these prove native IME, lifecycle restoration, safe areas, permissions or store delivery. Before accepting architecture choices that affect those contracts, review concrete phone requirements rather than waiting until the end to discover them.\n\nA'S EARLY PILOT\n\nAs soon as the ratified ARM64 target exists, one phone runs a bounded native pilot. It covers text input and composition, lifecycle restore, safe areas and the screen reader. It runs before the shared view and input contracts freeze, so native risks surface early. It ships no store build.\n\nFAIR ALTERNATIVES AND LOSS\n\nB is the same milestone without the pilot, so native risks surface only at bring-up. C keeps the deferral until another owner vote. A's residual cost is the pilot's bounded effort before Linux and web are done.",
+      "options": [
+        {
+          "key": "A",
+          "name": "After Linux and web, with an early pilot",
+          "detail": "Restart full phone bring-up after accepted Linux and web app behavior and the ratified compiler-target order. A bounded one-phone pilot tests native contracts before the shared design freezes.",
+          "technical": "Amends D-VERDICT-480-1 with a milestone end point and a bounded pilot; D-NATIVEUI3 is otherwise unchanged.",
+          "code": "# pilot: one phone, native text input, lifecycle, safe areas, screen reader\n$ jet run club.jet                 # milestone 1: a Linux window\n$ jet build club.jet --target=web  # milestone 2: a web page\n# both pass: full iOS and Android bring-up"
+        },
+        {
+          "key": "B",
+          "name": "After Linux and web, no pilot",
+          "detail": "Restart phone work after accepted Linux and web app behavior, with no native work before then.",
+          "technical": "Amends D-VERDICT-480-1 with a milestone end point only.",
+          "code": "$ jet run club.jet                 # milestone 1: a Linux window\n$ jet build club.jet --target=web  # milestone 2: a web page\n# both pass: iOS and Android work begins"
+        },
+        {
+          "key": "C",
+          "name": "Stay deferred",
+          "detail": "D-VERDICT-480-1 stands with no end point; a later ballot would restart phone work.",
+          "technical": "No change.",
+          "code": "# phones: deferred, no end point"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A gives the deferral a concrete quality gate and tests native contracts early. Phone-specific risks reach the shared design before it freezes, without a parallel phone port.",
+        "gains": [
+          "Phone work reuses proven parts.",
+          "Native risks surface before the shared design freezes.",
+          "A clear end to the deferral."
+        ],
+        "losses": [
+          {
+            "loss": "The pilot takes bounded effort before Linux and web are done.",
+            "mitigation": "Limit it to one phone and four contracts, with no store build, and start it only when the ratified ARM64 target exists."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It finds native input and lifecycle problems only after the shared design froze, when they cost most to fix."
+          },
+          {
+            "key": "C",
+            "reason": "It leaves the one-app goal unmet with no end point."
+          }
+        ],
+        "tradeoff": "Full native phone apps come after Linux and web, while one phone tests native contracts early and phone browsers get the web app first."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Checked the deferral and compiler-target order; replaced a straw alternative with an early phone pilot and removed installable-web equivalence claims. Main then folded the early one-phone pilot into A, so native input and lifecycle risks surface before the design freezes."
+      },
+      "checkInstructions": "SolBallotReview observed phone run E2104 without running builds. Decisions checked: D-VERDICT-480-1, D-NATIVEUI3 and D-TARGET-ORDER1.",
+      "surface": {
+        "gist": "Should phone apps follow Linux and web, with an early one-phone pilot that tests native input and lifecycle?",
+        "lesson": "A restart gate is not a release promise. Linux and web prove shared behavior, not phone lifecycle or native text input. The existing compiler-target order remains binding; browser access cannot erase the cost of later native validation.",
+        "trio": {
+          "current": {
+            "note": "The current seed refuses phone runs.",
+            "code": "$ jet run union.jet --target=ios\nError [jet.InvalidCommandInput]: `jet run --target` is not built yet\nMore: jet-lang.dev/e/E2104"
+          },
+          "wild": {
+            "lang": "Compose Multiplatform",
+            "note": "JetBrains shipped Android and desktop first, then declared iOS stable in 2025.",
+            "code": "// blog.jetbrains.com, Compose Multiplatform 1.8.0\n// \"Compose Multiplatform for iOS is stable\n//  and production-ready\""
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "After Linux and web, with an early pilot",
+            "gist": "Full phone apps follow Linux and web; one phone tests native contracts early.",
+            "gains": [
+              "Native input and lifecycle risks surface before the design freezes.",
+              "Phones reuse tested shared behavior."
+            ],
+            "losses": [
+              "A bounded pilot takes effort before Linux and web are done."
+            ],
+            "proposed": {
+              "code": "# pilot: one phone, native contracts only\n# Linux window and web page pass\n# then: full iOS and Android bring-up"
+            }
+          },
+          {
+            "key": "B",
+            "name": "After Linux and web, no pilot",
+            "gist": "Phone work starts only once Linux and web pass.",
+            "gains": [
+              "All effort stays on Linux and web until then."
+            ],
+            "losses": [
+              "Native risks surface only at phone bring-up, after the design froze."
+            ],
+            "proposed": {
+              "code": "# Linux window and web page pass\n# then: iOS and Android work begins"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Stay deferred",
+            "gist": "Keep phones deferred with no end point.",
+            "gains": [
+              "Full focus on language and Linux."
+            ],
+            "losses": [
+              "One app everywhere cannot be met.",
+              "No signal for when phones return."
+            ],
+            "proposed": {
+              "code": "# phones: deferred, no end point"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives the deferral a concrete quality gate and tests native contracts early. Phone-specific risks reach the shared design before it freezes, without a parallel phone port.",
+          "gains": [
+            "Phone work reuses proven parts.",
+            "Native risks surface before the shared design freezes.",
+            "A clear end to the deferral."
+          ],
+          "losses": [
+            {
+              "loss": "The pilot takes bounded effort before Linux and web are done.",
+              "mitigation": "Limit it to one phone and four contracts, with no store build, and start it only when the ratified ARM64 target exists."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It finds native input and lifecycle problems only after the shared design froze, when they cost most to fix."
+            },
+            {
+              "key": "C",
+              "reason": "It leaves the one-app goal unmet with no end point."
+            }
+          ],
+          "tradeoff": "Full native phone apps come after Linux and web, while one phone tests native contracts early and phone browsers get the web app first."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Native phone validation waits for the shared milestone.",
+          "attempts": [
+            "Fold a bounded one-phone pilot into A, so native contracts are tested before the design freezes.",
+            "Phone browsers use the web app meanwhile; this is early access, not native parity."
+          ],
+          "result": "Removed as a design risk: the pilot tests native contracts early. Residual: full phone apps ship after Linux and web, by design."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:33.889Z"
+    },
+    {
+      "id": "D-ONEAPP-MODEL1",
+      "cardId": "c0u5tm84",
+      "group": "gui",
+      "title": "One first-party app package serves the web, the desktop and phones",
+      "situation": "Jet currently exposes web app builders and a separate UI tree. Ratified rulings already put their higher-level code in shipped packages, with system services remaining in Core. This vote asks whether the web package becomes the shared app layer for web, desktop and phones. We recommend one app package over the existing UI model, without moving authentication or system services back into Core.",
+      "gist": "Should one first-party app package serve web, desktop and phone apps, replacing separate web and window libraries?",
+      "lesson": "The app layer adds screens, navigation, forms and server calls above views. Jet currently has a web builder and a separate UI tree, not two proven complete app frameworks. This vote extends the shipped web package across targets while retaining the approved UI and authentication package homes.",
+      "explainer": "",
+      "story": "Dana runs a tutoring business. She wants a booking site for parents, a desktop tool for her staff and a phone app for tutors. She would rather learn one way to write screens, forms and sign-in than three.",
+      "inWild": "Expo Router uses the same file-based routes across Android, iOS and web, while allowing platform-specific APIs. Source: https://docs.expo.dev/router/introduction/",
+      "detail": "WHAT THIS DECIDES\n\nRename the first-party web package to app and extend its app graph across targets. Amend D-WEB-HOME1's package name and scope, D-WEB-NAME1=C's framework name, D-ROUTE-ONE1's builder name, and D-GAME-PLATFORM1's web/app separation. D-UI-HOME1 and D-DB-AUTH-HOME1 retain their homes: ui is a package, core.ui.host stays Core, and auth remains its own package.\n\nCHECKED TODAY\n\nCore/Web/Web.jet:188 defines web.app; :291-360 holds routing and serving methods. Core/Ui/Ui.jet:195-209 supplies backends. SolBallotReview's ui_missing.jet gives E1004 for ui.application, despite D-UI-WINDOW-LIFE1's approved API. web_value.jet checked and ran web.app().facts_json(). The gui editor uses core.ui at Jetpack/Provider/Batteries/gui/gui.jet:460-475. This does not prove a complete desktop app model exists.\n\nA'S BOUNDARY\n\napp.new is the routed-app wrapper over D-UI-VIEW1's ui.app(view, state:). It creates no second mount, diff, state or window mechanism. ui.app is the smallest one-screen entry; app adds routes, navigation and shared form/data policy. The same route identity drives URLs and device deep links. Server handler rows remain server-only; unsupported effects are refused rather than ignored.\n\nCore keeps HTTP and networking. app depends on auth without copying or re-exporting another authentication implementation. The gui editor may consume ui; independent editor helpers are not deleted merely to rename widgets. Standard controls use ui under D-VIEW-SET1. This adjusts D-GAME-PLATFORM1's gui composition while preserving independent video and audio packages.\n\nC can share form and auth primitives without an I8 breach; its cost is separate top-level navigation models. B explicitly reverses the Core-home ruling; changing that ruling is not itself evidence B is technically unsound.\n\nCUTOVER\n\nMigrate existing core.web and first-party web callers together; do not assume no web package callers exist. Preserve server-only APIs. Prove unused target code is excluded rather than asserting this already happens. One booking example must preserve route state, browser Back and device deep links across web, desktop and phones.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One app package",
+          "detail": "The first-party web package becomes app and covers every target: screens, routes, forms, sign-in, server calls and offline data. Views come from the first-party ui package; Core keeps HTTP, networking and system services.",
+          "technical": "Amends D-WEB-HOME1, D-WEB-NAME1, D-ROUTE-ONE1 and D-GAME-PLATFORM1. ui.app remains the sole mount/state primitive; auth retains its package home.",
+          "code": "use app\nuse ui\nhome: fn(state: &ui.State<Int>) -> ui.Node { ui.text(\"Welcome\") }\nrun: fn() { app.new(title: \"Run Club\").screen(\"/\", home, state: 0).serve() }\n// Proposed: serve launches the selected target's app host."
+        },
+        {
+          "key": "B",
+          "name": "An app module in Core",
+          "detail": "core.app lives in Core and covers every target. This reverses D-WEB-HOME1, which moved the web app layer out of Core.",
+          "technical": "Amends D-WEB-HOME1=A back into Core; Core grows by the whole app layer.",
+          "code": "use app: core.app\nuse ui\nhome: fn(state: &ui.State<Int>) -> ui.Node { ui.text(\"Welcome\") }\nrun: fn() { app.new(title: \"Run Club\").screen(\"/\", home, state: 0).serve() }\n// Proposed Core home; same target behavior as A."
+        },
+        {
+          "key": "C",
+          "name": "Separate web and window models",
+          "detail": "Web sites use the web package's app. Windows and phones use the ui package's ui.app and windows. Views are shared; navigation, forms and sign-in differ.",
+          "technical": "D-WEB-HOME1 and D-UI-HOME1 as written; the ui package grows its own navigation and forms.",
+          "code": "// site.jet\nuse web\nrun: fn() { web.app().routes(from: \"Routes\").serve() }\n\n// desk.jet\nuse ui\nrun: fn() { ui.app(home, state: 0) }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Users learn one model for every target, and the app layer stays a shipped package, which is what the ratified home ruling asks for.",
+        "gains": [
+          "One model for web, desktop and phones.",
+          "Keeps Core small, as already ratified.",
+          "One migration from core.web, not two."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It reverses the ruling that moved the app layer out of Core, and grows Core by a framework."
+          },
+          {
+            "key": "C",
+            "reason": "It can share primitives, but authors still choose separate top-level navigation models."
+          }
+        ],
+        "tradeoff": "The web package grows into the app package for every target, instead of staying web-only."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Checked every cited ruling and added the ratified ui-package, auth-package and ui.app view rulings it missed. Checked package-home rulings and current builder/UI probes; repaired hidden game/web amendments, authentication duplication and claims that separate app wrappers inherently violate one-mechanism law."
+      },
+      "checkInstructions": "Probe: core.ui has no application item (E1004 lists the public items). Code: Core/Web/Web.jet:188,291-360; Jetpack/Provider/Batteries/gui/gui.jet. Decisions: D-WEB-HOME1, D-UI-HOME1, D-DB-AUTH-HOME1, D-UI-VIEW1, D-WEB-NAME1, D-ROUTE-ONE1, D-UI-WINDOW-LIFE1, D-API-COMPOSE1.",
+      "surface": {
+        "gist": "Should one first-party app package serve web, desktop and phone apps, replacing separate web and window libraries?",
+        "lesson": "The app layer adds screens, navigation, forms and server calls above views. Jet currently has a web builder and a separate UI tree, not two proven complete app frameworks. This vote extends the shipped web package across targets while retaining the approved UI and authentication package homes.",
+        "trio": {
+          "current": {
+            "note": "Today a site and a window are written with two unrelated libraries.",
+            "code": "use web: core.web\nuse ui: core.ui\nrun: fn() {\n    site: web.app()\n    tree: ui.text(\"Welcome\")\n}"
+          },
+          "wild": {
+            "lang": "Expo Router",
+            "note": "One file-based router runs the same screens on iOS, Android and the web.",
+            "code": "// docs.expo.dev/router/introduction\n// app/index.tsx -> \"/\" on iOS, Android and web\nexport default function Home() {\n  return <Text>Welcome</Text>;\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One app package",
+            "gist": "The ratified web package, renamed app, runs the same app file on web, desktop and phones.",
+            "gains": [
+              "Learn screens, forms and sign-in once for every target.",
+              "Stays out of Core, as the ratified ruling wants."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "use app\nuse ui\nhome: fn(state: Int) -> ui.Node { ui.text(\"Run Club\") }\nrun: fn() {\n    app.new(title: \"Run Club\").screen(\"/\", home, state: 0).serve()\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "An app module in Core",
+            "gist": "Put the one app model in Core instead of a package.",
+            "gains": [
+              "No jet add step."
+            ],
+            "losses": [
+              "Reverses the ratified package-home ruling.",
+              "Core grows by a whole framework."
+            ],
+            "proposed": {
+              "code": "use app: core.app\nuse ui\nhome: fn(state: Int) -> ui.Node { ui.text(\"Run Club\") }\nrun: fn() {\n    app.new(title: \"Run Club\").screen(\"/\", home, state: 0).serve()\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Separate web and window models",
+            "gist": "Keep two models: the web package for sites, the ui package for windows.",
+            "gains": [
+              "Each model stays small."
+            ],
+            "losses": [
+              "Wrappers may share ui.Node, but app orchestration stays separate."
+            ],
+            "proposed": {
+              "code": "// site.jet\nuse web\nrun: fn() { web.app().routes(from: \"Routes\").serve() }\n// desk.jet: a different model\nuse ui\nrun: fn() { ui.app(home, state: 0) }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Users learn one model for every target, and the app layer stays a shipped package, which is what the ratified home ruling asks for.",
+          "gains": [
+            "One model for web, desktop and phones.",
+            "Keeps Core small, as already ratified.",
+            "One migration from core.web, not two."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It reverses the ruling that moved the app layer out of Core, and grows Core by a framework."
+            },
+            {
+              "key": "C",
+              "reason": "It can share primitives, but authors still choose separate top-level navigation models."
+            }
+          ],
+          "tradeoff": "The web package grows into the app package for every target, instead of staying web-only."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Desktop builds could carry web-only code (removed).",
+          "attempts": [
+            "Separate wrappers may share primitives, but do not meet the single app-file goal.",
+            "Require build reachability to remove unused target code, with artifact evidence."
+          ],
+          "result": "Acceptance requirement, not an observed result: unused router/page code must be absent from native artifacts."
+        },
+        {
+          "loss": "One package with a large surface (removed).",
+          "attempts": [
+            "Cap the package's public functions: rejected, the cap would push features into sibling packages.",
+            "Apply the ratified primitives-first rule with one submodule per area: adopted."
+          ],
+          "result": "Primitives and small submodules organize the surface; no claim that the proposed lint group already proves this."
+        },
+        {
+          "loss": "Callers migrate from the web package name (removed).",
+          "attempts": [
+            "Keep web as an alias of app: rejected, two names for one thing.",
+            "Migrate core.web and first-party web callers together; preserve unrelated server APIs."
+          ],
+          "result": "One checked cutover is required; existing package callers are not assumed absent."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:36.264Z"
+    },
+    {
+      "id": "D-ONEAPP-RENDER1",
+      "cardId": "c0u5tm84",
+      "group": "gui",
+      "title": "Jet draws every screen itself, and each system supplies typing, screen readers and system sheets",
+      "situation": "Jet's phone plan uses system widgets, while its current GTK presentation reports an unavailable runtime. The choice is between system controls, Jet-drawn controls and an embedded browser, all using the same view model. We recommend Jet drawing on native targets, with system text input and accessibility services. Browser output is separate; identical browser and native pixels are not promised, and each target ships only after its input-method and screen-reader checks pass.",
+      "gist": "Should Jet draw every screen itself, with each system supplying typing, screen readers and system sheets?",
+      "lesson": "Native widgets use system controls; drawn widgets use Jet's renderer; web views use browser controls. All can share app behavior. System input and accessibility still need integration. The GTK presentation probe currently reports an unavailable runtime.",
+      "explainer": "",
+      "story": "Priya builds a habit tracker for her running club. Half the club uses iPhones, half use Android, and the coach plans on a laptop. She wants one app that looks the same on all three, with the phone keyboard, dictation and VoiceOver working as members expect.",
+      "inWild": "Flutter's framework builds widgets over a rendering engine, and platform embedders coordinate input, accessibility and event loops. Source: https://docs.flutter.dev/resources/architectural-overview",
+      "detail": "WHAT THIS DECIDES\n\nNative rendering direction, not another app or state model. D-NATIVEUI3=A ratified phone widgets and signing; D-NATIVEUI-ANDROID1=C chose JNI Views with a Compose adapter. A amends their widget clauses only. Signing, upload, bindings and owned windows remain. D-UI-WINDOW-LIFE1 excluded a new renderer from its own scope, not permanently.\n\nCHECKED TODAY\n\nCore/Ui/Ui.jet:39-52 defines four roles and five node kinds. Compiler/JetRuntime/Source/UiBackends.jet:13-16 and :889-894 implement unavailable GTK presentation. SolBallotReview checked and ran ui_gtk_clean.jet; present printed UI_UNSUPPORTED[gtk.runtime]. This proves that backend's result, not absence of every possible window API.\n\nHOMES AND ONE MECHANISM\n\nD-UI-HOME1 puts views and windows in ui; core.ui.host keeps system services. D-UI-VIEW1 retains ui.app, ui.Node and tracked state. D-GAME-PLATFORM1, with owner comment 'not ray but video', supplies independent video and audio. A's native renderer uses video and font. Standard gui controls use ui, explicitly amending that composition clause. Browser views follow D-ONEAPP-WEBOUT1; DOM views do not paint through video.\n\nA'S CONTRACT\n\nJet draws native controls and glyphs. System text clients supply composition and available editing services. They do not automatically supply a drawn caret, hit testing, spell check or every editing feature; each supported feature needs integration and proof. Core owns editing state and semantics; providers marshal events and geometry. Platform metrics feed one scrolling algorithm, not copied backend policy.\n\nExport one logical accessibility tree with stable identity and actions. Platform trees differ in wrappers and vocabulary. Compare normalized roles, names, order, states and actions, not byte-identical platform trees. Automated inspection plus manual assistive-technology and input-method checks are release gates, not proof of negligible risk before evidence exists.\n\nFAIR COMPARISON AND POSTING\n\nFlutter's architecture demonstrates drawn widgets with platform embedders: https://docs.flutter.dev/resources/architectural-overview. Native widgets offer built-in platform integration; browsers offer mature text and document layout. Neither prevents consistent app behavior. No Jet startup, memory, battery or accessibility advantage was measured here. Drawn UIs in the wild already serve system keyboards and screen readers, so A's risk is integration work. Each target's drawn UI ships only after its text-editing, input-method and screen-reader acceptance passes; that gate is part of this decision.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Jet draws, systems serve",
+          "detail": "Jet draws every view with its own renderer and font engine. The focused text field, the accessibility tree, menus, pickers, share sheets, notifications and permission prompts use each system's own service.",
+          "technical": "Native views use video and font; ui owns nodes/state, core.ui.host supplies providers. Browser output is separate; no cross-host pixel identity claim.",
+          "code": "use ui\nname_view: fn(name: &ui.State<String>) -> ui.Node {\n    ui.text_input(name, label: \"Your name\")\n}\nrun: fn() { ui.app(name_view, state: \"\") }\n// Proposed native drawing; input and accessibility integration required."
+        },
+        {
+          "key": "B",
+          "name": "Each system's own widgets",
+          "detail": "Each view maps to the system's control: UIKit on iOS, Android Views or Compose, AppKit, WinUI and GTK. This is the current D-NATIVEUI3 and D-NATIVEUI-ANDROID1 plan.",
+          "technical": "Six widget backends behind core.ui, each tracking its system's controls and layout rules.",
+          "code": "use ui\nname_view: fn(name: &ui.State<String>) -> ui.Node {\n    ui.text_input(name, label: \"Your name\")\n}\nrun: fn() { ui.app(name_view, state: \"\") }\n// Proposed: each system supplies its text-field widget."
+        },
+        {
+          "key": "C",
+          "name": "A web view everywhere",
+          "detail": "Jet renders HTML and CSS, and every desktop and phone build hosts it in the system web view: WebKit, WebView2, Android WebView or WebKitGTK.",
+          "technical": "core.ui emits DOM everywhere; device builds embed a web view and a bridge to system services.",
+          "code": "use ui\nname_view: fn(name: &ui.State<String>) -> ui.Node {\n    ui.text_input(name, label: \"Your name\")\n}\nrun: fn() { ui.app(name_view, state: \"\") }\n// Proposed: an HTML input in the system web view."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A supports one native visual design while keeping system services. Flutter and Compose Multiplatform show drawn controls serving system keyboards and screen readers, so the remaining risk is integration work behind a release gate.",
+        "gains": [
+          "The same app on every target.",
+          "Native typing, screen readers and system sheets.",
+          "One renderer instead of six widget wrappers."
+        ],
+        "losses": [
+          {
+            "loss": "Controls are not pixel copies of each system's newest look.",
+            "mitigation": "Native behavior stays, and any real system control can be embedded as one view where exact look matters."
+          },
+          {
+            "loss": "Screen reader support becomes Jet's job instead of each widget's.",
+            "mitigation": "Reuse proven adapters per the accessibility ballot, and gate each target's release on its input-method and screen-reader acceptance."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It preserves native integration, but control appearance remains system-dependent."
+          },
+          {
+            "key": "C",
+            "reason": "It reuses mature browser layout, but delegates native presentation to different browser engines."
+          }
+        ],
+        "tradeoff": "Jet owns one renderer and its accessibility export, in exchange for one consistent app on every target."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude Opus and GPT Sol. Fresh agent: OpusBallotReview and SolBallotReview. Reproduced GTK presentation refusal and repaired universal pixel, native-editing and accessibility guarantees, plus unfair native-widget/browser comparisons. Main then made input-method and screen-reader acceptance a release gate on each target, reusing proven accessibility adapters."
+      },
+      "checkInstructions": "Probe: a scratch file calling ui.gtk_backend(), ui.mount and present, run with the current seed, printed UI_UNSUPPORTED[gtk.runtime]. Code: Core/Ui/Ui.jet:16,46-52,195-209; Compiler/JetRuntime/Source/UiBackends.jet:13-16. Decisions: tower decision show D-NATIVEUI3 D-NATIVEUI-ANDROID1 D-GAME-PLATFORM1 D-RAYLIB-FONT-HOME1 D-UI-WINDOW-LIFE1.",
+      "surface": {
+        "gist": "Should Jet draw every screen itself, with each system supplying typing, screen readers and system sheets?",
+        "lesson": "Native widgets use system controls; drawn widgets use Jet's renderer; a web view uses browser controls. All three can share app behavior. System input and accessibility still need correct integration. Today the GTK present probe reports an unavailable runtime.",
+        "trio": {
+          "current": {
+            "note": "Today the only desktop backend wraps GTK, and the static runtime cannot load it, so no window opens.",
+            "code": "use ui: core.ui\nrun: fn() {\n    backend: ui.gtk_backend()\n    ui.mount(backend, ui.text(\"Welcome\"))\n    backend.present(\"Review\")\n}"
+          },
+          "wild": {
+            "lang": "Flutter",
+            "note": "Flutter draws this field itself; the system keyboard and screen reader still serve it.",
+            "code": "// docs.flutter.dev/resources/architectural-overview\nTextField(\n  decoration: InputDecoration(labelText: 'Your name'),\n)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Jet draws, systems serve",
+            "gist": "One drawn look everywhere; typing, screen readers and system sheets stay native.",
+            "gains": [
+              "One native visual design.",
+              "System services integrated behind one view model.",
+              "Shared native drawing code."
+            ],
+            "losses": [
+              "Controls are not pixel copies of each system's newest look.",
+              "Jet, not each widget, owns screen reader support."
+            ],
+            "proposed": {
+              "code": "name_view: fn(name: &ui.State<String>) -> ui.Node {\n    ui.text_input(name, label: \"Your name\")\n}\n// Proposed: Jet draws; system input/accessibility remain required."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Each system's own widgets",
+            "gist": "Today's plan: each control becomes the system's own widget.",
+            "gains": [
+              "Exact system look, including on release day."
+            ],
+            "losses": [
+              "The app looks and lays out differently on each system.",
+              "Six widget sets to wrap and track."
+            ],
+            "proposed": {
+              "code": "name_view: fn(name: &ui.State<String>) -> ui.Node {\n    ui.text_input(name, label: \"Your name\")\n}\n// Proposed: each platform supplies the control."
+            }
+          },
+          {
+            "key": "C",
+            "name": "A web view everywhere",
+            "gist": "Each app shows its screens as a web page inside a system browser view.",
+            "gains": [
+              "Reuses browser text, layout and accessibility."
+            ],
+            "losses": [
+              "Each system's browser engine renders differently.",
+              "Browser startup and memory must be measured."
+            ],
+            "proposed": {
+              "code": "name_view: fn(name: &ui.State<String>) -> ui.Node {\n    ui.text_input(name, label: \"Your name\")\n}\n// Proposed: each platform hosts an HTML input."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A supports one native visual design while keeping system services. Flutter and Compose Multiplatform show drawn controls serving system keyboards and screen readers, so the remaining risk is integration work behind a release gate.",
+          "gains": [
+            "The same app on every target.",
+            "Native typing, screen readers and system sheets.",
+            "One renderer instead of six widget wrappers."
+          ],
+          "losses": [
+            {
+              "loss": "Controls are not pixel copies of each system's newest look.",
+              "mitigation": "Native behavior stays, and any real system control can be embedded as one view where exact look matters."
+            },
+            {
+              "loss": "Screen reader support becomes Jet's job instead of each widget's.",
+              "mitigation": "Reuse proven adapters per the accessibility ballot, and gate each target's release on its input-method and screen-reader acceptance."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It preserves native integration, but control appearance remains system-dependent."
+            },
+            {
+              "key": "C",
+              "reason": "It reuses mature browser layout, but delegates native presentation to different browser engines."
+            }
+          ],
+          "tradeoff": "Jet owns one renderer and its accessibility export, in exchange for one consistent app on every target."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Controls are not pixel copies of each system's newest look.",
+          "attempts": [
+            "Copy each system's look per target, as Flutter's Cupertino widgets do: rejected, it breaks the one consistent look and lags every system redesign.",
+            "Use native widgets only for the most visible controls: rejected, it brings back per-system layout drift inside one screen."
+          ],
+          "result": "Keep native behavior (typing, gestures, menus, sheets) and allow embedding a real system control as one view. Residual: a pure look difference, by design."
+        },
+        {
+          "loss": "Jet owns screen reader support (minimized).",
+          "attempts": [
+            "Reuse proven platform adapters, per the accessibility ballot.",
+            "Compare normalized roles, actions, reading order and focus through platform inspection.",
+            "Make manual input-method and screen-reader acceptance a release gate on each target."
+          ],
+          "result": "Negligible as a design risk: drawn UIs in the wild pass these checks, and no target ships until it does. Residual: integration work."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T14:25:39.049Z"
     }
   ],
   "questions": [
@@ -178191,6 +179497,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T14:25:39.863Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-ONEAPP-RENDER1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:39.050Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ONEAPP-RENDER1",
+      "note": "Jet draws every screen itself, and each system supplies typing, screen readers and system sheets"
+    },
+    {
+      "at": "2026-11-06T14:25:37.108Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-ONEAPP-MODEL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:36.264Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ONEAPP-MODEL1",
+      "note": "One first-party app package serves the web, the desktop and phones"
+    },
+    {
+      "at": "2026-11-06T14:25:34.723Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-MOBILE-UNDEFER1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:33.889Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-MOBILE-UNDEFER1",
+      "note": "Phone apps follow Linux and web, with an early one-phone pilot of native contracts"
+    },
+    {
+      "at": "2026-11-06T14:25:32.295Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-LAYOUT2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:31.416Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-LAYOUT2",
+      "note": "Screens lay out with rows, columns, grids and stacks; the constraint solver stays for experts"
+    },
+    {
+      "at": "2026-11-06T14:25:29.863Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-I18N1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:29.061Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-I18N1",
+      "note": "Extract provable view literals and use one message model for translation"
+    },
+    {
+      "at": "2026-11-06T14:25:27.546Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-GPU-UI1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:26.732Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-GPU-UI1",
+      "note": "Phones switch to graphics drawing only if a paired cell proves the win"
+    },
+    {
+      "at": "2026-11-06T14:25:25.271Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-A11Y-EXPORT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:24.492Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-A11Y-EXPORT1",
+      "note": "One accessibility provider contract, using AccessKit on supported desktops"
+    },
+    {
+      "at": "2026-11-06T14:25:16.605Z",
+      "by": "agent",
+      "action": "decision.update",
+      "ref": "D-ENUM-DOT1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T14:25:11.540Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ENUM-DOT1",
+      "note": "Enum declarations write each case with its leading dot, as values and patterns already do"
+    },
+    {
+      "at": "2026-11-06T11:43:00.837Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqt0kq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T11:42:59.931Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ofw8u4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T11:37:10.404Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04j9ahx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T11:11:57.778Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-G12-SCOPE1",
+      "note": "Finish G1 and G2 sooner by moving the feature backlogs to the goals that own them"
+    },
+    {
+      "at": "2026-11-06T11:07:04.218Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01oyhqk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T11:05:54.367Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qus24o",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T10:57:27.291Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0swy9uf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-06T10:57:21.588Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0swy9uf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T10:25:37.957Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rodlty",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-06T10:25:14.946Z",
       "by": "Main",
