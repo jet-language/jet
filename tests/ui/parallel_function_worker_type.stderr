@@ -1,4 +1,4 @@
-Error [jet.ValueNotSendable]: `parallel item` can't cross a parallel worker boundary because `fn(Int) Int` isn't sendable
+Error [jet.ValueNotSendable]: `parallel item` can't cross a parallel worker boundary because `fn(Int) -> Int` isn't sendable
   --> tests/ui/parallel_function_worker_type.jet:11:27
     |
  11 |     bad_item :: callbacks.para_filter((callback: fn(Int) -> Int) -> true)
@@ -7,7 +7,7 @@ Error [jet.ValueNotSendable]: `parallel item` can't cross a parallel worker boun
  Fix: Copy plain owned data into the worker, or keep this operation sequential
 More: jet-lang.dev/e/E1102
 
-Error [jet.ValueNotSendable]: `parallel result` can't cross a parallel worker boundary because `[fn(Int) Int]` isn't sendable
+Error [jet.ValueNotSendable]: `parallel result` can't cross a parallel worker boundary because `[fn(Int) -> Int]` isn't sendable
   --> tests/ui/parallel_function_worker_type.jet:11:27
     |
  11 |     bad_item :: callbacks.para_filter((callback: fn(Int) -> Int) -> true)
@@ -16,7 +16,7 @@ Error [jet.ValueNotSendable]: `parallel result` can't cross a parallel worker bo
  Fix: Copy plain owned data into the worker, or keep this operation sequential
 More: jet-lang.dev/e/E1102
 
-Error [jet.ValueNotSendable]: `parallel result` can't cross a parallel worker boundary because `[fn(Int) Int -[]>]` isn't sendable
+Error [jet.ValueNotSendable]: `parallel result` can't cross a parallel worker boundary because `[fn(Int) -[]> Int Never!]` isn't sendable
   --> tests/ui/parallel_function_worker_type.jet:12:23
     |
  12 |     bad_result :: [1].para_map((n: Int) -> (x: Int) -> x + n)
@@ -25,25 +25,25 @@ Error [jet.ValueNotSendable]: `parallel result` can't cross a parallel worker bo
  Fix: Copy plain owned data into the worker, or keep this operation sequential
 More: jet-lang.dev/e/E1102
 
-Error [jet.BindingTypeMismatch]: Argument 2 to `.para_fold()` should be fn(fn(Int) Int -[]>, Int) fn(Int) Int -[]>, not fn(fn(Int) Int, Int) fn(Int) Int -[]> -[]>
+Error [jet.BindingTypeMismatch]: Argument 2 to `.para_fold()` should be fn(fn(Int) -[]> Int Never!, Int) -> fn(Int) -[]> Int Never!, not fn(fn(Int) -> Int, Int) -[]> (fn(Int) -> Int) Never!
   --> tests/ui/parallel_function_worker_type.jet:13:51
     |
  13 |     bad_acc :: [1].para_fold(() -> (x: Int) -> x, (callback: fn(Int) -> Int, n: Int) -> callback, (left: fn(Int) -> Int, right: fn(Int) -> Int) -> left)
-    |                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |                                                   ^
  Why: Built-in methods need arguments of the right type
- Fix: Use fn(fn(Int) Int -[]>, Int) fn(Int) Int -[]> here
+ Fix: Use fn(fn(Int) -[]> Int Never!, Int) -> fn(Int) -[]> Int Never! here
 More: jet-lang.dev/e/E0108
 
-Error [jet.BindingTypeMismatch]: Argument 3 to `.para_fold()` should be fn(fn(Int) Int -[]>, fn(Int) Int -[]>) fn(Int) Int -[]>, not fn(fn(Int) Int, fn(Int) Int) fn(Int) Int -[]> -[]>
+Error [jet.BindingTypeMismatch]: Argument 3 to `.para_fold()` should be fn(fn(Int) -[]> Int Never!, fn(Int) -[]> Int Never!) -> fn(Int) -[]> Int Never!, not fn(fn(Int) -> Int, fn(Int) -> Int) -[]> (fn(Int) -> Int) Never!
   --> tests/ui/parallel_function_worker_type.jet:13:99
     |
  13 |     bad_acc :: [1].para_fold(() -> (x: Int) -> x, (callback: fn(Int) -> Int, n: Int) -> callback, (left: fn(Int) -> Int, right: fn(Int) -> Int) -> left)
-    |                                                                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |                                                                                                   ^
  Why: Built-in methods need arguments of the right type
- Fix: Use fn(fn(Int) Int -[]>, fn(Int) Int -[]>) fn(Int) Int -[]> here
+ Fix: Use fn(fn(Int) -[]> Int Never!, fn(Int) -[]> Int Never!) -> fn(Int) -[]> Int Never! here
 More: jet-lang.dev/e/E0108
 
-Error [jet.ValueNotSendable]: `parallel result` can't cross a parallel worker boundary because `fn(Int) Int -[]>` isn't sendable
+Error [jet.ValueNotSendable]: `parallel result` can't cross a parallel worker boundary because `fn(Int) -[]> Int Never!` isn't sendable
   --> tests/ui/parallel_function_worker_type.jet:13:20
     |
  13 |     bad_acc :: [1].para_fold(() -> (x: Int) -> x, (callback: fn(Int) -> Int, n: Int) -> callback, (left: fn(Int) -> Int, right: fn(Int) -> Int) -> left)
@@ -61,11 +61,11 @@ Error [jet.ValueNotSendable]: `parallel item` can't cross a parallel worker boun
  Fix: Copy plain owned data into the worker, or keep this operation sequential
 More: jet-lang.dev/e/E1102
 
-Error [jet.ValueNotSendable]: `stored` can't cross a parallel worker boundary because `fn(Int) Int -[]>` isn't sendable
+Error [jet.ValueNotSendable]: `stored` can't cross a parallel worker boundary because `fn(Int) -[]> Int Never!` isn't sendable
   --> tests/ui/parallel_function_worker_type.jet:17:33
     |
  17 |     bad_capture :: [1].para_map((n: Int) -> stored(n))
-    |                                 ^^^^^^^^^^^^^^^^^^
+    |                                 ^^^^^^^^^^^^^^^^^^^^^
  Why: A function value carries executable state, not a worker data value; this concurrent boundary moves owned values between workers
  Fix: Copy plain owned data into the worker, or keep this operation sequential
 More: jet-lang.dev/e/E1102

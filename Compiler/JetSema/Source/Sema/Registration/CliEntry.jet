@@ -117,6 +117,12 @@ fn sema_cli_entry_expand_imported(program: &Program, imported: [Item]) {
         } else {
             ty :: sema_cli_entry_param(program.items, target.function) ?? next
             type_name = sema_registration_cli_named_leaf(ty) ?? next
+            // The wrapper names `T` as the entry wrote it (`cli.RunArgs`), so
+            // a same-named type of another import cannot capture it.
+            if ty == .Named(written) && written.contains(".") {
+                parts :: written.split(".").to_list()
+                qualifier = "{parts.slice(0, parts.len() - 1).join(".")}."
+            }
         }
         definition :: sema_cli_entry_struct(imported, type_name) ?? next
         bindings := imported.copy()

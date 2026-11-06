@@ -96,6 +96,7 @@ use jet_foundation.[
     FactDecl,
     compiler_threads_heaviest_first,
     owned_trait_codec_marker,
+    owned_trait_is_operator,
 ]
 
 // Exact registered APIs without a browser host provider. The compiler witness
@@ -3179,8 +3180,6 @@ fn sema_check_registered_method_stub(job: SemaBodyJob, module_index: Int, memory
 fn sema_check_registration_module_start(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, values: [SemaComptimeItemValue], scopes: &SemaScopeTable) -> SemaGraphModuleResult {
     if program.registration_graph == .Val(graph) {
         diagnostics := [Diagnostic]{}
-        // The module's unknown applied rules (E0927) do not stop its check.
-        if module_index < graph.unknown_rule_diagnostics.len() -> loop diagnostic in graph.unknown_rule_diagnostics[module_index] -> &diagnostics.push(diagnostic)
         complete := graph.complete
         incomplete_reasons := [String]{}
         if !graph.complete -> &incomplete_reasons.push("registration graph is incomplete")
@@ -3195,6 +3194,10 @@ fn sema_check_registration_module_start(environment: SemaScopeEnvironment, progr
             &incomplete_reasons.push("a declared member type names nothing")
             sema_type_signature_unknown_names(graph, module_index, &diagnostics)
         }
+        // The module's unknown applied rules (E0927) do not stop its check;
+        // they follow its declaration errors, as Rust reports a derive of a
+        // tag (E0731) before the unknown rule on the same marker.
+        if module_index < graph.unknown_rule_diagnostics.len() -> loop diagnostic in graph.unknown_rule_diagnostics[module_index] -> &diagnostics.push(diagnostic)
         return SemaGraphModuleResult{
             package_identity: graph.modules[module_index].package_identity,
             module_path: graph.modules[module_index].module_path,
@@ -3256,6 +3259,38 @@ fn sema_check_registration_module_scopes(program: SemaProgramTables, module_inde
     panic("an owning registered-module pass lost its registration graph")
 }
 
+// A #Test name as fixed text: the written label, or a `comptime loop`
+// template's interpolated label (`#Test("case {case.n}")`) once expansion
+// made each interpolated part a literal, so generated tests share the
+// duplicate-name check.
+fn sema_check_test_static_name(name: String?, name_expr: Expr?) -> String? Never! {
+    if name == .Val(text) -> return Val(text)
+    expression :: name_expr ?? return None
+    if expression == .Str(parts, _, _) {
+        text := ""
+        loop part in parts {
+            if part == {
+                .Lit(piece) -> text = "{text}{piece}"
+                .Interp(value, format) -> {
+                    if format == {
+                        .Display -> {}
+                        else -> return None
+                    }
+                    if value == {
+                        .Int(number, _, _, _, _) -> text = "{text}{number}"
+                        .Bool(flag, _, _) -> text = "{text}{flag}"
+                        .Char(character, _, _) -> text = "{text}{character}"
+                        else -> return None
+                    }
+                }
+                else -> return None
+            }
+        }
+        return Val(text)
+    }
+    None
+}
+
 // Retarget the actual module environment after declaration checking and
 // before this ordinary program/header phase, exactly as in the old checker.
 fn sema_check_registration_module_program(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, module_result: &SemaGraphModuleResult, count_work: Bool, items_scanned: &Int) {
@@ -3310,7 +3345,7 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
                 // no namespace with functions or types (#6288), only with the
                 // module's other test names.
                 .Test(test) -> {
-                    if test.name == .Val(test_name) {
+                    if sema_check_test_static_name(test.name, test.name_expr) == .Val(test_name) {
                         if test_names.get(test_name) != None {
                             &module_result.diagnostics.push(sema_defined_twice(test_name, "every test needs a unique name so failures are easy to find", test.name_span))
                         } else {
@@ -7925,7 +7960,20 @@ fn sema_effect_module_input(source: SemaRegistrationModule, module_index: Int) -
         source_segments: source.source_segments.copy(),
         trait_bounds: sema_effect_trait_bounds(source.program.items),
         trait_implementers: sema_effect_trait_implementers(source.program.items),
+        operator_hooks: sema_effect_operator_hooks(source),
     }
+}
+
+// The owned operator trait each hook method of an `impl Owner.Add` block
+// implements, by function key (E0742 bounds the hook to `-[]>`).
+fn sema_effect_operator_hooks(source: SemaRegistrationModule) -> [String:String] Never! {
+    hooks := [String:String]{}
+    loop implementation in source.impls {
+        trait_name :: implementation.trait_name ?? next
+        if implementation.trait_symbol != None || !owned_trait_is_operator(trait_name) -> next
+        loop function in implementation.methods -> hooks[function.symbol.id.key] = trait_name
+    }
+    hooks
 }
 
 fn sema_comptime_policy_for_package(policies: [SemaRegistrationPackagePolicy], package_identity: String) -> SemaRegistrationPackagePolicy? {

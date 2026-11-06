@@ -119,6 +119,10 @@ struct SemaEffectModuleInput {
     // `{trait}::{owner}` implementations this module declares
     // (sema_effect_trait_implementers), for generic dispatch.
     trait_implementers: [String]{[String]{}}
+    // The owned operator trait each `impl Owner.Add`-style hook method
+    // implements, by function key: the trait has no source row, so the
+    // checked body is a plain method (E0742 still bounds it).
+    operator_hooks: [String:String]{[String:String]{}}
 }
 
 struct SemaEffectDispatchSite {
@@ -2278,19 +2282,26 @@ fn sema_effect_trait_bound_diagnostic(bound: SemaEffectTraitBound, over: [String
 fn sema_effect_check_trait_bounds(module_row: SemaEffectModuleInput, functions: [FnBody], source_index: SemaEffectSourceIndex, nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], diagnostics: &[Diagnostic]) {
     if module_row.trait_bounds.len() == 0 -> return
     loop function in functions {
-        if function.kind == {
-            .TraitMethod(_, _, owner_type, trait_symbol, _) -> {
-                node_index :: sema_effect_node_index(node_by_key, function.key) ?? next
-                method :: sema_effect_method_name(function, module_row.sources, source_index)
-                trait_name :: sema_effect_symbol_leaf(trait_symbol.key)
-                loop bound in module_row.trait_bounds {
-                    if bound.trait_name != trait_name || bound.method != method -> next
-                    over :: sema_effect_uncovered(solved[node_index], bound.bound)
-                    if over.len() > 0 -> &diagnostics.push(sema_effect_trait_bound_diagnostic(bound, over, nodes[node_index].name_span, "{type_name(owner_type)}::{method}"))
-                    break
-                }
+        // An owned operator trait (`impl Vec2.Add`) has no source row, so its
+        // hook is checked as a plain method named in `operator_hooks`.
+        owner_type :: if function.kind == {
+            .Method(_, owner) -> owner
+            .TraitMethod(_, _, owner, _, _) -> owner
+            else -> {
+                next
             }
-            else -> {}
+        }
+        trait_name :: if function.kind == {
+            .TraitMethod(_, _, _, trait_symbol, _) -> sema_effect_symbol_leaf(trait_symbol.key)
+            else -> module_row.operator_hooks.get(function.key) ?? next
+        }
+        node_index :: sema_effect_node_index(node_by_key, function.key) ?? next
+        method :: sema_effect_method_name(function, module_row.sources, source_index)
+        loop bound in module_row.trait_bounds {
+            if bound.trait_name != trait_name || bound.method != method -> next
+            over :: sema_effect_uncovered(solved[node_index], bound.bound)
+            if over.len() > 0 -> &diagnostics.push(sema_effect_trait_bound_diagnostic(bound, over, nodes[node_index].name_span, "{type_name(owner_type)}::{method}"))
+            break
         }
     }
 }

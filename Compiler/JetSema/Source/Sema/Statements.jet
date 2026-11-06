@@ -4777,6 +4777,13 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
         return None
     }
     sema_ownership_declare_binding(&state, symbol, false)
+    // D-CONC-CROSS1 (Rust `record_fixed_backing`): `Fixed.new` allocates from
+    // a compiler-generated inline backing in this frame, so the handle is a
+    // view of that local storage and cannot cross a task or worker boundary.
+    if init.kind == .AllocNew(ctor, _) && ctor == .Fixed(_) {
+        backing := SemaOwnershipPlace{root: "<inline Fixed backing>", root_key: "<inline Fixed backing>@{binding.name_span.start}", root_span: binding.name_span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}
+        _ := sema_ownership_record_view_fact(&state, binding.name, binding.name_span, backing, [String]{}, AccessConvention.Write, scopes, -1)
+    }
     // `name :: root.field` / `name :: root[i]` reads the
     // place through a view; an exact `^name` later would copy it (E0201).
     if !binding.mutable && !string_view && sema_stmt_binding_reads_projection(binding.init, scopes) -> sema_scope_mark_place_alias(&scopes, binding.name)

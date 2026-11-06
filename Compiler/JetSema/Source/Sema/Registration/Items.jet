@@ -3907,7 +3907,7 @@ struct SemaRegistrationImportIndex {
     aliases: [String:Bool]
 }
 
-fn sema_registration_add_import(graph: &SemaRegistrationGraph, registered: &SemaRegistrationImportIndex, source_index: Int, declaration: ImportDecl, target_identity: String, target_package: String) {
+fn sema_registration_add_import(graph: &SemaRegistrationGraph, registered: &SemaRegistrationImportIndex, source_index: Int, scope: String, declaration: ImportDecl, target_identity: String, target_package: String) {
     source_identity := graph.modules[source_index].module_identity
     source_package := graph.modules[source_index].package_identity
     visibility :: sema_registration_import_visibility(declaration)
@@ -3919,7 +3919,9 @@ fn sema_registration_add_import(graph: &SemaRegistrationGraph, registered: &Sema
         return
     }
     qualified :: !sema_registration_import_is_unqualified(declaration)
-    alias_key :: "{source_index}|{declaration.alias}"
+    // A C library alias written in an inline module (`module m { use lib :: c.m }`)
+    // lives in that module's scope: sibling modules may reuse the alias.
+    alias_key :: "{source_index}|{scope}|{declaration.alias}"
     if qualified {
         if registered.aliases.get(alias_key) != None {
             sema_registration_push_graph_diagnostic(&graph, source_index, sema_defined_twice(declaration.alias, "module imports share one namespace alias", declaration.alias_span))
@@ -4355,7 +4357,8 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
                 if edge.source_scope != "" -> next
                 target_package := edge.target_package_identity
                 if target_package == "" -> target_package = graph.modules[target_index ?? 0].package_identity
-                sema_registration_add_import(&graph, &registered, source_module_index, sema_registration_foreign_import_declaration(edge), edge.target_module_identity, target_package)
+                scope :: if edge.foreign_binding == .Val(binding) -> binding.scope ?? "" else -> ""
+                sema_registration_add_import(&graph, &registered, source_module_index, scope, sema_registration_foreign_import_declaration(edge), edge.target_module_identity, target_package)
             }
         }
     }

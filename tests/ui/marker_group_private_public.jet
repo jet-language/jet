@@ -1,12 +1,15 @@
-// A public group cannot export a private marker (E0605).
-struct Private {
-    impl Marker {
-        sites :: [.Function]
+// A public group cannot export a private marker (E0605). Privacy belongs to a
+// `priv module`, so the private marker is declared inside one.
+priv module internal {
+    struct Private {
+        impl Marker {
+            sites :: [.Function]
+        }
     }
 }
 struct Published {
     impl Marker {
-        group :: #[Private, Inline]
+        group :: #[Internal.Private, Inline]
     }
 }
 fn run() {}
