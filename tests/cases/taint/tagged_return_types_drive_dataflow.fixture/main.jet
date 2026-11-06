@@ -1,7 +1,8 @@
 
 use process: core.process
 PII: tag { deny: [Exec] }
-account_name: fn() #PII String -> "Ada"
+account_name: fn() -> #PII String { "Ada" }
 run: fn() {
-    process.run(["echo", account_name()]) ?? return Err("test")
+    receipt: process.cmd(["echo", account_name()]).run() ?? return Err("test")
+    receipt.drop("only the argument flow matters here")
 }

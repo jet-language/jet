@@ -7,5 +7,6 @@ Store: struct {
 }
 run: fn() {
     store := Store{ value: "Ada" }
-    process.run(["echo", store.read()]) ?? return Err("test")
+    receipt: process.cmd(["echo", store.read()]).run() ?? return Err("test")
+    receipt.drop("only the argument flow matters here")
 }

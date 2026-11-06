@@ -215,6 +215,13 @@ sema_taint_type_tags: fn(ty: Type) -> [String] Never! {
     }
 }
 
+// The value a call yields. The failure projection writes every return as
+// `T E!`, so the tags and the type a caller sees are the success's.
+sema_taint_success_type: fn(ty: Type?) -> Type? Never! {
+    if ty == .Val(.Result(ok, _)) -> return Val(ok.copy())
+    ty.copy()
+}
+
 sema_taint_effect_name: fn(effect_value: Effect) -> String Never! {
     if effect_value == {
         .Net -> "Net"
@@ -491,15 +498,16 @@ sema_taint_index_callable: fn(catalog: &SemaTaintCatalog, module_identity: Strin
 sema_taint_add_callable: fn(catalog: &SemaTaintCatalog, module_identity: String, module_alias: String, owner: String, function: Func) Never! {
     params := [SemaTaintTagList]{}
     loop parameter_index in 0..<function.params.len() -> &params.push(SemaTaintTagList{tags: sema_taint_type_tags(function.params[parameter_index].ty)})
+    success: sema_taint_success_type(function.return_type)
     return_tags := [String]{}
-    if function.return_type == {
+    if success == {
         .Val(ty) -> return_tags = sema_taint_type_tags(ty)
         .None -> {}
     }
     ffi_origin := function.inline_foreign != None
     if ffi_origin -> sema_taint_add(&return_tags, SEMA_TAINT_ORIGIN_FFI)
     key := sema_taint_callable_key(module_identity, owner, function.name)
-    &catalog.callables.push(SemaTaintCallableFact{key: key, module_identity: module_identity, owner: owner, name: function.name, parameter_tags: params, return_tags: return_tags, return_type: function.return_type, scrub_tag: function.scrub_tag, ffi_origin: ffi_origin, span: function.name_span})
+    &catalog.callables.push(SemaTaintCallableFact{key: key, module_identity: module_identity, owner: owner, name: function.name, parameter_tags: params, return_tags: return_tags, return_type: success, scrub_tag: function.scrub_tag, ffi_origin: ffi_origin, span: function.name_span})
     sema_taint_index_callable(&catalog, module_identity, owner, function.name)
     sema_taint_add_source_path(&catalog, module_alias, owner, function.name)
 }
@@ -507,10 +515,11 @@ sema_taint_add_callable: fn(catalog: &SemaTaintCatalog, module_identity: String,
 sema_taint_add_extern_callable: fn(catalog: &SemaTaintCatalog, module_identity: String, function: ExternFn) Never! {
     params := [SemaTaintTagList]{}
     loop parameter_index in 0..<function.params.len() -> &params.push(SemaTaintTagList{tags: sema_taint_type_tags(function.params[parameter_index].ty)})
+    success: sema_taint_success_type(function.return_type)
     returns := [String]{SEMA_TAINT_ORIGIN_FFI}
-    if function.return_type != None -> returns = sema_taint_type_tags(function.return_type ?? Type.Named{name: "Unit"})
+    if success == .Val(ty) -> returns = sema_taint_type_tags(ty)
     sema_taint_add(&returns, SEMA_TAINT_ORIGIN_FFI)
-    &catalog.callables.push(SemaTaintCallableFact{key: "{module_identity}:{function.name}", module_identity: module_identity, owner: "", name: function.name, parameter_tags: params, return_tags: returns, return_type: function.return_type, scrub_tag: None, ffi_origin: true, span: function.name_span})
+    &catalog.callables.push(SemaTaintCallableFact{key: "{module_identity}:{function.name}", module_identity: module_identity, owner: "", name: function.name, parameter_tags: params, return_tags: returns, return_type: success, scrub_tag: None, ffi_origin: true, span: function.name_span})
     sema_taint_index_callable(&catalog, module_identity, "", function.name)
 }
 
