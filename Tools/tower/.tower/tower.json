@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6605,
-    "rev": 93000,
+    "nextNum": 6610,
+    "rev": 93025,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -84968,11 +84968,11 @@
         {
           "n": 9,
           "text": "jet devtools and jet split are built; every cases row that reported E2104 for it passes on the default tier.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:12:12.624Z"
+          "evidence": "jet self devtools grammars landed in e30a4b7640, porting the editor-grammars generator into EditorGrammars.jet; the .mjs and its test are deleted. jet split and jet fold landed in 8170c2f082 and dfc887571e. cases --filter=grammar/ on the s1 of 60adfbb42a: PASS 7, and both former KF rows were UNEXPECTED-PASS, so their KF entries are removed. package_transition_cli is KF→PASS. No E2104 row for devtools, split or fold remains. package_host_split now passes its split step and stops at jet os plan, a different, unbuilt engine verb, now tracked on #6604.",
+          "at": "2026-11-06T08:44:22.092Z"
         },
         {
           "n": 10,
@@ -86172,7 +86172,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-06T08:28:20.840Z",
+      "updated": "2026-11-06T08:44:22.092Z",
       "updatedBy": "Main"
     },
     {
@@ -86979,6 +86979,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Partial, afa5ffac85 (GoldenRoots3): 19 ui rows KF→PASS, all 19 removed from KF; full ui on e30a4b7640+patch: KF 130, PASS 2241, FAIL 0 ($JET_SCRATCH_ROOT/lanes/GoldenRoots3/r28.txt). Ported: E0963; E0119 SQL row header; E0106 marker collision; E0905/E0312 derive blocking; E2411; E0921 shared; E3203 C fn value; D-EFFDBREAD1; E3405 on jet build (jet build now sets request.artifact_build for SemaBuildFacts). Also lands the orphan-impl body fix. Main's review: the fixture edits match the spec (Dyn index, upper exists, explicit Err route). Open: cffi_abi_function_value pins the type display 'fn(I32) -> I32 Never!' for an infallible fn type, a printer defect. Golden and cases A/B were not run for the jet build artifact_build change."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Routed from #6035 c15n (8e1219e5ec): tests/ui/operator_mixed_orphan_reverse is now KF under #6425. E0902 fires, but sema still checks the refused impl body, which adds a stray E0605. A refused impl body must not produce follow-on diagnostics."
         },
         {
@@ -87294,7 +87299,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T07:25:24.208Z",
-      "updated": "2026-11-06T08:14:16.233Z",
+      "updated": "2026-11-06T08:52:01.466Z",
       "updatedBy": "Main"
     },
     {
@@ -93592,6 +93597,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Seed a0_027 released and rotated: dev dfc887571e, which contains A2 cced341fd5; s2==s3 4f1306092c375912. Every gate PASSES: chain, cc-pack, pack, jetpack, jetpack-engine. golden 4754 rows (0 lost), ui 2420 (0 lost), cases 4492 (0 lost); 27 gains over a0_026. The B–D landing window is open."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "A2 cced341fd5 (DeclColon, pushed): every compiler-binary text and token detector reads both spellings. Covered: build, run, workspace-module, #Job, use-alias, registry, plugin, capability, Output and C-facade, each with #Tests for both forms. chain full on d728fb362c+A2 with a0_025: FIXED_POINT (jet 55f7fa3c676f65d5). The official seed a0_027 will be cut on a HEAD that contains A2; B–D (the converted tree) lands only after a0_027 rotates."
         },
         {
@@ -93683,7 +93693,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T02:04:25.306Z",
-      "updated": "2026-11-06T08:25:58.380Z",
+      "updated": "2026-11-06T09:11:11.103Z",
       "updatedBy": "Main"
     },
     {
@@ -94094,6 +94104,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "ac563303ea (CoreOwnership): the Core helper __provider_fields becomes provider_record_fields, since __ names are reserved for registry host leaves. Prepush's Core check had reported 4 ReservedDunderName errors. Views regenerated with check-core-surface-ledger --write. On 89f28e76af+patch, chain check shows 0 rows, ui_host_provider and ui_default_browser PASS."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "60adfbb42a (CoreOwnership): a default browser provider, with provider records as length-prefixed fields; the clipboard reads from the page's paste, copy and cut mirror with no implicit readText; core-library.md updated. Main's review keeps c2 open: the provider still computes the IME caret, maps DOM event types to phases (including compositionend with an empty string → Cancel), and keeps unbounded queues. The fix: send raw fields, let Core own the mapping and caret, and report overflow as Core's existing QueueFull. Ballot item B3: the browser's dragleave dropEffect 'none' has no UIDragOperation, so today it is a HostFailure; the choice is a None case or an optional operation."
         },
         {
@@ -94130,11 +94145,11 @@
         {
           "n": 2,
           "text": "The web runtime installs a default browser provider that forwards only raw browser primitives (keys, IME composition, drag/drop items, file dialogs, clipboard), with a DOM-stub cases row proving the forwarding",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T08:17:04.380Z"
+          "evidence": "60adfbb42a and 0fc5677e4c (CoreOwnership); Main reviewed the Host.jet provider. It forwards only raw DOM event types, data, dropEffect and the text/plain and uri-list strings. Core maps phases (including an empty compositionend → Cancel), places the caret after the text in characters, parses uri-lists and maps effects. A 256-record host buffer holds an overflow marker that Core reports as QueueFull. The clipboard mirror reads paste, copy and cut, and never calls readText implicitly. Row: tests/cases/web_build/ui_default_browser_provider_forwards_raw_events, with a DOM stub, ␟ in the IME and drop data, and the dragleave row citing ballot item B3. Chain s2==s3 876a7e472cd9905a; web_build 24 PASS (2 FAILs that predate this, web_edge and web_two_hop); golden ui/ 57 PASS.",
+          "at": "2026-11-06T08:47:18.690Z"
         }
       ],
       "refs": [],
@@ -94145,7 +94160,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T06:28:56.205Z",
-      "updated": "2026-11-06T08:37:47.005Z",
+      "updated": "2026-11-06T09:24:10.847Z",
       "updatedBy": "Main"
     },
     {
@@ -94352,25 +94367,45 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "edc75a36a3 also applies Main's ruling (c): an unhandled entry Err now goes jet_rt_entry_error_exit → the shared renderer as a full report. Under the root, cleanup runs before the report (scheduler_root_publish_owned); jet_journey_report is deleted. Re-recorded: serde/decode_error_exit.err.out and the field_error_entry_golden corpora case (debug, release and default all PASS); a scan finds 0 bare-message trails. Also: exports.list rot fixed in run-crypto-fixtures and run-testsuite-fixtures; 19 dead JetDataPlot dispatcher rows deleted; the Core views regenerated; check-core-surface-ledger clean."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c2 partial in af2db41544: the 60 witnesses assert the 8-byte owner word and shared clones, still proving no leak and no double free. Still open on c2: the HostFiles/Host tests, ProcessExecution, RootStdio and VaultHooks still assume a 24-byte Text; DateZoneGlue.jet:132 and DataMetadata.jet:80 have stale lent-header comments; NativeTextNormalizeWitness uses the old jet_rt_string_new door. Also found: run-crypto-fixtures.mjs:45 reads Compiler/JetRuntime/exports.list, which doesn't exist; Prelude/Core.jet dispatcher rows name jet_data_plot_* exports that no source defines; the UnsafeRatchet baseline in Docs/spec/safety.md is far out of date (safety.md was hand-edited 1127→1126 for HyperLogLog)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "All 75 runtime witness harnesses compile and link against the current runtime and pass through the free-observer route, with a per-witness report",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T07:34:15.566Z"
+          "evidence": "af2db41544 (Builder5). 16 of the 76 witnesses were for orphan runtime sources that no Core, Prelude, route or host code calls. They are deleted along with 29 sources, their doors, their runners and 104 route rows (I8 one mechanism). All remaining 60 compile, link and pass through the checked-heap observer on dev 0fc5677e4c plus the change (s1 528a4ed0ffa410cb), with stdout matching the goldens; the per-witness list is in the handoff. VaultProvider passed 5/5 reruns. The checked heap exposed real runtime defects, which are fixed: thread_zero overran the tail word, and multiply-add was unwrapped in VaultLinux, Scheduler and JourneyTLS. A guard now fails RuntimeGenerators --check (run by LaneCheck) on any orphan or dangling sources.list entry, proven by a planted orphan and a planted dangling line. CHECK OK.",
+          "at": "2026-11-06T09:04:23.902Z"
         },
         {
           "n": 2,
           "text": "Every witness that asserted the old Text header or distinct clone pointers asserts the current refcounted layout and still proves no leak and no double free",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T07:34:16.428Z"
+          "evidence": "edc75a36a3 (Builder5), on s1 91a504b088153be2 with a temp HOME. HostFilesTests, HostTests, ProcessExecutionWitness, RootStdioWitness (modes 0–4, the --established skip removed), NativeTextNormalizeWitness, VaultHooksWitness and err-report.c all assert the 32-byte {data,len,cap,cache} Text with _Static_assert. The shared-owner checks became exact (same pointer, exact owner counts); no assertion is weakened, and no leak or double free is still proven. Lent-header comments fixed in 7 runtime sources. CHECK OK.",
+          "at": "2026-11-06T09:39:36.644Z"
+        },
+        {
+          "n": 3,
+          "text": "Every pinned witness input (char-debug-goldens.bin, RtL6b3/fmt-expected.out, and any other) lives in the repository or comes from a tracked generator; no witness reads a scratch or cache path",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "edc75a36a3: the pinned inputs now live in the repository under Compiler/JetRuntime/Tests. CharDebugPlain.ranges (907 ranges) feeds run-ui-key-witness.mjs, which rebuilds char-debug-goldens.bin byte-identical to the pin 72a49808…. FmtParityExpected.out (372 cases, f7c9a211…) is regenerated from the formatter source. s5-fixtures and stage-frozen-inputs no longer stage scratch copies, and the scratch copy is deleted. UiKeyWitness PASS.",
+          "at": "2026-11-06T09:39:37.522Z"
         }
       ],
       "refs": [],
@@ -94381,7 +94416,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T07:34:10.008Z",
-      "updated": "2026-11-06T07:34:16.428Z",
+      "updated": "2026-11-06T09:39:38.387Z",
       "updatedBy": "Main"
     },
     {
@@ -94406,11 +94441,20 @@
         {
           "n": 1,
           "text": "A user struct's nested impl Debug renders {x:Debug} with the user's debug() on every tier, matching the top-level impl T.Debug; a ui or cases row proves both spellings",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T07:46:34.271Z"
+          "evidence": "9067cd33e4 (CoreOwnership). Golden Examples/features/traits/nested_debug_impl (Main reviewed it) covers nested and top-level impl Debug on a struct, an enum, a generic type and a list; {x:Debug} renders the authored debug(), identically on o0/o1/o2 and web. ui/: 2200 PASS, 0 FAIL.",
+          "at": "2026-11-06T08:59:45.999Z"
+        },
+        {
+          "n": 2,
+          "text": "A generic bound reaches the same Debug rule: fn f<T: Debug>(v: T) { \"{v:Debug}\" } checks and renders the authored debug() on every tier (today E0112: Debug is not a bare bound and the generic path finds no trait symbol), with a golden row",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "93b459c08e (CoreOwnership). T: Debug and T: Display bounds now work for {v:Debug}, {v:Pretty} and {v}, including through list elements. New ui row generic_display_debug_bound_unmet. golden traits/ 30/0 and text/ 162/0; nested_debug_impl identical on O0/O1/O2/web; full ui 2201 PASS, 0 FAIL. On a clean export of HEAD, OwnedTraitRows.jet --check passes (2 copies match).",
+          "at": "2026-11-06T09:26:46.033Z"
         }
       ],
       "refs": [],
@@ -94421,7 +94465,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T07:46:26.985Z",
-      "updated": "2026-11-06T07:46:34.271Z",
+      "updated": "2026-11-06T09:26:46.033Z",
       "updatedBy": "Main"
     },
     {
@@ -94446,11 +94490,11 @@
         {
           "n": 1,
           "text": "Every jet command refuses a registered flag outside its registry scope with a usage error naming the commands that take it; jet init --check writes nothing; a cases row covers init --check and one other mis-scoped flag",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T08:28:19.891Z"
+          "evidence": "89f28e76af and 0c07bee511 (JetpackEngine). A registered flag outside a command's registry scope is E2102 naming the commands that take it, from one scope rule that also drives jet help. jet init --check exits 2 and writes nothing. Row cli_commands/misplaced_flag_is_e2102_naming_the_commands_that_take_it PASSES. A one-pass census of every jet <cmd> --flag in tests, Docs/spec, the site and harness argv against the scope finds only the intended refusals. Fixed per spec: the stale gate_law check --allow/--force case now runs through jet inspect gates and PASSES; the --preview/--accept scopes are widened for build --import and bind --update (D-FFI-BUILD1, cli.md); help, man and completion snapshots re-blessed for those lines only.",
+          "at": "2026-11-06T09:28:01.031Z"
         }
       ],
       "refs": [],
@@ -94461,7 +94505,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T08:28:11.139Z",
-      "updated": "2026-11-06T08:28:19.891Z",
+      "updated": "2026-11-06T09:28:01.031Z",
       "updatedBy": "Main"
     },
     {
@@ -94502,6 +94546,202 @@
       "needsAcceptance": false,
       "created": "2026-11-06T08:44:12.044Z",
       "updated": "2026-11-06T08:44:20.982Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c04yboap",
+      "num": 6605,
+      "title": "UnsafeRatchet baseline in Docs/spec/safety.md is far out of date: hundreds of #Unsafe rows unrecorded",
+      "body": "Found by Builder5 (#6601, af2db41544). Running the UnsafeRatchet regeneration at HEAD reports hundreds of #Unsafe rows that the safety.md baseline doesn't record, so af2db41544 hand-edited one row (HyperLogLog, 1127→1126) instead of regenerating. A stale ratchet can't gate new unsafe code (I1). Find why the baseline drifted (no gate runs the ratchet, or regeneration was skipped), regenerate it, audit every new row for a reason, and make a fast gate (lane-check or a generator --check) fail on drift.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Docs/spec/safety.md's ratchet matches UnsafeRatchet output at HEAD; every new row has an audited reason; a lane-check-level gate fails on drift, proven with a planted unrecorded #Unsafe block",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T09:04:37.491Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T09:04:33.444Z",
+      "updated": "2026-11-06T09:04:37.491Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c015yc5v",
+      "num": 6606,
+      "title": "Every CLI flag must also be a setting: non-build commands (registry publish --force and others) have no settings home",
+      "body": "Standing owner order: every CLI flag is also a setting. The only flag↔setting table is JET_BUILD_OPTIONS (build profiles, fn build, pins), which only build, run and dev read. jet registry publish --force (CLICommands.jet:796; it also gates E1218 per #6600) and every other non-build command flag have no setting. First census every registered CLI flag against its setting home. Then ballot where non-build command settings live (e.g. package.jet publish: {…} vs a per-command settings table in jet settings), with same-program alternatives. Then build it, with one flag↔setting mechanism for all commands.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A census lists every registered CLI flag with its setting (or none); after the ratified ballot, every flag has exactly one setting through one shared flag-to-setting mechanism, with a cases row per command family proving that flag and setting have the same effect",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T09:29:18.344Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G4"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T09:29:13.427Z",
+      "updated": "2026-11-06T09:29:18.344Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0swy9uf",
+      "num": 6607,
+      "title": "Test kit runs cases with the real HOME: suites write ~/.jet (registry index, keys)",
+      "body": "The cases kit does not isolate HOME per case, so suite runs (pkg and vendored filters) modify the owner's ~/.jet: registry-index was modified on 2026-11-06 at 04:11 during agent suite runs. A probe with the real HOME also overwrote ~/.jet/keys/jet.ed25519 at 04:23. Every case must get its own fresh HOME (and JET_HOME, XDG_* dirs) under its scratch directory, unless the case explicitly declares a home fixture. The kit must also refuse to run when the resolved HOME equals the invoking user's real home.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Suspect runs that modified the owner's ~/.jet on 2026-11-06: DeclColon's ui suites, jetpack builds and generators (03:30–04:45); GoldenRoots3's tests/cases/pkg A/B (04:00–04:36); JetpackEngine's pkg/vendored filters and its registry keygen --force probe (04:23). GoldenRoots3's pkg profile also deadlocked on the base compiler (all threads in futex waits, no children), probably contention on the shared real ~/.jet/.jetpack.lock across agents. Re-check under per-case HOME. Every lane now runs with a temp HOME and JET_HOME."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each cases, ui and golden row runs with a fresh HOME, JET_HOME and XDG dirs under its scratch directory. A planted case that writes $HOME/.jet/probe leaves the real home untouched (proven by stat before and after a full pkg-filter run). The kit refuses a run whose HOME resolves to the real user home.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T09:29:31.974Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T09:29:25.988Z",
+      "updated": "2026-11-06T09:31:29.299Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0j5iuv5",
+      "num": 6608,
+      "title": "core.text fmt stops E3010 formatting a whole number with no exact Float (Fmt.jet:272 Float{abs_int(n)})",
+      "body": "Found by Builder5 (#6601, edc75a36a3). run-fmt-parity stops at case bytes-integer6: Core/Text/Fmt.jet:272 converts an integer through Float{abs_int(n)}, which hits Stop E3010 when the whole number has no exact Float (|n| > 2^53). Integer formatting must never round-trip through Float. The 34 cases before the stop match FmtParityExpected.out byte for byte; the other 338 can't be checked until this is fixed.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Integer formatting in core.text fmt never converts through Float: run-fmt-parity passes all 372 cases of FmtParityExpected.out, and a golden row formats ±(2^63−1), 2^53+1 and U64 max on every tier",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T09:39:57.054Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T09:39:47.958Z",
+      "updated": "2026-11-06T09:39:57.054Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c05s2kt4",
+      "num": 6609,
+      "title": "Runtime test rot: journey-tls fixtures undefined, NormalizationTest.txt row count off the s5 pin, missing RtCrypto1 inputs, UiKeyWitness 24-byte Text typedef",
+      "body": "Leftovers from #6601 (edc75a36a3), all found by Builder5. (1) journey-tls.c compiles but can't link: nothing in the repo defines fixture_journey_auto_color_raw or fixture_journey_columns_raw. (2) tests/data/unicode/NormalizationTest.txt has 17091 rows, but s5 pins 20034, so the data is truncated or the pin is stale; check it against the pinned UCD version. (3) stage-frozen-inputs still needs the missing RtCrypto1 inputs. (4) UiKeyWitness.c keeps a 24-byte Text typedef (pointer-only use). (5) run-fmt-parity prints a 'parked … Tower #4923' line that cites a card which no longer exists. For each: fix it, or delete the dead harness when nothing reaches it.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T09:39:49.326Z",
+      "updated": "2026-11-06T09:39:49.326Z",
       "updatedBy": "Main"
     }
   ],
@@ -177602,6 +177842,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-06T09:39:57.054Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0j5iuv5",
+      "note": "#1 Integer formatting in core.text fmt never converts through F"
+    },
+    {
+      "at": "2026-11-06T09:39:49.326Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c05s2kt4",
+      "note": "Runtime test rot: journey-tls fixtures undefined, NormalizationTest.txt row count off the s5 pin, missing RtCrypto1 inputs, UiKeyWitness 24-byte Text typedef"
+    },
+    {
+      "at": "2026-11-06T09:39:47.958Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0j5iuv5",
+      "note": "core.text fmt stops E3010 formatting a whole number with no exact Float (Fmt.jet:272 Float{abs_int(n)})"
+    },
+    {
+      "at": "2026-11-06T09:39:38.387Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0n8obf9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T09:39:37.522Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0n8obf9",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-06T09:39:36.644Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0n8obf9",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-06T09:31:29.299Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0swy9uf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T09:29:31.974Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0swy9uf",
+      "note": "#1 Each cases, ui and golden row runs with a fresh HOME, JET_HO"
+    },
+    {
+      "at": "2026-11-06T09:29:25.989Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0swy9uf",
+      "note": "Test kit runs cases with the real HOME: suites write ~/.jet (registry index, keys)"
+    },
+    {
+      "at": "2026-11-06T09:29:18.345Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c015yc5v",
+      "note": "#1 A census lists every registered CLI flag with its setting (o"
+    },
+    {
+      "at": "2026-11-06T09:29:13.427Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c015yc5v",
+      "note": "Every CLI flag must also be a setting: non-build commands (registry publish --force and others) have no settings home"
+    },
+    {
+      "at": "2026-11-06T09:28:01.031Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0lm9h4f",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T09:26:46.033Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07hutuq",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-06T09:24:10.847Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0o3di45",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T09:11:11.103Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ofw8u4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T09:04:37.491Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c04yboap",
+      "note": "#1 Docs/spec/safety.md's ratchet matches UnsafeRatchet output a"
+    },
+    {
+      "at": "2026-11-06T09:04:33.444Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c04yboap",
+      "note": "UnsafeRatchet baseline in Docs/spec/safety.md is far out of date: hundreds of #Unsafe rows unrecorded"
+    },
+    {
+      "at": "2026-11-06T09:04:26.697Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0n8obf9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T09:04:25.191Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0n8obf9",
+      "note": "#3 Every pinned witness input (char-debug-goldens.bin, RtL6b3/f"
+    },
+    {
+      "at": "2026-11-06T09:04:23.902Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0n8obf9",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T08:59:46.889Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07hutuq",
+      "note": "#2 A generic bound reaches the same Debug rule: fn f<T: Debug>("
+    },
+    {
+      "at": "2026-11-06T08:59:45.999Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07hutuq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T08:52:01.466Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01oyhqk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T08:47:18.690Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0o3di45",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-06T08:44:22.092Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hn7w1n",
+      "note": "#9"
+    },
+    {
       "at": "2026-11-06T08:44:20.982Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -181051,713 +181466,6 @@
       "action": "card.criteria-meet",
       "ref": "c0rqi33c",
       "note": "#46"
-    },
-    {
-      "at": "2026-11-05T21:08:08.230Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rdxo6y",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-05T21:06:45.027Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#64"
-    },
-    {
-      "at": "2026-11-05T21:06:44.348Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#63"
-    },
-    {
-      "at": "2026-11-05T21:06:24.291Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T20:56:22.088Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "qflt97of",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T20:56:00.410Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-05T20:56:00.410Z"
-    },
-    {
-      "at": "2026-11-05T20:52:47.014Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T20:52:45.873Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T20:48:45.197Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0ohzy6k",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-05T20:48:43.853Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c0cl9fm1",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-05T20:48:42.583Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c058eq5n",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-05T20:48:41.498Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c06tdlnf",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-05T20:47:54.355Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "qecu53x9",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T20:47:06.928Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0n8pmxe",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-05T20:45:01.041Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T20:33:31.148Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T20:20:51.006Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T20:16:41.651Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0n8pmxe",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T20:15:03.830Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fo37ov",
-      "note": "#60 Compiler/JetDriver/Tests doesn't compile on dev 8219108260: "
-    },
-    {
-      "at": "2026-11-05T20:15:02.929Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fo37ov",
-      "note": "#59 Runtime deadlock (found by TestSpeedLead 2026-11-05): with m"
-    },
-    {
-      "at": "2026-11-05T19:27:26.389Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T19:04:42.603Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xuffg1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T19:04:40.965Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T18:59:46.636Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T18:49:17.993Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T18:47:06.004Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T18:11:39.133Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T17:43:09.329Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T17:31:42.512Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T17:31:41.527Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T16:49:41.904Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-PACKAGE-PACKS1",
-      "note": "Allow checked packs for installed dependencies?"
-    },
-    {
-      "at": "2026-11-05T16:36:12.514Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T16:32:00.462Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T16:20:37.322Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T16:14:51.176Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fo37ov",
-      "note": "#58 Jet's test runner is the fastest of any language, shown by a"
-    },
-    {
-      "at": "2026-11-05T16:14:50.485Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fo37ov",
-      "note": "#57 Running one test costs about that test's own time. The testk"
-    },
-    {
-      "at": "2026-11-05T16:14:49.747Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T16:03:32.493Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:43:32.212Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:38:57.939Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:36:54.099Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FNVAL-WRITE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-05T15:36:54.099Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0grmd0j",
-      "note": "#8 snapshots re-blessed"
-    },
-    {
-      "at": "2026-11-05T15:36:54.099Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0grmd0j",
-      "note": "#7 editor grammars regenerated (editor-grammars.mjs --write)"
-    },
-    {
-      "at": "2026-11-05T15:36:54.099Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0grmd0j",
-      "note": "#6 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-11-05T15:36:54.099Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0grmd0j",
-      "note": "#5 Data/Syntax registry entry updated"
-    },
-    {
-      "at": "2026-11-05T15:30:37.212Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0rqi33c",
-      "note": "#107 Single-source census F33 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:36.243Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xnvmrf",
-      "note": "#27 Single-source census F32 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:35.335Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ym70o1",
-      "note": "#33 Single-source census F31 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:34.387Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#13 Single-source census F30 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:33.310Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0dp5efn",
-      "note": "#7 Single-source census F29 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:32.125Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#12 Single-source census F28 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:31.021Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0scf8mn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:29.903Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:28.820Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bs5inj",
-      "note": "#14 Single-source census F25 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:27.860Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#11 Single-source census F24 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:26.975Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#10 Single-source census F23 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:26.058Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y4zfcp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:25.123Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c022g7qw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:24.302Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c022g7qw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:23.246Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0w1wcfc",
-      "note": "#50 Single-source census F19 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:22.351Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w1wcfc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:21.307Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y4zfcp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:20.383Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xuffg1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:19.571Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xuffg1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:18.792Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#9 Single-source census F14 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:18.012Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0rqi33c",
-      "note": "#106 Single-source census F13 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:17.268Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#8 Single-source census F12 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:16.505Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#7 Single-source census F11 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:15.727Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#6 Single-source census F10 (Docs/audits/2026-11-05-single-sour"
-    },
-    {
-      "at": "2026-11-05T15:30:14.976Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#5 Single-source census F9 (Docs/audits/2026-11-05-single-sourc"
-    },
-    {
-      "at": "2026-11-05T15:30:14.307Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xnvmrf",
-      "note": "#26 Single-source census F8 (Docs/audits/2026-11-05-single-sourc"
-    },
-    {
-      "at": "2026-11-05T15:30:13.446Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c022g7qw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:12.648Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0scf8mn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:11.727Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y4zfcp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:10.796Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0w1wcfc",
-      "note": "#49 Single-source census F4 (Docs/audits/2026-11-05-single-sourc"
-    },
-    {
-      "at": "2026-11-05T15:30:09.800Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xuffg1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:08.905Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0scf8mn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:30:08.091Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0w1wcfc",
-      "note": "#48 Single-source census F1 (Docs/audits/2026-11-05-single-sourc"
-    },
-    {
-      "at": "2026-11-05T15:14:45.866Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0pgowhn",
-      "note": "#64 Storing a named function whose parameter is marked & or ^ in"
-    },
-    {
-      "at": "2026-11-05T15:14:45.198Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0pgowhn",
-      "note": "#63 A read-only (unmarked) Pool parameter cannot be changed thro"
-    },
-    {
-      "at": "2026-11-05T15:14:25.735Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-FNVAL-WRITE1",
-      "note": "Preserve write and move parameters in stored function types"
-    },
-    {
-      "at": "2026-11-05T15:14:24.989Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-POOL-HAS1",
-      "note": "Ask whether a Pool id names a live entry: pool.has(id)"
-    },
-    {
-      "at": "2026-11-05T15:07:19.890Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05gn07n",
-      "note": "#7 Paired performance cell for a checked lane gather (draft bal"
-    },
-    {
-      "at": "2026-11-05T15:07:19.242Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0oev2ib",
-      "note": "#122 A typed literal written straight after a comparison in an if"
-    },
-    {
-      "at": "2026-11-05T15:02:49.207Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:02:48.537Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rkebo4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T15:02:15.029Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T14:58:31.596Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xuffg1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-05T14:58:10.930Z",
-      "by": "agent",
-      "action": "card.update",
-      "ref": "c0xuffg1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T14:36:19.385Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0sg79an",
-      "note": "#9 D-UB-BOUNDARY1=A is built: expert code skips a check only in"
-    },
-    {
-      "at": "2026-11-05T14:36:18.662Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0flvd7x",
-      "note": "#10 A pattern test in a `loop` condition binds its names in the "
-    },
-    {
-      "at": "2026-11-05T14:36:18.002Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05gn07n",
-      "note": "#6 Integer lane types (`I8`..`I64`, `U8`..`U64` lanes) support "
-    },
-    {
-      "at": "2026-11-05T14:36:17.332Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06y0cef",
-      "note": "#5 A module global written `name := <value>` starts from any st"
-    },
-    {
-      "at": "2026-11-05T14:36:16.677Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0rkebo4",
-      "note": "#29 An `#Import module c.<lib>` row may declare a C counted-poin"
-    },
-    {
-      "at": "2026-11-05T14:36:16.013Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c03jg20v",
-      "note": "#1 Two `ID<T>` values compare with `==`/`!=` by slot and genera"
-    },
-    {
-      "at": "2026-11-05T14:29:35.452Z",
-      "by": "agent",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T14:29:34.707Z",
-      "by": "agent",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T14:29:33.995Z",
-      "by": "agent",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T14:29:01.667Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T14:23:23.327Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hs3czc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T14:23:22.674Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0j6lwuh",
-      "note": "#9 The games area has a machine-ceiling reference built from Je"
     }
   ],
   "nextNum": 368,
