@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6610,
-    "rev": 93425,
+    "rev": 93450,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -36826,13 +36826,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "**Goal**\nFinish the data/web slice of Core Jet ownership (parent #3547 is done). Every data, web, reactive, sync, service and jobs declaration has a real Jet body or a typed provider leaf, all policy, validation and error meaning lives in Jet, and each package passes AOT, `jet run` and interpreter proof.\n\n**Current state**\n- Building (log 2026-09-24): disjoint worktree lanes for data, HTTP client, web router and sync. Known failures: core/data/database and `is_base64` emit AOT Rust E0308/E0063 (JetErr into typed `DataError` slots). The Core/http/client.jet syntax cascade (E0003 at byte 12789) blocked the http_i9 framing test.\n- HTTP/CSRF policy still in Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:141-174 (`JetWebServerFnCsrfPolicy`, `JetWebServerFnSpec`) and HTTPServer.rs. Core/http/server.jet:53 `json<T: Encode>` delegates to the provider. The HTTP client/server framing now belongs to #3665 and #3666, so it is out of this card's scope.\n- Jobs: Core/jobs/jobs.jet:59-69 `JobQueue` is an in-memory record list (`queue()` builds `records: []`), which shadows the D-DX-QUEUE1=A SQLite provider. Examples/features/concurrency/job_queue.jet has no golden.\n- Packages: Core/data (data, loader, stream, arrow, plot, sketch), Core/web (router, forms, query, table, virtual, store, storage, browser, devserver), Core/reactive, Core/service, Core/jobs.\n\n**Changes**\n1. Lane data: fix the typed error-carrier emission so `DataError` slots receive `DataError`, not `JetErr`. The fix goes in Compiler/JetCodegen at the result-carrier lowering, mirrored in the Rust emitter only as far as the shipped binary needs. Then fix the Core/data/data.jet `public_parameter` split and Core/web/query.jet `esc_json` UTF-8 defects named in the log.\n2. Lane web: move CSRF/retry/idempotency policy from WebServerFn.rs into Core/web (a Jet decision function). WebServerFn.rs keeps only transport leaves.\n3. Lane jobs: make `jobs.queue()` open the single SQLite-default durable provider identity with receiver `enqueue`/`claim`/`ack`/`retry`/`delay`/dead-letter. Delete the in-memory `records` shadow, migrate callers and add the job_queue golden.\n4. Per package: diff each source declaration against the CoreCallRows and CoreModuleExportNames rows and the actual callers. Delete any route that re-encodes a Jet body. Main alone edits the shared Core.jet and registry rows at integration.\n5. Web and browser tier cells stay explicitly pending until exercised.\n\n**Proof**\n- `JET_GOLDEN_FILTER=concurrency/job_queue Tools/agent/jet-env cargo test --test golden examples_compile_and_run`: passes.\n- `Tools/agent/jet-env cargo test --test corelib_http_data -- core_data_`: passes, including database and base64 on AOT.\n- `Tools/agent/jet-env cargo test --test ui_backend -- web_` and `JET_GOLDEN_FILTER=web/ Tools/agent/jet-env cargo test --test golden examples_compile_and_run`: pass.\n- A three-tier `jet run` diff for Examples/features/web/query_lifecycle.jet and store_history.jet against their goldens: empty.\n\n**Batch**\nbatch-core-ui (web/reactive family): most remaining work is Core/web, reactive and jobs. The data carrier fix lands in the same build.\n\n**Dependencies**\nNone blocking. #3665 and #3666 own HTTP framing and TLS.",
+      "plan": "**Goal**\nFinish the data/web slice of Core Jet ownership (parent #3547 is done). Every data, web, reactive, sync, service and jobs declaration has a real Jet body or a typed provider leaf, all policy, validation and error meaning lives in Jet, and each package passes AOT, `jet run` and interpreter proof.\n\n**Current state**\n- Building (log 2026-09-24): disjoint worktree lanes for data, HTTP client, web router and sync. Known failures: core/data/database and `is_base64` emit AOT Rust E0308/E0063 (JetErr into typed `DataError` slots). The Core/http/client.jet syntax cascade (E0003 at byte 12789) blocked the http_i9 framing test.\n- HTTP/CSRF policy still in Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:141-174 (`JetWebServerFnCsrfPolicy`, `JetWebServerFnSpec`) and HTTPServer.rs. Core/http/server.jet:53 `json<T: Encode>` delegates to the provider. The HTTP client/server framing now belongs to #3665 and #3666, so it is out of this card's scope.\n- Jobs: Core/jobs/jobs.jet:59-69 `JobQueue` is an in-memory record list (`queue()` builds `records: []`), which shadows the D-DX-QUEUE1=A SQLite provider. Examples/features/concurrency/job_queue.jet has no golden.\n- Packages: Core/data (data, loader, stream, arrow, plot, sketch), Core/web (router, forms, query, table, virtual, store, storage, browser, devserver), Core/reactive, Core/service, Core/jobs.\n\n**Changes**\n1. Lane data: fix the typed error-carrier emission so `DataError` slots receive `DataError`, not `JetErr`. The fix goes in Compiler/JetCodegen at the result-carrier lowering, mirrored in the Rust emitter only as far as the shipped binary needs. Then fix the Core/data/data.jet `public_parameter` split and Core/web/query.jet `esc_json` UTF-8 defects named in the log.\n2. Lane web: move CSRF/retry/idempotency policy from WebServerFn.rs into Core/web (a Jet decision function). WebServerFn.rs keeps only transport leaves.\n3. Lane jobs: make `jobs.queue()` open the single SQLite-default durable provider identity with receiver `enqueue`/`claim`/`ack`/`retry`/`delay`/dead-letter. Delete the in-memory `records` shadow, migrate callers and add the job_queue golden.\n4. Per package: diff each source declaration against the CoreCallRows and CoreModuleExportNames rows and the actual callers. Delete any route that re-encodes a Jet body. Main alone edits the shared Core.jet and registry rows at integration.\n5. Web and browser tier cells stay explicitly pending until exercised.\n\n**Proof**\n- `jet test Compiler --profile golden concurrency/job_queue`: passes.\n- `Tools/agent/jet-env cargo test --test corelib_http_data -- core_data_`: passes, including database and base64 on AOT.\n- `Tools/agent/jet-env cargo test --test ui_backend -- web_` and `jet test Compiler --profile golden web/`: pass.\n- A three-tier `jet run` diff for Examples/features/web/query_lifecycle.jet and store_history.jet against their goldens: empty.\n\n**Batch**\nbatch-core-ui (web/reactive family): most remaining work is Core/web, reactive and jobs. The data carrier fix lands in the same build.\n\n**Dependencies**\nNone blocking. #3665 and #3666 own HTTP framing and TLS.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": "Main",
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -37267,7 +37272,7 @@
         },
         {
           "n": 11,
-          "text": "(was #3519 c3) Fresh JIT and AOT storage fixtures preserve exact local and session outputs [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #3519 c3) Fresh O0, O1 and O2 storage fixtures preserve exact local and session outputs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -37294,9 +37299,9 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:04.333Z",
-      "updated": "2026-11-06T16:35:52.046Z",
+      "updated": "2026-11-06T18:38:43.765Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-06T11:05:54.367Z",
+      "claimedAt": "2026-11-06T18:38:43.765Z",
       "goals": [
         "G3"
       ]
@@ -37312,13 +37317,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "**Goal.** This is the specialized wave of #3690: compute/models, ui/tui/font/game, plugin/mod, compiler/reflect/testing, and app/build/devtools/perf/rt. Jet source owns authority, error and effect meaning. Vetted engines (GTK, raylib, ONNX Runtime, wasmtime) remain typed Rust provider leaves until F4/F5 are ratified.\n\n**Current state.**\n- Specialized dispatcher rows in `crates/jet-codegen/src/Prelude/Core.jet`: 206 in total, 197 of them already Jet-owned duplicates.\n\n| Module | Rows | Jet-owned |\n|---|---|---|\n| compute | 64 | 64 |\n| ui | 52 | 48 |\n| tui | 35 | 35 |\n| game | 19 | 18 |\n| testing | 14 | 13 |\n| app | 11 | 11 |\n| perf | 4 | 4 |\n| font | 2 | 2 |\n| models, plugin, devtools | 1 each | 0 |\n\n- `core.compute.solve` ownership is resolved. Core.jet has `source_module core.compute.solve … owns { dense, lu }`, and `tests/core_compute_solve.rs` has `compute_solve_uses_scale_relative_pivots_and_checked_errors`.\n- The core.testing tier fix is proven: `core_testing_histories_error_is_stable_across_i9_tiers`, passing since 2026-09-24.\n- Probe failures that must clear first come from #3695: `Core/ui/ui.jet:121,126` E0768 and :141 E1102, clipboard `UiClipboardText`, and `Core/compiler/compiler.jet:30-40` undefined carriers.\n- Self-hosted routing mirrors: `Compiler/JetFoundation/Source/Registry/*.jet` and `Compiler/JetCodegen/Source/Codegen/HandleMethods.jet`.\n\n**Changes (one module per patch).**\n1. compute/compute.solve: delete the 64 Jet-owned rows and the matching `Prelude/CoreLib` compute functions and JIT shims (F1). Keep CUDA/Metal/Vulkan device leaves typed.\n2. tui, then ui/font/game: delete the Jet-owned rows. GTK/raylib calls stay leaves. Give the 4 unowned ui rows and 1 unowned game row Jet bodies or leaf declarations.\n3. testing, app, perf, rt, mod: delete the Jet-owned rows.\n4. models, plugin and devtools each keep one unowned row. #3670 owns plugin policy. models `open` stays an ONNX leaf; declare it as a leaf in `Core/models`.\n5. Regenerate registries with `node Tools/agent/gen-core-tables.mjs --write`. Mirror the removals in the self-hosted registry and HandleMethods. Migrate examples and goldens in each patch.\n6. Measure no performance win unless a matched battery exists (compute cells are gated).\n\n**Proof.**\n- The commands in add_criteria.\n- `cargo test --test core_surface_ledger`: passes.\n\n**Batch.** `batch-host-runtime`: the work removes Prelude CoreLib Rust routes and needs one build plus a tier-parity golden pass.\n\n**Dependencies.** Parent #3690. It shares ui/compiler probe fixes with #3695 and plugin policy with #3670. Neither is a hard prerequisite for the compute/tui/testing slices.\n",
+      "plan": "**Goal.** This is the specialized wave of #3690: compute/models, ui/tui/font/game, plugin/mod, compiler/reflect/testing, and app/build/devtools/perf/rt. Jet source owns authority, error and effect meaning. Vetted engines (GTK, raylib, ONNX Runtime, wasmtime) remain typed Rust provider leaves until F4/F5 are ratified.\n\n**Current state.**\n- Specialized dispatcher rows in `crates/jet-codegen/src/Prelude/Core.jet`: 206 in total, 197 of them already Jet-owned duplicates.\n\n| Module | Rows | Jet-owned |\n|---|---|---|\n| compute | 64 | 64 |\n| ui | 52 | 48 |\n| tui | 35 | 35 |\n| game | 19 | 18 |\n| testing | 14 | 13 |\n| app | 11 | 11 |\n| perf | 4 | 4 |\n| font | 2 | 2 |\n| models, plugin, devtools | 1 each | 0 |\n\n- `core.compute.solve` ownership is resolved. Core.jet has `source_module core.compute.solve … owns { dense, lu }`, and `tests/core_compute_solve.rs` has `compute_solve_uses_scale_relative_pivots_and_checked_errors`.\n- The core.testing tier fix is proven: `core_testing_histories_error_is_stable_across_i9_tiers`, passing since 2026-09-24.\n- Probe failures that must clear first come from #3695: `Core/ui/ui.jet:121,126` E0768 and :141 E1102, clipboard `UiClipboardText`, and `Core/compiler/compiler.jet:30-40` undefined carriers.\n- Self-hosted routing mirrors: `Compiler/JetFoundation/Source/Registry/*.jet` and `Compiler/JetCodegen/Source/Codegen/HandleMethods.jet`.\n\n**Changes (one module per patch).**\n1. compute/compute.solve: delete the 64 Jet-owned rows and the matching `Prelude/CoreLib` compute functions and JIT shims (F1). Keep CUDA/Metal/Vulkan device leaves typed.\n2. tui, then ui/font/game: delete the Jet-owned rows. GTK/raylib calls stay leaves. Give the 4 unowned ui rows and 1 unowned game row Jet bodies or leaf declarations.\n3. testing, app, perf, rt, mod: delete the Jet-owned rows.\n4. models, plugin and devtools each keep one unowned row. #3670 owns plugin policy. models `open` stays an ONNX leaf; declare it as a leaf in `Core/models`.\n5. Regenerate registries with `node Tools/agent/gen-core-tables.mjs --write`. Mirror the removals in the self-hosted registry and HandleMethods. Migrate examples and goldens in each patch.\n6. Measure no performance win unless a matched battery exists (compute cells are gated).\n\n**Proof.**\n- The commands in add_criteria.\n- `jet test Compiler --profile cases core_surface_ledger/`: passes.\n\n**Batch.** `batch-host-runtime`: the work removes Prelude CoreLib Rust routes and needs one build plus a tier-parity golden pass.\n\n**Dependencies.** Parent #3690. It shares ui/compiler probe fixes with #3695 and plugin policy with #3670. Neither is a hard prerequisite for the compute/tui/testing slices.\n",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": "Main",
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -37495,7 +37505,7 @@
         },
         {
           "n": 4,
-          "text": "[retarget] Every specialized Core/<module> member has a Jet body or a declared typed provider leaf, and no Rust dispatcher row/JIT shim/interpreter route duplicates it.",
+          "text": "[retarget] Every specialized Core/<module> member has a Jet body or a declared typed provider leaf, and no second implementation (host leaf, tier-specific shim or compiler-side route) duplicates it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -37513,7 +37523,7 @@
         },
         {
           "n": 6,
-          "text": "After each specialized module cutover, `crates/jet-codegen/src/Prelude/Core.jet` has no `dispatcher_row` for any member its `source_module` owns, and `node Tools/agent/check-core-surface-ledger.mjs` passes. `JET_GOLDEN_FILTER=tooling/compute_ cargo test --test golden examples_compile_and_run`, `JET_GOLDEN_FILTER=ui/ cargo test --test golden examples_compile_and_run`, `JET_GOLDEN_FILTER=game/ cargo test --test golden examples_compile_and_run`, `cargo test --test core_compute_solve` and `cargo test --test core_testing_history` pass with identical output on AOT/default-run/interpreter (and web where the example declares it).",
+          "text": "After each specialized module cutover, `Compiler/Prelude/Core.jet` has no `dispatcher_row` for any member its `source_module` owns, and `node Tools/agent/check-core-surface-ledger.mjs` passes. `jet test Compiler --profile golden tooling/compute_`, `jet test Compiler --profile golden ui/`, `jet test Compiler --profile golden game/`, `jet test Compiler --profile cases core_compute_solve/` and `jet test Compiler --profile cases core_testing_history/` pass with identical output on O0, O1 and O2 (and web where the example declares it).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -37585,7 +37595,7 @@
         },
         {
           "n": 14,
-          "text": "(was #499 c3) Real gzip compress/decompress round trips execute through core.compress in AOT and default dev paths; legacy core.archive gzip use rejects with a pinned Jet diagnostic or ordinary unknown-member diagnostic [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #499 c3) Real gzip compress/decompress round trips execute through core.compress in O0, O1 and O2 paths; legacy core.archive gzip use rejects with a pinned Jet diagnostic or ordinary unknown-member diagnostic [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -37621,9 +37631,9 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:05.017Z",
-      "updated": "2026-11-04T23:48:00.744Z",
+      "updated": "2026-11-06T18:38:47.603Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-04T23:48:00.744Z",
+      "claimedAt": "2026-11-06T18:38:47.603Z",
       "goals": []
     },
     {
@@ -37792,6 +37802,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -38160,7 +38175,7 @@
         },
         {
           "n": 2,
-          "text": "Every slice passes Jetpack/Bootstrap/check.sh and runs on AOT and default jet run (I9), with no #Unsafe lacking an audited reason and no new external dependency outside an approved bridge.",
+          "text": "Every slice passes Jetpack/Bootstrap/check.sh and runs on O0, O1 and O2 (I9), with no #Unsafe lacking an audited reason and no new external dependency outside an approved bridge.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -38183,8 +38198,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Rust Jetpack was deleted with the Rust tree (c9129d174d); there is no Rust route left for a Jet/Rust performance ratio.",
-          "at": "2026-11-04T19:42:46.455Z",
-          "closure": "obsolete"
+          "at": "2026-11-04T19:42:46.455Z"
         },
         {
           "n": 5,
@@ -38193,8 +38207,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Rust Jetpack is no longer shipped: the Rust tree was deleted in c9129d174d, so this stop point (Rust ships until owner cutover) has passed.",
-          "at": "2026-11-04T19:42:47.028Z",
-          "closure": "obsolete"
+          "at": "2026-11-04T19:42:47.028Z"
         },
         {
           "n": 6,
@@ -38284,8 +38297,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "The cargo build this owner authorization gated no longer exists: the Rust tree and Cargo were removed in c9129d174d.",
-          "at": "2026-11-04T19:42:47.590Z",
-          "closure": "obsolete"
+          "at": "2026-11-04T19:42:47.590Z"
         },
         {
           "n": 16,
@@ -38636,8 +38648,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Duplicate of #3590 c51 (each claim finishes under 30 s, no hang), from the same #6302 split. Research3 census of goals 1-2 (2026-11-04, tree 3ba4a57a78, jet 9942f58d47; $JET_SCRATCH_ROOT/lanes/Main/briefs/g14-g15-census.tsv)",
-          "at": "2026-11-04T22:18:27.258Z",
-          "closure": "obsolete"
+          "at": "2026-11-04T22:18:27.258Z"
         },
         {
           "n": 55,
@@ -38763,8 +38774,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "D-JPK-REF1=A (ratified 2026-07-23): package refs are name['#'version]['@'source], so the CLI spelling is cowsay@nixpkgs and an old provider@target ref is a teaching error; the change this criterion asked for is settled by that ruling (JetpackCLI)",
-          "at": "2026-11-05T22:22:20.400Z",
-          "closure": "decision"
+          "at": "2026-11-05T22:22:20.400Z"
         },
         {
           "n": 69,
@@ -39596,7 +39606,7 @@
         },
         {
           "n": 161,
-          "text": "(was #2348 c4) Default and AOT tiers pass the phase 2 parity suite without network or real-store access [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2348 c4) O0, O1 and O2 tiers pass the phase 2 parity suite without network or real-store access [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -39632,7 +39642,7 @@
         },
         {
           "n": 165,
-          "text": "(was #2349 c4) Default and AOT tiers pass the phase 3 suite without touching shipped stores or caches [precut audit: not proven on 9c7ddf1359: C:jetpack_dogfood/jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures SKIP-HOST os:linux]",
+          "text": "(was #2349 c4) O0, O1 and O2 tiers pass the phase 3 suite without touching shipped stores or caches [precut audit: not proven on 9c7ddf1359: C:jetpack_dogfood/jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures SKIP-HOST os:linux]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -39677,7 +39687,7 @@
         },
         {
           "n": 170,
-          "text": "(was #2362 c2) AOT, default JIT, and interpreter call the same Prelude permission mutation and produce the same resulting Stat.mode [precut audit: failing on 9c7ddf1359: C:corelib_parts_platform/core_files_stat_mode_matches_across_tiers FAIL stream predicate numeric-lines failed]",
+          "text": "(was #2362 c2) O0, O1 and O2 call the same Prelude permission mutation and produce the same resulting Stat.mode [precut audit: failing on 9c7ddf1359: C:corelib_parts_platform/core_files_stat_mode_matches_across_tiers FAIL stream predicate numeric-lines failed]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -39947,7 +39957,7 @@
       "parentId": "c0v95zs3",
       "needsAcceptance": false,
       "created": "2026-09-27T23:27:03.232Z",
-      "updated": "2026-11-06T18:15:22.082Z",
+      "updated": "2026-11-06T18:38:52.935Z",
       "updatedBy": "Main",
       "goals": [
         "G2"
@@ -39964,13 +39974,18 @@
       "milestoneId": "e5-m11-jetpack-in-jet",
       "phase": "ready",
       "priority": "P1",
-      "plan": "## Goal\nGive `core.files` the store-grade primitives the Jetpack Jet port (#3590) needs, exactly as the seven ratified decisions define them, with the syscalls as policy-free provider leaves. Two needs that no decision covers go to ballots.\n\n## Current state\n- Core/files/files.jet: `samefile` always errors with `file identity requires provider inode/device support` (:1041-1046). `lock` is a host marker file (:759; dispatcher `jet_std_fs_lock` at crates/jet-codegen/src/Prelude/Core.jet:322). `truncate` rewrites the whole file (:1157). Byte IO is whole-file only (`read_bytes` :132, `write_bytes` :147).\n- There is no no-follow, directory-handle, fd-relative, xattr or binary-handle API. `open`/`create` are host rows (Core.jet:1080-1081), and `stat` is `jet_std_fs_stat` (:301).\n- Ratified A: D-CORE-FILEERROR1 (`IOError.AlreadyExists`/`Unsupported(IOContext)`, one mapper); D-CORE-FILESTAT1 (`FileId{device, inode}`, `links`, `owner`, `size_on_disk`, and Instant `modified`/`changed`/`created` replacing `modified_ms`/`created_ms`; `samefile` compares ids); D-CORE-FILEOPEN1 (`create(if_exists: CreateIfExists{.Replace}, mode: Int?{None}, links: LinkPolicy{.Follow})`, `open(links:)`, and FileReader `read`/`chunks`/`seek`/`stat` plus FileWriter `write`/`write_all`/`fsync`/`set_mode`/`stat`, with all handles close-on-exec, which covers need 6); D-CORE-FILERENAME1 (`rename(if_exists: RenameIfExists{.Replace})` with Refuse and Swap, and folder `fsync`); D-CORE-FILEDIR1 (an opaque `Directory` from `open_directory` with no-follow relative-name methods); D-CORE-FILELOCK1 (flock/LockFileEx `lock(path, timeout: Duration?{None})`, `try_lock`, crash release, identity re-check); D-CORE-FILEXATTR1 (three no-follow xattr calls).\n- Needs 8 (`set_len` on a handle) and 10 (SEEK_HOLE/SEEK_DATA) have no decision.\n\n## Changes\n1. Jet semantics in files.jet: the new enums (`CreateIfExists`, `LinkPolicy`, `RenameIfExists`), `FileId`, the extended `Stat`, `samefile`, the `Directory` path-part validation (reject `..`, `.`, empty and absolute parts), lock timeout and retry policy, and every error message (what, why, fix).\n2. Provider leaves only in the retained host (Prelude CoreLib Rust and jet-rt): open flags (O_EXCL, O_NOFOLLOW, O_CLOEXEC, O_DIRECTORY), openat/mkdirat/renameat2/unlinkat/fchmod/fdopendir, flock, the [l]xattr calls, statx, renameatx_np and the Windows equivalents, plus the shared errno mapper.\n3. Cutover: remove `modified_ms`/`created_ms` and the marker lock, then migrate every caller in Core/, Jetpack/, Examples/ and tests/. Register the members in Compiler/JetFoundation/Source/Registry (CoreHostSignatures.jet, CoreCallRows.jet) and regenerate with `node Tools/agent/gen-core-tables.mjs --write`.\n4. Draft two ballots, D-CORE-FILESETLEN1 (handle `set_len`) and D-CORE-FILEHOLES1 (sparse data/hole query), each with same-program alternatives.\n5. New Examples/features/io/files_store_primitives.jet with its .out, one section per decision, covering the failure cells: AlreadyExists, a final link refused, a `..` part refused, Swap with a missing name, try_lock contention, and an xattr on an unsupported filesystem.\n\n## Proof\n- `JET_GOLDEN_FILTER=io/files_store_primitives cargo test --test golden examples_compile_and_run` passes.\n- `Tools/agent/jet-env jet run --interpret Examples/features/io/files_store_primitives.jet | diff - Examples/features/expected/io/files_store_primitives.out` prints nothing.\n- `node Tools/agent/gen-core-tables.mjs --check` exits 0.\n\n## Batch\nbatch-core-files: Core/files plus its provider leaves, retested in one pass.\n\n## Dependencies\nNone for the seven ratified slices. Needs 8 (set_len) and 10 (holes) wait on the two ballots this card drafts.",
+      "plan": "## Goal\nGive `core.files` the store-grade primitives the Jetpack Jet port (#3590) needs, exactly as the seven ratified decisions define them, with the syscalls as policy-free provider leaves. Two needs that no decision covers go to ballots.\n\n## Current state\n- Core/files/files.jet: `samefile` always errors with `file identity requires provider inode/device support` (:1041-1046). `lock` is a host marker file (:759; dispatcher `jet_std_fs_lock` at crates/jet-codegen/src/Prelude/Core.jet:322). `truncate` rewrites the whole file (:1157). Byte IO is whole-file only (`read_bytes` :132, `write_bytes` :147).\n- There is no no-follow, directory-handle, fd-relative, xattr or binary-handle API. `open`/`create` are host rows (Core.jet:1080-1081), and `stat` is `jet_std_fs_stat` (:301).\n- Ratified A: D-CORE-FILEERROR1 (`IOError.AlreadyExists`/`Unsupported(IOContext)`, one mapper); D-CORE-FILESTAT1 (`FileId{device, inode}`, `links`, `owner`, `size_on_disk`, and Instant `modified`/`changed`/`created` replacing `modified_ms`/`created_ms`; `samefile` compares ids); D-CORE-FILEOPEN1 (`create(if_exists: CreateIfExists{.Replace}, mode: Int?{None}, links: LinkPolicy{.Follow})`, `open(links:)`, and FileReader `read`/`chunks`/`seek`/`stat` plus FileWriter `write`/`write_all`/`fsync`/`set_mode`/`stat`, with all handles close-on-exec, which covers need 6); D-CORE-FILERENAME1 (`rename(if_exists: RenameIfExists{.Replace})` with Refuse and Swap, and folder `fsync`); D-CORE-FILEDIR1 (an opaque `Directory` from `open_directory` with no-follow relative-name methods); D-CORE-FILELOCK1 (flock/LockFileEx `lock(path, timeout: Duration?{None})`, `try_lock`, crash release, identity re-check); D-CORE-FILEXATTR1 (three no-follow xattr calls).\n- Needs 8 (`set_len` on a handle) and 10 (SEEK_HOLE/SEEK_DATA) have no decision.\n\n## Changes\n1. Jet semantics in files.jet: the new enums (`CreateIfExists`, `LinkPolicy`, `RenameIfExists`), `FileId`, the extended `Stat`, `samefile`, the `Directory` path-part validation (reject `..`, `.`, empty and absolute parts), lock timeout and retry policy, and every error message (what, why, fix).\n2. Provider leaves only in the retained host (Prelude CoreLib Rust and jet-rt): open flags (O_EXCL, O_NOFOLLOW, O_CLOEXEC, O_DIRECTORY), openat/mkdirat/renameat2/unlinkat/fchmod/fdopendir, flock, the [l]xattr calls, statx, renameatx_np and the Windows equivalents, plus the shared errno mapper.\n3. Cutover: remove `modified_ms`/`created_ms` and the marker lock, then migrate every caller in Core/, Jetpack/, Examples/ and tests/. Register the members in Compiler/JetFoundation/Source/Registry (CoreHostSignatures.jet, CoreCallRows.jet) and regenerate with `node Tools/agent/gen-core-tables.mjs --write`.\n4. Draft two ballots, D-CORE-FILESETLEN1 (handle `set_len`) and D-CORE-FILEHOLES1 (sparse data/hole query), each with same-program alternatives.\n5. New Examples/features/io/files_store_primitives.jet with its .out, one section per decision, covering the failure cells: AlreadyExists, a final link refused, a `..` part refused, Swap with a missing name, try_lock contention, and an xattr on an unsupported filesystem.\n\n## Proof\n- `jet test Compiler --profile golden io/files_store_primitives` passes.\n- `jet test Compiler --profile golden io/files_store_primitives` passes on O0, O1 and O2.\n- `node Tools/agent/gen-core-tables.mjs --check` exits 0.\n\n## Batch\nbatch-core-files: Core/files plus its provider leaves, retested in one pass.\n\n## Dependencies\nNone for the seven ratified slices. Needs 8 (set_len) and 10 (holes) wait on the two ballots this card drafts.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -40057,7 +40072,7 @@
         },
         {
           "n": 5,
-          "text": "(was #2361 c2) AOT, default JIT, and forced interpreter marshal one shared Prelude mode value with identical observable results [precut audit: failing on 9c7ddf1359: C:corelib_parts_platform/core_files_stat_mode_matches_across_tiers FAIL stream predicate numeric-lines failed]",
+          "text": "(was #2361 c2) O0, O1 and O2 marshal one shared Prelude mode value with identical observable results [precut audit: failing on 9c7ddf1359: C:corelib_parts_platform/core_files_stat_mode_matches_across_tiers FAIL stream predicate numeric-lines failed]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -40133,7 +40148,7 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:24.292Z",
-      "updated": "2026-11-04T23:46:56.070Z",
+      "updated": "2026-11-06T18:38:56.192Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -41187,13 +41202,18 @@
       "milestoneId": "e5-m11-jetpack-in-jet",
       "phase": "ready",
       "priority": "P0",
-      "plan": "**Goal.** The HTTP client's meaning moves into Core:\n- HTTP/1.1 framing, HTTP/2 framing and HPACK\n- cookies with public-suffix rules\n- redirects, proxies, pool/per-origin limits, DNS TTL, phase timeouts\n- header/form/multipart encoding and retries\n\nIt lives in `Core/http/{client,http,h1,h2,hpack,cookie}.jet`. Rust keeps socket I/O, TLS (rustls) and gzip inflate leaves only.\n\n**Current state.**\n- `Core/http/` has `client.jet` (518 lines), `http.jet` (1227) and `server.jet` (91). There is no `h1`/`h2`/`hpack`/`cookie.jet`.\n- `crates/jet-pkg-model/src/Prelude/HTTP.rs` (5534 lines) holds the policy. The card body lists 18 semantic items with line ranges, which this plan keeps:\n  - ambient deadline :18-67, limit constants :68-78, pool :104-276\n  - client builders :283-700, cookies/PSL :704-1118\n  - H2 :1180-1660/:3915-4224, DNS cache :1746-1785, PEM :1842-1941\n  - timeouts :2088-2166, send parts :2167-2530, forbidden headers :2531-2588\n  - form/multipart :2589-2644/:5413-5534, redirects :2645-3020, proxy :3021-3078\n  - H1 write :3180-3511, head parse :3774-3914, body framing :4225-4562, HPACK :5003-5412\n- Retry divergence: `Core/http/client.jet:232` `retryable_method` retries GET/HEAD/OPTIONS/TRACE/PUT/DELETE, while Rust retries safe methods only.\n- `Core/http/http.jet` already has `valid_header_name`/`has_ctl` (:1043/:1051), `form_encode`/`query_encode` (:716-769) and `parse_response`/`content_length` (:474/:870).\n- #3663 was fixed in 6fc6f3862.\n\n**Changes (one sub-module per patch).**\n1. `h1.jet` (new): request encoding, upload body writing, the streaming head reader, and `BodyFraming` (content-length/chunked/close) readers over a byte-stream leaf.\n2. `hpack.jet` (new): static table, integer/string/Huffman codec and the decoder dynamic table. `h2.jet` (new): frame read/write, connection settings/flow control and the response body reader.\n3. `cookie.jet` (new): `CookieJar`, date parse, domain/path match, and the PSL `registrable_domain` over a generated constant table (F2).\n4. `client.jet`:\n   - pool/origin limits, the DNS TTL cache and phase timeouts\n   - redirect follow with body-replay rules, and proxy/no_proxy selection\n   - reconcile the limit constants with the existing `C_MAX_*`\n5. `http.jet`: the forbidden-request-header list and multipart encoding.\n6. Retry rule, kept as the one documented rule: RFC 9110 idempotent methods (current Jet `retryable_method`), and only when the body is replayable and no response bytes arrived. The Rust safe-only branch is deleted. Document it in the `client.jet` doc comment.\n7. PEM helpers move to `Core/net/tls.jet`, shared with #3666.\n8. Delete the ported Rust, the dead client-handle builders and `JetHTTPAmbientDeadline::push` if uncalled, plus the Jet-owned `core.http` dispatcher rows. Regenerate the tables.\n\n**Proof.**\n- The commands in add_criteria.\n- `cargo test --test http` and `cargo test --test http_dependency_audit`: pass.\n- A perf cell is required only if the matched networking battery covers the client. Rerun it and keep the Rust route on any loss.\n\n**Batch.** `batch-core-net`: Core http/net source and its Rust Prelude twin, needing one build and the net retest.\n\n**Dependencies.** None open. It shares the PEM parser with #3666, and whichever lands first owns `Core/net/tls.jet` PEM.\n",
+      "plan": "**Goal.** The HTTP client's meaning moves into Core:\n- HTTP/1.1 framing, HTTP/2 framing and HPACK\n- cookies with public-suffix rules\n- redirects, proxies, pool/per-origin limits, DNS TTL, phase timeouts\n- header/form/multipart encoding and retries\n\nIt lives in `Core/http/{client,http,h1,h2,hpack,cookie}.jet`. Rust keeps socket I/O, TLS (rustls) and gzip inflate leaves only.\n\n**Current state.**\n- `Core/http/` has `client.jet` (518 lines), `http.jet` (1227) and `server.jet` (91). There is no `h1`/`h2`/`hpack`/`cookie.jet`.\n- `crates/jet-pkg-model/src/Prelude/HTTP.rs` (5534 lines) holds the policy. The card body lists 18 semantic items with line ranges, which this plan keeps:\n  - ambient deadline :18-67, limit constants :68-78, pool :104-276\n  - client builders :283-700, cookies/PSL :704-1118\n  - H2 :1180-1660/:3915-4224, DNS cache :1746-1785, PEM :1842-1941\n  - timeouts :2088-2166, send parts :2167-2530, forbidden headers :2531-2588\n  - form/multipart :2589-2644/:5413-5534, redirects :2645-3020, proxy :3021-3078\n  - H1 write :3180-3511, head parse :3774-3914, body framing :4225-4562, HPACK :5003-5412\n- Retry divergence: `Core/http/client.jet:232` `retryable_method` retries GET/HEAD/OPTIONS/TRACE/PUT/DELETE, while Rust retries safe methods only.\n- `Core/http/http.jet` already has `valid_header_name`/`has_ctl` (:1043/:1051), `form_encode`/`query_encode` (:716-769) and `parse_response`/`content_length` (:474/:870).\n- #3663 was fixed in 6fc6f3862.\n\n**Changes (one sub-module per patch).**\n1. `h1.jet` (new): request encoding, upload body writing, the streaming head reader, and `BodyFraming` (content-length/chunked/close) readers over a byte-stream leaf.\n2. `hpack.jet` (new): static table, integer/string/Huffman codec and the decoder dynamic table. `h2.jet` (new): frame read/write, connection settings/flow control and the response body reader.\n3. `cookie.jet` (new): `CookieJar`, date parse, domain/path match, and the PSL `registrable_domain` over a generated constant table (F2).\n4. `client.jet`:\n   - pool/origin limits, the DNS TTL cache and phase timeouts\n   - redirect follow with body-replay rules, and proxy/no_proxy selection\n   - reconcile the limit constants with the existing `C_MAX_*`\n5. `http.jet`: the forbidden-request-header list and multipart encoding.\n6. Retry rule, kept as the one documented rule: RFC 9110 idempotent methods (current Jet `retryable_method`), and only when the body is replayable and no response bytes arrived. The Rust safe-only branch is deleted. Document it in the `client.jet` doc comment.\n7. PEM helpers move to `Core/net/tls.jet`, shared with #3666.\n8. Delete the ported Rust, the dead client-handle builders and `JetHTTPAmbientDeadline::push` if uncalled, plus the Jet-owned `core.http` dispatcher rows. Regenerate the tables.\n\n**Proof.**\n- The commands in add_criteria.\n- `jet test Compiler --profile cases http/` and `cargo test --test http_dependency_audit`: pass.\n- A perf cell is required only if the matched networking battery covers the client. Rerun it and keep the Rust route on any loss.\n\n**Batch.** `batch-core-net`: Core http/net source and its Rust Prelude twin, needing one build and the net retest.\n\n**Dependencies.** None open. It shares the PEM parser with #3666, and whichever lands first owns `Core/net/tls.jet` PEM.\n",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-10-31",
           "by": "Main",
@@ -41277,7 +41297,7 @@
         },
         {
           "n": 2,
-          "text": "Every route (AOT, default jet run/JIT, interpreter, web where applicable) calls the one Jet meaning, proven by a golden example with identical output on each applicable tier.",
+          "text": "Every route (O0, O1, O2 and web where applicable) calls the one Jet meaning, proven by a golden example with identical output on each applicable tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -41295,7 +41315,7 @@
         },
         {
           "n": 4,
-          "text": "`cargo test --test http_client_law` (all 40 tests, e.g. `pooled_h1_reuses_only_after_drain_and_decodes_gzip_natively`, `h1_rejects_request_target_controls_before_connecting`, `session_request_rejects_invalid_proxy_before_transport`) and `cargo test --test http_i9` pass after `crates/jet-pkg-model/src/Prelude/HTTP.rs` shrinks to socket/TLS/gzip leaves. `JET_GOLDEN_FILTER=net/http_client cargo test --test golden examples_compile_and_run` passes and shows a PUT retry and a POST non-retry under the one documented rule.",
+          "text": "`jet test Compiler --profile cases http_client_law/` (all 40 tests, e.g. `pooled_h1_reuses_only_after_drain_and_decodes_gzip_natively`, `h1_rejects_request_target_controls_before_connecting`, `session_request_rejects_invalid_proxy_before_transport`) and `jet test Compiler --profile cases http_i9/` pass after `crates/jet-pkg-model/src/Prelude/HTTP.rs` shrinks to socket/TLS/gzip leaves. `jet test Compiler --profile golden net/http_client` passes and shows a PUT retry and a POST non-retry under the one documented rule.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -41412,7 +41432,7 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-28T11:08:58.002Z",
-      "updated": "2026-11-05T00:30:17.517Z",
+      "updated": "2026-11-06T18:38:59.238Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -41761,13 +41781,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "**Goal**\nA Jet-native local-first sync engine at Convex/Linear grade (owner note 2026-09-28: \"a jet-native tool that functions like convexdb as an excellent, world class sync engine\"). It covers client cache and partial bootstrap, local reads and writes as transactions, server accept or reject with rollback, socket fan-out, an offline queue and a local-only mode. Query, mutation and action are compiler-checked effect classes.\n\n**Current state**\n- Ratified mechanism: D-LIVEQUERY1 (footprint-tracked live queries over `-[DB.Read]>`, `#Transact` invalidation, `Signal<T>` push), D-EFFDBREAD1, D-SYNC1 (CRDT values), D-DBPOLICY1, D-DX-QUERY1 (optimistic mutation plus rollback), D-DX-SERVERFN1 and D-QUERY-LIVE1.\n- Code: Compiler/JetSema/Source/Sema/Calls/Database.jet:31-41 tags `query`/`query_one`/`live` as `DB.Read` and `execute` as `DB.Write`. Effect checks are in Compiler/JetSema/Source/Sema/Effects/Checks.jet. Core/sync/sync.jet exists. Core/app is string-keyed, and the D-LIVEQUERY1 example does not compile (#3700). app and core.web duplicate the surface (#3701).\n- Harvest: Linear (4:12-8:26 of https://youtu.be/pRf8_40EDtM): one bootstrap, then local reads and writes, identical local and remote change paths, accept or reject with rollback, lazy partial bootstrap, and sync-off prototyping. Convex runtimes: deterministic queries and mutations (seeded rng, frozen clock); only actions do non-deterministic I/O.\n\n**Changes**\n1. After #3700 and #3701, write Docs/proposals/sync-engine.md covering cache and bootstrap, transaction upload, accept/reject, rollback, socket fan-out, offline queue and local-only mode, each tied to the decisions above (criterion 1).\n2. Effect classes (no new syntax): a query is a fn whose inferred row ⊆ {DB.Read}; a mutation is a `#Transact` fn with no Net, Exec or irreversible effect; an action is anything else. Add the checks in Effects/Checks.jet, register two diagnostics in Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet with UI fixtures tests/ui/sync_query_writes.jet and sync_mutation_calls_net.jet, and mirror them in the Rust sema only as far as the shipped binary needs.\n3. Ballots before implementing each: frozen clock and seeded rng inside queries and mutations vs explicit Clock/Rng injection (D-DET1); the concurrent-mutation conflict policy (serializable retry vs CRDT merge); client persistence defaults.\n4. Add Examples/features/web/sync_two_clients plus its golden: two clients, one edits offline, both reconnect and see each other's change, and the server rejects one write, which rolls back.\n5. Add a gauntlet cell under Tools/gauntlet against Convex and one other engine before any battery claim, under the strict performance gate.\n\n**Proof**\n- `JET_UI_FILTER=tests/ui/sync_ Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots`: both snapshots match.\n- `JET_GOLDEN_FILTER=web/sync_two_clients Tools/agent/jet-env cargo test --test golden examples_compile_and_run`: passes on AOT and default run. `Tools/agent/jet-env cargo test --test web_build -- sync_two_clients`: passes on the web tier.\n\n**Batch**\nbatch-jetc-sema: the first buildable slice is the effect-class checks. The proposal and ballots come before it.\n\n**Dependencies**\n#3700 (live-query example and ICE) and #3701 (app/web owner ballot).",
+      "plan": "**Goal**\nA Jet-native local-first sync engine at Convex/Linear grade (owner note 2026-09-28: \"a jet-native tool that functions like convexdb as an excellent, world class sync engine\"). It covers client cache and partial bootstrap, local reads and writes as transactions, server accept or reject with rollback, socket fan-out, an offline queue and a local-only mode. Query, mutation and action are compiler-checked effect classes.\n\n**Current state**\n- Ratified mechanism: D-LIVEQUERY1 (footprint-tracked live queries over `-[DB.Read]>`, `#Transact` invalidation, `Signal<T>` push), D-EFFDBREAD1, D-SYNC1 (CRDT values), D-DBPOLICY1, D-DX-QUERY1 (optimistic mutation plus rollback), D-DX-SERVERFN1 and D-QUERY-LIVE1.\n- Code: Compiler/JetSema/Source/Sema/Calls/Database.jet:31-41 tags `query`/`query_one`/`live` as `DB.Read` and `execute` as `DB.Write`. Effect checks are in Compiler/JetSema/Source/Sema/Effects/Checks.jet. Core/sync/sync.jet exists. Core/app is string-keyed, and the D-LIVEQUERY1 example does not compile (#3700). app and core.web duplicate the surface (#3701).\n- Harvest: Linear (4:12-8:26 of https://youtu.be/pRf8_40EDtM): one bootstrap, then local reads and writes, identical local and remote change paths, accept or reject with rollback, lazy partial bootstrap, and sync-off prototyping. Convex runtimes: deterministic queries and mutations (seeded rng, frozen clock); only actions do non-deterministic I/O.\n\n**Changes**\n1. After #3700 and #3701, write Docs/proposals/sync-engine.md covering cache and bootstrap, transaction upload, accept/reject, rollback, socket fan-out, offline queue and local-only mode, each tied to the decisions above (criterion 1).\n2. Effect classes (no new syntax): a query is a fn whose inferred row ⊆ {DB.Read}; a mutation is a `#Transact` fn with no Net, Exec or irreversible effect; an action is anything else. Add the checks in Effects/Checks.jet, register two diagnostics in Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet with UI fixtures tests/ui/sync_query_writes.jet and sync_mutation_calls_net.jet, and mirror them in the Rust sema only as far as the shipped binary needs.\n3. Ballots before implementing each: frozen clock and seeded rng inside queries and mutations vs explicit Clock/Rng injection (D-DET1); the concurrent-mutation conflict policy (serializable retry vs CRDT merge); client persistence defaults.\n4. Add Examples/features/web/sync_two_clients plus its golden: two clients, one edits offline, both reconnect and see each other's change, and the server rejects one write, which rolls back.\n5. Add a gauntlet cell under Tools/gauntlet against Convex and one other engine before any battery claim, under the strict performance gate.\n\n**Proof**\n- `jet test Compiler --profile ui sync_`: both snapshots match.\n- `jet test Compiler --profile golden web/sync_two_clients`: passes on O0, O1 and O2. `Tools/agent/jet-env cargo test --test web_build -- sync_two_clients`: passes on the web tier.\n\n**Batch**\nbatch-jetc-sema: the first buildable slice is the effect-class checks. The proposal and ballots come before it.\n\n**Dependencies**\n#3700 (live-query example and ICE) and #3701 (app/web owner ballot).",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -41834,7 +41859,7 @@
         },
         {
           "n": 4,
-          "text": "A two-client example (edit offline, reconnect, see the other client's change, server rejects one write and the client rolls back) matches its golden on AOT, default jet run, and web.",
+          "text": "A two-client example (edit offline, reconnect, see the other client's change, server rejects one write and the client rolls back) matches its golden on O0, O1, O2 and web where applicable.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -41843,7 +41868,7 @@
         },
         {
           "n": 5,
-          "text": "[retarget] Jet compiler proof (Rust freeze 2026-10-01): UI fixture tests/ui/sync_ pass when compiled by the Jet compiler (Compiler/ pipeline, for example the #670 compiler-diff candidate run or jetc0): goldens print their expected output on AOT and default run, UI fixtures match their snapshots; no Rust compiler change (a Core-library-only change may also be shown on the frozen Rust compiler as interim evidence). Replaces the Rust-compiler proof: \"Query and mutation effect classes are checked: `JET_UI_FILTER=tests/ui/sync_ Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots` matches the snapshots (a query that writes is rejected, and a mutation that reaches `Net` is rejected, each with a registered code and what/why/fix text).\"",
+          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): Query and mutation effect classes are checked: `jet test Compiler --profile ui sync_` matches the snapshots (a query that writes is rejected, and a mutation that reaches `Net` is rejected, each with a registered code and what/why/fix text). Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -41852,7 +41877,7 @@
         },
         {
           "n": 6,
-          "text": "[retarget] Jet compiler proof (Rust freeze 2026-10-01): golden web/sync_two_clients pass when compiled by the Jet compiler (Compiler/ pipeline, for example the #670 compiler-diff candidate run or jetc0): goldens print their expected output on AOT and default run, UI fixtures match their snapshots; no Rust compiler change (a Core-library-only change may also be shown on the frozen Rust compiler as interim evidence). Replaces the Rust-compiler proof: \"The two-client example passes on every applicable tier: `JET_GOLDEN_FILTER=web/sync_two_clients Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes, and the web tier is proved by `Tools/agent/jet-env cargo test --test web_build -- sync_two_clients`.\"",
+          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): a Jet test or case row proves what the retired Rust test checked: \"The two-client example passes on every applicable tier: `JET_GOLDEN_FILTER=web/sync_two_clients Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes, and the web tier is proved by `Tools/agent/jet-env cargo test --test web_build -- sync_two_clients`.\". Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -41945,7 +41970,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-04T23:48:04.368Z",
+      "updated": "2026-11-06T18:39:02.696Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -43144,6 +43169,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 3 criteria from archived #2772, #2970: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -43256,7 +43286,7 @@
         },
         {
           "n": 7,
-          "text": "(was #2970 c1) Implementation-only closure: typed, versioned model packages use one canonical shared runtime with signature/artifact policy, provider execution, task cancellation and native/JIT/interpreter/Web caller adapters. Original runtime, tier, golden and measurement requirements remain in #2919 [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2970 c1) Implementation-only closure: typed, versioned model packages use one canonical shared runtime with signature/artifact policy, provider execution, task cancellation and native and Web caller adapters. Original runtime, tier, golden and measurement requirements remain in #2919 [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -43271,7 +43301,7 @@
       "parentId": "c00dtttx",
       "needsAcceptance": false,
       "created": "2026-09-30T16:14:24.984Z",
-      "updated": "2026-11-04T23:49:25.360Z",
+      "updated": "2026-11-06T18:39:06.362Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -44381,6 +44411,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); D-EXEC2=A (native code generator only; Cranelift and MIREval are retired)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 1 criteria from archived #28: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -44417,7 +44452,7 @@
         },
         {
           "n": 2,
-          "text": "One binary picks the AVX2 body on an AVX2 machine and the baseline body elsewhere, with identical output, proven on AOT and jet run.",
+          "text": "One binary picks the AVX2 body on an AVX2 machine and the baseline body elsewhere, with identical output, proven on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -44426,7 +44461,7 @@
         },
         {
           "n": 3,
-          "text": "[#3042] The complete `#FFI(asm)` contract lowers through one sema-owned descriptor: named placeholders, operand classes, clobber_abi, the option table, target and CPU rows. #3017 short form is unchanged. The lowlevel/inline_asm_wide_mul golden returns `Product128{low: 21, high: 0}` on every level, and wrong targets or missing features reject. tests/ui/asm_ snapshots. Syntax registry and grammars are updated. The Cranelift and interpreter rows in the original criteria are void under D-EXEC1.",
+          "text": "[#3042] The complete `#FFI(asm)` contract lowers through one sema-owned descriptor: named placeholders, operand classes, clobber_abi, the option table, target and CPU rows. #3017 short form is unchanged. The lowlevel/inline_asm_wide_mul golden returns `Product128{low: 21, high: 0}` on every level, and wrong targets or missing features reject. tests/ui/asm_ snapshots. Syntax registry and grammars are updated. Only the native tiers O0, O1 and O2 are in scope (D-EXEC1, D-EXEC2=A).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -44477,7 +44512,7 @@
       "parentId": "c0969ekj",
       "needsAcceptance": false,
       "created": "2026-10-02T01:15:08.474Z",
-      "updated": "2026-11-04T23:50:39.754Z",
+      "updated": "2026-11-06T18:39:09.762Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -44857,6 +44892,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 14 criteria from archived #696, #697, #1049, #1312, #1329, #1330, #1660, #3910: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -45122,7 +45162,7 @@
         },
         {
           "n": 19,
-          "text": "(was #1312 c1) resp/req/body.json, server.json, static_files, cors, and cors_policy lower on JIT/dev and interpreter with the same semantics as AOT [precut audit: failing on 9c7ddf1359: C:http_i9/http_web_defaults_forced_deopt_uses_prelude_ambient KNOWN-FAILING #4260 no doc decides how a printed HTTP error reads: Jet prints its message (`invalid HTTP framing`), the Rust-era golden its variant (`InvalidFra (known-failing #4260:…]",
+          "text": "(was #1312 c1) resp/req/body.json, server.json, static_files, cors, and cors_policy lower on O0, O1 and O2 with the same semantics [precut audit: failing on 9c7ddf1359: C:http_i9/http_web_defaults_forced_deopt_uses_prelude_ambient KNOWN-FAILING #4260 no doc decides how a printed HTTP error reads: Jet prints its message (`invalid HTTP framing`), the Rust-era golden its variant (`InvalidFra (known-failing #4260:…]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -45212,7 +45252,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-02T16:50:50.627Z",
-      "updated": "2026-11-05T15:30:36.243Z",
+      "updated": "2026-11-06T18:39:12.844Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -48560,6 +48600,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 4 criteria from archived #1628: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -48640,7 +48685,7 @@
         },
         {
           "n": 4,
-          "text": "(was #1628 c1) One datatree_kind remains in the tree, in crates/jet-codegen/src/Prelude/**; the comptime, TIR-eval and JIT copies are deleted [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #1628 c1) One datatree_kind remains, in the Jet Prelude; no compile-time, IR-evaluation or tier-specific copy exists [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -48658,7 +48703,7 @@
         },
         {
           "n": 6,
-          "text": "(was #1628 c3) A test decodes a Bytes payload and proves the same text and behavior on AOT, jet run (JIT) and the interpreter [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #1628 c3) A test decodes a Bytes payload and proves the same text and behavior on O0, O1 and O2 [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -48686,7 +48731,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-02T18:52:06.045Z",
-      "updated": "2026-11-04T23:48:46.589Z",
+      "updated": "2026-11-06T18:39:15.860Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -49986,6 +50031,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 7 criteria from archived #645, #3915, #4198: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -50076,7 +50126,7 @@
         },
         {
           "n": 9,
-          "text": "(was #645 c5) Every policy/site/bypass failure has Jet-owned registered diagnostics and UI snapshots; examples, AOT/dev parity, grammars, docs, independent safety review, and full verification pass [precut audit: failing on 9c7ddf1359: U:unsafe_obligation_missing FAIL snapshot mismatch: tests/ui/unsafe_obligation_missing.stderr; U:unsafe_obligation_no_bleed FAIL snapshot mismatch: tests/ui/unsafe_obligation_no_bleed.stderr]",
+          "text": "(was #645 c5) Every policy/site/bypass failure has Jet-owned registered diagnostics and UI snapshots; examples, O0, O1 and O2 parity, grammars, docs, independent safety review, and full verification pass [precut audit: failing on 9c7ddf1359: U:unsafe_obligation_missing FAIL snapshot mismatch: tests/ui/unsafe_obligation_missing.stderr; U:unsafe_obligation_no_bleed FAIL snapshot mismatch: tests/ui/unsafe_obligation_no_bleed.stderr]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -50109,7 +50159,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-10-04T14:14:26.629Z",
-      "updated": "2026-11-04T23:47:14.033Z",
+      "updated": "2026-11-06T18:39:18.727Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -50515,6 +50565,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c76 follow-up dev ce5343187f (GoldenRoots3): router handlers Net-only (router-owned handler list; HTTPMux __select split into __pick + handle). s1 7c9a5fd1a9+patch: cases http_router_dispatch and http_router_named_catchall_and_encoded_marker_literals PASS, KF rows removed; golden web/ o0/o1/o2 79/0; golden net/ 136/0; ui http_route 8 PASS; cases http 27 FAIL identical to base (0 regressions)"
         },
         {
@@ -50809,8 +50864,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "GoldenLower was deleted (c357547df1); goldens now run through Tools/testkit in fresh processes.",
-          "at": "2026-11-04T19:42:49.373Z",
-          "closure": "obsolete"
+          "at": "2026-11-04T19:42:49.373Z"
         },
         {
           "n": 4,
@@ -50828,8 +50882,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "The parser-contract harness was deleted (23872f7ab7), so its assembly gaps no longer apply.",
-          "at": "2026-11-04T19:42:49.865Z",
-          "closure": "obsolete"
+          "at": "2026-11-04T19:42:49.865Z"
         },
         {
           "n": 6,
@@ -51216,8 +51269,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Duplicate of #3955 c3 (compute_autodiff golden). Research3 census of goals 1-2 (2026-11-04, tree 3ba4a57a78, jet 9942f58d47; $JET_SCRATCH_ROOT/lanes/Main/briefs/g14-g15-census.tsv)",
-          "at": "2026-11-04T22:18:36.732Z",
-          "closure": "obsolete"
+          "at": "2026-11-04T22:18:36.732Z"
         },
         {
           "n": 49,
@@ -51752,7 +51804,7 @@
         },
         {
           "n": 108,
-          "text": "(was #2898 c4) A test fails the compiler build when a TIR variant or Core row is added without all applicable back-end cells; `aot_broken` and `interpreter_refused` are no longer accepted gate categories, or the card log records the owner's decision to keep them until D-TIER-ONEIR1 lands [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2898 c4) A test fails the compiler build when a TIR variant or Core row is added without all applicable back-end cells; `aot_broken` and `interpreter_refused` are not accepted gate categories (no interpreter tier exists, D-EXEC2=A) [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -51768,8 +51820,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-05T10:55:41.702Z",
-      "updated": "2026-11-06T15:20:09.014Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-06T18:39:21.503Z",
+      "updatedBy": "Main",
       "goals": [
         "G1",
         "G2"
@@ -51816,7 +51868,7 @@
         },
         {
           "n": 2,
-          "text": "(was #1023 c2, #1025 c2, #1027 c2) Clean and incremental JIT and optimized AOT meet declared latency, memory, output-parity, and variance budgets with pinned stage and machine identity [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #1023 c2, #1025 c2, #1027 c2) Clean and incremental O0, O1 and O2 meet declared latency, memory, output-parity, and variance budgets with pinned stage and machine identity [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -51876,7 +51928,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-05T11:05:54.255Z",
-      "updated": "2026-11-04T23:47:43.842Z",
+      "updated": "2026-11-06T18:39:23.641Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -182992,6 +183044,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T18:39:23.641Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00sxc6r",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:39:21.503Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0max8v8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:39:20.647Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0max8v8",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:39:18.727Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08rdp62",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:39:17.886Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08rdp62",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:39:15.860Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07rizte",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:39:14.830Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07rizte",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:39:12.845Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xnvmrf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:39:11.967Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xnvmrf",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:39:09.762Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l389gj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:39:08.668Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l389gj",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:39:06.363Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0n1stxi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:39:05.376Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0n1stxi",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:39:02.697Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ttcd0k",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:39:01.730Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ttcd0k",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:59.239Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c047t3lg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:58.318Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c047t3lg",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:56.192Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0iiv9ft",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:55.042Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0iiv9ft",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:52.935Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uwol3w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:52.036Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uwol3w",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:38:47.603Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c025w7rd",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:46.691Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c025w7rd",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:38:43.765Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qus24o",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:38:42.898Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qus24o",
+      "note": "criteria,plan"
+    },
     {
       "at": "2026-11-06T18:38:40.345Z",
       "by": "Main",
