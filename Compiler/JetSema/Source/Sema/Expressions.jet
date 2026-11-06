@@ -468,17 +468,20 @@ fn sema_expr_numeric_conversion(value: TExpr, target: Type, span: Span, line: In
 }
 
 fn sema_expr_numeric_literal_conversion(value: TExpr, target: Type, span: Span, line: Int, diagnostics: &[Diagnostic]) -> TExpr? {
-    literal :: sema_expr_integer_literal_value(value)
-    if literal != None && (target == Type.Float || target == Type.Float32) {
-        limit := if target == Type.Float32 -> 1 << 24 else -> 1 << 53
-        literal_value := literal
-        lower := -limit
-        if literal_value < lower || literal_value > limit {
-            &diagnostics.push(sema_error("E1003", span, "{literal_value} does not fit exactly in {type_name(target)}", "{type_name(target)} holds every whole number only from {lower} through {limit}", "use a whole-number type, or write a value from {lower} through {limit}"))
-            return None
-        }
-    }
+    if !sema_expr_float_literal_fits(value, target, span, &diagnostics) -> return None
     sema_expr_numeric_conversion(value, target, span, line)
+}
+
+// E1003: a whole-number literal crossing into Float or F32 must have an exact
+// value there, for `Float{n}` and `Float.from_int(n)` alike.
+fn sema_expr_float_literal_fits(value: TExpr, target: Type, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    literal :: sema_expr_integer_literal_value(value) ?? return true
+    if target != Type.Float && target != Type.Float32 -> return true
+    limit :: if target == Type.Float32 -> 1 << 24 else -> 1 << 53
+    lower :: -limit
+    if literal >= lower && literal <= limit -> return true
+    &diagnostics.push(sema_error("E1003", span, "{literal} does not fit exactly in {type_name(target)}", "{type_name(target)} holds every whole number only from {lower} through {limit}", "use a whole-number type, or write a value from {lower} through {limit}"))
+    false
 }
 
 // The exact number a type is, by identity: the root name a literal carries
@@ -1786,11 +1789,11 @@ fn sema_expr_unit_conversion_method(fact: SemaRegistrationUnitFact) -> String Ne
 }
 fn sema_expr_unit_concrete_value(value: TExpr, context: SemaCheckContext) -> Float? {
     if value.kind == {
-        .IntLit(number, _) -> return Val(Float.from_int(number))
+        .IntLit(number, _) -> return Val(approx(number))
         .Flat(index) -> return sema_expr_unit_concrete_node(index, context)
         .CtLit(comptime_value) -> {
             if comptime_value == {
-                .Int(number) -> return Val(Float.from_int(number))
+                .Int(number) -> return Val(approx(number))
                 .Float(number, _) -> return Val(number)
                 else -> {}
             }
@@ -1815,7 +1818,7 @@ fn sema_expr_unit_concrete_value(value: TExpr, context: SemaCheckContext) -> Flo
 fn sema_expr_unit_concrete_node(index: Int, context: SemaCheckContext) -> Float? {
     if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == {
         .FloatLit(number) -> return Val(number)
-        .IntLit(number, _) -> return Val(Float.from_int(number))
+        .IntLit(number, _) -> return Val(approx(number))
         .Unary(op, operand) -> {
             if op == TUnaryOp.Neg {
                 concrete :: sema_expr_unit_concrete_node(operand, context) ?? return None
@@ -1901,8 +1904,8 @@ fn sema_expr_unit_implicit_conversion(value: TExpr, required: Type, environment:
 }
 
 fn sema_expr_unit_ratio_is_finite(value: UnitRatio) -> Bool {
-    numerator := Float.from_int(value.numerator)
-    denominator := Float.from_int(value.denominator)
+    numerator := approx(value.numerator)
+    denominator := approx(value.denominator)
     math.is_finite(numerator) && math.is_finite(denominator) && denominator != 0.0
 }
 
@@ -1952,8 +1955,8 @@ fn sema_expr_unit_measured_relative_uncertainty(fact: SemaRegistrationUnitFact) 
     if fact.scale_provenance == {
         .Measured(_, standard_uncertainty, _) -> {
             uncertainty :: Float.parse(standard_uncertainty) ?? return None
-            numerator := Float.from_int(fact.scale.numerator)
-            denominator := Float.from_int(fact.scale.denominator)
+            numerator := approx(fact.scale.numerator)
+            denominator := approx(fact.scale.denominator)
             scale := math.fabs(numerator / denominator)
             if !math.is_finite(scale) || scale <= 0.0 -> return None
             return Val(math.fabs(uncertainty) / scale)

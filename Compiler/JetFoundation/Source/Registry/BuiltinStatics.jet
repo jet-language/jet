@@ -232,6 +232,15 @@ fn builtin_numeric_host_kind(kind: BuiltinNumericKind) -> Int Never! {
 fn builtin_numeric_operation(source: BuiltinNumericKind, target: BuiltinNumericKind) -> TNumericOp Never! {
     if !target.integer {
         if target.ty == Type.Float32 && source.ty == Type.Float -> return TNumericOp.FloatNarrow
+        // A whole number crosses into Float or F32 by the one checked rule
+        // `T{n}` follows (D-NUMWIDEN-CROSS1): it stops with E3010 when it has
+        // no exact value there, and `approx(n)` is the rounding spelling. A
+        // fixed source narrower than the target's precision is always exact.
+        if source.integer {
+            precision :: if target.ty == Type.Float32 -> 24 else -> 53
+            if source.fixed && source.bits <= precision -> return TNumericOp.CastAs{dst_rust: target.rust}
+            return TNumericOp.CheckedIntToFloat{source_signed: source.signed, target_f32: target.ty == Type.Float32, line: 0}
+        }
         return TNumericOp.CastAs{dst_rust: target.rust}
     }
     // `U64` rides an i64 word; `Int.from_u64` stays on the exact CastAs adapter.

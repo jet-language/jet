@@ -585,7 +585,8 @@ fn sema_call_builtin_static_call_arg(value: TExpr, argument: CallArg) -> TCallAr
 }
 
 // CoreCall rows lower through the registered Core route in the caller.
-fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args: [CallArg], bindings: [SemaInferenceBinding], span: Span, context: &SemaCheckContext) -> TExprKind? {
+// `line` is the call's source line, which a checked crossing stops at.
+fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args: [CallArg], bindings: [SemaInferenceBinding], span: Span, line: Int, context: &SemaCheckContext) -> TExprKind? {
     rest := [TExpr]{}
     loop index in 0..<values.len() {
         if index > 0 -> &rest.push(values[index])
@@ -608,8 +609,7 @@ fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args
         }
         .DurationNew(unit_name) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: THandleOp.DurationNew{unit: unit_name, float: values[0].ty == Type.Float || values[0].ty == Type.Float32}, args: [TExpr]{}})
         .EmptyMap -> Val(TExprKind.MapLit{entries: [TMapEntry]{}})
-        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.NumericMethod owns this one
-        .Numeric(operation) -> Val(TExprKind.NumericMethod{receiver: values[0], operation: operation.copy()})
+        .Numeric(operation) -> Val(TExprKind.NumericMethod{receiver: values[0], operation: sema_call_numeric_at_line(operation, line)})
         .Precise(precise_type, function) -> Val(TExprKind.PreciseBuiltin{type_name: precise_type, function: function, args: values})
         .CoreCall(_, _) -> None
     }
@@ -723,7 +723,10 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         return SemaMethodSpecialCheck{handled: true, value: sema_call_core_tree(record, values, span, [Type]{}, widen_to_vec, result, fallibility, expected, environment, program, &diagnostics)}
     }
 
-    kind :: sema_call_builtin_static_lowered(row, values, ownership_args, bindings, span, &context) ?? {
+    if row.lowering == .Numeric(operation) && operation == .CheckedIntToFloat(_, _, _) && values.len() == 1 {
+        if !sema_expr_float_literal_fits(values[0], result, values[0].span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    kind :: sema_call_builtin_static_lowered(row, values, ownership_args, bindings, span, sema_source_line_at(environment.source_segments, span) ?? 0, &context) ?? {
         &diagnostics.push(sema_error("E0104", span, "static method call `{callee}` could not be lowered", "the built-in static row has no checked-tree construction", "use a registered built-in static method"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -1104,10 +1107,17 @@ fn sema_call_distinct_numeric_row(base: Type, method: String) -> BuiltinStaticRo
     None
 }
 
-fn sema_call_distinct_numeric_operation(row: BuiltinStaticRow) -> TNumericOp? {
-    // copy: `operation` is a payload of read parameter `row`, which keeps the original; the Val carrier owns this one
-    if row.lowering == .Numeric(operation) -> return Val(operation.copy())
+fn sema_call_distinct_numeric_operation(row: BuiltinStaticRow, line: Int) -> TNumericOp? {
+    if row.lowering == .Numeric(operation) -> return Val(sema_call_numeric_at_line(operation, line))
     None
+}
+
+// A registry numeric operation placed at its call: a checked Int-to-Float
+// crossing reports the call's line when it stops.
+fn sema_call_numeric_at_line(operation: TNumericOp, line: Int) -> TNumericOp Never! {
+    if operation == .CheckedIntToFloat(source_signed, target_f32, _) -> return TNumericOp.CheckedIntToFloat{source_signed: source_signed, target_f32: target_f32, line: line}
+    // copy: `operation` is a payload of a read registry row, which keeps the original; the returned operation owns this one
+    operation.copy()
 }
 
 // A distinct over a non-numeric base is built by its base-named conversion
@@ -1155,7 +1165,7 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
         constructed :: sema_tree_node(success, TExprKind.DistinctCtor{argument: argument}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(constructed, expected, environment, program, context, &diagnostics)}
     }
-    operation :: sema_call_distinct_numeric_operation(row) ?? return sema_call_distinct_conversion_failed()
+    operation :: sema_call_distinct_numeric_operation(row, sema_source_line_at(environment.source_segments, span) ?? 0) ?? return sema_call_distinct_conversion_failed()
     // Rust `converted_literal`: an integer literal that fits the base is
     // known at compile time, so a range type checks it here.
     literal_in_range := false
@@ -1173,7 +1183,7 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
         // A float literal past the bounds can never convert either; its
         // conversion stays fallible, as any float source's does.
         if args[0].expr == .Float(number, _, _, raw, _) {
-            if sema_expr_is_integer(facts.base) && (number < Float.from_int(bounds.lo) || number > Float.from_int(bounds.hi)) {
+            if sema_expr_is_integer(facts.base) && (number < approx(bounds.lo) || number > approx(bounds.hi)) {
                 // A whole-number literal reads as the integer it converts to.
                 text :: raw ?? "{number}"
                 written :: if text.ends_with(".0") -> text.slice(0, text.len() - 2) else -> text

@@ -389,7 +389,7 @@ fn sql_aggregate_value(group: [U64], function: JetSQLAggregate, field: String?, 
             if value == {
                 .Int(integer) -> {
                     integer_sum = sum_add(integer_sum, integer)
-                    float_sum += Float.from_i64(integer)
+                    float_sum += approx(integer)
                 }
                 .Float(real) -> {
                     all_int = false
@@ -419,7 +419,7 @@ fn sql_aggregate_value(group: [U64], function: JetSQLAggregate, field: String?, 
             }
             return .Float(float_sum)
         }
-        .Avg -> return .Float(float_sum / Float.from_i64(count))
+        .Avg -> return .Float(float_sum / approx(count))
         .Min -> selected ?? JetSQLValue.Null
         .Max -> selected ?? JetSQLValue.Null
         .Count -> return .Int(count)
@@ -544,7 +544,7 @@ priv module internal {
     }
     fn value_number(value: JetSQLValue) -> Float? Never! {
         if value == {
-            .Int(number) -> Val(Float.from_i64(number))
+            .Int(number) -> Val(approx(number))
             .Float(number) -> Val(number)
             else -> None
         }
