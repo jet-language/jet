@@ -972,8 +972,9 @@ fn sema_expression_index_mismatch(base_ty: Type, offered: Type, span: Span) -> D
     None
 }
 
-// Whether the nominal `ty` has an impl of the index hook trait `trait_name`
-// (`Index` or `IndexMut`).
+// Whether the nominal `ty` has an impl of the prelude index hook trait
+// `trait_name` (`Index` or `IndexMut`). A user trait that shares the name is
+// not the hook, so its impl never routes `[ ]`.
 fn sema_expression_index_hook(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, trait_name: String) -> Bool {
     if ty == {
         .Named(_) | .Apply(_, _) -> {}
@@ -984,7 +985,9 @@ fn sema_expression_index_hook(environment: SemaScopeEnvironment, program: SemaPr
     identity :: graph.modules[row.module_index].nominals[row.row].identity_key
     loop module_row in graph.modules {
         loop implementation in module_row.impls {
-            if implementation.trait_name == (Val(trait_name)) && implementation.target_identity_key == identity -> return true
+            if implementation.trait_name != (Val(trait_name)) || implementation.target_identity_key != identity -> next
+            if implementation.trait_symbol != None || sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name) != None -> next
+            return true
         }
     }
     false
