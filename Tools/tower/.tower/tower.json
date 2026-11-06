@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6610,
-    "rev": 93575,
+    "rev": 93588,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -61428,7 +61428,7 @@
       "body": "Owner directive 2026-10-20: everything done in the repo should be doable in Jet (Jet is a scripting language); non-Jet scripts are a gap.\n\nInventory at dev 2026-10-20 (git ls-files, excluding the Rust implementation, which goes with the Rust removal): .mjs 339 Tools + 166 Compiler + 92 tests; .sh 71 Tools + 30 tests; .py 57 Tools + 32 tests; .js 14 Tools + 13 tests + 12 Compiler; .ts 12 tests. C sources (190 Compiler, 43 Tools, 29 tests, 15 Examples) are FFI/runtime fixtures, not scripting; review separately.\n\nPlan:\n1. Classify every script: (a) dies with the Rust removal (Rust->Jet generators, parity checkers, cargo wrappers); (b) gates and harnesses the chain and receipts use (native-compiler.mjs assembly, fixture runners, preflight, phase-diff, census); (c) generators of Jet tables; (d) one-off migrations and codemods (delete); (e) perf/agent tooling.\n2. Delete (a) and (d) during the Rust removal and greenfield cleanup.\n3. Port (b) and (c) to Jet, gated by #5068 (multi-package jet build/test); assembly disappears once jet build Compiler/ works.\n4. Every capability a port needs that Jet lacks (process spawn/stream, JSON, regex, fs walk, hashing, parallel jobs) becomes a gap card and gets fixed in Jet, not worked around.\nMain scratch tooling ($JET_STATE_ROOT/scratch/Main/*.mjs, *.sh: chain, census, preflight, fmt-verify) is included in the same port.",
       "kind": "task",
       "track": "sidequest",
-      "epoch": "e11",
+      "epoch": "e17",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -61439,6 +61439,16 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06 (later the same day): scripting performance and the full removal of non-Jet languages are G4 work, not G1/G2. #5072 returns to G4/e17 with criteria c12-c17 (pairing guard, AGENTS line, port bars, helper and runner pairs, Core API gaps from token losses) as its plan. Until then G1/G2 agents only prefer Jet for new tooling where practical; there is no guard and no pairing obligation."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06 refinement: writing a script first in another language is allowed when its Jet twin follows; the pair is a gauntlet benchmark (capability, speed, ease of reasoning, terseness through library APIs that cover the common cases). Reference = the original language only. A port blocks until Jet wins every bar. Ease of reasoning = reviewer checklist plus measured proxies. c12-c15 reworded accordingly."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -61602,7 +61612,7 @@
         },
         {
           "n": 12,
-          "text": "No new non-Jet script lands: Tools/agent/LaneCheck.jet refuses a commit that adds a .mjs, .js, .cjs, .ts, .sh, .bash or .py file, or an extensionless file with a non-Jet shebang. The only exceptions are browser-executed JS and Nix/flake files (owner 2026-11-06). A planted script add is refused with a message naming the file, and a planted browser asset passes.",
+          "text": "Pairing guard: Tools/agent/LaneCheck.jet refuses a commit that adds a .mjs, .js, .cjs, .ts, .sh, .bash or .py file (or an extensionless file with a non-Jet shebang) unless a gauntlet entry under Tools/gauntlet/entries/ names that script as its original and holds its Jet twin, the shared fixtures, the expected output and a parity check, all in the same commit. Browser-executed JS and Nix/flake files are exempt (owner 2026-11-06). A planted unpaired script is refused with a message naming the file; a planted paired script and a planted browser asset pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -61611,7 +61621,7 @@
         },
         {
           "n": 13,
-          "text": "AGENTS.md states the rule: repository and agent tooling is written in Jet; an existing non-Jet script gets only small fixes until it is ported; a capability Jet lacks becomes a gap card on #5072; browser-executed JS and Nix files are the only exceptions.",
+          "text": "AGENTS.md states the rule in plain prose: new tooling may be written first in another language and proven working, then its Jet twin is written and proven to give the same output; the pair is a gauntlet entry; the repository keeps running the original until the Jet twin wins every bar in the next criterion, and then switches to Jet and keeps the original only as the entry's reference.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -61620,12 +61630,39 @@
         },
         {
           "n": 14,
-          "text": "The orchestrator's helpers (lane commit, batch verify with its run-to-run diff, prepush, and the Tower spec apply) are Jet programs under Tools/agent/, and the non-Jet copies in agent scratch are deleted.",
+          "text": "Port bars, each judged per entry against the script's original language only (owner 2026-11-06): (1) identical output on the entry's fixtures; (2) Jet faster, with Jet/original below 1.00 in wall time and in peak memory; (3) Jet no longer, with Jet source tokens at or below the original's; (4) Jet easier to reason about: a fresh reviewer scores both on the fixed checklist (types visible at use, every failure path visible at the call, no hidden global or mutable state, data flows top to bottom, one obvious way per operation, effects such as files, network and processes visible), and Jet scores at least the original while its measured proxies (branch count, nesting depth, hand-written helpers that a library call would replace) are no worse. A port lands only when all four bars hold; until then the original keeps running and each lost bar is an open card (a speed loss on a performance card, a missing convenience as a Core API gap card on this card).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-06T18:45:12.750Z"
+        },
+        {
+          "n": 15,
+          "text": "The orchestrator's helpers (lane commit, batch verify with its run-to-run diff, prepush, and the Tower spec apply) are each a gauntlet pair under the port bars, and they move into Tools/agent/ as Jet once the Jet twin wins every bar.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T18:45:13.895Z"
+        },
+        {
+          "n": 16,
+          "text": "The witness runners (Compiler/JetRuntime/Tests/run-alloc-cache-witness.mjs, run-tdigest-witness.mjs, run-alloc-observer-witness.mjs and the remaining #6594 c5 runners) are each paired with a Jet test row under the port bars and switch to Jet once it wins every bar.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T18:49:56.217Z"
+        },
+        {
+          "n": 17,
+          "text": "Every existing gauntlet entry where Jet uses more source tokens than Python (wordfreq 4.1x, tensor-map-4k 1.8x, csvtransform 1.5x, bulkrename 1.5x, regex-find-all-4mb 1.4x, tzreport 1.3x, taskfile-cli 1.3x, fft-4096 1.2x, logreport 1.2x at 2026-11-06) has its missing conveniences named, each as a Core API gap card, so that composing library calls rather than hand-written helpers closes the gap.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T18:49:56.217Z"
         }
       ],
       "refs": [],
@@ -61638,10 +61675,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-06T18:45:12.750Z",
+      "updated": "2026-11-06T18:50:23.262Z",
       "updatedBy": "Main",
       "goals": [
-        "G2",
         "G4"
       ]
     },
@@ -62930,6 +62966,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Owner 2026-11-06: c10 and c11 close as obsolete when #6035 c3 lands (testkit and Node harnesses deleted). Main closes them then."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
         },
         {
@@ -63600,11 +63641,12 @@
         {
           "n": 50,
           "text": "(was #1748 c1) Every registered lint carries a stable snake_case name; a coverage test fails a lint registered without one [precut audit: failing on 9c7ddf1359: C:diagnostics_coverage/registered_config_and_cli_snapshots_keep_row_identity KNOWN-FAILING #5454 jet install: `jet install` is not in the Jet-hosted CLI (E2104) (exit 2, expected 1; stderr lacks \"Error [E0043]\"): exit 2; expected 1 (known-failing…]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:35:30.347Z"
+          "evidence": "Duplicate of #6096 c51 (met: every_registered_lint_has_a_unique_snake_case_name ported); owner approved closing it 2026-11-06.",
+          "at": "2026-11-06T18:45:56.582Z",
+          "closure": "duplicate"
         },
         {
           "n": 51,
@@ -63627,11 +63669,12 @@
         {
           "n": 53,
           "text": "(was #1748 c4) Rendered diagnostics still show the code beside the name; nothing user-typed requires a code anywhere [precut audit: failing on 9c7ddf1359: C:diagnostics_coverage/registered_config_and_cli_snapshots_keep_row_identity KNOWN-FAILING #5454 jet install: `jet install` is not in the Jet-hosted CLI (E2104) (exit 2, expected 1; stderr lacks \"Error [E0043]\"): exit 2; expected 1 (known-failing…]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:35:32.887Z"
+          "evidence": "Duplicate of #6096 c52 (met: rendered_lint_keeps_code_beside_name ported); owner approved closing it 2026-11-06.",
+          "at": "2026-11-06T18:45:57.668Z",
+          "closure": "duplicate"
         },
         {
           "n": 54,
@@ -64010,7 +64053,7 @@
       "parentId": "c0rqi33c",
       "needsAcceptance": false,
       "created": "2026-10-23T06:35:31.835Z",
-      "updated": "2026-11-06T18:35:53.489Z",
+      "updated": "2026-11-06T18:45:58.667Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -94986,6 +95029,21 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Owner 2026-11-06: script porting, the pairing bars and full removal of non-Jet languages are G4 work (#5072), not G1/G2; c5 keeps its original goal."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06 refinement: runner ports follow #5072's pairing rule; the .mjs keeps running until the Jet twin wins every bar."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06 (#5072): runner ports are Jet, never new .mjs; c1aa7b298c's two .mjs runners convert under #5072 c15."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "HANDOFF 2026-11-06 (Main restart after the session crash): TestSystemLead takes over from TestRot: c5 runner registration; c3 fixed point and c4 s5 loop are in batch vb5."
         },
         {
@@ -95043,7 +95101,7 @@
         },
         {
           "n": 5,
-          "text": "The 8 runtime runners still unregistered in s5 (run-alloc-observer-witness, files-walk, host-parallelism, native-codec-file-leaves, native-tcp-routes, process-witnesses, scan-goldens, test-runtime-abi-symbols) are each ported to the current ABI and registered in s5 with a passing run, or deleted for cause with the cause logged",
+          "text": "The 8 runtime runners still unregistered in s5 (run-alloc-observer-witness, files-walk, host-parallelism, native-codec-file-leaves, native-tcp-routes, process-witnesses, scan-goldens, test-runtime-abi-symbols) are each ported to the current ABI and registered in s5 with a passing run (new runner code in Jet where practical; pairing and porting to Jet belong to #5072 in G4), or deleted for cause with the cause logged",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -95059,7 +95117,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T06:13:43.662Z",
-      "updated": "2026-11-06T18:15:23.987Z",
+      "updated": "2026-11-06T18:50:26.078Z",
       "updatedBy": "Main"
     },
     {
@@ -183360,6 +183418,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T18:50:26.078Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gaxqxg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:50:25.224Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gaxqxg",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:50:23.262Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "epoch,logEntry,goals"
+    },
+    {
+      "at": "2026-11-06T18:50:03.251Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gaxqxg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:50:02.418Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gaxqxg",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:49:57.074Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:49:56.217Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:45:58.667Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h18kyi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:45:57.668Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h18kyi",
+      "note": "#53"
+    },
+    {
+      "at": "2026-11-06T18:45:56.583Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h18kyi",
+      "note": "#50"
+    },
+    {
+      "at": "2026-11-06T18:45:26.343Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gaxqxg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:45:25.471Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gaxqxg",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:45:13.896Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qe89cl",
+      "note": "#15 The witness runners added on 2026-11-06 (Compiler/JetRuntime"
+    },
     {
       "at": "2026-11-06T18:45:12.750Z",
       "by": "Main",
