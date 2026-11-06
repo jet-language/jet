@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6610,
-    "rev": 93300,
+    "rev": 93325,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -4058,11 +4058,16 @@
       "milestoneId": "e11-m04-deterministic-game-runtime",
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nImplement D-GAME-ASSET1=A in Jet. Core/game owns scene-scoped asset identity, the typed image and sound handles, kind and path validation, and the atomic hot-reload transaction. The host keeps only file-read and decode leaves.\n\n## Current state\n- Core/game/game.jet:19-48 has only plain `Scene{name, max_frames, tick}`, `Replay{path}` and `Backend{name, running}`. The exports are `Backend`, `Replay`, `Scene` and `run` (Compiler/JetFoundation/Source/Registry/CoreCallRows.jet:1944).\n- Every asset semantic is Rust: GameState asset roots and handles (crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:10-20), `jet_game_assets_image` and `jet_game_assets_sound` (:402-441), and the reload transaction (:444-493).\n- Codegen routes game handles to host symbols (Compiler/JetCodegen/Source/Codegen/HandleMethods.jet:1095-1099). Sema is Compiler/JetSema/Source/Sema/Calls/Game.jet.\n- Examples/features/game/core_game_headless.jet:17-18 uses `scene.assets.image` and `scene.assets.sound`, and has a golden.\n- Ratified shape (Docs/spec/syntax-decisions.md:3695-3706): `player :: scene.assets.image(\"assets/player.png\")?`, with handles tied to scene identity.\n\n## Changes\n1. Core/game/game.jet: a `SceneAssets` registry keyed by scene identity, with typed `GameImage` and `GameSound` handles {scene, path, kind, revision}; `image(path)` and `sound(path)`; and `reload`, which validates the import fact (kind, declared path, owning scene) and then publishes one deterministic handle and receipt. A missing file, wrong kind, stale scene, corrupt import fact or failed reload returns a typed error and leaves the last valid handle and its provenance unchanged.\n2. Game.rs keeps only the provider leaves (read bytes, decode header into an import fact, the dev-session watch relay). Delete `jet_game_assets_image`, `jet_game_assets_sound` and the reload policy. Route `scene.assets.*` to the Jet source in HandleMethods.jet and Sema Calls/Game.jet.\n3. Add the new types to CoreCallRows.jet:1944 and run `node Tools/agent/gen-core-tables.mjs --write`.\n4. New Examples/features/game/game_assets.jet with Examples/features/expected/game/game_assets.out. It covers success; each failure cell, printing the retained handle and receipt; and a handle used on a second scene. It must fail if `scene.assets` bypasses the Jet registry.\n\n## Proof\n- `JET_GOLDEN_FILTER=game/game_assets cargo test --test golden examples_compile_and_run` passes.\n- `JET_GOLDEN_FILTER=game/core_game_headless cargo test --test golden examples_compile_and_run` still passes.\n- `Tools/agent/jet-env jet run --interpret Examples/features/game/game_assets.jet | diff - Examples/features/expected/game/game_assets.out` prints nothing.\n\n## Batch\nbatch-core-ui: Core/game plus Jet codegen and sema routing, proven by game goldens.\n\n## Dependencies\nNone open. #3690 is the umbrella direction, not a prerequisite.",
+      "plan": "## Goal\nImplement D-GAME-ASSET1=A in Jet. Core/game owns scene-scoped asset identity, the typed image and sound handles, kind and path validation, and the atomic hot-reload transaction. The host keeps only file-read and decode leaves.\n\n## Current state\n- Core/game/game.jet:19-48 has only plain `Scene{name, max_frames, tick}`, `Replay{path}` and `Backend{name, running}`. The exports are `Backend`, `Replay`, `Scene` and `run` (Compiler/JetFoundation/Source/Registry/CoreCallRows.jet:1944).\n- Every asset semantic is Rust: GameState asset roots and handles (crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs:10-20), `jet_game_assets_image` and `jet_game_assets_sound` (:402-441), and the reload transaction (:444-493).\n- Codegen routes game handles to host symbols (Compiler/JetCodegen/Source/Codegen/HandleMethods.jet:1095-1099). Sema is Compiler/JetSema/Source/Sema/Calls/Game.jet.\n- Examples/features/game/core_game_headless.jet:17-18 uses `scene.assets.image` and `scene.assets.sound`, and has a golden.\n- Ratified shape (Docs/spec/syntax-decisions.md:3695-3706): `player: scene.assets.image(\"assets/player.png\")?`, with handles tied to scene identity.\n\n## Changes\n1. Core/game/game.jet: a `SceneAssets` registry keyed by scene identity, with typed `GameImage` and `GameSound` handles {scene, path, kind, revision}; `image(path)` and `sound(path)`; and `reload`, which validates the import fact (kind, declared path, owning scene) and then publishes one deterministic handle and receipt. A missing file, wrong kind, stale scene, corrupt import fact or failed reload returns a typed error and leaves the last valid handle and its provenance unchanged.\n2. Game.rs keeps only the provider leaves (read bytes, decode header into an import fact, the dev-session watch relay). Delete `jet_game_assets_image`, `jet_game_assets_sound` and the reload policy. Route `scene.assets.*` to the Jet source in HandleMethods.jet and Sema Calls/Game.jet.\n3. Add the new types to CoreCallRows.jet:1944 and run `node Tools/agent/gen-core-tables.mjs --write`.\n4. New Examples/features/game/game_assets.jet with Examples/features/expected/game/game_assets.out. It covers success; each failure cell, printing the retained handle and receipt; and a handle used on a second scene. It must fail if `scene.assets` bypasses the Jet registry.\n\n## Proof\n- `jet test Compiler --profile golden game/game_assets` passes.\n- `jet test Compiler --profile golden game/core_game_headless` still passes.\n- `jet test Compiler --profile golden game/game_assets` passes on O0, O1 and O2.\n\n## Batch\nbatch-core-ui: Core/game plus Jet codegen and sema routing, proven by game goldens.\n\n## Dependencies\nNone open. #3690 is the umbrella direction, not a prerequisite.",
       "blockedBy": [],
       "workOrder": 1810,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -4198,7 +4203,7 @@
         }
       ],
       "created": "2026-07-06T19:15:48.960Z",
-      "updated": "2026-11-04T23:50:31.944Z",
+      "updated": "2026-11-06T18:35:11.625Z",
       "criteria": [
         {
           "n": 1,
@@ -4247,7 +4252,7 @@
         },
         {
           "n": 6,
-          "text": "Slice-specific: the behavior this card alone owns — “core.game assets: deterministic identity, loading, and hot reload” — is exercised by a targeted check that fails when crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs is bypassed, with no sibling slice supplying the evidence.",
+          "text": "Slice-specific: the behavior this card alone owns — “core.game assets: deterministic identity, loading, and hot reload” — is exercised by a targeted check that fails when the Core/Game/Game.jet asset path is bypassed, with no sibling slice supplying the evidence.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -4256,7 +4261,7 @@
         },
         {
           "n": 7,
-          "text": "[retarget] Scene-owned asset identity, loading and reload semantics live in Core/game/*.jet; the Rust Game.rs keeps only typed provider leaves.",
+          "text": "[retarget] Scene-owned asset identity, loading and reload semantics live in Core/Game/*.jet; host code keeps only typed provider leaves.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -4265,7 +4270,7 @@
         },
         {
           "n": 8,
-          "text": "[retarget] Image/sound success, missing/mismatched asset, stale scene and failed reload each keep the last valid asset state, proven by one focused example/golden identical on default, interpreter and AOT; the test fails when the Jet asset path is bypassed.",
+          "text": "[retarget] Image/sound success, missing/mismatched asset, stale scene and failed reload each keep the last valid asset state, proven by one focused example/golden identical on O0, O1 and O2; the test fails when the Jet asset path is bypassed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -4274,7 +4279,7 @@
         },
         {
           "n": 9,
-          "text": "Runnable proof: `JET_GOLDEN_FILTER=game/game_assets cargo test --test golden examples_compile_and_run` passes with identical `jet run --interpret` output, and no asset policy remains in crates/jet-codegen/src/Prelude/CoreLib/Top/Game.rs (replaces the Rust-bypass wording of criterion 6).",
+          "text": "Runnable proof: `jet test Compiler --profile golden game/game_assets` passes on O0, O1 and O2, and no asset policy remains outside Core/Game/*.jet (replaces the Rust-bypass wording of criterion 6).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -4283,7 +4288,7 @@
         },
         {
           "n": 10,
-          "text": "[#820] Typed ECS storage, entity identity, deterministic queries and conflict-safe scheduling live in Jet, replacing the synthetic Game.rs rows.",
+          "text": "[#820] Typed ECS storage, entity identity, deterministic queries and conflict-safe scheduling live in Jet, with no synthetic host rows.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -25873,14 +25878,14 @@
       "id": "c03habw5",
       "num": 3030,
       "title": "Declare catalog-free release inputs for existing binary recipes",
-      "body": "Define a catalog-free, self-authored release declaration for Source::Releases. D-RELEASE-RECIPE1 compares A, fields beside source, with B, Recipe.release around exactly one existing installer. Both are proposed surfaces, not shipped APIs. Direct GitHub and HTTPS feeds use D-RELEASE-TRUST1, automatic observed-byte hashes, and no public feed signature or key protocol.",
+      "body": "Define a catalog-free, self-authored release declaration for the `Releases` source (`RefSource.Releases`). D-RELEASE-RECIPE1 compares A, fields beside source, with B, Recipe.release around exactly one existing installer. Both are proposed surfaces, not shipped APIs. Direct GitHub and HTTPS feeds use D-RELEASE-TRUST1, automatic observed-byte hashes, and no public feed signature or key protocol.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e15",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nShip the ratified D-RELEASE-RECIPE1=A declaration: `Pkg.adapt` carries `resolver:` and `asset:` beside `source:` for `Source::Releases`, around exactly one existing installer. Option B (`Recipe.release`) is rejected and must not exist.\n\n## Current state\n- `Jetpack/EnvModel/Source/ModuleEval/PackageSugar.jet:79-96` `envmodel_parse_adapter` admits only `name`, `source`, `deps`, `recipe` (`:81` field list); every shape error is E1270 (`:299-300`).\n- Field spellings live in `Jetpack/Foundation/Source/Syntax.jet:403-409` (`@ADAPTER_FIELD_*`, `@RECIPE_*`); the Rust mirror is `crates/jet-foundation/src/Syntax/package_files.rs:639-645`.\n- `Source::Releases` exists only as a ref source: `Jetpack/PackageModel/Source/Refs/RefSpec.jet:45,66,110`, mapped to `ProviderKind.JetPackage` in `Jetpack/EnvModel/Source/ModuleEval/SourceLoader.jet:304`.\n- No `ReleaseResolver`, `ReleaseAssetSelector` or `Sha256` type exists anywhere in `Jetpack/`.\n- PackageSugar.jet has uncommitted edits from another writer: coordinate before you edit it.\n\n## Changes\n1. `Jetpack/PackageModel/Source/Release/ReleaseModel.jet` (new, listed in `Jetpack/Bootstrap/sources.list`): the finite family `ReleaseResolver` (`Release.github`, `Release.https{metadata, origins, decoder}`), `ReleaseFeed`, `ReleaseCandidate`, `ReleaseAsset`, `ReleaseAssetSelector`, `ReleaseAssetKind`, `ReleaseFormat`, `ReleaseEntryMode`, `Sha256`, `ReleaseDecodeError`. The pure decoder contract has no signature, key or proof field.\n2. Same module, pure validation used later by the Provider seam: nonempty fields, RFC3339 times, HTTPS-only URLs, safe relative root and entry, size and extraction bounds, and `sha256_parse` (bare 64-hex or `sha256:<64-hex>` → lowercase; whitespace, wrong length, non-hex and unknown algorithms fail; None stays None). Add `release_origin_admits(scope, url)` so metadata, artifact and redirect origins are checked before any request; the scope cannot be widened after the fact.\n3. `Syntax.jet` and `package_files.rs`: add `@ADAPTER_FIELD_RESOLVER`, `@ADAPTER_FIELD_ASSET` and the `Release.*` spellings.\n4. `PackageSugar.jet` `envmodel_parse_adapter`: accept `resolver:` and `asset:` only when the source classifies as `RefSource.Releases`, with exactly one Copy, Prebuilt or Build recipe. Reject release fields on other sources, duplicate selector fields, a second fetch and any `Recipe.release` spelling with E1270, and extend the E1270 help text. `Release.github` takes no repository argument; it derives owner/repo from the source.\n5. Record the ratified surface in `Docs/spec/syntax-decisions.md` and the packaging spec (A only; B absent).\nProvider wiring, trust and staging belong to #3031, #3032 and #3033. `BuildStep.fetch` hash and credential-free laws do not change.\n\n## Proof\n- `JETPACK_WORKER=rel Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area EnvModel --tests` prints `JETPACK CHECK OK (check, default run, AOT test)`. It runs new claims in `Jetpack/PackageModel/Tests/Release.jet` (SHA-256 table, RFC3339/URL/path/size rejections, origin admission) and `Jetpack/EnvModel/Tests/ModuleEvalReleases.jet` (the complete Acme HTTPS example with three ordered origins and one archive selector is accepted; release fields on a non-Releases source, a duplicate `asset:` and `Recipe.release(...)` each give E1270).\n- `Tools/agent/jet-env target/debug/jet self devtools grammars` produces no diff, because these are field names, not lexer tokens. That satisfies criteria 13-14 without re-blessing.\n\n## Batch\nbatch-jetpack-envmodel: the EnvModel area unit (with its PackageModel closure) proves the whole declaration.\n\n## Dependencies\nNone open.",
+      "plan": "## Goal\nShip the ratified D-RELEASE-RECIPE1=A declaration: `Pkg.adapt` carries `resolver:` and `asset:` beside `source:` for the `Releases` source (`RefSource.Releases`), around exactly one existing installer. Option B (`Recipe.release`) is rejected and must not exist.\n\n## Current state\n- `Jetpack/EnvModel/Source/ModuleEval/PackageSugar.jet:79-96` `envmodel_parse_adapter` admits only `name`, `source`, `deps`, `recipe` (`:81` field list); every shape error is E1270 (`:299-300`).\n- Field spellings live in `Jetpack/Foundation/Source/Syntax.jet:403-409` (`@ADAPTER_FIELD_*`, `@RECIPE_*`).\n- The `Releases` source (`RefSource.Releases`) exists only as a ref source: `Jetpack/PackageModel/Source/Refs/RefSpec.jet:45,66,110`, mapped to `ProviderKind.JetPackage` in `Jetpack/EnvModel/Source/ModuleEval/SourceLoader.jet:304`.\n- No `ReleaseResolver`, `ReleaseAssetSelector` or `Sha256` type exists anywhere in `Jetpack/`.\n- PackageSugar.jet has uncommitted edits from another writer: coordinate before you edit it.\n\n## Changes\n1. `Jetpack/PackageModel/Source/Release/ReleaseModel.jet` (new, listed in `Jetpack/Bootstrap/sources.list`): the finite family `ReleaseResolver` (`Release.github`, `Release.https{metadata, origins, decoder}`), `ReleaseFeed`, `ReleaseCandidate`, `ReleaseAsset`, `ReleaseAssetSelector`, `ReleaseAssetKind`, `ReleaseFormat`, `ReleaseEntryMode`, `Sha256`, `ReleaseDecodeError`. The pure decoder contract has no signature, key or proof field.\n2. Same module, pure validation used later by the Provider seam: nonempty fields, RFC3339 times, HTTPS-only URLs, safe relative root and entry, size and extraction bounds, and `sha256_parse` (bare 64-hex or `sha256:<64-hex>` → lowercase; whitespace, wrong length, non-hex and unknown algorithms fail; None stays None). Add `release_origin_admits(scope, url)` so metadata, artifact and redirect origins are checked before any request; the scope cannot be widened after the fact.\n3. `Syntax.jet` and the syntax registry (`Compiler/JetFoundation/Data/Syntax`): add `@ADAPTER_FIELD_RESOLVER`, `@ADAPTER_FIELD_ASSET` and the `Release.*` spellings.\n4. `PackageSugar.jet` `envmodel_parse_adapter`: accept `resolver:` and `asset:` only when the source classifies as `RefSource.Releases`, with exactly one Copy, Prebuilt or Build recipe. Reject release fields on other sources, duplicate selector fields, a second fetch and any `Recipe.release` spelling with E1270, and extend the E1270 help text. `Release.github` takes no repository argument; it derives owner/repo from the source.\n5. Record the ratified surface in `Docs/spec/syntax-decisions.md` and the packaging spec (A only; B absent).\nProvider wiring, trust and staging belong to #3031, #3032 and #3033. `BuildStep.fetch` hash and credential-free laws do not change.\n\n## Proof\n- `JETPACK_WORKER=rel Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area EnvModel --tests` prints `JETPACK CHECK OK (check, default run, AOT test)`. It runs new claims in `Jetpack/PackageModel/Tests/Release.jet` (SHA-256 table, RFC3339/URL/path/size rejections, origin admission) and `Jetpack/EnvModel/Tests/ModuleEvalReleases.jet` (the complete Acme HTTPS example with three ordered origins and one archive selector is accepted; release fields on a non-Releases source, a duplicate `asset:` and `Recipe.release(...)` each give E1270).\n- `Tools/agent/jet-env target/debug/jet self devtools grammars` produces no diff, because these are field names, not lexer tokens. That satisfies criteria 13-14 without re-blessing.\n\n## Batch\nbatch-jetpack-envmodel: the EnvModel area unit (with its PackageModel closure) proves the whole declaration.\n\n## Dependencies\nNone open.",
       "checkSteps": "Future proof, not run during preparation. After implementation, #2919 should use scripts/agent/jet-env and a fresh binary with focused adapter, decoder, pagination, origin, trust and transaction fixtures. Cover complete A/B HTTPS declarations, checksum normalization, bounded metadata, unsafe trees, pre-request origin approval, source-scope reuse, same-release mutation, rollback, cancellation, crash, concurrency and running-app preservation. Preparation runs no validation.",
       "probe": null,
       "visualMedia": [],
@@ -25889,6 +25894,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
+        },
         {
           "at": "2026-10-04",
           "by": "Pip",
@@ -25972,7 +25982,7 @@
         },
         {
           "n": 5,
-          "text": "Release.github derives one repository from Source::Releases. Release.https keeps logical source target and metadata authority separate.",
+          "text": "Release.github derives one repository from the `Releases` source (`RefSource.Releases`). Release.https keeps logical source target and metadata authority separate.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -26026,7 +26036,7 @@
         },
         {
           "n": 11,
-          "text": "Syntax.rs entry updated",
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -26125,7 +26135,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-10T22:59:01.979Z",
-      "updated": "2026-10-28T11:31:22.813Z",
+      "updated": "2026-11-06T18:35:14.351Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -27537,13 +27547,18 @@
       "milestoneId": "e3-m20-enum-language-reflection",
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nDeliver D-ENUM-CASEVALUES1=A (ratified): `T.@values` is a registered compile-time fact that reads as ordinary `[T#N]` data. It lists every accessible payload-free leaf once, in declaration order, as a stock compiler/Core addition. It adds no `T.cases()`, no alias, no enum-collection wrapper and no runtime registry.\n\nRatified example:\n```jet\nenum Direction { North South }\n@choices :: Direction.@values // ordinary [Direction#2]\n@count :: @choices.len()\nfn run() {\n    print(@count) // 2; adding East makes 3.\n}\n```\n\n## Current state\n- Nothing implements `@values` in Compiler/JetParser, Compiler/JetSema, crates/jet-sema, Examples or Core (grep, 2026-09-28). The Rust recovery 0732a643 was never integrated.\n- The `T.@name` fact namespace already exists for other facts: `Compiler/JetSema/Source/Sema/Comptime/Reflection.jet:1162-1165` builds `{definition.name}.@range` fact rows. Enum variant metadata is at `:1102-1156` and `:1395` `sema_comptime_reflection_enum_type_info`.\n- Payload-free versus payload variants: `VariantPayload.Unit` (`Reflection.jet:1103-1104`). Groups (D-TAG1) add paths; sparse discriminants do not create gaps.\n\n## Changes\n1. JetParser/JetSema: resolve `T.@values` through the same registered `@`-fact path as `@range`. Do not reserve an unmarked method.\n2. JetSema `Comptime/Reflection.jet`: add `sema_comptime_reflection_enum_values(definition)`. It returns a `TComptimeValue.List` of the payload-free leaves in declaration order (group leaves included once, by full path), typed `[T#N]` with the nominal `T` kept.\n3. Rejections (registered, with snapshots): a payload-bearing enum (E-row: \"`Shape.@values` needs every case to be payload-free; `Circle` carries a Float\"), a non-enum type, and an enum whose leaves are not all accessible from the use site. Do no filtering, no fabricated payloads, and no integer casts.\n4. JetCodegen: materialize the constant like any other `[T#N]` constant, with no mandatory heap collection. Independent iterations share no cursor state.\n5. Rust mirror (the shipped binary must run the golden): the same fact in crates/jet-sema's `@` fact resolver.\n6. Add `Examples/features/types/enum_values.jet` + `.out` (count, order, a group path, sparse codes, two independent loops) and `tests/ui/enum_values_payload.jet` / `enum_values_non_enum.jet`.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `JET_GOLDEN_FILTER=types/enum_values Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes, and `Tools/agent/jet-env jet run --interpret Examples/features/types/enum_values.jet` matches the `.out`.\n- `JET_UI_FILTER=tests/ui/enum_values_ Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots` passes.\n\n## Batch\nbatch-jetc-sema: the fact is resolved in JetSema's comptime reflection. The codegen and Rust mirror land in the same build.\n\n## Dependencies\nNone; D-ENUM-CASEVALUES1=A is ratified. D-ENUM-CASEMETA1 descriptions stay separate but share the declaration owner.\n",
+      "plan": "## Goal\nDeliver D-ENUM-CASEVALUES1=A (ratified): `T.@values` is a registered compile-time fact that reads as ordinary `[T#N]` data. It lists every accessible payload-free leaf once, in declaration order, as a stock compiler/Core addition. It adds no `T.cases()`, no alias, no enum-collection wrapper and no runtime registry.\n\nRatified example:\n```jet\nDirection: enum { North South }\n@choices: Direction.@values // ordinary [Direction#2]\n@count: @choices.len()\nrun: fn() {\n    print(@count) // 2; adding East makes 3.\n}\n```\n\n## Current state\n- Nothing implements `@values` in Compiler/JetParser, Compiler/JetSema, crates/jet-sema, Examples or Core (grep, 2026-09-28). The Rust recovery 0732a643 was never integrated.\n- The `T.@name` fact namespace already exists for other facts: `Compiler/JetSema/Source/Sema/Comptime/Reflection.jet:1162-1165` builds `{definition.name}.@range` fact rows. Enum variant metadata is at `:1102-1156` and `:1395` `sema_comptime_reflection_enum_type_info`.\n- Payload-free versus payload variants: `VariantPayload.Unit` (`Reflection.jet:1103-1104`). Groups (D-TAG1) add paths; sparse discriminants do not create gaps.\n\n## Changes\n1. JetParser/JetSema: resolve `T.@values` through the same registered `@`-fact path as `@range`. Do not reserve an unmarked method.\n2. JetSema `Comptime/Reflection.jet`: add `sema_comptime_reflection_enum_values(definition)`. It returns a `TComptimeValue.List` of the payload-free leaves in declaration order (group leaves included once, by full path), typed `[T#N]` with the nominal `T` kept.\n3. Rejections (registered, with snapshots): a payload-bearing enum (E-row: \"`Shape.@values` needs every case to be payload-free; `Circle` carries a Float\"), a non-enum type, and an enum whose leaves are not all accessible from the use site. Do no filtering, no fabricated payloads, and no integer casts.\n4. JetCodegen: materialize the constant like any other `[T#N]` constant, with no mandatory heap collection. Independent iterations share no cursor state.\n5. Rust mirror (the shipped binary must run the golden): the same fact in crates/jet-sema's `@` fact resolver.\n6. Add `Examples/features/types/enum_values.jet` + `.out` (count, order, a group path, sparse codes, two independent loops) and `tests/ui/enum_values_payload.jet` / `enum_values_non_enum.jet`.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `jet test Compiler --profile golden types/enum_values` passes on O0, O1 and O2.\n- `jet test Compiler --profile ui enum_values_` passes.\n\n## Batch\nbatch-jetc-sema: the fact is resolved in JetSema's comptime reflection. The codegen and Rust mirror land in the same build.\n\n## Dependencies\nNone; D-ENUM-CASEVALUES1=A is ratified. D-ENUM-CASEMETA1 descriptions stay separate but share the declaration owner.\n",
       "checkSteps": "1. Owner decides the complete draft D-ENUM-CASEVALUES1 before any public method is implemented. Main first checks decision-ID uniqueness and whether an uncaptured existing API already satisfies the workload.\n2. If chosen, T.cases() yields each payload-free leaf exactly once in declaration order; groups are not values and sparse external codes do not create gaps.\n3. The iterator's items retain nominal type T. Payload-bearing or non-enum receivers receive a Jet diagnostic explaining why explicit supplied values are required.\n4. No payload values are fabricated and no implicit heap collection is required. Ordinary iterator adapters are reused.\n5. Adding a payload-free case updates the generated catalog without a second user-maintained list. Reordering deliberately changes presentation order, not a wire protocol code.\n6. Existing user methods named cases require a coherent declaration conflict diagnostic, not hidden replacement or dispatch ambiguity.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-enum-f03-finite-case-values. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
         {
           "at": "2026-10-04",
           "by": "Pip",
@@ -27646,7 +27661,7 @@
         },
         {
           "n": 7,
-          "text": "[retarget] Jet compiler proof (Rust freeze 2026-10-01): golden types/enum_values, UI fixture tests/ui/enum_values_payload.jet, Examples/features/types/enum_values.jet, tests/ui/enum_values_payload.jet pass when compiled by the Jet compiler (Compiler/ pipeline, for example the #670 compiler-diff candidate run or jetc0): goldens print their expected output on AOT and default run, UI fixtures match their snapshots; no Rust compiler change (a Core-library-only change may also be shown on the frozen Rust compiler as interim evidence). Replaces the Rust-compiler proof: \"`Examples/features/types/enum_values.jet` prints the count, order and names from `Direction.@values`, and grows by one when a case is added: `JET_GOLDEN_FILTER=types/enum_values Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes, and `JET_UI_FILTER=tests/ui/enum_values_payload.jet Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots` passes\"",
+          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `Examples/features/types/enum_values.jet` prints the count, order and names from `Direction.@values`, and grows by one when a case is added: `jet test Compiler --profile golden types/enum_values` passes, and `jet test Compiler --profile ui enum_values_payload` passes. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -27741,7 +27756,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:35.846Z",
-      "updated": "2026-10-31T14:51:24.075Z",
+      "updated": "2026-11-06T18:35:17.141Z",
       "updatedBy": "Main",
       "workOrder": 128,
       "goals": []
@@ -34476,20 +34491,25 @@
       "id": "c0tsbf3w",
       "num": 3505,
       "title": "Const generics: a compile-time Int as a type parameter",
-      "body": "Owner gate from the Jai-vs-Jet interview (comptime ladder rung R4, owner chose \"R0-R4 now\"). Today a known constant can size an array (`[U8#64]`, `[Float#(@lanes * 2)]`) but a number cannot be a type parameter, so `Packet<64>` and a generic SOA count cannot be written; S26 says comptime does not parameterize a type. The proposal is a narrow amendment: a compile-time `Int` may parameterize an existing type constructor, spelled with the compile-time sigil that S57 already gives such names: `struct Packet<@N: Int> { data: [U8#@N] }`, used as `Packet<64>` or `Packet<@lanes>`. Monomorphized like `<T>`. Not types-as-values: no use-site type factories, no `SOA(T, n)` in type position, no dispatch on comptime results. `Meta.Const` is named alongside (see D-META-GATE1).\n\n## Exit criteria (after ratification)\n1. Parser and sema accept `<@N: Int>` declarations and literal / comptime-constant arguments; a runtime value in that slot is a teaching diagnostic.\n2. Example: firmware-style `Packet<@N>` with `[U8#@N]` field runs on AOT, JIT, and interpreter (I9).\n3. Spec entry amends S26 narrowly and cites D-META-CONST1.\n\n## Owner scope extension — 2026-09-21\n\n## Outcome\n\nFinish D-CONSTGEN1 without treating const generics as first-class type factories. Implement compile-time Int parameters, substitution, instance identity, constraints and target layout through the existing generic mechanism. Reconcile the latest metadata naming direction with immutable decision history through the contract card; ordinary prepared values do not require repeated @ references outside declared parameter syntax.\n\n## Owned paths and integration\n\n- crates/jet-foundation/src/AST\n- crates/jet-parser/src/Parser/Types.rs\n- crates/jet-sema/src/Sema/Bundle/GenericModules\n- crates/jet-codegen/src/Codegen/TIR\n- tests/generics.rs\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\nAdd the Packet<@N: Int> witness with literal and prepared arguments, distinct sizes and nested use. Exercise AOT, run and interpreter. Reject runtime arguments, illegal array sizes, overflow and conflicting instance identities with source snapshots. Inspect the instantiated type metadata from the same program.",
+      "body": "Owner gate from the Jai-vs-Jet interview (comptime ladder rung R4, owner chose \"R0-R4 now\"). Today a known constant can size an array (`[U8#64]`, `[Float#(@lanes * 2)]`) but a number cannot be a type parameter, so `Packet<64>` and a generic SOA count cannot be written; S26 says comptime does not parameterize a type. The proposal is a narrow amendment: a compile-time `Int` may parameterize an existing type constructor, spelled `Packet: struct<comptime N: Int> { data: [U8#N] }` (D-COMPTIME-WORD1=A), used as `Packet<64>` or `Packet<lanes>`. Monomorphized like `<T>`. Not types-as-values: no use-site type factories, no `SOA(T, n)` in type position, no dispatch on comptime results. `Meta.Const` is named alongside (see D-META-GATE1).\n\n## Exit criteria (after ratification)\n1. Parser and sema accept `<comptime N: Int>` declarations and literal / comptime-constant arguments; a runtime value in that slot is a teaching diagnostic.\n2. Example: firmware-style `Packet<N>` with `[U8#N]` field runs on O0, O1 and O2 (I9).\n3. Spec entry amends S26 narrowly and cites D-META-CONST1.\n\n## Owner scope extension — 2026-09-21\n\n## Outcome\n\nFinish D-CONSTGEN1 without treating const generics as first-class type factories. Implement compile-time Int parameters, substitution, instance identity, constraints and target layout through the existing generic mechanism. Reconcile the latest metadata naming direction with immutable decision history through the contract card; ordinary prepared values do not require repeated @ references outside declared parameter syntax.\n\n## Owned paths and integration\n\n- crates/jet-foundation/src/AST\n- crates/jet-parser/src/Parser/Types.rs\n- crates/jet-sema/src/Sema/Bundle/GenericModules\n- crates/jet-codegen/src/Codegen/TIR\n- tests/generics.rs\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\nAdd the `Packet: struct<comptime N: Int>` witness with literal and prepared arguments, distinct sizes and nested use. Exercise O0, O1 and O2. Reject runtime arguments, illegal array sizes, overflow and conflicting instance identities with source snapshots. Inspect the instantiated type metadata from the same program.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e4",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nFinish D-CONSTGEN1, with the spelling now fixed by D-CONSTGEN2=A: a compile-time `Int` may be a type parameter of an existing type constructor. The declaration is `struct Packet<prep N: Int> { data: [U8#N] }`, and uses write the plain value, as in `Packet<64>` or `Packet<lanes>` after `lanes :: prep { 64 }`. It is monomorphized like `<T>`.\n\nThis is not types-as-values: no use-site type factories, no `SOA(T, n)` in type position, and no dispatch on comptime results. It is comptime ladder rung R4; the owner chose \"R0-R4 now\".\n\n## Current state\n- The grammar and AST have shipped (#3662, logged 2026-09-28 in `Docs/spec/syntax-decisions.md:7455`; syntax row at `:34`).\n  - Jet: `TypeParam.prep: PrepParam?` in `Compiler/JetAst/Source/AST/Items.jet:447-464`, with the parser at `Compiler/JetParser/Source/Parser/Items.jet:531`.\n  - Rust: `crates/jet-parser/src/Parser/Types.rs:473`.\n  - This supersedes the card's older `<@N: Int>` spelling.\n- Every `prep` parameter is rejected with E0390 until this card lands:\n  - Jet sema: `Compiler/JetSema/Source/Sema/Registration/Items.jet:438-441`;\n  - Rust sema: `crates/jet-sema/src/Sema/Casing.rs:120-128`;\n  - UI fixture: `tests/ui/prep_number_param_unsupported.jet`.\n- There is no substitution, instance identity or layout for number parameters in `Compiler/JetSema` or `Compiler/JetCodegen/Source/Codegen/TypeInstances.jet`.\n- Criteria 1-4 and 9-12 (Syntax entry, log entry, grammars, snapshots) are met for the declaration grammar by #3662. Only the E0390 snapshot changes here.\n\n## Changes\n1. JetSema (`Registration/Items.jet` plus generic substitution):\n   - Replace the E0390 rejection with number-parameter binding. `N` is in scope as a value inside the declaration, including array sizes such as `[U8#N]`.\n   - A use-site argument must be an Int literal or a prep constant. A runtime value in that slot gets a new registered teaching diagnostic with a UI snapshot.\n   - Instance identity includes the value, so `Packet<64>` and `Packet<32>` are different types.\n2. JetCodegen (`TypeInstances.jet`, `Types.jet`): monomorphize and lay out each instance, with deterministic naming that includes the number.\n3. Mirror the change in the shipped Rust sema, TIR and MIR so the goldens run on the shipped binary. Delete the E0390 path in both compilers and retire the row, or keep E0390 only for a non-Int number type.\n4. Add `Examples/features/generics/const_packet.jet`: a firmware-style `Packet<prep N: Int>` with literal and prep arguments, two distinct sizes and a nested use, printing sizes and bytes.\n5. Update `Docs/spec/reference/metaprogramming.md`: S26 is amended narrowly, citing D-CONSTGEN1 and D-CONSTGEN2.\n\n## Proof\n- `JET_GOLDEN_FILTER=generics/const_packet Tools/agent/jet-env cargo test --test golden examples_compile_and_run`: identical on AOT, `jet run` and `--interpret`.\n- `JET_UI_FILTER=tests/ui/prep_number_param Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots`: the old E0390 fixture is replaced by a runtime-argument rejection fixture.\n- `Tools/agent/jet-env cargo test --test generics`: passes.\n\n## Batch\nbatch-jetc-sema: substitution and identity are the core. Codegen layout lands in the same build.\n\n## Dependencies\nNone real. #3520's naming reconciliation was settled by D-CONSTGEN2=A (#3662 shipped).\n",
+      "plan": "## Goal\nFinish D-CONSTGEN1, with the spelling now fixed by D-CONSTGEN2=A: a compile-time `Int` may be a type parameter of an existing type constructor. The declaration is `Packet: struct<comptime N: Int> { data: [U8#N] }` (D-DECL-COLON1=A, D-COMPTIME-WORD1=A), and uses write the plain value, as in `Packet<64>` or `Packet<lanes>` after `lanes: comptime { 64 }`. It is monomorphized like `<T>`.\n\nThis is not types-as-values: no use-site type factories, no `SOA(T, n)` in type position, and no dispatch on comptime results. It is comptime ladder rung R4; the owner chose \"R0-R4 now\".\n\n## Current state\n- The grammar and AST have shipped (#3662, logged 2026-09-28 in `Docs/spec/syntax-decisions.md:7455`; syntax row at `:34`).\n  - Jet: `TypeParam.prep: PrepParam?` in `Compiler/JetAst/Source/AST/Items.jet:447-464`, with the parser at `Compiler/JetParser/Source/Parser/Items.jet:531`.\n  - Rust: `crates/jet-parser/src/Parser/Types.rs:473`.\n  - This supersedes the card's older `<@N: Int>` spelling.\n- Every `prep` parameter is rejected with E0390 until this card lands:\n  - Jet sema: `Compiler/JetSema/Source/Sema/Registration/Items.jet:438-441`;\n  - Rust sema: `crates/jet-sema/src/Sema/Casing.rs:120-128`;\n  - UI fixture: `tests/ui/prep_number_param_unsupported.jet`.\n- There is no substitution, instance identity or layout for number parameters in `Compiler/JetSema` or `Compiler/JetCodegen/Source/Codegen/TypeInstances.jet`.\n- Criteria 1-4 and 9-12 (Syntax entry, log entry, grammars, snapshots) are met for the declaration grammar by #3662. Only the E0390 snapshot changes here.\n\n## Changes\n1. JetSema (`Registration/Items.jet` plus generic substitution):\n   - Replace the E0390 rejection with number-parameter binding. `N` is in scope as a value inside the declaration, including array sizes such as `[U8#N]`.\n   - A use-site argument must be an Int literal or a comptime constant. A runtime value in that slot gets a new registered diagnostic with a UI snapshot.\n   - Instance identity includes the value, so `Packet<64>` and `Packet<32>` are different types.\n2. JetCodegen (`TypeInstances.jet`, `Types.jet`): monomorphize and lay out each instance, with deterministic naming that includes the number.\n3. Mirror the change in the shipped Rust sema, TIR and MIR so the goldens run on the shipped binary. Delete the E0390 path in both compilers and retire the row, or keep E0390 only for a non-Int number type.\n4. Add `Examples/features/generics/const_packet.jet`: a firmware-style `Packet: struct<comptime N: Int>` with literal and comptime arguments, two distinct sizes and a nested use, printing sizes and bytes.\n5. Update `Docs/spec/reference/metaprogramming.md`: S26 is amended narrowly, citing D-CONSTGEN1 and D-CONSTGEN2.\n\n## Proof\n- `jet test Compiler --profile golden generics/const_packet`: identical on O0, O1 and O2.\n- `jet test Compiler --profile ui prep_number_param`: the old E0390 fixture is replaced by a runtime-argument rejection fixture.\n- `jet test Compiler --profile cases generics/`: passes.\n\n## Batch\nbatch-jetc-sema: substitution and identity are the core. Codegen layout lands in the same build.\n\n## Dependencies\nNone real. #3520's naming reconciliation was settled by D-CONSTGEN2=A (#3662 shipped).\n",
       "checkSteps": "\n\nRebuild: scripts/agent/jet-env cargo build -p jet --bin jet with CARGO_INCREMENTAL=0. Keep scratch at ~/.cache/jet-test-scratch. Existing stale CoreModuleExports.rs is an execution prerequisite, not evidence that any feature passes.\n\nAdd the Packet<@N: Int> witness with literal and prepared arguments, distinct sizes and nested use. Exercise AOT, run and interpreter. Reject runtime arguments, illegal array sizes, overflow and conflicting instance identities with source snapshots. Inspect the instantiated type metadata from the same program.\n\nFor each planned package witness, use scripts/agent/jet-env jet check, jet run, jet run --interpret, jet dev --watch=off where relevant, and jet build from that package directory; launch its emitted .jet/build/run artifact. Compare the named golden and actual state changes. Use the existing web harness when the feature reaches web. No broad suite outside the composed closeout gate.\n\nExact witness: struct Packet<@N: Int> { data: [U8#N] }; lanes :: prep { 64 }; instantiate Packet<64> and Packet<lanes>. Verify equal intended specialization and reject obsolete ordinary-value @ references outside metadata queries or template holes.",
       "probe": "jet run examples/features/collections/fixed_arrays.jet",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-COMPTIME-WORD1=A; I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
         {
           "at": "2026-10-04",
           "by": "Pip",
@@ -34672,7 +34692,7 @@
         },
         {
           "n": 17,
-          "text": "[retarget] Jet compiler proof (Rust freeze 2026-10-01): golden generics/const_packet pass when compiled by the Jet compiler (Compiler/ pipeline, for example the #670 compiler-diff candidate run or jetc0): goldens print their expected output on AOT and default run, UI fixtures match their snapshots; no Rust compiler change (a Core-library-only change may also be shown on the frozen Rust compiler as interim evidence). Replaces the Rust-compiler proof: \"`JET_GOLDEN_FILTER=generics/const_packet Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes on AOT, jet run and --interpret (Packet<prep N: Int> with literal and prep arguments, distinct sizes, nested use), and E0390 no longer fires for Int number parameters\"",
+          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `jet test Compiler --profile golden generics/const_packet` passes (`Packet: struct<comptime N: Int>` with literal and comptime arguments, distinct sizes, nested use), and E0390 no longer fires for Int number parameters. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -34717,7 +34737,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-16T19:41:29.526Z",
-      "updated": "2026-11-04T18:09:33.073Z",
+      "updated": "2026-11-06T18:35:19.899Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -34734,13 +34754,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nOne complete, versioned public model for metadata, preparation, generated code, compiler sessions and advanced operations. Its exact field and operation catalogs are published as executable registries in the Jet compiler, not as duplicated prose. This card owns contracts, not compiler delivery.\n\n## Current state\n- All four ballots (D-PREP-SURFACE2, D-META-REFLECT2, D-META-PUBLISH2, D-META-CONTROL2) are ratified A, so no decision blocker remains.\n- Criteria 6-8 are met: the Syntax.rs entry, the syntax-decisions.md log and regenerated `jet devtools grammars`. Criterion 9 (re-bless snapshots) is open.\n- The 2026-09-24 work landed in archived crates/jet-semindex (typed callable facts, schema v20; `callable_signature_facts_keep_typed_and_unavailable_states` passed). tests/semindex.rs:363 pins SCHEMA_VERSION 20.\n- Owned paths retarget from crates/jet-foundation/src/{Syntax.rs, AST, Registry.rs, Collections.rs} to Compiler/JetFoundation/Source/Registry (CoreCalls.jet, CoreCallRows.jet, CoreModules.jet, DiagnosticRows.jet), Compiler/JetAst/Source/AST (Comptime.jet, Expressions.jet, Items.jet) and Compiler/JetFoundation/Source/Collections.jet. Docs: Docs/spec/reference/metaprogramming.md and Docs/spec/syntax-decisions.md (the old docs/ path is stale).\n- Metadata families and owners: type universe (#3147); fields and enum cases (#3147, #3524); callable contracts (#3522, #3541); plus the remaining families listed in the card body.\n\n## Changes\n1. Registry: add Compiler/JetFoundation/Source/Registry/Metaprogramming.jet (listed in Compiler/Bootstrap/sources.list), with one row per public fact, operation, phase and failure: name, family, availability phase, result/error type, owner card and witness name. Include D-META-REFLECT2's closed result and error types, complete typed field schema, runtime value/table roots and retention operations exactly. Extend the string-only CallableSignatureFact fields from their checker producers, and do not describe them as already complete.\n2. AST: Compiler/JetAst/Source/AST/Comptime.jet carries the ratified prep and generation shapes. No discarded spelling survives as a second interface.\n3. Docs: metaprogramming.md cites the registry, not a copy of it. Record that default mode stops at level 5 and that opt-in never grants host permissions or unchecked facts. Phase availability, unavailable facts, identity, visibility, receipts and I9 meaning are explicit.\n4. Map all forty captured Jai capability families to a contract, owner and proof. Unknown peer details stay blockers.\n5. Re-bless the affected snapshots (criterion 9).\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- A registry completeness check, `rg -c \"owner:\" Compiler/JetFoundation/Source/Registry/Metaprogramming.jet`, equals the row count, and every owner card exists in Tower.\n- `JET_UI_FILTER=tests/ui/meta_ cargo test --test diagnostic_snapshots ui_snapshots` passes.\n- `cargo test --test semindex -- semindex_schema_version` passes.\n\n## Batch\nbatch-jetc-front: the registries and AST shapes are front-end foundation data, checked in one compiler check.\n\n## Dependencies\nNone open. All four ballots are ratified.",
+      "plan": "## Goal\nOne complete, versioned public model for metadata, preparation, generated code, compiler sessions and advanced operations. Its exact field and operation catalogs are published as executable registries in the Jet compiler, not as duplicated prose. This card owns contracts, not compiler delivery.\n\n## Current state\n- All four ballots (D-PREP-SURFACE2, D-META-REFLECT2, D-META-PUBLISH2, D-META-CONTROL2) are ratified A, so no decision blocker remains.\n- Criteria 6-8 are met: the Syntax.rs entry, the syntax-decisions.md log and regenerated `jet devtools grammars`. Criterion 9 (re-bless snapshots) is open.\n- The 2026-09-24 work landed in archived crates/jet-semindex (typed callable facts, schema v20; `callable_signature_facts_keep_typed_and_unavailable_states` passed). tests/semindex.rs:363 pins SCHEMA_VERSION 20.\n- Owned paths retarget from crates/jet-foundation/src/{Syntax.rs, AST, Registry.rs, Collections.rs} to Compiler/JetFoundation/Source/Registry (CoreCalls.jet, CoreCallRows.jet, CoreModules.jet, DiagnosticRows.jet), Compiler/JetAst/Source/AST (Comptime.jet, Expressions.jet, Items.jet) and Compiler/JetFoundation/Source/Collections.jet. Docs: Docs/spec/reference/metaprogramming.md and Docs/spec/syntax-decisions.md (the old docs/ path is stale).\n- Metadata families and owners: type universe (#3147); fields and enum cases (#3147, #3524); callable contracts (#3522, #3541); plus the remaining families listed in the card body.\n\n## Changes\n1. Registry: add Compiler/JetFoundation/Source/Registry/Metaprogramming.jet (listed in Compiler/Bootstrap/sources.list), with one row per public fact, operation, phase and failure: name, family, availability phase, result/error type, owner card and witness name. Include D-META-REFLECT2's closed result and error types, complete typed field schema, runtime value/table roots and retention operations exactly. Extend the string-only CallableSignatureFact fields from their checker producers, and do not describe them as already complete.\n2. AST: Compiler/JetAst/Source/AST/Comptime.jet carries the ratified prep and generation shapes. No discarded spelling survives as a second interface.\n3. Docs: metaprogramming.md cites the registry, not a copy of it. Record that default mode stops at level 5 and that opt-in never grants host permissions or unchecked facts. Phase availability, unavailable facts, identity, visibility, receipts and I9 meaning are explicit.\n4. Map all forty captured Jai capability families to a contract, owner and proof. Unknown peer details stay blockers.\n5. Re-bless the affected snapshots (criterion 9).\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- A registry completeness check, `rg -c \"owner:\" Compiler/JetFoundation/Source/Registry/Metaprogramming.jet`, equals the row count, and every owner card exists in Tower.\n- `jet test Compiler --profile ui meta_` passes.\n- `jet test Compiler --profile cases semindex/semindex_schema_version` passes.\n\n## Batch\nbatch-jetc-front: the registries and AST shapes are front-end foundation data, checked in one compiler check.\n\n## Dependencies\nNone open. All four ballots are ratified.",
       "checkSteps": "Rebuild: scripts/agent/jet-env cargo build -p jet --bin jet with CARGO_INCREMENTAL=0. Keep scratch at ~/.cache/jet-test-scratch. Existing stale CoreModuleExports.rs is an execution prerequisite, not evidence that any feature passes.\n\nRead every approved decision and compare its chosen interface with the executable registry schema planned by the consumer cards. Require every public fact, operation, phase and failure to have a delivery owner and a behavioral witness; reject holes described as future work.\n\nFor each planned package witness, use scripts/agent/jet-env jet check, jet run, jet run --interpret, jet dev --watch=off where relevant, and jet build from that package directory; launch its emitted .jet/build/run artifact. Compare the named golden and actual state changes. Use the existing web harness when the feature reaches web. No broad suite outside the composed closeout gate.",
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -34935,7 +34960,7 @@
         },
         {
           "n": 10,
-          "text": "Every public metadata fact, operation, phase and failure named by D-PREP-SURFACE2, D-META-REFLECT2, D-META-PUBLISH2 and D-META-CONTROL2 appears as a row in the Jet executable registry (Compiler/JetFoundation/Source/Registry) with a delivery-owner card and a behavioral-witness name; `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0 and `JET_UI_FILTER=tests/ui/meta_ cargo test --test diagnostic_snapshots ui_snapshots` passes after the re-bless (crit 9).",
+          "text": "Every public metadata fact, operation, phase and failure named by D-PREP-SURFACE2, D-META-REFLECT2, D-META-PUBLISH2 and D-META-CONTROL2 appears as a row in the Jet executable registry (Compiler/JetFoundation/Source/Registry) with a delivery-owner card and a behavioral-witness name; `jet check Compiler` exits 0 and `jet test Compiler --profile ui meta_` passes after the re-bless (crit 9).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -35052,7 +35077,7 @@
         },
         {
           "n": 23,
-          "text": "`$phase` is ratified and documented but unresolved (E0107), and the fix line asks the user to declare a `$` name: `$phase` reads the evaluation-site Phase on o0, o1 and o2 (Preparation inside comptime, Runtime in fn run), proved by a golden example. E0107 never suggests declaring a `$` name; an unknown `$` root reports E0003 with the root list (UI snapshot). metaprogramming.md and reflect.jet no longer describe fact reads as an `@` form. (Evidence: Found by #6385 on dev 59213de00f. `print($phase)` and `PH :: comptime { $phase }` both report `E0107 Nothing named '$phase' exists here` with `Fix: Declare it first: '$phase :: ...'`, although users cannot declare `$` names and `$phase` is a ratified root (D-PREP-SURFACE2, D-META-ROOT3; Docs/spec/reference/metaprogramming.md:240). The same page (line 188) and Examples/features/comptime/reflect.jet:2 still call fact reads 'the `@` member form', although `@` is retired (D-COMPILER-NS1=A). Repros: probes/zig/z06_phase.jet, z06b_phase.jet. Related: #3520 C10.) The same patch corrects the stale spelling at Docs/spec/syntax-decisions.md:3503, which still shows the retired `@loop` over `T.@fields`.",
+          "text": "`$phase` is ratified and documented but unresolved (E0107), and the fix line asks the user to declare a `$` name: `$phase` reads the evaluation-site Phase on o0, o1 and o2 (Preparation inside comptime, Runtime in fn run), proved by a golden example. E0107 never suggests declaring a `$` name; an unknown `$` root reports E0003 with the root list (UI snapshot). metaprogramming.md and reflect.jet no longer describe fact reads as an `@` form. (Evidence: Found by #6385 on dev 59213de00f. `print($phase)` and `PH: comptime { $phase }` both report `E0107 Nothing named '$phase' exists here` with `Fix: Declare it first: '$phase: ...'`, although users cannot declare `$` names and `$phase` is a ratified root (D-PREP-SURFACE2, D-META-ROOT3; Docs/spec/reference/metaprogramming.md:240). The same page (line 188) and Examples/features/comptime/reflect.jet:2 still call fact reads 'the `@` member form', although `@` is retired (D-COMPILER-NS1=A). Repros: probes/zig/z06_phase.jet, z06b_phase.jet. Related: #3520 C10.) The same patch corrects the stale spelling at Docs/spec/syntax-decisions.md:3503, which still shows the retired `@loop` over `T.@fields`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -35134,8 +35159,8 @@
       "parentId": "c0zima4a",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:37.792Z",
-      "updated": "2026-11-05T00:44:25.097Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-06T18:35:22.838Z",
+      "updatedBy": "Main",
       "goals": [
         "G6"
       ]
@@ -37681,6 +37706,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): PortsLead takes over from JetpackEngine: land the explain/bridge/services/config dispatch with JetpackCLI's hunk, then D-CHANNEL-AUTO2=A and the open rows. Commits 0c9e1000cb and 1338ccac06 are in batch vb5."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c190 partial, 12da3c76b5 (JetpackEngine): the JetpackStore handoff landed (CacheLease, LeaseSnapshot, projections, ShellEnv, CLI/Services/JetOS consumers, ExecutableLease), which fixes the c83c1385c4 Engine assembly break; the ClosureJournal jet-cc hunk stays with the #6564 c23 lane. Engine --tests default tier 518/548 vs 513/548 on HEAD with StoreCache reverted; the FAIL set is a strict subset of baseline (store ingest child-replaced and disappearing-output now pass); 3 c190 known-failing rows removed. Remaining: 2 c190 rows that SIGSEGV in compiler codegen on &opt_handle == .Val(x) (see the new compiler-crash card), plus 'incomplete generation...' and 'lease recovery waits for descendant', which also fail on baseline. AOT tier pending."
         },
         {
@@ -39828,8 +39858,8 @@
       "parentId": "c0v95zs3",
       "needsAcceptance": false,
       "created": "2026-09-27T23:27:03.232Z",
-      "updated": "2026-11-06T17:14:03.303Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-06T18:15:22.082Z",
+      "updatedBy": "Main",
       "goals": [
         "G2"
       ]
@@ -40029,7 +40059,7 @@
       "milestoneId": "e5-m11-jetpack-in-jet",
       "phase": "planning",
       "priority": "P1",
-      "plan": "## Goal\nImplement the six ratified core.process decisions the Jetpack port (#3590) needs: binary pipes, process replacement, terminal handoff and groups, kept-open handles, scoped signal receivers, and start identity. Prove each on AOT and default `jet run` (I9). The port may not work around a missing Core API.\n\n## Current state\n- `Core/process/process.jet` (349 lines) has only line streams. `stdin_text` (:51-57) writes text, and `on_signal` (:100) registers a policy only. There is no exec, keep_open, `signals()` receiver or identity.\n- Process handles are compiler-known: `Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:292-456` (ProcessChild fields `stdin`/`stdout`/`stderr`/`terminal` at :431-437, and ProcessStdin write/close at :410-412). The registry has `ProcessStdin.close` at `Compiler/JetFoundation/Source/Registry/CoreCallRows.jet:1601`.\n- The host is `crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs`, which already defaults to a Unix process group and Windows Job containment (per the 2026-09-28 log, around :328-347 and :493-513), plus `ProcessSpec.rs`.\n- #3591 is done. All six decisions are ratified A: D-CORE-PROCBYTES1, PROCREPLACE1, PROCGROUP1, PROCIDENT1, PROCINHERIT1 and PROCSIGNAL1. `IOError.Unsupported` comes from D-CORE-FILEERROR1=A (card #3593), which is not yet in `Core/io/io.jet`.\n\n## Changes (Jet compiler first; one sub-slice per decision, landing together)\n1. PROCBYTES1: `ProcessStdin.write(bytes) -> Int IOError!`, `write_all(bytes)`, `write_text(text)` (renamed from `write(text)`; migrate `stdin_text` and callers). `ProcessStdoutStream`/`ProcessStderrStream` get `read(limit) -> [U8]`, where `[]` means EOF, and `chunks(size: Int{65536})`. A limit below 1 gives `IOError.InvalidInput` before any read. Sema rows go in `ProcessHandles.jet`, registry rows in CoreCallRows, and host code in `Process.rs`.\n2. PROCREPLACE1: `ProcessSpec.replace_process() -[Exec, Time.Wait]> Never IOError!`. It refuses Capture/Stream/terminal/detached/timeout/output_limit/under before execve. On Unix it flushes Jet stdio before execve. On Windows it uses a Job Object stand-in.\n3. PROCGROUP1: automatic terminal handoff (setpgid/tcsetpgrp with SIGTTOU blocked, reclaim after wait, refuse a second owner with InvalidInput). On Windows, CREATE_NEW_PROCESS_GROUP for non-console children.\n4. PROCINHERIT1: `ProcessSpec.keep_open(^handle: KeepOpen, at: Int?{None})`, where KeepOpen is a core.files handle. Numbers below 3 or duplicates are refused. CLOEXEC is cleared only in the child. On Windows it uses PROC_THREAD_ATTRIBUTE_HANDLE_LIST, and `at` gives Unsupported.\n5. PROCSIGNAL1: `process.signals(kinds) -[Exec]> Receiver<ProcessSignal>` with a nested newest-wins scope, restore on drop, and one pending value per kind.\n6. PROCIDENT1: `ProcessIdentity { pid, start, containment }`, `ProcessChild.identity()`, `process.identity(pid)`, `process.find(saved)` and `RunningProcess` terminate/kill/interrupt. Start tokens: Linux stat starttime, macOS proc_pidinfo, Windows GetProcessTimes. Other targets give `IOError.Unsupported`.\n7. Update `Docs/spec` core.process and the Jetpack mapping receipts.\n\n## Proof\n- Add goldens `Examples/features/io/process_bytes.jet` (binary round-trip through `cat`, chunks, invalid limit), `process_keep_open.jet`, `process_signals.jet` (self-SIGINT through `sys.kill`, nested restore) and `process_identity.jet` (identity equality, `find` after exit returns None). For each, `JET_GOLDEN_FILTER=io/process_ Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes, and `jet run` diffs empty.\n- `tests/process_replace.rs::replace_process_execs_and_refuses_capture` passes via `Tools/agent/jet-env cargo test --test process_replace`.\n- The terminal handoff is checked in `tests/help_pty.rs` style under a PTY: `Tools/agent/jet-env cargo test --test process_replace -- terminal_handoff`.\n\n## Batch\nbatch-core-files: the core.process surface plus its sema, registry and host rows, retested with the io/process goldens.\n\n## Dependencies\n#3593 (core.files handles and `IOError.Unsupported` from D-CORE-FILEERROR1) is needed for items 4 and 6. Items 1, 2, 3 and 5 can land first.",
+      "plan": "## Goal\nImplement the six ratified core.process decisions the Jetpack port (#3590) needs: binary pipes, process replacement, terminal handoff and groups, kept-open handles, scoped signal receivers, and start identity. Prove each on AOT and default `jet run` (I9). The port may not work around a missing Core API.\n\n## Current state\n- `Core/process/process.jet` (349 lines) has only line streams. `stdin_text` (:51-57) writes text, and `on_signal` (:100) registers a policy only. There is no exec, keep_open, `signals()` receiver or identity.\n- Process handles are compiler-known: `Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:292-456` (ProcessChild fields `stdin`/`stdout`/`stderr`/`terminal` at :431-437, and ProcessStdin write/close at :410-412). The registry has `ProcessStdin.close` at `Compiler/JetFoundation/Source/Registry/CoreCallRows.jet:1601`.\n- The host is `crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs`, which already defaults to a Unix process group and Windows Job containment (per the 2026-09-28 log, around :328-347 and :493-513), plus `ProcessSpec.rs`.\n- #3591 is done. All six decisions are ratified A: D-CORE-PROCBYTES1, PROCREPLACE1, PROCGROUP1, PROCIDENT1, PROCINHERIT1 and PROCSIGNAL1. `IOError.Unsupported` comes from D-CORE-FILEERROR1=A (card #3593), which is not yet in `Core/io/io.jet`.\n\n## Changes (Jet compiler first; one sub-slice per decision, landing together)\n1. PROCBYTES1: `ProcessStdin.write(bytes) -> Int IOError!`, `write_all(bytes)`, `write_text(text)` (renamed from `write(text)`; migrate `stdin_text` and callers). `ProcessStdoutStream`/`ProcessStderrStream` get `read(limit) -> [U8]`, where `[]` means EOF, and `chunks(size: Int{65536})`. A limit below 1 gives `IOError.InvalidInput` before any read. Sema rows go in `ProcessHandles.jet`, registry rows in CoreCallRows, and host code in `Process.rs`.\n2. PROCREPLACE1: `ProcessSpec.replace_process() -[Exec, Time.Wait]> Never IOError!`. It refuses Capture/Stream/terminal/detached/timeout/output_limit/under before execve. On Unix it flushes Jet stdio before execve. On Windows it uses a Job Object stand-in.\n3. PROCGROUP1: automatic terminal handoff (setpgid/tcsetpgrp with SIGTTOU blocked, reclaim after wait, refuse a second owner with InvalidInput). On Windows, CREATE_NEW_PROCESS_GROUP for non-console children.\n4. PROCINHERIT1: `ProcessSpec.keep_open(handle: &&KeepOpen, at: Int?{None})`, where KeepOpen is a core.files handle. Numbers below 3 or duplicates are refused. CLOEXEC is cleared only in the child. On Windows it uses PROC_THREAD_ATTRIBUTE_HANDLE_LIST, and `at` gives Unsupported.\n5. PROCSIGNAL1: `process.signals(kinds) -[Exec]> Receiver<ProcessSignal>` with a nested newest-wins scope, restore on drop, and one pending value per kind.\n6. PROCIDENT1: `ProcessIdentity { pid, start, containment }`, `ProcessChild.identity()`, `process.identity(pid)`, `process.find(saved)` and `RunningProcess` terminate/kill/interrupt. Start tokens: Linux stat starttime, macOS proc_pidinfo, Windows GetProcessTimes. Other targets give `IOError.Unsupported`.\n7. Update `Docs/spec` core.process and the Jetpack mapping receipts.\n\n## Proof\n- Add goldens `Examples/features/io/process_bytes.jet` (binary round-trip through `cat`, chunks, invalid limit), `process_keep_open.jet`, `process_signals.jet` (self-SIGINT through `sys.kill`, nested restore) and `process_identity.jet` (identity equality, `find` after exit returns None). For each, `jet test Compiler --profile golden io/process_` passes, and `jet run` diffs empty.\n- `tests/process_replace.rs::replace_process_execs_and_refuses_capture` passes via `Tools/agent/jet-env cargo test --test process_replace`.\n- The terminal handoff is checked in `tests/help_pty.rs` style under a PTY: `Tools/agent/jet-env cargo test --test process_replace -- terminal_handoff`.\n\n## Batch\nbatch-core-files: the core.process surface plus its sema, registry and host rows, retested with the io/process goldens.\n\n## Dependencies\n#3593 (core.files handles and `IOError.Unsupported` from D-CORE-FILEERROR1) is needed for items 4 and 6. Items 1, 2, 3 and 5 can land first.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
@@ -40038,6 +40068,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-10-30",
           "by": "Main",
@@ -40072,7 +40107,7 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Binary pipes, replace_process, terminal handoff, keep_open, signals() and identity each have a focused proof. Goldens `Examples/features/io/process_{bytes,keep_open,signals,identity}.jet` pass `JET_GOLDEN_FILTER=io/process_ Tools/agent/jet-env cargo test --test golden examples_compile_and_run`, and `jet run` diffs empty. `Tools/agent/jet-env cargo test --test process_replace` covers exec refusal and PTY terminal handoff.",
+          "text": "Binary pipes, replace_process, terminal handoff, keep_open, signals() and identity each have a focused proof. Goldens `Examples/features/io/process_{bytes,keep_open,signals,identity}.jet` pass `jet test Compiler --profile golden io/process_`, and `jet run` diffs empty. `Tools/agent/jet-env cargo test --test process_replace` covers exec refusal and PTY terminal handoff.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -40140,8 +40175,8 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.012Z",
-      "updated": "2026-11-06T17:14:03.303Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-06T18:35:25.516Z",
+      "updatedBy": "Main",
       "goals": []
     },
     {
@@ -52182,6 +52217,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 3 criteria from archived #3584: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -52199,7 +52239,7 @@
         },
         {
           "n": 2,
-          "text": "If A: `नमस्ते :: 1` and NFD `café` both compile; NFC and NFD spellings of one name are the same binding on every engine; jet fmt rewrites the file to NFC.",
+          "text": "If A: `नमस्ते: 1` and NFD `café` both compile; NFC and NFD spellings of one name are the same binding on every engine; jet fmt rewrites the file to NFC.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -52271,7 +52311,7 @@
         },
         {
           "n": 10,
-          "text": "Syntax.rs entry updated",
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -52354,7 +52394,7 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.274Z",
-      "updated": "2026-11-04T23:49:37.444Z",
+      "updated": "2026-11-06T18:35:28.187Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -52462,7 +52502,7 @@
       "id": "c012s7jk",
       "num": 4626,
       "title": "Map literals never lose an entry silently when two keys are equal",
-      "body": "NEW card, host for ballot D-MAPLIT-DUP1. Builds on D-DATATREE-RULES1 (#4602, owner ruling 2026-10-05: duplicate object keys are a parse error with explicit opt-in) and the JSON reader law (core-library.md:2170-2174). Does not touch #4602's DataTree deliverable. Conflicts with nothing ratified: no existing decision states map-literal duplicate-key semantics (searched syntax-decisions S38/D-EMPTYLIT1, D-MAPSPACE1; card search 'map literal|duplicate key').\n\n## Actual\n\nObserved 2026-10-05 on the dev candidate jet ($JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet, built 14:16) and on the main checkout debug jet (HEAD 3e5349196):\n\n```jet\nfn run() {\n    level :: 7\n    character :: [String:Int]{\"level\": level, \"rank\": 2, \"level\": 99}\n    print(character.get(\"level\") ?? -1)   // prints 99; jet check: no problems\n}\n```\n\nA literal whose two variable keys are equal (`a :: \"level\"; b :: \"level\"; [String:Int]{a: 1, b: 2}`) prints length 1 and value 2. Neither `jet check` nor `jet run` reports anything.\n\n## Why it matters\n\nJet already refuses repeated names in data: JSON parse/decode/reader reject a repeated object name with path and position, with `_allow_duplicates` as the explicit opt-in (core-library.md:2170-2174), and the owner's 2026-10-05 DataTree ruling (#4602, D-DATATREE-RULES1) makes duplicate object keys a parse error. Jet's own source literal is the one place that still drops data silently. A 7-hour beginner Python course (youtube 4M87qBgpafk 05:54-05:56) demonstrates exactly this trap: a pasted second `level` entry silently replaces the parameter-backed value.\n\n## Owner choice\n\nD-MAPLIT-DUP1 decides runtime semantics for computed-key collisions. Implement the ratified outcome only.\n\n## Scope\n\nSema check for written-out (literal, enum-case, constant-folded) equal keys; runtime literal construction per the ratified option; same rule in the compile-time evaluator and every execution tier; registered report rows with UI snapshots; corpus and Core scan for literals relying on overwrite; spec sentence under S38.\n\nDistilled 2026-10-05 by DistillLang from the six mining batches; Tower snapshot rev 74843 (jet-state digest INCONSISTENT during collection: rerun before posting).",
+      "body": "NEW card, host for ballot D-MAPLIT-DUP1. Builds on D-DATATREE-RULES1 (#4602, owner ruling 2026-10-05: duplicate object keys are a parse error with explicit opt-in) and the JSON reader law (core-library.md:2170-2174). Does not touch #4602's DataTree deliverable. Conflicts with nothing ratified: no existing decision states map-literal duplicate-key semantics (searched syntax-decisions S38/D-EMPTYLIT1, D-MAPSPACE1; card search 'map literal|duplicate key').\n\n## Actual\n\nObserved 2026-10-05 on the dev candidate jet ($JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet, built 14:16) and on the main checkout debug jet (HEAD 3e5349196):\n\n```jet\nrun: fn() {\n    level: 7\n    character: [String:Int]{\"level\": level, \"rank\": 2, \"level\": 99}\n    print(character.get(\"level\") ?? -1)   // prints 99; jet check: no problems\n}\n```\n\nA literal whose two variable keys are equal (`a: \"level\"; b: \"level\"; [String:Int]{a: 1, b: 2}`) prints length 1 and value 2. Neither `jet check` nor `jet run` reports anything.\n\n## Why it matters\n\nJet already refuses repeated names in data: JSON parse/decode/reader reject a repeated object name with path and position, with `_allow_duplicates` as the explicit opt-in (core-library.md:2170-2174), and the owner's 2026-10-05 DataTree ruling (#4602, D-DATATREE-RULES1) makes duplicate object keys a parse error. Jet's own source literal is the one place that still drops data silently. A 7-hour beginner Python course (youtube 4M87qBgpafk 05:54-05:56) demonstrates exactly this trap: a pasted second `level` entry silently replaces the parameter-backed value.\n\n## Owner choice\n\nD-MAPLIT-DUP1 decides runtime semantics for computed-key collisions. Implement the ratified outcome only.\n\n## Scope\n\nSema check for written-out (literal, enum-case, constant-folded) equal keys; runtime literal construction per the ratified option; same rule in the compile-time evaluator and every execution tier; registered report rows with UI snapshots; corpus and Core scan for literals relying on overwrite; spec sentence under S38.\n\nDistilled 2026-10-05 by DistillLang from the six mining batches; Tower snapshot rev 74843 (jet-state digest INCONSISTENT during collection: rerun before posting).",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
@@ -52476,6 +52516,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
         {
           "at": "2026-10-05",
           "by": "Pip",
@@ -52503,7 +52548,7 @@
         },
         {
           "n": 3,
-          "text": "A map literal whose computed keys collide behaves exactly as the ratified outcome states on default jet run, AOT/native and the interpreter, and in compile-time evaluation; a test pins each tier.",
+          "text": "A map literal whose computed keys collide behaves exactly as the ratified outcome states on O0, O1 and O2, and in compile-time evaluation; a test pins each tier.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -52556,7 +52601,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:49.267Z",
-      "updated": "2026-10-31T14:19:49.542Z",
+      "updated": "2026-11-06T18:35:30.804Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -53277,6 +53322,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-EXEC2=A (native code generator only; Cranelift and MIREval are retired)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 4 criteria from archived #3493, #3494, #3496, #3512: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -53299,7 +53349,7 @@
         },
         {
           "n": 2,
-          "text": "A bind failure returns a typed error to the caller; no process::exit remains in the server path.",
+          "text": "A bind failure returns a typed error to the caller; no process exit call remains in the server path.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -53335,7 +53385,7 @@
         },
         {
           "n": 6,
-          "text": "(was #3493 c1) Resident Cranelift preserves both HTTPResponse.header mutations and matches exact AOT/interpreter output in the focused HTTP response fixture [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #3493 c1) O0 (`jet run`) preserves both HTTPResponse.header mutations and matches exact O1 and O2 output in the focused HTTP response fixture [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -53344,7 +53394,7 @@
         },
         {
           "n": 7,
-          "text": "(was #3494 c1) Resident Cranelift resolves core.http.server.json through jet_http_srv_json and the focused Tower DataTree fixture executes with expected output [precut audit: failing on 9c7ddf1359: C:http_i9/http_route_handlers_preserve_arity_context_and_errors_on_both_dev_tiers FAIL exit 1; expected 0]",
+          "text": "(was #3494 c1) O0 (`jet run`) resolves core.http.server.json through jet_http_srv_json and the focused Tower DataTree fixture executes with expected output [precut audit: failing on 9c7ddf1359: C:http_i9/http_route_handlers_preserve_arity_context_and_errors_on_both_dev_tiers FAIL exit 1; expected 0]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -53353,7 +53403,7 @@
         },
         {
           "n": 8,
-          "text": "(was #3496 c1) Resident Cranelift resolves canonical jet_http_srv_static_file through the existing adapter and the focused Tower DataTree resident proof passes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #3496 c1) O0 (`jet run`) resolves canonical jet_http_srv_static_file through the existing adapter and the focused Tower DataTree resident proof passes [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -53362,7 +53412,7 @@
         },
         {
           "n": 9,
-          "text": "(was #3512 c1) core.http.server.static_file preserves one Result<HTTPResponse, HTTPError> carrier across AOT, resident Cranelift, and interpreter; the canonical Tower suite and focused resident fixture pass without generated-Rust rejection or ICE [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #3512 c1) core.http.server.static_file preserves one Result<HTTPResponse, HTTPError> carrier across O0, O1 and O2; the canonical Tower suite and focused resident fixture pass without generated-Rust rejection or ICE [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -53390,7 +53440,7 @@
       "parentId": "c086hhzb",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:55.999Z",
-      "updated": "2026-11-04T23:48:53.525Z",
+      "updated": "2026-11-06T18:35:33.557Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -70523,6 +70573,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): TestSystemLead takes over from TestRot: c5 in flight (rejected cases and #Pre), then c2 and c6. 980b5d3680 and be89473c60 (c1, c4) are in batch vb5."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 2 criteria from archived #2341: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -70601,7 +70656,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:26.439Z",
-      "updated": "2026-11-05T23:25:14.299Z",
+      "updated": "2026-11-06T18:15:22.983Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -78339,6 +78394,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): SyntaxOwner (owner's syntax slot) builds the seven ratified decisions after #6586 lands."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Owner direction 2026-11-06: the seven ratified syntax decisions on this card (D-ENUM-DOT1=B, D-ALIAS-GENERIC1=A, D-ALT-SUBSET1=A, D-RECORD-BRACE1=A, D-ALT-CASES1=A, D-BRACE-LAYOUT1=A, D-RECORD-ORDER1=A) are implemented by the owner's dedicated agent once #6586 (name: value, && take, call-site mark removal) lands; DeclColon keeps #6586 only."
         },
         {
@@ -78514,7 +78574,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T20:27:37.698Z",
-      "updated": "2026-11-06T17:18:19.319Z",
+      "updated": "2026-11-06T18:15:20.304Z",
       "updatedBy": "Main"
     },
     {
@@ -84967,6 +85027,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): CoreCliLead owns the command families except the Jetpack-engine dispatch rows, which PortsLead owns."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Deconfliction 2026-11-06 (owner approved removal): retired spellings get no teaching fixtures (owner order), D-DECL-COLON1=A and D-ALIAS-GENERIC1 remove the alias keyword and ::, and D-META-HASH1=A removes $. The live impure_no_reason check from the old c75 is kept as a new criterion. Removed as superseded: c75 \"(was #1461 c4) Each retired spelling has a paired teaching fixture under tests/ui, including marker_retired_sql_angle.jet/.stderr, marker_re…\"; c76 \"(was #1513 c5) `rg -n '^\\s*alias\\s+[^;]+\\s=\\s' examples tests --glob '*.jet'` returns no old alias declaration, while `rg -n '^\\s*alias\\s+[^…\"; c92 \"(was #1606 c12) tests/ui/marker_retired_known.jet/.stderr remains green and teaches the $ spelling; no other retired block-marker spelling i…\"."
         },
         {
@@ -86367,7 +86432,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-06T18:09:05.419Z",
+      "updated": "2026-11-06T18:15:26.348Z",
       "updatedBy": "Main"
     },
     {
@@ -86388,6 +86453,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): CoreCliLead takes over from Builder5: data_hostile guard, then the Severity E0772 collision, #6605, then this card."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -86943,7 +87013,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:12:20.739Z",
-      "updated": "2026-11-06T04:30:26.777Z",
+      "updated": "2026-11-06T18:15:25.248Z",
       "updatedBy": "Main"
     },
     {
@@ -94288,6 +94358,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): TestSystemLead takes over from TestRot: c5 runner registration; c3 fixed point and c4 s5 loop are in batch vb5."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c3 and c4 added from TestRot's #6595/#6609 findings (no new card): runtime import ledger drift and 6 s5 witness-loop rot rows."
         },
         {
@@ -94356,7 +94431,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T06:13:43.662Z",
-      "updated": "2026-11-06T16:55:11.091Z",
+      "updated": "2026-11-06T18:15:23.987Z",
       "updatedBy": "Main"
     },
     {
@@ -94634,7 +94709,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "HANDOFF 2026-11-06 (Main restart after the session crash): PortsLead takes over from BindgenPort: finish the staged 3-way merges, fix the jet_ffi_b64encode_cabi export and the opaque_handles ICE, regenerate caches."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -94663,7 +94744,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T06:40:53.022Z",
-      "updated": "2026-11-06T06:41:00.340Z",
+      "updated": "2026-11-06T18:15:21.207Z",
       "updatedBy": "Main"
     },
     {
@@ -182649,6 +182730,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T18:35:33.557Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04es5yq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:32.718Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04es5yq",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:35:30.804Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c012s7jk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:30.024Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c012s7jk",
+      "note": "criteria,body"
+    },
+    {
+      "at": "2026-11-06T18:35:28.187Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0441rvj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:27.396Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0441rvj",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:35:25.516Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ufrhm0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:24.710Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ufrhm0",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:35:22.838Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yfcz0w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:21.891Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yfcz0w",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:35:19.899Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tsbf3w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:18.995Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tsbf3w",
+      "note": "criteria,body,plan"
+    },
+    {
+      "at": "2026-11-06T18:35:17.141Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xb6zik",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:16.262Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xb6zik",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:35:14.351Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03habw5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:13.503Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03habw5",
+      "note": "criteria,body,plan"
+    },
+    {
+      "at": "2026-11-06T18:35:11.625Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c9q0534j",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:35:10.629Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c9q0534j",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:15:26.348Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hn7w1n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:15:25.248Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c081c9o8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:15:23.987Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gaxqxg",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:15:22.983Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jfu2us",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:15:22.082Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uwol3w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:15:21.207Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yy2xbx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:15:20.304Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqt0kq",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-06T18:15:19.009Z",
       "by": "Main",
