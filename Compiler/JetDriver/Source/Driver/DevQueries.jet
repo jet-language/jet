@@ -2,7 +2,7 @@
 // evaluated like fn build; its `d.watch`, `d.serve` and `d.reload` calls
 // reach this adapter, which records them for `jet dev`.
 use {
-    jet_foundation.[Diagnostic, Span, TComptimeValue, Type]
+    jet_foundation.[Diagnostic, PolicyKey, Span, TComptimeValue, Type, policy_gate_allows]
     jet_eval.[JetEvalBuildHostAdapter, JetEvalBuildReply, jet_eval_build_session_input, jet_eval_runtime_config]
 }
 
@@ -99,6 +99,8 @@ fn jet_driver_query_dev_config(owned_request: ^JetDriverCompileRequest) -> JetDr
     configured.configured = true
     state :: shared configured
     config := jet_eval_runtime_config(request.eval_config)
+    // A refused effect inside `#Impure` is reported for this gate (E3411).
+    config.impure_gate = policy_gate_allows(request.gate_set, PolicyKey.Impure)
     config.build_host_adapter = Val(JetDriverDevAdapter{state: state})
     run := jet_driver_invocation_run(^inputs, [TComptimeValue]{TComptimeValue.Struct{type_name: "Dev", fields: []}}, config, Span{start: 0, end: 0})
     errors := ^compiled.diagnostics

@@ -214,12 +214,14 @@ fn sema_call_core_crypto_expert_gate(module_name: String, member: String, span: 
 }
 
 // Rust `vault_comptime_denied` (raised:754 @ 6083377777): a `core.crypto.vault`
-// call in compile-time code (a `comptime` block, a module field, a comptime
-// function) is E1265. No gate unlocks it: a build artifact must never hold a
-// decrypted secret. True when reported; the call then has no value, so no
-// comptime evaluation is staged for it.
-fn sema_call_core_vault_build_time_gate(module_name: String, member: String, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool Never! {
-    if scopes.comptime_execution_depth == 0 || module_name != "core.crypto.vault" -> return false
+// call in build-time code (a `comptime` block, a module field, a comptime
+// function, the body of `fn build`) is E1265. No gate unlocks it, `#Impure`
+// included: a build artifact must never hold a decrypted secret. True when
+// reported; the call then has no value, so no comptime evaluation is staged
+// for it. `function_name` names the function whose body holds the call.
+fn sema_call_core_vault_build_time_gate(module_name: String, member: String, span: Span, scopes: SemaScopeTable, function_name: String, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if module_name != "core.crypto.vault" -> return false
+    if scopes.comptime_execution_depth == 0 && (scopes.location_function ?? function_name) != "build" -> return false
     row :: diagnostic_registry_row("E1265") ?? panic("E1265 must have a registry row")
     &diagnostics.push(sema_error("E1265", span, "`{module_name}.{member}()` can't be reached from a build-time context", row.why, row.fix))
     true

@@ -4678,7 +4678,9 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     _ := sema_ownership_report_arena_view_escape(&state, binding.init, "be stored in another binding", scopes, &diagnostics)
     if binding.uninit -> return sema_stmt_check_uninit_binding(binding, environment, program, &scopes, &state, &context, &diagnostics)
     if binding.arena_view -> return None
-    if binding.is_comptime -> return sema_stmt_check_prepared_binding(binding, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    // A lambda is already its value, and a function is no compile-time data:
+    // `name :: comptime { () -> … }` binds the lambda as a runtime binding does.
+    if binding.is_comptime && !(binding.init == .Lambda(_, _)) -> return sema_stmt_check_prepared_binding(binding, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if binding.pattern == .Val(pattern) {
         statement := sema_stmt_check_destructure(binding, pattern, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if statement != None {

@@ -1,7 +1,7 @@
 // Read-only fn-build staging: ordinary Driver checking and comptime execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use {
-    jet_foundation.[Diagnostic, EffectRowEntry, Item, Span, TComptimeValue, Type, sha256_hex]
+    jet_foundation.[Diagnostic, EffectRowEntry, Item, PolicyKey, Span, TComptimeValue, Type, policy_gate_allows, sha256_hex]
     jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
     jet_eval.[jet_eval_build_failed_diagnostic]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
@@ -236,6 +236,8 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     session := build_session_new(session_id, jet_driver_build_session_package(package, path), request.host_facts.compiler_identity ?? "", scope.policy)
     build_session_set_args(&session, request.build_args)
     config := jet_eval_runtime_config(request.eval_config)
+    // A refused effect inside `#Impure` is reported for this gate (E3411).
+    config.impure_gate = policy_gate_allows(request.gate_set, PolicyKey.Impure)
     // copy: the evaluator's build adapter gets a session and the request's input handles of its
     // own. This query keeps `session` to abort or finish it, and `request` is returned in every
     // response.

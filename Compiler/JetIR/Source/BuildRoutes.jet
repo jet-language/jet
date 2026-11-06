@@ -5058,8 +5058,19 @@ fn ir_reflect_literal(p: IRProgram, b: IRBuilder, node: Int) -> String Never! {
     text
 }
 
-// A Core call: its checked arguments to the record's runtime route.
+// A Core call: its checked arguments to the record's runtime route. In a
+// build invocation an `#Impure` block's Core call runs between the host marks
+// Impure.enter and Impure.leave (IRProgram.invocation).
 fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], span: Span) -> Int Never! {
+    if !p.invocation || b.impure == 0 -> return ir_core_call_routed(&m, p, &b, ty, record, args, type_args, widen, span)
+    _ :: ir_host_method_words(&m, p, &b, Type.Bool, "Impure.enter", [Int]{}, span)
+    result :: ir_core_call_routed(&m, p, &b, ty, record, args, type_args, widen, span)
+    if ir_failed(b) -> return -1
+    _ :: ir_host_method_words(&m, p, &b, Type.Bool, "Impure.leave", [Int]{}, span)
+    result
+}
+
+fn ir_core_call_routed(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], span: Span) -> Int Never! {
     canonical :: ir_canonical_core_record(record)
     if canonical.module_name == "core.mem" && (canonical.member == "__list_capacity" || canonical.member == "__list_reserve_exact" || canonical.member == "__type_size") {
         return ir_core_list_leaf(&m, p, &b, ty, canonical.member, args, type_args, span)
@@ -5090,6 +5101,14 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     }
     if p.comptime_values && b.impure == 0 {
         if ir_comptime_ambient_refusal(symbol) == .Val(what) -> return ir_fail_slot(&b, span, "{canonical.module_name}.{canonical.member} reads {what}, which a compile-time value must not depend on")
+    }
+    // Inside a build invocation's `#Impure` block, a route that reads or
+    // writes ambient process state with no system call the runtime child's
+    // filter could refuse is refused by the compiler as it is reached.
+    if p.invocation && b.impure > 0 {
+        if ir_invocation_ambient_refusal(symbol) == .Val(what) {
+            _ :: ir_host_method_words(&m, p, &b, Type.Bool, "Impure.refuse:{what}", [Int]{}, span)
+        }
     }
     if symbol == "jet_raw_object_from_entries" -> return ir_object_from_entries(&m, p, &b, ty, args, span)
     if symbol == "jet_raw_object_entries_view" -> return ir_object_entries_view(&m, p, &b, ty, args, span)
@@ -5285,6 +5304,14 @@ fn ir_comptime_ambient_refusal(symbol: String) -> String? Never! {
         "jet_compute_simd_lanes" -> Val("the host's SIMD dispatch")
         else -> None
     }
+}
+
+// What runtime route `symbol` reads or writes when it touches ambient process
+// state with no system call (ir_comptime_ambient_refusal, and the logical
+// environment's writes); None for every other route.
+fn ir_invocation_ambient_refusal(symbol: String) -> String? Never! {
+    if symbol == "jet_std_env_try_set" || symbol == "jet_std_env_unset" -> return Val("the environment")
+    ir_comptime_ambient_refusal(symbol)
 }
 
 // The raw List layout leaves: `__type_size<T>()` is T's List stride,

@@ -44,10 +44,12 @@ struct JetEvalIRComptime {
 // and no foreign functions.
 // `comptime_values` when the roots compute compile-time values (not a build
 // invocation): ambient reads with no system call are refused while building
-// (IRProgram.comptime_values).
+// (IRProgram.comptime_values); otherwise the roots are a build invocation
+// (IRProgram.invocation).
 fn jet_eval_ir_comptime_build(functions: ^[FnBody], decls: DeclTable, item_keys: [String], type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef], comptime_values: Bool) -> JetEvalIRComptime {
     program := ir_program_new(^functions, decls, ^type_defs, ^impls, [String:String]{}, ^constants)
     program.comptime_values = comptime_values
+    program.invocation = !comptime_values
     jet_eval_ir_comptime_roots(shared [IRProgram]{}, ^program, item_keys)
 }
 

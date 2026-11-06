@@ -160,6 +160,10 @@ struct JetEvalIRState {
     // was opened.
     impure: Bool
     impure_gate: Bool
+    // The `#Impure` Core calls of a build invocation now running (the host
+    // marks Impure.enter and Impure.leave, IRProgram.invocation): a system
+    // call refused inside one is refused as `impure` refuses it.
+    impure_sites: Int{0}
     span: Span
     failure: JetEvalError?
     internal_problem: JetEvalInternalProblem?
@@ -747,12 +751,13 @@ fn jet_eval_native_stop(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, d
 
 // System call `number` (first argument `first`) the filter refused. Runtime
 // execution has no host for it (unsupported), except under `jet eval`, whose
-// evaluator mode refuses it as an ambient effect (E3401). A comptime
-// evaluation refuses it as the effect it is: ambient time and randomness are
-// E3403, any other effect is observable outside the program, so folding it
-// would bake one build-time result into every run (E3410).
+// evaluator mode refuses it as an ambient effect (E3401), and inside a build
+// invocation's `#Impure` Core call, which is a Tier-2 effect (E3411). A
+// comptime evaluation refuses it as the effect it is: ambient time and
+// randomness are E3403, any other effect is observable outside the program,
+// so folding it would bake one build-time result into every run (E3410).
 fn jet_eval_native_refused(s: &JetEvalIRState, number: Int, first: Int) {
-    if s.runtime_execution && !s.eval_entry {
+    if s.runtime_execution && !s.eval_entry && s.impure_sites == 0 {
         jet_eval_ir_unsupported(&s, "system call {number}")
         return
     }
@@ -793,11 +798,12 @@ fn jet_eval_ir_effect_refused(s: &JetEvalIRState, what: String, nondeterministic
         s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_with_rights(refusal, "pure", [String]{what}, [String]{}, None)})
         return
     }
-    if s.impure && s.impure_gate {
+    impure :: s.impure || s.impure_sites > 0
+    if impure && s.impure_gate {
         s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Effect, s.span, "`{what}` inside `#Impure` is a Tier-2 comptime effect, which compile-time evaluation does not run", "`--gate impure=allow` opens the gate, but the compile-time evaluator performs no host effect", "keep the call at runtime"))
         return
     }
-    if s.impure {
+    if impure {
         entry :: diagnostic_registry_row("E3411") ?? panic("E3411 has no registry row")
         s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_from_registry("E3411", Val(s.span), "`{what}` inside `#Impure` is a Tier-2 comptime effect, but `--gate impure=allow` was not passed", entry.why, entry.fix)})
         return
