@@ -1,216 +1,249 @@
 // Backend-neutral facts and compare-and-commit transaction state for a resident native swap.
 // No method waits for quiescence or performs linker, socket, scheduler or OS operations.
 // Producers supply checked semantic, relocation, link and quiescence facts before pause.
-use {
-    jet_foundation.HotSwap.[HotSwapDecision, StateRetentionDecision]
-    std.fmt
-}
+use jet_foundation.[HotSwapDecision]
 
 NATIVE_SWAP_PROTOCOL: String{"jet.native.swap.v1"}
-MAX_NATIVE_SWAP_ID_BYTES: USize{256}
-MAX_NATIVE_SWAP_DETAIL_BYTES: USize{1024}
-MAX_NATIVE_SWAP_FACTS: USize{1024}
+MAX_NATIVE_SWAP_ID_BYTES: Int{256}
+MAX_NATIVE_SWAP_DETAIL_BYTES: Int{1024}
+MAX_NATIVE_SWAP_FACTS: Int{1024}
 
-NativeSwapSourceIdentity: struct { source_id: String; module_ref: String }
+NativeSwapSourceIdentity: struct { source_id: String, module_ref: String }
 impl NativeSwapSourceIdentity {
-    new: fn(source_id: String) -> Self NativeSwapError! { Self.new_with_module(source_id.copy(), source_id) }
-    new_with_module: fn(source_id: String, module_ref: String) -> Self NativeSwapError! {
-        _: validate_identity(source_id, "source identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_identity(module_ref, "module identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        Self { source_id: source_id.move(), module_ref: module_ref.move() }
+    new: fn(source_id: String) -> NativeSwapSourceIdentity NativeSwapError! {
+        NativeSwapSourceIdentity.new_with_module(source_id, source_id)
     }
-    canonical: fn(self: Self) -> String {
-        if self.source_id == self.module_ref -> self.source_id.copy() else -> "{self.source_id}::{self.module_ref}"
+    new_with_module: fn(source_id: String, module_ref: String) -> NativeSwapSourceIdentity NativeSwapError! {
+        _: validate_identity(source_id, "source identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_identity(module_ref, "module identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        NativeSwapSourceIdentity{source_id: source_id, module_ref: module_ref}
     }
-    matches: fn(self: Self, other: Self) -> Bool { self == other }
+    canonical: fn(self) -> String {
+        if self.source_id == self.module_ref -> self.source_id else -> "{self.source_id}::{self.module_ref}"
+    }
+    matches: fn(self, other: NativeSwapSourceIdentity) -> Bool {
+        self.source_id == other.source_id && self.module_ref == other.module_ref
+    }
 }
-impl NativeSwapSourceIdentity.Display {
-    fmt: fn(self: Self, output: fmt.Formatter) -> fmt.Result { output.write_str(self.canonical()) }
-}
+impl NativeSwapSourceIdentity.Display { display: fn(&&self) -> String { self.canonical() } }
+
 NativeSwapCodeRevision: struct { value: String }
 impl NativeSwapCodeRevision {
-    new: fn(value: String) -> Self NativeSwapError! {
-        _: validate_revision(value, "code revision") ?? return .Err(NativeSwapError.input(value, .InvalidRevision, err))
-        Self { value: value.move() }
+    new: fn(value: String) -> NativeSwapCodeRevision NativeSwapError! {
+        _: validate_revision(value, "code revision") ?? return Err(NativeSwapError.input(value, .InvalidRevision, err))
+        NativeSwapCodeRevision{value: value}
     }
-    as_str: fn(self: Self) -> String { self.value }
+    as_str: fn(self) -> String { self.value }
 }
-impl NativeSwapCodeRevision.Display {
-    fmt: fn(self: Self, output: fmt.Formatter) -> fmt.Result { output.write_str(self.value) }
-}
+impl NativeSwapCodeRevision.Display { display: fn(&&self) -> String { self.value } }
+
 NativeSwapDataRevision: struct { value: String }
 impl NativeSwapDataRevision {
-    new: fn(value: String) -> Self NativeSwapError! {
-        _: validate_revision(value, "data revision") ?? return .Err(NativeSwapError.input(value, .InvalidRevision, err))
-        Self { value: value.move() }
+    new: fn(value: String) -> NativeSwapDataRevision NativeSwapError! {
+        _: validate_revision(value, "data revision") ?? return Err(NativeSwapError.input(value, .InvalidRevision, err))
+        NativeSwapDataRevision{value: value}
     }
-    as_str: fn(self: Self) -> String { self.value }
+    as_str: fn(self) -> String { self.value }
 }
-impl NativeSwapDataRevision.Display {
-    fmt: fn(self: Self, output: fmt.Formatter) -> fmt.Result { output.write_str(self.value) }
-}
-NativeSwapRevision: struct { code: NativeSwapCodeRevision; data: NativeSwapDataRevision }
+impl NativeSwapDataRevision.Display { display: fn(&&self) -> String { self.value } }
+
+NativeSwapRevision: struct { code: NativeSwapCodeRevision, data: NativeSwapDataRevision }
 impl NativeSwapRevision {
-    new: fn(code: String, data: String) -> Self NativeSwapError! {
-        Self { code: NativeSwapCodeRevision.new(code), data: NativeSwapDataRevision.new(data)? }
+    new: fn(code: String, data: String) -> NativeSwapRevision NativeSwapError! {
+        NativeSwapRevision{code: NativeSwapCodeRevision.new(code), data: NativeSwapDataRevision.new(data)}
     }
-    code_revision: fn(self: Self) -> String { self.code.as_str() }
-    data_revision: fn(self: Self) -> String { self.data.as_str() }
-    code_unchanged: fn(self: Self, other: Self) -> Bool { self.code == other.code }
-    data_unchanged: fn(self: Self, other: Self) -> Bool { self.data == other.data }
+    code_revision: fn(self) -> String { self.code.value }
+    data_revision: fn(self) -> String { self.data.value }
+    code_unchanged: fn(self, other: NativeSwapRevision) -> Bool { self.code.value == other.code.value }
+    data_unchanged: fn(self, other: NativeSwapRevision) -> Bool { self.data.value == other.data.value }
 }
+
 NativeSwapExecutable: struct {
     source: NativeSwapSourceIdentity
     revision: NativeSwapRevision
     generation: U64
 }
 impl NativeSwapExecutable {
-    new: fn(source: NativeSwapSourceIdentity, revision: NativeSwapRevision, generation: U64) -> Self NativeSwapError! {
-        _: validate_source_identity(source, "executable") ?? return .Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
-        Self { source: source.move(), revision: revision, generation }
+    new: fn(source: NativeSwapSourceIdentity, revision: NativeSwapRevision, generation: U64) -> NativeSwapExecutable NativeSwapError! {
+        _: validate_source_identity(source, "executable") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        NativeSwapExecutable{source: source, revision: revision, generation: generation}
     }
-    source_id: fn(self: Self) -> String { self.source.canonical() }
+    source_id: fn(self) -> String { self.source.canonical() }
+    same_as: fn(self, other: NativeSwapExecutable) -> Bool {
+        self.source.matches(other.source) && self.revision.code_unchanged(other.revision) && self.revision.data_unchanged(other.revision) && self.generation == other.generation
+    }
 }
-NativeSwapCodePolicy: enum { Replace; Restart; Reject }
+
+NativeSwapCodePolicy: enum { Replace Restart Reject }
 impl NativeSwapCodePolicy {
-    as_str: fn(self) -> String { if self == {
-        .Replace -> "replace"
-        .Restart -> "restart"
-        .Reject -> "reject"
-    } }
+    as_str: fn(self) -> String {
+        if self == {
+            .Replace -> "replace"
+            .Restart -> "restart"
+            .Reject -> "reject"
+        }
+    }
 }
-NativeSwapDataPolicy: enum { Preserve; Replace; Migrate; Restart; Reject }
+NativeSwapDataPolicy: enum { Preserve Replace Migrate Restart Reject }
 impl NativeSwapDataPolicy {
-    as_str: fn(self) -> String { if self == {
-        .Preserve -> "preserve"
-        .Replace -> "replace"
-        .Migrate -> "migrate"
-        .Restart -> "restart"
-        .Reject -> "reject"
-    } }
+    as_str: fn(self) -> String {
+        if self == {
+            .Preserve -> "preserve"
+            .Replace -> "replace"
+            .Migrate -> "migrate"
+            .Restart -> "restart"
+            .Reject -> "reject"
+        }
+    }
 }
-NativeSwapHandlePolicy: enum { Never; ExplicitCompatible }
+NativeSwapHandlePolicy: enum { Never ExplicitCompatible }
 impl NativeSwapHandlePolicy {
-    as_str: fn(self) -> String { if self == {
-        .Never -> "never"
-        .ExplicitCompatible -> "explicit_compatible"
-    } }
+    as_str: fn(self) -> String {
+        if self == {
+            .Never -> "never"
+            .ExplicitCompatible -> "explicit_compatible"
+        }
+    }
 }
-NativeSwapQuiescencePolicy: enum { Required; NotRequired }
+NativeSwapQuiescencePolicy: enum { Required NotRequired }
 impl NativeSwapQuiescencePolicy {
-    as_str: fn(self) -> String { if self == {
-        .Required -> "required"
-        .NotRequired -> "not_required"
-    } }
+    as_str: fn(self) -> String {
+        if self == {
+            .Required -> "required"
+            .NotRequired -> "not_required"
+        }
+    }
 }
-NativeSwapRelocationStrategy: enum { StableIdentity; RebindByIdentity; Restart; Reject }
+NativeSwapRelocationStrategy: enum { StableIdentity RebindByIdentity Restart Reject }
 impl NativeSwapRelocationStrategy {
-    as_str: fn(self) -> String { if self == {
-        .StableIdentity -> "stable_identity"
-        .RebindByIdentity -> "rebind_by_identity"
-        .Restart -> "restart"
-        .Reject -> "reject"
-    } }
+    as_str: fn(self) -> String {
+        if self == {
+            .StableIdentity -> "stable_identity"
+            .RebindByIdentity -> "rebind_by_identity"
+            .Restart -> "restart"
+            .Reject -> "reject"
+        }
+    }
     permits_in_place: fn(self) -> Bool { self == .StableIdentity || self == .RebindByIdentity }
 }
-NativeSwapLinkStrategy: enum { ReuseResident; Relink; Restart; Reject }
+impl NativeSwapRelocationStrategy.Display { display: fn(&&self) -> String { self.as_str() } }
+NativeSwapLinkStrategy: enum { ReuseResident Relink Restart Reject }
 impl NativeSwapLinkStrategy {
-    as_str: fn(self) -> String { if self == {
-        .ReuseResident -> "reuse_resident"
-        .Relink -> "relink"
-        .Restart -> "restart"
-        .Reject -> "reject"
-    } }
+    as_str: fn(self) -> String {
+        if self == {
+            .ReuseResident -> "reuse_resident"
+            .Relink -> "relink"
+            .Restart -> "restart"
+            .Reject -> "reject"
+        }
+    }
     permits_in_place: fn(self) -> Bool { self == .ReuseResident || self == .Relink }
 }
-impl NativeSwapRelocationStrategy.Display {
-    fmt: fn(self: Self, output: fmt.Formatter) -> fmt.Result { output.write_str(self.as_str()) }
-}
-impl NativeSwapLinkStrategy.Display {
-    fmt: fn(self: Self, output: fmt.Formatter) -> fmt.Result { output.write_str(self.as_str()) }
-}
+impl NativeSwapLinkStrategy.Display { display: fn(&&self) -> String { self.as_str() } }
+
 NativeSwapRelocationFacts: struct {
     strategy: NativeSwapRelocationStrategy
     code_symbols: [String]
     data_slots: [String]
 }
 impl NativeSwapRelocationFacts {
-    new: fn(strategy: NativeSwapRelocationStrategy) -> Self { Self { strategy, code_symbols: [], data_slots: [] } }
+    new: fn(strategy: NativeSwapRelocationStrategy) -> NativeSwapRelocationFacts {
+        NativeSwapRelocationFacts{strategy: strategy, code_symbols: [String]{}, data_slots: [String]{}}
+    }
+    // Resident code and data keep their identities unless a producer says otherwise.
+    stable: fn() -> NativeSwapRelocationFacts { NativeSwapRelocationFacts.new(.StableIdentity) }
 }
-impl NativeSwapRelocationFacts.Default {
-    default: fn() -> Self { Self.new(.StableIdentity) }
-}
+
 NativeSwapLinkFacts: struct {
     strategy: NativeSwapLinkStrategy
     resident_identity: String
     candidate_identity: String
 }
-// The Rust `NativeSwapLinkStrategyFacts` is `NativeSwapLinkFacts`
 impl NativeSwapLinkFacts {
-    new: fn(strategy: NativeSwapLinkStrategy, resident_identity: String, candidate_identity: String) -> Self NativeSwapError! {
-        _: validate_identity(resident_identity, "resident link identity") ?? return .Err(NativeSwapError.input(resident_identity, .InvalidIdentity, err))
-        _: validate_identity(candidate_identity, "candidate link identity") ?? return .Err(NativeSwapError.input(candidate_identity, .InvalidIdentity, err))
-        Self { strategy, resident_identity: resident_identity, candidate_identity: candidate_identity.move() }
+    new: fn(strategy: NativeSwapLinkStrategy, resident_identity: String, candidate_identity: String) -> NativeSwapLinkFacts NativeSwapError! {
+        _: validate_identity(resident_identity, "resident link identity") ?? return Err(NativeSwapError.input(resident_identity, .InvalidIdentity, err))
+        _: validate_identity(candidate_identity, "candidate link identity") ?? return Err(NativeSwapError.input(candidate_identity, .InvalidIdentity, err))
+        NativeSwapLinkFacts{strategy: strategy, resident_identity: resident_identity, candidate_identity: candidate_identity}
     }
-    resident: fn(identity: String) -> Self NativeSwapError! { Self.new(.ReuseResident, identity.copy(), identity) }
-}
-impl NativeSwapLinkFacts.Default {
-    default: fn() -> Self {
-        // Opaque labels only: this does not claim a linker has run.
-        Self { strategy: .ReuseResident, resident_identity: "resident", candidate_identity: "candidate" }
+    resident: fn(identity: String) -> NativeSwapLinkFacts NativeSwapError! { NativeSwapLinkFacts.new(.ReuseResident, identity, identity) }
+    // Opaque labels only: this does not claim a linker has run.
+    unlinked: fn() -> NativeSwapLinkFacts {
+        NativeSwapLinkFacts{strategy: .ReuseResident, resident_identity: "resident", candidate_identity: "candidate"}
     }
 }
-NativeSwapQuiescence: struct { required: Bool; active_operations: U64; reached: Bool }
+
+NativeSwapQuiescence: struct { required: Bool, active_operations: U64, reached: Bool }
 impl NativeSwapQuiescence {
-    ready: fn() -> Self { Self { required: true, active_operations: 0, reached: true } }
-    pending: fn(active_operations: U64) -> Self { Self { required: true, active_operations, reached: false } }
-    not_required: fn() -> Self { Self { required: false, active_operations: 0, reached: true } }
+    ready: fn() -> NativeSwapQuiescence { NativeSwapQuiescence{required: true, active_operations: 0, reached: true} }
+    pending: fn(active_operations: U64) -> NativeSwapQuiescence { NativeSwapQuiescence{required: true, active_operations: active_operations, reached: false} }
+    not_required: fn() -> NativeSwapQuiescence { NativeSwapQuiescence{required: false, active_operations: 0, reached: true} }
     is_ready: fn(self) -> Bool { self.reached && self.active_operations == 0 }
 }
+
+// `Unblocked` is the fact a compatible plan carries; it renders as "none".
 NativeSwapBlockingFact: enum {
-    None; InvalidIdentity; InvalidRevision; SourceIdentityChanged; CodeRevisionUnsupported; DataRevisionUnsupported;
-    IncompatibleType; ConnectionHandleStale; LayoutChanged; UnsafeEdit; RestartRequired; ListenerHandleMissing;
-    ListenerHandleIncompatible; ListenerHandleStale; ConnectionHandleMissing; ConnectionHandleIncompatible;
-    ConnectionListenerNotPreserved; DuplicateIdentity; FactLimit; QuiescenceRequired; RelocationUnsupported;
-    LinkStrategyUnsupported; StaleReference; StalePlan; InvalidPhase; CompileFailed; MigrationFailed;
-    RollbackUnavailable; CapabilityUnavailable
+    Unblocked InvalidIdentity InvalidRevision SourceIdentityChanged CodeRevisionUnsupported DataRevisionUnsupported
+    IncompatibleType ConnectionHandleStale LayoutChanged UnsafeEdit RestartRequired ListenerHandleMissing
+    ListenerHandleIncompatible ListenerHandleStale ConnectionHandleMissing ConnectionHandleIncompatible
+    ConnectionListenerNotPreserved DuplicateIdentity FactLimit QuiescenceRequired RelocationUnsupported
+    LinkStrategyUnsupported StaleReference StalePlan InvalidPhase CompileFailed MigrationFailed
+    RollbackUnavailable CapabilityUnavailable
 }
 impl NativeSwapBlockingFact {
     as_str: fn(self) -> String {
         if self == {
-            .None -> "none", .InvalidIdentity -> "invalid_identity", .InvalidRevision -> "invalid_revision"
-            .SourceIdentityChanged -> "source_identity_changed", .CodeRevisionUnsupported -> "code_revision_unsupported"
-            .DataRevisionUnsupported -> "data_revision_unsupported", .IncompatibleType -> "incompatible_type"
-            .ConnectionHandleStale -> "connection_handle_stale", .LayoutChanged -> "layout_changed", .UnsafeEdit -> "unsafe_edit"
-            .RestartRequired -> "restart_required", .ListenerHandleMissing -> "listener_handle_missing"
-            .ListenerHandleIncompatible -> "listener_handle_incompatible", .ListenerHandleStale -> "listener_handle_stale"
-            .ConnectionHandleMissing -> "connection_handle_missing", .ConnectionHandleIncompatible -> "connection_handle_incompatible"
-            .ConnectionListenerNotPreserved -> "connection_listener_not_preserved", .DuplicateIdentity -> "duplicate_identity"
-            .FactLimit -> "fact_limit", .QuiescenceRequired -> "quiescence_required", .RelocationUnsupported -> "relocation_unsupported"
-            .LinkStrategyUnsupported -> "link_strategy_unsupported", .StaleReference -> "stale_reference", .StalePlan -> "stale_plan"
-            .InvalidPhase -> "invalid_phase", .CompileFailed -> "compile_failed", .MigrationFailed -> "migration_failed"
-            .RollbackUnavailable -> "rollback_unavailable", .CapabilityUnavailable -> "capability_unavailable"
+            .Unblocked -> "none"
+            .InvalidIdentity -> "invalid_identity"
+            .InvalidRevision -> "invalid_revision"
+            .SourceIdentityChanged -> "source_identity_changed"
+            .CodeRevisionUnsupported -> "code_revision_unsupported"
+            .DataRevisionUnsupported -> "data_revision_unsupported"
+            .IncompatibleType -> "incompatible_type"
+            .ConnectionHandleStale -> "connection_handle_stale"
+            .LayoutChanged -> "layout_changed"
+            .UnsafeEdit -> "unsafe_edit"
+            .RestartRequired -> "restart_required"
+            .ListenerHandleMissing -> "listener_handle_missing"
+            .ListenerHandleIncompatible -> "listener_handle_incompatible"
+            .ListenerHandleStale -> "listener_handle_stale"
+            .ConnectionHandleMissing -> "connection_handle_missing"
+            .ConnectionHandleIncompatible -> "connection_handle_incompatible"
+            .ConnectionListenerNotPreserved -> "connection_listener_not_preserved"
+            .DuplicateIdentity -> "duplicate_identity"
+            .FactLimit -> "fact_limit"
+            .QuiescenceRequired -> "quiescence_required"
+            .RelocationUnsupported -> "relocation_unsupported"
+            .LinkStrategyUnsupported -> "link_strategy_unsupported"
+            .StaleReference -> "stale_reference"
+            .StalePlan -> "stale_plan"
+            .InvalidPhase -> "invalid_phase"
+            .CompileFailed -> "compile_failed"
+            .MigrationFailed -> "migration_failed"
+            .RollbackUnavailable -> "rollback_unavailable"
+            .CapabilityUnavailable -> "capability_unavailable"
         }
     }
     is_restartable: fn(self) -> Bool {
-        self == .CodeRevisionUnsupported || self == .DataRevisionUnsupported || self == .IncompatibleType ||
-        self == .LayoutChanged || self == .RestartRequired || self == .RelocationUnsupported || self == .LinkStrategyUnsupported
+        if self == {
+            .CodeRevisionUnsupported | .DataRevisionUnsupported | .IncompatibleType | .LayoutChanged | .RestartRequired | .RelocationUnsupported | .LinkStrategyUnsupported -> true
+            else -> false
+        }
     }
 }
-impl NativeSwapBlockingFact.Display {
-    fmt: fn(self: Self, output: fmt.Formatter) -> fmt.Result { output.write_str(self.as_str()) }
-}
-NativeSwapDisposition: enum { Swap; Restart; Rejected }
+impl NativeSwapBlockingFact.Display { display: fn(&&self) -> String { self.as_str() } }
+
+NativeSwapDisposition: enum { Swap Restart Rejected }
 impl NativeSwapDisposition {
-    as_str: fn(self) -> String { if self == {
-        .Swap -> "swap"
-        .Restart -> "restart"
-        .Rejected -> "rejected"
-    } }
+    as_str: fn(self) -> String {
+        if self == {
+            .Swap -> "swap"
+            .Restart -> "restart"
+            .Rejected -> "rejected"
+        }
+    }
 }
-impl NativeSwapDisposition.Display {
-    fmt: fn(self: Self, output: fmt.Formatter) -> fmt.Result { output.write_str(self.as_str()) }
-}
+impl NativeSwapDisposition.Display { display: fn(&&self) -> String { self.as_str() } }
+
 NativeSwapExplanation: struct {
     source_id: String
     disposition: NativeSwapDisposition
@@ -218,45 +251,44 @@ NativeSwapExplanation: struct {
     detail: String
 }
 impl NativeSwapExplanation {
-    new: fn(source_id: String, disposition: NativeSwapDisposition, blocking_fact: NativeSwapBlockingFact, detail: String) -> Self {
-        Self { source_id: bounded_text(source_id, MAX_NATIVE_SWAP_ID_BYTES), disposition, blocking_fact, detail: bounded_text(detail, MAX_NATIVE_SWAP_DETAIL_BYTES) }
+    new: fn(source_id: String, disposition: NativeSwapDisposition, blocking_fact: NativeSwapBlockingFact, detail: String) -> NativeSwapExplanation {
+        NativeSwapExplanation{source_id: bounded_text(source_id, MAX_NATIVE_SWAP_ID_BYTES), disposition: disposition, blocking_fact: blocking_fact, detail: bounded_text(detail, MAX_NATIVE_SWAP_DETAIL_BYTES)}
     }
-    compatible: fn(source_id: String) -> Self {
-        Self.new(source_id, .Swap, .None, "code/data and explicit resident handles are compatible")
+    compatible: fn(source_id: String) -> NativeSwapExplanation {
+        NativeSwapExplanation.new(source_id, .Swap, .Unblocked, "code/data and explicit resident handles are compatible")
     }
-    render: fn(self: Self) -> String {
+    render: fn(self) -> String {
         "reload disposition={self.disposition.as_str()} source={self.source_id} blocking_fact={self.blocking_fact.as_str()} detail={self.detail}"
     }
 }
-impl NativeSwapExplanation.Display {
-    fmt: fn(self: Self, output: fmt.Formatter) -> fmt.Result { output.write_str(self.render()) }
-}
+impl NativeSwapExplanation.Display { display: fn(&&self) -> String { self.render() } }
+
 #Error
 NativeSwapError: struct { explanation: NativeSwapExplanation }
 impl NativeSwapError {
-    input: fn(source_id: String, blocking_fact: NativeSwapBlockingFact, detail: String) -> Self {
-        Self { explanation: NativeSwapExplanation.new(source_id, .Rejected, blocking_fact, detail) }
+    input: fn(source_id: String, blocking_fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError {
+        NativeSwapError{explanation: NativeSwapExplanation.new(source_id, .Rejected, blocking_fact, detail)}
     }
-    restart: fn(source_id: String, blocking_fact: NativeSwapBlockingFact, detail: String) -> Self {
-        Self { explanation: NativeSwapExplanation.new(source_id, .Restart, blocking_fact, detail) }
+    restart: fn(source_id: String, blocking_fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError {
+        NativeSwapError{explanation: NativeSwapExplanation.new(source_id, .Restart, blocking_fact, detail)}
     }
-    explanation: fn(self: Self) -> NativeSwapExplanation { &self.explanation }
-    source_id: fn(self: Self) -> String { self.explanation.source_id }
-    blocking_fact: fn(self: Self) -> NativeSwapBlockingFact { self.explanation.blocking_fact }
-    render: fn(self: Self) -> String { self.explanation.render() }
+    source_id: fn(self) -> String { self.explanation.source_id }
+    blocking_fact: fn(self) -> NativeSwapBlockingFact { self.explanation.blocking_fact }
+    render: fn(self) -> String { self.explanation.render() }
 }
-impl NativeSwapError.Display {
-    fmt: fn(self: Self, output: fmt.Formatter) -> fmt.Result { output.write_str(self.render()) }
-}
-// NativeSwapError's #Error supplies the std.error.Error contract.
-NativeSwapHandleCompatibility: enum { Compatible; Incompatible }
+impl NativeSwapError.Display { display: fn(&&self) -> String { self.render() } }
+
+NativeSwapHandleCompatibility: enum { Compatible Incompatible }
 impl NativeSwapHandleCompatibility {
-    as_str: fn(self) -> String { if self == {
-        .Compatible -> "compatible"
-        .Incompatible -> "incompatible"
-    } }
+    as_str: fn(self) -> String {
+        if self == {
+            .Compatible -> "compatible"
+            .Incompatible -> "incompatible"
+        }
+    }
     is_compatible: fn(self) -> Bool { self == .Compatible }
 }
+
 NativeSwapListenerHandle: struct {
     id: String
     source: NativeSwapSourceIdentity
@@ -264,15 +296,20 @@ NativeSwapListenerHandle: struct {
     compatibility: NativeSwapHandleCompatibility
 }
 impl NativeSwapListenerHandle {
-    new: fn(id: String, source: NativeSwapSourceIdentity, generation: U64, compatibility: NativeSwapHandleCompatibility) -> Self NativeSwapError! {
-        _: validate_identity(id, "listener handle identity") ?? return .Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
-        _: validate_source_identity(source, "listener") ?? return .Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
-        Self { id: id.move(), source: source, generation, compatibility }
+    new: fn(id: String, source: NativeSwapSourceIdentity, generation: U64, compatibility: NativeSwapHandleCompatibility) -> NativeSwapListenerHandle NativeSwapError! {
+        _: validate_identity(id, "listener handle identity") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        _: validate_source_identity(source, "listener") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        NativeSwapListenerHandle{id: id, source: source, generation: generation, compatibility: compatibility}
     }
-    compatible: fn(id: String, source: NativeSwapSourceIdentity, generation: U64) -> Self NativeSwapError! { Self.new(id, source, generation, .Compatible) }
-    incompatible: fn(id: String, source: NativeSwapSourceIdentity, generation: U64) -> Self NativeSwapError! { Self.new(id, source, generation, .Incompatible) }
-    is_compatible: fn(self: Self) -> Bool { self.compatibility.is_compatible() }
+    compatible: fn(id: String, source: NativeSwapSourceIdentity, generation: U64) -> NativeSwapListenerHandle NativeSwapError! {
+        NativeSwapListenerHandle.new(id, source, generation, .Compatible)
+    }
+    incompatible: fn(id: String, source: NativeSwapSourceIdentity, generation: U64) -> NativeSwapListenerHandle NativeSwapError! {
+        NativeSwapListenerHandle.new(id, source, generation, .Incompatible)
+    }
+    is_compatible: fn(self) -> Bool { self.compatibility.is_compatible() }
 }
+
 NativeSwapConnectionHandle: struct {
     id: String
     listener_id: String
@@ -281,16 +318,21 @@ NativeSwapConnectionHandle: struct {
     compatibility: NativeSwapHandleCompatibility
 }
 impl NativeSwapConnectionHandle {
-    new: fn(id: String, listener_id: String, source: NativeSwapSourceIdentity, generation: U64, compatibility: NativeSwapHandleCompatibility) -> Self NativeSwapError! {
-        _: validate_identity(id, "connection handle identity") ?? return .Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
-        _: validate_identity(listener_id, "connection listener identity") ?? return .Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
-        _: validate_source_identity(source, "connection") ?? return .Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
-        Self { id: id.move(), listener_id: listener_id, source: source, generation, compatibility }
+    new: fn(id: String, listener_id: String, source: NativeSwapSourceIdentity, generation: U64, compatibility: NativeSwapHandleCompatibility) -> NativeSwapConnectionHandle NativeSwapError! {
+        _: validate_identity(id, "connection handle identity") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        _: validate_identity(listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        _: validate_source_identity(source, "connection") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        NativeSwapConnectionHandle{id: id, listener_id: listener_id, source: source, generation: generation, compatibility: compatibility}
     }
-    compatible: fn(id: String, listener_id: String, source: NativeSwapSourceIdentity, generation: U64) -> Self NativeSwapError! { Self.new(id, listener_id, source, generation, .Compatible) }
-    incompatible: fn(id: String, listener_id: String, source: NativeSwapSourceIdentity, generation: U64) -> Self NativeSwapError! { Self.new(id, listener_id, source, generation, .Incompatible) }
-    is_compatible: fn(self: Self) -> Bool { self.compatibility.is_compatible() }
+    compatible: fn(id: String, listener_id: String, source: NativeSwapSourceIdentity, generation: U64) -> NativeSwapConnectionHandle NativeSwapError! {
+        NativeSwapConnectionHandle.new(id, listener_id, source, generation, .Compatible)
+    }
+    incompatible: fn(id: String, listener_id: String, source: NativeSwapSourceIdentity, generation: U64) -> NativeSwapConnectionHandle NativeSwapError! {
+        NativeSwapConnectionHandle.new(id, listener_id, source, generation, .Incompatible)
+    }
+    is_compatible: fn(self) -> Bool { self.compatibility.is_compatible() }
 }
+
 NativeSwapCapability: struct {
     code: NativeSwapCodePolicy
     data: NativeSwapDataPolicy
@@ -302,17 +344,23 @@ NativeSwapCapability: struct {
     link: NativeSwapLinkStrategy
 }
 impl NativeSwapCapability {
-    resident: fn() -> Self {
-        Self { code: .Replace, data: .Preserve, listeners: .ExplicitCompatible, connections: .ExplicitCompatible,
-            restart: true, quiescence: .Required, relocation: .StableIdentity, link: .ReuseResident }
+    resident: fn() -> NativeSwapCapability {
+        NativeSwapCapability{code: .Replace, data: .Preserve, listeners: .ExplicitCompatible, connections: .ExplicitCompatible,
+            restart: true, quiescence: .Required, relocation: .StableIdentity, link: .ReuseResident}
     }
-    with_relocation: fn(self: Self, strategy: NativeSwapRelocationStrategy) -> Self { self.relocation = strategy; self }
-    with_link: fn(self: Self, strategy: NativeSwapLinkStrategy) -> Self { self.link = strategy; self }
+    with_relocation: fn(self, strategy: NativeSwapRelocationStrategy) -> NativeSwapCapability {
+        next := self
+        next.relocation = strategy
+        next
+    }
+    with_link: fn(self, strategy: NativeSwapLinkStrategy) -> NativeSwapCapability {
+        next := self
+        next.link = strategy
+        next
+    }
     allows_restart: fn(self) -> Bool { self.restart }
 }
-impl NativeSwapCapability.Default {
-    default: fn() -> Self { Self.resident() }
-}
+
 NativeSwapRestartBoundary: struct {
     required: Bool
     reason: NativeSwapBlockingFact?
@@ -321,34 +369,33 @@ NativeSwapRestartBoundary: struct {
     reset: [String]
 }
 impl NativeSwapRestartBoundary {
-    in_place: fn() -> Self { Self { required: false, reason: .None, affected: [], kept: [], reset: [] } }
-    required: fn(reason: NativeSwapBlockingFact, affected: [String]) -> Self {
-        Self { required: true, reason: .Val(reason), affected: normalized_facts(affected), kept: [], reset: [] }
+    in_place: fn() -> NativeSwapRestartBoundary {
+        NativeSwapRestartBoundary{required: false, reason: None, affected: [String]{}, kept: [String]{}, reset: [String]{}}
     }
-    with_state: fn(self: Self, kept: [String], reset: [String]) -> Self {
-        self.kept = normalized_facts(kept)
-        self.reset = normalized_facts(reset)
-        self
+    required_by: fn(reason: NativeSwapBlockingFact, affected: [String]) -> NativeSwapRestartBoundary {
+        NativeSwapRestartBoundary{required: true, reason: Val(reason), affected: normalized_facts(affected), kept: [String]{}, reset: [String]{}}
     }
-    validate: fn(self: &Self, source_id: String) NativeSwapError! {
+    with_state: fn(self, kept: [String], reset: [String]) -> NativeSwapRestartBoundary {
+        next := self
+        next.kept = normalized_facts(kept)
+        next.reset = normalized_facts(reset)
+        next
+    }
+    validate: fn(self, source_id: String) NativeSwapError! {
         validate_fact_list(source_id, self.affected)
         validate_fact_list(source_id, self.kept)
         validate_fact_list(source_id, self.reset)
-        if self.required && self.reason.is_none() -> return .Err(NativeSwapError.input(source_id, .RestartRequired, "restart boundary is required but has no blocking fact"))
-        if !self.required && self.reason.is_some() -> return .Err(NativeSwapError.input(source_id, .RestartRequired, "in-place boundary carries a restart reason"))
+        if self.required && self.reason == None -> return Err(NativeSwapError.input(source_id, .RestartRequired, "restart boundary is required but has no blocking fact"))
+        if !self.required && self.reason != None -> return Err(NativeSwapError.input(source_id, .RestartRequired, "in-place boundary carries a restart reason"))
         if self.reason == .Val(reason) {
-            if !reason.is_restartable() -> return .Err(NativeSwapError.input(source_id, reason, "restart boundary reason `{reason.as_str()}` cannot be handled by a clean restart"))
+            if !reason.is_restartable() -> return Err(NativeSwapError.input(source_id, reason, "restart boundary reason `{reason.as_str()}` cannot be handled by a clean restart"))
         }
-        kept_index := [String:Bool]{}
-        loop kept in self.kept -> kept_index.insert(kept, true)
         loop value in self.reset {
-            if kept_index.contains_key(value) -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "restart state `{value}` is both kept and reset"))
+            if self.kept.contains(value) -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "restart state `{value}` is both kept and reset"))
         }
     }
 }
-impl NativeSwapRestartBoundary.Default {
-    default: fn() -> Self { Self.in_place() }
-}
+
 NativeSwapPlan: struct {
     source: NativeSwapSourceIdentity
     from: NativeSwapExecutable
@@ -366,57 +413,86 @@ NativeSwapPlan: struct {
     blocking_fact: NativeSwapBlockingFact?
 }
 impl NativeSwapPlan {
-    new: fn(source: NativeSwapSourceIdentity, from: NativeSwapExecutable, to: NativeSwapExecutable, capability: NativeSwapCapability, decision: HotSwapDecision) -> Self NativeSwapError! {
+    new: fn(source: NativeSwapSourceIdentity, from: NativeSwapExecutable, to: NativeSwapExecutable, capability: NativeSwapCapability, decision: HotSwapDecision) -> NativeSwapPlan NativeSwapError! {
         source_id: source.canonical()
         validate_hot_swap_decision(source_id, source, decision)
-        if !from.source.matches(source) || !to.source.matches(source) -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source does not match both executable identities"))
-        if to.generation <= from.generation -> return .Err(NativeSwapError.input(source.canonical(), .StalePlan, "candidate generation must advance beyond the resident generation"))
+        if !from.source.matches(source) || !to.source.matches(source) -> return Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source does not match both executable identities"))
+        if to.generation <= from.generation -> return Err(NativeSwapError.input(source_id, .StalePlan, "candidate generation must advance beyond the resident generation"))
         restart_boundary: if decision.is_compatible() -> NativeSwapRestartBoundary.in_place() else -> decision_restart_boundary(decision)
-        changed_items: normalized_facts(decision.changed_functions.copy())
-        Self { source: source.move(), from: from, to: to, decision: decision, capability: capability,
-            preserve_listeners: [], preserve_connections: [], restart_boundary: restart_boundary,
-            quiescence: NativeSwapQuiescence.ready(), relocation: NativeSwapRelocationFacts.default(),
-            link: NativeSwapLinkFacts.default(), changed_items: changed_items, removed_definitions: [], blocking_fact: .None }
+        NativeSwapPlan{source: source, from: from, to: to, decision: decision, capability: capability,
+            preserve_listeners: [NativeSwapListenerHandle]{}, preserve_connections: [NativeSwapConnectionHandle]{}, restart_boundary: restart_boundary,
+            quiescence: NativeSwapQuiescence.ready(), relocation: NativeSwapRelocationFacts.stable(),
+            link: NativeSwapLinkFacts.unlinked(), changed_items: normalized_facts(decision.changed_functions), removed_definitions: [String]{}, blocking_fact: None}
     }
-    mark_layout_changed: fn(self: Self, affected: [String]) -> Self {
-        self.blocking_fact = .Val(.LayoutChanged)
-        self.restart_boundary = NativeSwapRestartBoundary.required(.LayoutChanged, affected)
-        self
+    mark_layout_changed: fn(self, affected: [String]) -> NativeSwapPlan {
+        next := self
+        next.blocking_fact = Val(NativeSwapBlockingFact.LayoutChanged)
+        next.restart_boundary = NativeSwapRestartBoundary.required_by(.LayoutChanged, affected)
+        next
     }
-    with_quiescence: fn(self: Self, quiescence: NativeSwapQuiescence) -> Self { self.quiescence = quiescence; self }
-    with_relocation: fn(self: Self, relocation: NativeSwapRelocationFacts) -> Self { self.relocation = relocation.move(); self }
-    with_link: fn(self: Self, link: NativeSwapLinkFacts) -> Self { self.link = link.move(); self }
-    preserve_listener: fn(self: Self, handle: NativeSwapListenerHandle) -> Self {
-        self.preserve_listeners.push(handle)
-        self.preserve_listeners.sort()
-        self
+    with_quiescence: fn(self, quiescence: NativeSwapQuiescence) -> NativeSwapPlan {
+        next := self
+        next.quiescence = quiescence
+        next
     }
-    preserve_connection: fn(self: Self, handle: NativeSwapConnectionHandle) -> Self {
-        self.preserve_connections.push(handle)
-        self.preserve_connections.sort()
-        self
+    with_relocation: fn(self, relocation: NativeSwapRelocationFacts) -> NativeSwapPlan {
+        next := self
+        next.relocation = relocation
+        next
     }
-    code_changed: fn(self: Self) -> Bool { !self.from.revision.code_unchanged(self.to.revision) }
-    data_changed: fn(self: Self) -> Bool { !self.from.revision.data_unchanged(self.to.revision) }
-    requires_restart: fn(self: Self) -> Bool {
-        self.decision.requires_restart() || self.restart_boundary.required || self.blocking_fact.is_some_and((fact) -> fact.is_restartable())
+    with_link: fn(self, link: NativeSwapLinkFacts) -> NativeSwapPlan {
+        next := self
+        next.link = link
+        next
     }
-    explanation: fn(self: Self) -> NativeSwapExplanation {
+    // Handles stay ordered by identity so receipts and validation read them deterministically.
+    preserve_listener: fn(self, handle: NativeSwapListenerHandle) -> NativeSwapPlan {
+        next := self
+        at := next.preserve_listeners.len()
+        loop index in 0..<next.preserve_listeners.len() {
+            if handle.id < next.preserve_listeners[index].id {
+                at = index
+                break
+            }
+        }
+        next.preserve_listeners.insert(at, handle)
+        next
+    }
+    preserve_connection: fn(self, handle: NativeSwapConnectionHandle) -> NativeSwapPlan {
+        next := self
+        at := next.preserve_connections.len()
+        loop index in 0..<next.preserve_connections.len() {
+            if handle.id < next.preserve_connections[index].id {
+                at = index
+                break
+            }
+        }
+        next.preserve_connections.insert(at, handle)
+        next
+    }
+    code_changed: fn(self) -> Bool { !self.from.revision.code_unchanged(self.to.revision) }
+    data_changed: fn(self) -> Bool { !self.from.revision.data_unchanged(self.to.revision) }
+    requires_restart: fn(self) -> Bool {
+        if self.decision.requires_restart() || self.restart_boundary.required -> return true
+        if self.blocking_fact == .Val(fact) -> return fact.is_restartable()
+        false
+    }
+    explanation: fn(self) -> NativeSwapExplanation {
         if !self.decision.is_compatible() {
             disposition: if self.capability.restart -> NativeSwapDisposition.Restart else -> NativeSwapDisposition.Rejected
             return NativeSwapExplanation.new(self.source.canonical(), disposition, .IncompatibleType,
-                self.decision.compatibility.reason().unwrap_or("semantic hot-swap verdict requires a clean restart"))
+                self.decision.compatibility.reason() ?? "semantic hot-swap verdict requires a clean restart")
         }
-        state: NativeSwapState.new(self.from.copy(), self.preserve_listeners.copy(), self.preserve_connections.copy()) ?? return err.explanation.copy()
+        state: NativeSwapState.new(self.from, self.preserve_listeners, self.preserve_connections) ?? return err.explanation
         state.explain_reload(self)
     }
-    validate_shape: fn(self: &Self) NativeSwapError! {
+    validate_shape: fn(self) NativeSwapError! {
         source_id: self.source.canonical()
-        loop (label, identity) in [("plan", self.source), ("resident executable", self.from.source), ("candidate executable", self.to.source)] {
-            _: validate_source_identity(identity, label) ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        }
-        if !self.from.source.matches(self.source) || !self.to.source.matches(self.source) -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source does not match both executable identities"))
-        if self.to.generation <= self.from.generation -> return .Err(NativeSwapError.input(source_id, .StalePlan, "candidate generation must advance beyond the resident generation"))
+        _: validate_source_identity(self.source, "plan") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_source_identity(self.from.source, "resident executable") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_source_identity(self.to.source, "candidate executable") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if !self.from.source.matches(self.source) || !self.to.source.matches(self.source) -> return Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source does not match both executable identities"))
+        if self.to.generation <= self.from.generation -> return Err(NativeSwapError.input(source_id, .StalePlan, "candidate generation must advance beyond the resident generation"))
         validate_hot_swap_decision(source_id, self.source, self.decision)
         self.restart_boundary.validate(source_id)
         validate_fact_list(source_id, self.changed_items)
@@ -425,11 +501,24 @@ impl NativeSwapPlan {
         validate_fact_list(source_id, self.relocation.data_slots)
         validate_listener_plan_facts(source_id, self.source, self.preserve_listeners)
         validate_connection_plan_facts(source_id, self.source, self.preserve_connections)
-        loop (label, identity) in [("resident link identity", self.link.resident_identity), ("candidate link identity", self.link.candidate_identity)] {
-            _: validate_identity(identity, label) ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_identity(self.link.resident_identity, "resident link identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_identity(self.link.candidate_identity, "candidate link identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+    }
+}
+
+NativeSwapOutcome: enum { Committed RolledBack Rejected RestartRequired }
+impl NativeSwapOutcome {
+    as_str: fn(self) -> String {
+        if self == {
+            .Committed -> "committed"
+            .RolledBack -> "rolled_back"
+            .Rejected -> "rejected"
+            .RestartRequired -> "restart_required"
         }
     }
 }
+impl NativeSwapOutcome.Display { display: fn(&&self) -> String { self.as_str() } }
+
 NativeSwapReceipt: struct {
     source: NativeSwapSourceIdentity
     outcome: NativeSwapOutcome
@@ -444,42 +533,35 @@ NativeSwapReceipt: struct {
     restart_boundary: NativeSwapRestartBoundary
     explanation: NativeSwapExplanation?
 }
-NativeSwapOutcome: enum { Committed; RolledBack; Rejected; RestartRequired }
-impl NativeSwapOutcome {
-    as_str: fn(self) -> String { if self == {
-        .Committed -> "committed"
-        .RolledBack -> "rolled_back"
-        .Rejected -> "rejected"
-        .RestartRequired -> "restart_required"
-    } }
-}
 impl NativeSwapReceipt {
-    committed: fn(self: Self) -> Bool { self.outcome == .Committed }
-    rolled_back: fn(self: Self) -> Bool { self.outcome == .RolledBack }
-    rejected: fn(self: Self) -> Bool { self.outcome == .Rejected || self.outcome == .RestartRequired }
-    render: fn(self: Self) -> String {
-        explanation: self.explanation.as_ref().map((value) -> value.render()).unwrap_or("none")
-        "native-swap outcome={self.outcome.as_str()} source={self.source.canonical()} before=code:{self.before.code.as_str()}+data:{self.before.data.as_str()}@{self.before_generation} after=code:{self.after.code.as_str()}+data:{self.after.data.as_str()}@{self.after_generation} preserved_listeners=[{self.preserved_listeners.join(",")}] reset_listeners=[{self.reset_listeners.join(",")}] preserved_connections=[{self.preserved_connections.join(",")}] reset_connections=[{self.reset_connections.join(",")}] restart={self.restart_boundary.required} explanation={explanation}"
+    committed: fn(self) -> Bool { self.outcome == .Committed }
+    rolled_back: fn(self) -> Bool { self.outcome == .RolledBack }
+    rejected: fn(self) -> Bool { self.outcome == .Rejected || self.outcome == .RestartRequired }
+    render: fn(self) -> String {
+        explanation: if self.explanation == .Val(value) -> value.render() else -> "none"
+        before: "code:{self.before.code.value}+data:{self.before.data.value}@{self.before_generation}"
+        after: "code:{self.after.code.value}+data:{self.after.data.value}@{self.after_generation}"
+        handles: "preserved_listeners=[{self.preserved_listeners.join(",")}] reset_listeners=[{self.reset_listeners.join(",")}] preserved_connections=[{self.preserved_connections.join(",")}] reset_connections=[{self.reset_connections.join(",")}]"
+        "native-swap outcome={self.outcome.as_str()} source={self.source.canonical()} before={before} after={after} {handles} restart={self.restart_boundary.required} explanation={explanation}"
     }
 }
-impl NativeSwapOutcome.Display {
-    fmt: fn(self: Self, output: fmt.Formatter) -> fmt.Result { output.write_str(self.as_str()) }
-}
-NativeSwapPhase: enum { Ready; Paused; Applied }
+
+NativeSwapPhase: enum { Ready Paused Applied }
 impl NativeSwapPhase {
-    as_str: fn(self) -> String { if self == {
-        .Ready -> "ready"
-        .Paused -> "paused"
-        .Applied -> "applied"
-    } }
+    as_str: fn(self) -> String {
+        if self == {
+            .Ready -> "ready"
+            .Paused -> "paused"
+            .Applied -> "applied"
+        }
+    }
 }
-impl NativeSwapPhase.Display {
-    fmt: fn(self: Self, output: fmt.Formatter) -> fmt.Result { output.write_str(self.as_str()) }
-}
+impl NativeSwapPhase.Display { display: fn(&&self) -> String { self.as_str() } }
+
 NativeSwapCheckpoint: struct {
     executable: NativeSwapExecutable
-    listeners: [String:NativeSwapListenerHandle]
-    connections: [String:NativeSwapConnectionHandle]
+    listeners: [String: NativeSwapListenerHandle]
+    connections: [String: NativeSwapConnectionHandle]
 }
 NativeSwapWorkingReceipt: struct {
     source: NativeSwapSourceIdentity
@@ -493,134 +575,127 @@ NativeSwapWorkingReceipt: struct {
 }
 NativeSwapState: struct {
     executable: NativeSwapExecutable
-    listeners: [String:NativeSwapListenerHandle]
-    connections: [String:NativeSwapConnectionHandle]
+    listeners: [String: NativeSwapListenerHandle]
+    connections: [String: NativeSwapConnectionHandle]
     phase: NativeSwapPhase
     checkpoint: NativeSwapCheckpoint?
     pending_plan: NativeSwapPlan?
     working_receipt: NativeSwapWorkingReceipt?
 }
 impl NativeSwapState {
-    new: fn(executable: NativeSwapExecutable, listeners: [NativeSwapListenerHandle], connections: [NativeSwapConnectionHandle]) -> Self NativeSwapError! {
+    new: fn(executable: NativeSwapExecutable, listeners: [NativeSwapListenerHandle], connections: [NativeSwapConnectionHandle]) -> NativeSwapState NativeSwapError! {
         source_id: executable.source.canonical()
-        _: validate_source_identity(executable.source, "executable") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        listener_map: listener_map(source_id, executable, listeners)
-        connection_map: connection_map(source_id, executable, connections, listener_map)
-        Self { executable: executable.move(), listeners: listener_map, connections: connection_map,
-            phase: .Ready, checkpoint: .None, pending_plan: .None, working_receipt: .None }
+        _: validate_source_identity(executable.source, "executable") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        resident_listeners: listener_map(source_id, executable, listeners)
+        resident_connections: connection_map(source_id, executable, connections, resident_listeners)
+        NativeSwapState{executable: executable, listeners: resident_listeners, connections: resident_connections,
+            phase: .Ready, checkpoint: None, pending_plan: None, working_receipt: None}
     }
-    empty: fn(executable: NativeSwapExecutable) -> Self NativeSwapError! { Self.new(executable, [], []) }
-    executable: fn(self: Self) -> NativeSwapExecutable { &self.executable }
-    source: fn(self: Self) -> NativeSwapSourceIdentity { &self.executable.source }
-    revision: fn(self: Self) -> NativeSwapRevision { &self.executable.revision }
-    generation: fn(self: Self) -> U64 { self.executable.generation }
-    phase: fn(self: Self) -> NativeSwapPhase { self.phase }
-    is_paused: fn(self: Self) -> Bool { self.phase == .Paused }
-    is_applied: fn(self: Self) -> Bool { self.phase == .Applied }
-    listeners: fn(self: Self) -> [NativeSwapListenerHandle] {
-        keys := self.listeners.keys().cloned().collect[[String]]()
-        keys.sort()
-        keys.iter().map((key) -> self.listeners[key].copy()).collect()
+    empty: fn(executable: NativeSwapExecutable) -> NativeSwapState NativeSwapError! {
+        NativeSwapState.new(executable, [NativeSwapListenerHandle]{}, [NativeSwapConnectionHandle]{})
     }
-    connections: fn(self: Self) -> [NativeSwapConnectionHandle] {
-        keys := self.connections.keys().cloned().collect[[String]]()
-        keys.sort()
-        keys.iter().map((key) -> self.connections[key].copy()).collect()
+    source: fn(self) -> NativeSwapSourceIdentity { self.executable.source }
+    revision: fn(self) -> NativeSwapRevision { self.executable.revision }
+    generation: fn(self) -> U64 { self.executable.generation }
+    is_paused: fn(self) -> Bool { self.phase == .Paused }
+    is_applied: fn(self) -> Bool { self.phase == .Applied }
+    resident_listeners: fn(self) -> [NativeSwapListenerHandle] {
+        loop key in sorted_keys(self.listeners) -> self.listeners[key]
     }
-    listener: fn(self: Self, id: String) -> NativeSwapListenerHandle? { self.listeners.get(id) }
-    connection: fn(self: Self, id: String) -> NativeSwapConnectionHandle? { self.connections.get(id) }
-    listener_count: fn(self: Self) -> USize { self.listeners.len() }
-    connection_count: fn(self: Self) -> USize { self.connections.len() }
-    preflight: fn(self: &Self, plan: &NativeSwapPlan) NativeSwapError! { self.validate_plan(plan) }
-    explain_reload: fn(self: Self, plan: NativeSwapPlan) -> NativeSwapExplanation {
-        _: self.validate_plan(plan) ?? return err.explanation.copy()
+    resident_connections: fn(self) -> [NativeSwapConnectionHandle] {
+        loop key in sorted_keys(self.connections) -> self.connections[key]
+    }
+    listener: fn(self, id: String) -> NativeSwapListenerHandle? { self.listeners.get(id) }
+    connection: fn(self, id: String) -> NativeSwapConnectionHandle? { self.connections.get(id) }
+    listener_count: fn(self) -> Int { self.listeners.len() }
+    connection_count: fn(self) -> Int { self.connections.len() }
+    preflight: fn(self, plan: NativeSwapPlan) NativeSwapError! { self.validate_plan(plan) }
+    explain_reload: fn(self, plan: NativeSwapPlan) -> NativeSwapExplanation {
+        _: self.validate_plan(plan) ?? return err.explanation
         NativeSwapExplanation.compatible(plan.source.canonical())
     }
-    pause: fn(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
-        if self.phase != .Ready -> return .Err(self.phase_error("pause requires a ready transaction"))
+    pause: fn(&self, plan: NativeSwapPlan) NativeSwapError! {
+        if self.phase != .Ready -> return Err(self.phase_error("pause requires a ready transaction"))
         self.validate_plan(plan)
-        checkpoint: NativeSwapCheckpoint { executable: self.executable.copy(), listeners: self.listeners.copy(), connections: self.connections.copy() }
-        self.checkpoint = .Val(checkpoint)
-        self.pending_plan = .Val(plan.copy())
-        self.working_receipt = .None
+        self.checkpoint = Val(NativeSwapCheckpoint{executable: self.executable, listeners: self.listeners, connections: self.connections})
+        self.pending_plan = Val(plan)
+        self.working_receipt = None
         self.phase = .Paused
     }
-    apply: fn(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
-        if self.phase != .Paused -> return .Err(self.phase_error("apply requires a paused transaction"))
-        if self.pending_plan.as_ref() != .Val(plan) -> return .Err(NativeSwapError.input(self.source().canonical(), .StalePlan, "apply plan does not match the paused plan"))
+    apply: fn(&self, plan: NativeSwapPlan) NativeSwapError! {
+        if self.phase != .Paused -> return Err(self.phase_error("apply requires a paused transaction"))
+        pending: self.pending_plan ?? return Err(self.phase_error("apply has no paused plan"))
+        if !plans_match(pending, plan) -> return Err(NativeSwapError.input(self.source().canonical(), .StalePlan, "apply plan does not match the paused plan"))
         self.validate_plan(plan)
-        checkpoint: self.checkpoint.as_ref() ?? return .Err(self.error(.RollbackUnavailable, "apply checkpoint is missing"))
-        preserved_listener_ids := [String:Bool]{}
-        loop handle in plan.preserve_listeners -> preserved_listener_ids.insert(handle.id.copy(), true)
-        preserved_connection_ids := [String:Bool]{}
-        loop handle in plan.preserve_connections -> preserved_connection_ids.insert(handle.id.copy(), true)
-        next_listeners := [String:NativeSwapListenerHandle]{}
+        checkpoint: self.checkpoint ?? return Err(self.error(.RollbackUnavailable, "apply checkpoint is missing"))
+        next_listeners := [String: NativeSwapListenerHandle]{}
         loop handle in plan.preserve_listeners {
-            preserved := handle.copy()
+            preserved := handle
             preserved.generation = plan.to.generation
-            next_listeners.insert(preserved.id.copy(), preserved)
+            next_listeners[preserved.id] = preserved
         }
-        next_connections := [String:NativeSwapConnectionHandle]{}
+        next_connections := [String: NativeSwapConnectionHandle]{}
         loop handle in plan.preserve_connections {
-            preserved := handle.copy()
+            preserved := handle
             preserved.generation = plan.to.generation
-            next_connections.insert(preserved.id.copy(), preserved)
+            next_connections[preserved.id] = preserved
         }
-        reset_listeners := checkpoint.listeners.keys().filter((id) -> !preserved_listener_ids.contains_key(id)).cloned().collect[[String]]()
-        reset_listeners.sort()
-        reset_connections := checkpoint.connections.keys().filter((id) -> !preserved_connection_ids.contains_key(id)).cloned().collect[[String]]()
-        reset_connections.sort()
-        listener_ids := preserved_listener_ids.keys().cloned().collect[[String]]()
-        listener_ids.sort()
-        connection_ids := preserved_connection_ids.keys().cloned().collect[[String]]()
-        connection_ids.sort()
-        working: NativeSwapWorkingReceipt { source: plan.source.copy(), before: checkpoint.executable.copy(), after: plan.to.copy(),
-            preserved_listeners: listener_ids, reset_listeners: reset_listeners,
-            preserved_connections: connection_ids, reset_connections: reset_connections,
-            restart_boundary: plan.restart_boundary.copy() }
+        reset_listeners := [String]{}
+        loop id in sorted_keys(checkpoint.listeners) {
+            if next_listeners.get(id) == None -> reset_listeners.push(id)
+        }
+        reset_connections := [String]{}
+        loop id in sorted_keys(checkpoint.connections) {
+            if next_connections.get(id) == None -> reset_connections.push(id)
+        }
+        working: NativeSwapWorkingReceipt{source: plan.source, before: checkpoint.executable, after: plan.to,
+            preserved_listeners: sorted_keys(next_listeners), reset_listeners: reset_listeners,
+            preserved_connections: sorted_keys(next_connections), reset_connections: reset_connections,
+            restart_boundary: plan.restart_boundary}
         // Every fallible check and all receipt facts are complete before the first resident mutation.
-        self.executable = plan.to.copy()
-        self.listeners = next_listeners.move()
-        self.connections = next_connections.move()
-        self.working_receipt = .Val(working)
+        self.executable = plan.to
+        self.listeners = next_listeners
+        self.connections = next_connections
+        self.working_receipt = Val(working)
         self.phase = .Applied
     }
-    commit: fn(self: Self) -> NativeSwapReceipt NativeSwapError! {
-        if self.phase != .Applied -> return .Err(self.phase_error("commit requires an applied transaction"))
-        working: self.working_receipt.take() ?? return .Err(self.error(.InvalidPhase, "applied transaction has no working receipt"))
-        receipt: receipt_from_working(working, .Committed, .None)
-        self.checkpoint = .None
-        self.pending_plan = .None
+    commit: fn(&self) -> NativeSwapReceipt NativeSwapError! {
+        if self.phase != .Applied -> return Err(self.phase_error("commit requires an applied transaction"))
+        working: self.working_receipt ?? return Err(self.error(.InvalidPhase, "applied transaction has no working receipt"))
+        self.working_receipt = None
+        self.checkpoint = None
+        self.pending_plan = None
         self.phase = .Ready
-        receipt
+        receipt_from_working(working, .Committed, None)
     }
-    rollback: fn(self: Self) -> NativeSwapReceipt NativeSwapError! {
-        if self.phase != .Paused && self.phase != .Applied -> return .Err(self.phase_error("rollback requires a paused or applied transaction"))
-        checkpoint: self.checkpoint.take() ?? return .Err(self.error(.RollbackUnavailable, "rollback checkpoint is missing"))
-        before: &self.executable
-        preserved_listeners := checkpoint.listeners.keys().cloned().collect[[String]]()
-        preserved_listeners.sort()
-        reset_listeners := self.listeners.keys().filter((id) -> !checkpoint.listeners.contains_key(id)).cloned().collect[[String]]()
-        reset_listeners.sort()
-        preserved_connections := checkpoint.connections.keys().cloned().collect[[String]]()
-        preserved_connections.sort()
-        reset_connections := self.connections.keys().filter((id) -> !checkpoint.connections.contains_key(id)).cloned().collect[[String]]()
-        reset_connections.sort()
-        receipt: NativeSwapReceipt { source: checkpoint.executable.source.copy(), outcome: .RolledBack,
-            before: before.revision.copy(), after: checkpoint.executable.revision.copy(), before_generation: before.generation,
-            after_generation: checkpoint.executable.generation, preserved_listeners: preserved_listeners,
-            reset_listeners: reset_listeners, preserved_connections: preserved_connections, reset_connections: reset_connections,
-            restart_boundary: NativeSwapRestartBoundary.in_place(), explanation: .Val(NativeSwapExplanation.new(
-                checkpoint.executable.source.canonical(), .Rejected, .UnsafeEdit, "rollback restored the prior executable and explicit handles")) }
-        self.executable = checkpoint.executable.move()
-        self.listeners = checkpoint.listeners.move()
-        self.connections = checkpoint.connections.move()
-        self.pending_plan = .None
-        self.working_receipt = .None
+    rollback: fn(&self) -> NativeSwapReceipt NativeSwapError! {
+        if self.phase != .Paused && self.phase != .Applied -> return Err(self.phase_error("rollback requires a paused or applied transaction"))
+        checkpoint: self.checkpoint ?? return Err(self.error(.RollbackUnavailable, "rollback checkpoint is missing"))
+        before: self.executable
+        reset_listeners := [String]{}
+        loop id in sorted_keys(self.listeners) {
+            if checkpoint.listeners.get(id) == None -> reset_listeners.push(id)
+        }
+        reset_connections := [String]{}
+        loop id in sorted_keys(self.connections) {
+            if checkpoint.connections.get(id) == None -> reset_connections.push(id)
+        }
+        explanation: NativeSwapExplanation.new(checkpoint.executable.source.canonical(), .Rejected, .UnsafeEdit, "rollback restored the prior executable and explicit handles")
+        receipt: NativeSwapReceipt{source: checkpoint.executable.source, outcome: .RolledBack,
+            before: before.revision, after: checkpoint.executable.revision, before_generation: before.generation,
+            after_generation: checkpoint.executable.generation, preserved_listeners: sorted_keys(checkpoint.listeners),
+            reset_listeners: reset_listeners, preserved_connections: sorted_keys(checkpoint.connections), reset_connections: reset_connections,
+            restart_boundary: NativeSwapRestartBoundary.in_place(), explanation: Val(explanation)}
+        self.executable = checkpoint.executable
+        self.listeners = checkpoint.listeners
+        self.connections = checkpoint.connections
+        self.checkpoint = None
+        self.pending_plan = None
+        self.working_receipt = None
         self.phase = .Ready
         receipt
     }
 }
-// The Rust original reject (continued in NativeSwap02) retains the current
-// executable and handles when compilation or migration fails before pause can
-// begin.
+// NativeSwap02 continues NativeSwapState with reject/fail (compilation or
+// migration failing before pause can begin), plan validation and the shared
+// identity and fact-list validators.

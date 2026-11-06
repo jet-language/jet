@@ -1,209 +1,259 @@
-use jet_foundation.HotSwap.[HotSwapDecision, StateRetentionDecision]
+use jet_foundation.[HotSwapDecision]
 
 impl NativeSwapState {
-    reject: fn(self: Self, plan: NativeSwapPlan, explanation: NativeSwapExplanation) -> NativeSwapReceipt {
-        preserved_listeners := self.listeners.keys().cloned().collect[[String]]()
-        preserved_listeners.sort()
-        preserved_connections := self.connections.keys().cloned().collect[[String]]()
-        preserved_connections.sort()
-        NativeSwapReceipt { source: self.executable.source.copy(),
-            outcome: if explanation.disposition == .Restart -> NativeSwapOutcome.RestartRequired else -> NativeSwapOutcome.Rejected,
-            before: self.executable.revision.copy(), after: plan.to.revision.copy(),
+    reject: fn(self, plan: NativeSwapPlan, explanation: NativeSwapExplanation) -> NativeSwapReceipt {
+        outcome: if explanation.disposition == .Restart -> NativeSwapOutcome.RestartRequired else -> NativeSwapOutcome.Rejected
+        NativeSwapReceipt{source: self.executable.source, outcome: outcome,
+            before: self.executable.revision, after: plan.to.revision,
             before_generation: self.executable.generation, after_generation: self.executable.generation,
-            preserved_listeners: preserved_listeners, reset_listeners: [], preserved_connections: preserved_connections,
-            reset_connections: [], restart_boundary: plan.restart_boundary.copy(), explanation: .Val(explanation) }
+            preserved_listeners: sorted_keys(self.listeners), reset_listeners: [String]{}, preserved_connections: sorted_keys(self.connections),
+            reset_connections: [String]{}, restart_boundary: plan.restart_boundary, explanation: Val(explanation)}
     }
-    fail: fn(self: Self, explanation: NativeSwapExplanation) -> NativeSwapReceipt NativeSwapError! {
+    fail: fn(&self, explanation: NativeSwapExplanation) -> NativeSwapReceipt NativeSwapError! {
         receipt := self.rollback()
         receipt.outcome = if explanation.disposition == .Restart -> NativeSwapOutcome.RestartRequired else -> NativeSwapOutcome.Rejected
-        receipt.explanation = .Val(explanation)
+        receipt.explanation = Val(explanation)
         receipt
     }
-    validate_plan: fn(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
+    validate_plan: fn(self, plan: NativeSwapPlan) NativeSwapError! {
         plan.validate_shape()
         source_id: self.source().canonical()
-        if !plan.source.matches(self.source()) -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source `{plan.source.canonical()}` does not match resident source"))
-        if plan.from != self.executable -> return .Err(NativeSwapError.input(source_id, .StalePlan, "plan `from` executable does not match resident executable"))
-        if plan.to.source != plan.source -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "candidate executable belongs to another source"))
-        if plan.to.generation <= self.executable.generation -> return .Err(NativeSwapError.input(source_id, .StalePlan, "candidate generation does not advance the resident generation"))
-        if plan.decision.requires_restart() -> return .Err(restart_or_reject(source_id, plan.capability.restart, .IncompatibleType,
-            plan.decision.compatibility.reason().unwrap_or("semantic hot-swap verdict requires a clean restart")))
+        if !plan.source.matches(self.source()) -> return Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source `{plan.source.canonical()}` does not match resident source"))
+        if !plan.from.same_as(self.executable) -> return Err(NativeSwapError.input(source_id, .StalePlan, "plan `from` executable does not match resident executable"))
+        if !plan.to.source.matches(plan.source) -> return Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "candidate executable belongs to another source"))
+        if plan.to.generation <= self.executable.generation -> return Err(NativeSwapError.input(source_id, .StalePlan, "candidate generation does not advance the resident generation"))
+        if plan.decision.requires_restart() {
+            return Err(restart_or_reject(source_id, plan.capability.restart, .IncompatibleType,
+                plan.decision.compatibility.reason() ?? "semantic hot-swap verdict requires a clean restart"))
+        }
         if plan.blocking_fact == .Val(fact) {
             disposition: if plan.capability.restart && fact.is_restartable() -> NativeSwapDisposition.Restart else -> NativeSwapDisposition.Rejected
-            return .Err(NativeSwapError { explanation: NativeSwapExplanation.new(source_id, disposition, fact, "checked producer marked this plan unsafe or incompatible") })
+            return Err(NativeSwapError{explanation: NativeSwapExplanation.new(source_id, disposition, fact, "checked producer marked this plan unsafe or incompatible")})
         }
-        if !plan.removed_definitions.is_empty() -> return .Err(NativeSwapError.input(source_id, .StaleReference, "removed definitions would leave stale references: {plan.removed_definitions.join(",")}"))
+        if plan.removed_definitions.len() > 0 -> return Err(NativeSwapError.input(source_id, .StaleReference, "removed definitions would leave stale references: {plan.removed_definitions.join(",")}"))
         if plan.restart_boundary.required {
-            fact: plan.restart_boundary.reason.unwrap_or(.RestartRequired)
-            return .Err(restart_or_reject(source_id, plan.capability.restart, fact, "candidate requires the announced clean restart boundary"))
+            fact: plan.restart_boundary.reason ?? NativeSwapBlockingFact.RestartRequired
+            return Err(restart_or_reject(source_id, plan.capability.restart, fact, "candidate requires the announced clean restart boundary"))
         }
-        if plan.capability.quiescence == .Required && (!plan.quiescence.required || !plan.quiescence.is_ready()) -> return .Err(NativeSwapError.input(source_id, .QuiescenceRequired,
-            "swap requires quiescence; active_operations={plan.quiescence.active_operations} reached={plan.quiescence.reached}"))
+        if plan.capability.quiescence == .Required && (!plan.quiescence.required || !plan.quiescence.is_ready()) {
+            return Err(NativeSwapError.input(source_id, .QuiescenceRequired, "swap requires quiescence; active_operations={plan.quiescence.active_operations} reached={plan.quiescence.reached}"))
+        }
         if plan.code_changed() {
             if plan.capability.code == {
                 .Replace -> {}
-                .Restart -> { return .Err(restart_or_reject(source_id, plan.capability.restart, .CodeRevisionUnsupported, "code revision changed but capability permits replacement only at restart")) }
-                .Reject -> { return .Err(NativeSwapError.input(source_id, .CodeRevisionUnsupported, "code revision changed and capability rejects in-place replacement")) }
+                .Restart -> return Err(restart_or_reject(source_id, plan.capability.restart, .CodeRevisionUnsupported, "code revision changed but capability permits replacement only at restart"))
+                .Reject -> return Err(NativeSwapError.input(source_id, .CodeRevisionUnsupported, "code revision changed and capability rejects in-place replacement"))
             }
         }
         if plan.data_changed() {
             if plan.capability.data == {
-                .Preserve -> { return .Err(restart_or_reject(source_id, plan.capability.restart, .DataRevisionUnsupported, "data revision changed but resident data policy is preserve")) }
+                .Preserve -> return Err(restart_or_reject(source_id, plan.capability.restart, .DataRevisionUnsupported, "data revision changed but resident data policy is preserve"))
                 .Replace | .Migrate -> {}
-                .Restart -> { return .Err(restart_or_reject(source_id, plan.capability.restart, .LayoutChanged, "data revision changed and capability requires a clean restart")) }
-                .Reject -> { return .Err(NativeSwapError.input(source_id, .DataRevisionUnsupported, "data revision changed and capability rejects in-place replacement")) }
+                .Restart -> return Err(restart_or_reject(source_id, plan.capability.restart, .LayoutChanged, "data revision changed and capability requires a clean restart"))
+                .Reject -> return Err(NativeSwapError.input(source_id, .DataRevisionUnsupported, "data revision changed and capability rejects in-place replacement"))
             }
         }
+        changed: plan.code_changed() || plan.data_changed()
         relocation_supported: plan.relocation.strategy.permits_in_place() && plan.capability.relocation.permits_in_place()
-        if (plan.code_changed() || plan.data_changed()) && !relocation_supported -> return .Err(restart_or_reject(source_id, plan.capability.restart, .RelocationUnsupported,
-            "relocation strategy `{plan.relocation.strategy.as_str()}` with capability `{plan.capability.relocation.as_str()}` does not permit in-place activation"))
+        if changed && !relocation_supported {
+            return Err(restart_or_reject(source_id, plan.capability.restart, .RelocationUnsupported,
+                "relocation strategy `{plan.relocation.strategy.as_str()}` with capability `{plan.capability.relocation.as_str()}` does not permit in-place activation"))
+        }
         link_supported: plan.link.strategy.permits_in_place() && plan.capability.link.permits_in_place()
-        if (plan.code_changed() || plan.data_changed()) && !link_supported -> return .Err(restart_or_reject(source_id, plan.capability.restart, .LinkStrategyUnsupported,
-            "link strategy `{plan.link.strategy.as_str()}` with capability `{plan.capability.link.as_str()}` does not permit in-place activation"))
+        if changed && !link_supported {
+            return Err(restart_or_reject(source_id, plan.capability.restart, .LinkStrategyUnsupported,
+                "link strategy `{plan.link.strategy.as_str()}` with capability `{plan.capability.link.as_str()}` does not permit in-place activation"))
+        }
         self.validate_listener_handles(plan)
         self.validate_connection_handles(plan)
     }
-    validate_listener_handles: fn(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
+    validate_listener_handles: fn(self, plan: NativeSwapPlan) NativeSwapError! {
         source_id: self.source().canonical()
-        if !plan.preserve_listeners.is_empty() && plan.capability.listeners == .Never -> return .Err(NativeSwapError.input(source_id, .CapabilityUnavailable, "listener preservation was requested but capability forbids it"))
+        if plan.preserve_listeners.len() > 0 && plan.capability.listeners == .Never -> return Err(NativeSwapError.input(source_id, .CapabilityUnavailable, "listener preservation was requested but capability forbids it"))
         loop handle in plan.preserve_listeners {
-            if !handle.source.matches(self.source()) -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` belongs to another source"))
-            current: self.listeners.get(handle.id) ?? return .Err(NativeSwapError.input(source_id, .ListenerHandleMissing, "listener handle `{handle.id}` is not resident"))
-            if !handle.is_compatible() -> return .Err(NativeSwapError.input(source_id, .ListenerHandleIncompatible, "listener handle `{handle.id}` is explicitly incompatible"))
-            if current.generation != handle.generation || !current.is_compatible() -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` does not match the resident generation"))
+            if !handle.source.matches(self.source()) -> return Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` belongs to another source"))
+            current: self.listeners.get(handle.id) ?? return Err(NativeSwapError.input(source_id, .ListenerHandleMissing, "listener handle `{handle.id}` is not resident"))
+            if !handle.is_compatible() -> return Err(NativeSwapError.input(source_id, .ListenerHandleIncompatible, "listener handle `{handle.id}` is explicitly incompatible"))
+            if current.generation != handle.generation || !current.is_compatible() -> return Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` does not match the resident generation"))
         }
     }
-    validate_connection_handles: fn(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
+    validate_connection_handles: fn(self, plan: NativeSwapPlan) NativeSwapError! {
         source_id: self.source().canonical()
-        if !plan.preserve_connections.is_empty() && plan.capability.connections == .Never -> return .Err(NativeSwapError.input(source_id, .CapabilityUnavailable, "connection preservation was requested but capability forbids it"))
-        listener_ids := [String:Bool]{}
-        loop handle in plan.preserve_listeners -> listener_ids.insert(handle.id, true)
+        if plan.preserve_connections.len() > 0 && plan.capability.connections == .Never -> return Err(NativeSwapError.input(source_id, .CapabilityUnavailable, "connection preservation was requested but capability forbids it"))
+        listener_ids := [String: Bool]{}
+        loop handle in plan.preserve_listeners -> listener_ids[handle.id] = true
         loop handle in plan.preserve_connections {
-            if !handle.source.matches(self.source()) -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection handle `{handle.id}` belongs to another source"))
-            current: self.connections.get(handle.id) ?? return .Err(NativeSwapError.input(source_id, .ConnectionHandleMissing, "connection handle `{handle.id}` is not resident"))
-            if !handle.is_compatible() -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleIncompatible, "connection handle `{handle.id}` is explicitly incompatible"))
-            if current.generation != handle.generation || !current.is_compatible() -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection handle `{handle.id}` does not match the resident generation"))
-            if !listener_ids.contains_key(handle.listener_id) -> return .Err(NativeSwapError.input(source_id, .ConnectionListenerNotPreserved,
-                "connection `{handle.id}` names listener `{handle.listener_id}` without an explicit compatible listener handle"))
+            if !handle.source.matches(self.source()) -> return Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection handle `{handle.id}` belongs to another source"))
+            current: self.connections.get(handle.id) ?? return Err(NativeSwapError.input(source_id, .ConnectionHandleMissing, "connection handle `{handle.id}` is not resident"))
+            if !handle.is_compatible() -> return Err(NativeSwapError.input(source_id, .ConnectionHandleIncompatible, "connection handle `{handle.id}` is explicitly incompatible"))
+            if current.generation != handle.generation || !current.is_compatible() -> return Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection handle `{handle.id}` does not match the resident generation"))
+            if listener_ids.get(handle.listener_id) == None {
+                return Err(NativeSwapError.input(source_id, .ConnectionListenerNotPreserved,
+                    "connection `{handle.id}` names listener `{handle.listener_id}` without an explicit compatible listener handle"))
+            }
         }
     }
-    error: fn(self: Self, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError { NativeSwapError.input(self.source().canonical(), fact, detail) }
-    phase_error: fn(self: Self, detail: String) -> NativeSwapError { self.error(.InvalidPhase, "{detail}; current phase={self.phase.as_str()}") }
+    error: fn(self, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError { NativeSwapError.input(self.source().canonical(), fact, detail) }
+    phase_error: fn(self, detail: String) -> NativeSwapError { self.error(.InvalidPhase, "{detail}; current phase={self.phase.as_str()}") }
 }
-// The Rust `CodeRevision` is `NativeSwapCodeRevision` `DataRevision` is `NativeSwapDataRevision`
-// `NativeSwapResidentState` is `NativeSwapState` `NativeSwapFailure` is `NativeSwapError`
 
-receipt_from_working: fn(working: NativeSwapWorkingReceipt, outcome: NativeSwapOutcome, explanation: NativeSwapExplanation?) -> NativeSwapReceipt {
-    NativeSwapReceipt { source: working.source.copy(), outcome, before: working.before.revision.copy(), after: working.after.revision.copy(),
-        before_generation: working.before.generation, after_generation: working.after.generation,
-        preserved_listeners: working.preserved_listeners.copy(), reset_listeners: working.reset_listeners.copy(),
-        preserved_connections: working.preserved_connections.copy(), reset_connections: working.reset_connections.copy(),
-        restart_boundary: working.restart_boundary.copy(), explanation: explanation.move() }
+// A paused plan matches the applied one when every checked fact it carries is the same.
+plans_match: fn(left: NativeSwapPlan, right: NativeSwapPlan) -> Bool {
+    if !left.source.matches(right.source) || !left.from.same_as(right.from) || !left.to.same_as(right.to) -> return false
+    if left.decision.module_ref != right.decision.module_ref || left.decision.changed_functions != right.decision.changed_functions || left.decision.is_compatible() != right.decision.is_compatible() -> return false
+    if left.capability.code != right.capability.code || left.capability.data != right.capability.data -> return false
+    if left.capability.listeners != right.capability.listeners || left.capability.connections != right.capability.connections -> return false
+    if left.capability.restart != right.capability.restart || left.capability.quiescence != right.capability.quiescence -> return false
+    if left.capability.relocation != right.capability.relocation || left.capability.link != right.capability.link -> return false
+    if left.restart_boundary.required != right.restart_boundary.required || left.restart_boundary.reason != right.restart_boundary.reason -> return false
+    if left.restart_boundary.affected != right.restart_boundary.affected || left.restart_boundary.kept != right.restart_boundary.kept || left.restart_boundary.reset != right.restart_boundary.reset -> return false
+    if left.quiescence.required != right.quiescence.required || left.quiescence.active_operations != right.quiescence.active_operations || left.quiescence.reached != right.quiescence.reached -> return false
+    if left.relocation.strategy != right.relocation.strategy || left.relocation.code_symbols != right.relocation.code_symbols || left.relocation.data_slots != right.relocation.data_slots -> return false
+    if left.link.strategy != right.link.strategy || left.link.resident_identity != right.link.resident_identity || left.link.candidate_identity != right.link.candidate_identity -> return false
+    if left.changed_items != right.changed_items || left.removed_definitions != right.removed_definitions || left.blocking_fact != right.blocking_fact -> return false
+    if left.preserve_listeners.len() != right.preserve_listeners.len() || left.preserve_connections.len() != right.preserve_connections.len() -> return false
+    loop index in 0..<left.preserve_listeners.len() {
+        a: left.preserve_listeners[index]
+        b: right.preserve_listeners[index]
+        if a.id != b.id || !a.source.matches(b.source) || a.generation != b.generation || a.compatibility != b.compatibility -> return false
+    }
+    loop index in 0..<left.preserve_connections.len() {
+        a: left.preserve_connections[index]
+        b: right.preserve_connections[index]
+        if a.id != b.id || a.listener_id != b.listener_id || !a.source.matches(b.source) || a.generation != b.generation || a.compatibility != b.compatibility -> return false
+    }
+    true
 }
-listener_map: fn(source_id: String, executable: &NativeSwapExecutable, listeners: [NativeSwapListenerHandle]) -> [String:NativeSwapListenerHandle] NativeSwapError! {
-    if listeners.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "resident listener count exceeds its bounded fact limit"))
-    map := [String:NativeSwapListenerHandle]{}
+sorted_keys: fn<T>(map: [String: T]) -> [String] {
+    keys := map.keys().to_list()
+    keys.sort()
+    keys
+}
+receipt_from_working: fn(working: NativeSwapWorkingReceipt, outcome: NativeSwapOutcome, explanation: NativeSwapExplanation?) -> NativeSwapReceipt {
+    NativeSwapReceipt{source: working.source, outcome: outcome, before: working.before.revision, after: working.after.revision,
+        before_generation: working.before.generation, after_generation: working.after.generation,
+        preserved_listeners: working.preserved_listeners, reset_listeners: working.reset_listeners,
+        preserved_connections: working.preserved_connections, reset_connections: working.reset_connections,
+        restart_boundary: working.restart_boundary, explanation: explanation}
+}
+listener_map: fn(source_id: String, executable: NativeSwapExecutable, listeners: [NativeSwapListenerHandle]) -> [String: NativeSwapListenerHandle] NativeSwapError! {
+    if listeners.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "resident listener count exceeds its bounded fact limit"))
+    map := [String: NativeSwapListenerHandle]{}
     loop listener in listeners {
-        _: validate_identity(listener.id, "listener handle identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_source_identity(listener.source, "listener handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        if !listener.source.matches(executable.source) -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener `{listener.id}` belongs to another source"))
-        if listener.generation != executable.generation -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener `{listener.id}` does not match resident generation"))
-        if map.insert(listener.id.copy(), listener).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "resident listener identities must be unique"))
+        _: validate_identity(listener.id, "listener handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_source_identity(listener.source, "listener handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if !listener.source.matches(executable.source) -> return Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener `{listener.id}` belongs to another source"))
+        if listener.generation != executable.generation -> return Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener `{listener.id}` does not match resident generation"))
+        if map.get(listener.id) != None -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "resident listener identities must be unique"))
+        map[listener.id] = listener
     }
     map
 }
-connection_map: fn(source_id: String, executable: &NativeSwapExecutable, connections: [NativeSwapConnectionHandle], listeners: &[String:NativeSwapListenerHandle]) -> [String:NativeSwapConnectionHandle] NativeSwapError! {
-    if connections.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "resident connection count exceeds its bounded fact limit"))
-    map := [String:NativeSwapConnectionHandle]{}
+connection_map: fn(source_id: String, executable: NativeSwapExecutable, connections: [NativeSwapConnectionHandle], listeners: [String: NativeSwapListenerHandle]) -> [String: NativeSwapConnectionHandle] NativeSwapError! {
+    if connections.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "resident connection count exceeds its bounded fact limit"))
+    map := [String: NativeSwapConnectionHandle]{}
     loop connection in connections {
-        _: validate_identity(connection.id, "connection handle identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_identity(connection.listener_id, "connection listener identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_source_identity(connection.source, "connection handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        if !connection.source.matches(executable.source) -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection `{connection.id}` belongs to another source"))
-        if connection.generation != executable.generation -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection `{connection.id}` does not match resident generation"))
-        if !listeners.contains_key(connection.listener_id) -> return .Err(NativeSwapError.input(source_id, .ConnectionListenerNotPreserved, "connection `{connection.id}` names unknown listener `{connection.listener_id}`"))
-        if map.insert(connection.id.copy(), connection).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "resident connection identities must be unique"))
+        _: validate_identity(connection.id, "connection handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_identity(connection.listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_source_identity(connection.source, "connection handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if !connection.source.matches(executable.source) -> return Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection `{connection.id}` belongs to another source"))
+        if connection.generation != executable.generation -> return Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection `{connection.id}` does not match resident generation"))
+        if listeners.get(connection.listener_id) == None -> return Err(NativeSwapError.input(source_id, .ConnectionListenerNotPreserved, "connection `{connection.id}` names unknown listener `{connection.listener_id}`"))
+        if map.get(connection.id) != None -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "resident connection identities must be unique"))
+        map[connection.id] = connection
     }
     map
 }
 validate_identity: fn(value: String, label: String) Err! {
-    if value.is_empty() -> return .Err("{label} must not be empty")
-    if value.len() > MAX_NATIVE_SWAP_ID_BYTES -> return .Err("{label} exceeds {MAX_NATIVE_SWAP_ID_BYTES} bytes")
-    if value.chars().any((character) -> character.is_control()) -> return .Err("{label} contains a control character")
+    if value == "" -> return Err("{label} must not be empty")
+    if value.bytes().len() > MAX_NATIVE_SWAP_ID_BYTES -> return Err("{label} exceeds {MAX_NATIVE_SWAP_ID_BYTES} bytes")
+    loop byte in value.bytes() {
+        if byte < 32 || byte == 127 -> return Err("{label} contains a control character")
+    }
 }
-validate_source_identity: fn(identity: &NativeSwapSourceIdentity, label: String) Err! {
+validate_source_identity: fn(identity: NativeSwapSourceIdentity, label: String) Err! {
     validate_identity(identity.source_id, "{label} source")
     validate_identity(identity.module_ref, "{label} module")
 }
-validate_hot_swap_decision: fn(source_id: String, source: &NativeSwapSourceIdentity, decision: &HotSwapDecision) NativeSwapError! {
-    _: validate_identity(decision.module_ref, "hot-swap decision module") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-    if decision.module_ref != source.module_ref -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "hot-swap decision module `{decision.module_ref}` does not match source module `{source.module_ref}`"))
-    if decision.state_facts().len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "hot-swap decision exceeds its retention fact limit"))
-    seen := [String:Bool]{}
-    loop fact in decision.state_facts() {
-        _: validate_identity(fact.key, "hot-swap retention key") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        if seen.insert(fact.key, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "hot-swap retention key `{fact.key}` appears more than once"))
+validate_hot_swap_decision: fn(source_id: String, source: NativeSwapSourceIdentity, decision: HotSwapDecision) NativeSwapError! {
+    _: validate_identity(decision.module_ref, "hot-swap decision module") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+    if decision.module_ref != source.module_ref -> return Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "hot-swap decision module `{decision.module_ref}` does not match source module `{source.module_ref}`"))
+    facts: decision.state_facts()
+    if facts.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "hot-swap decision exceeds its retention fact limit"))
+    seen := [String: Bool]{}
+    loop fact in facts {
+        _: validate_identity(fact.key, "hot-swap retention key") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if seen.get(fact.key) != None -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "hot-swap retention key `{fact.key}` appears more than once"))
+        seen[fact.key] = true
     }
 }
 decision_restart_boundary: fn(decision: HotSwapDecision) -> NativeSwapRestartBoundary {
-    affected := normalized_facts(decision.changed_functions.copy())
-    if affected.is_empty() -> affected.push(decision.module_ref.copy())
+    affected := normalized_facts(decision.changed_functions)
+    if affected.len() == 0 -> affected.push(decision.module_ref)
     kept := [String]{}
     reset := [String]{}
     loop fact in decision.state_facts() {
         if fact.decision == {
-            .Preserve -> kept.push(fact.key.copy())
-            .Fresh { .. } -> reset.push(fact.key.copy())
+            .Preserve -> kept.push(fact.key)
+            else -> reset.push(fact.key)
         }
     }
-    NativeSwapRestartBoundary.required(.IncompatibleType, affected).with_state(kept, reset)
+    NativeSwapRestartBoundary.required_by(.IncompatibleType, affected).with_state(kept, reset)
 }
-validate_listener_plan_facts: fn(source_id: String, expected_source: &NativeSwapSourceIdentity, handles: &[NativeSwapListenerHandle]) NativeSwapError! {
-    if handles.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "native swap plan exceeds its listener fact limit"))
-    seen := [String:Bool]{}
+validate_listener_plan_facts: fn(source_id: String, expected_source: NativeSwapSourceIdentity, handles: [NativeSwapListenerHandle]) NativeSwapError! {
+    if handles.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "native swap plan exceeds its listener fact limit"))
+    seen := [String: Bool]{}
     loop handle in handles {
-        _: validate_identity(handle.id, "listener handle identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_source_identity(handle.source, "listener handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        if !handle.source.matches(expected_source) -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` belongs to another source"))
-        if seen.insert(handle.id, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "listener handle `{handle.id}` appears more than once"))
+        _: validate_identity(handle.id, "listener handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_source_identity(handle.source, "listener handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if !handle.source.matches(expected_source) -> return Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` belongs to another source"))
+        if seen.get(handle.id) != None -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "listener handle `{handle.id}` appears more than once"))
+        seen[handle.id] = true
     }
 }
-validate_connection_plan_facts: fn(source_id: String, expected_source: &NativeSwapSourceIdentity, handles: &[NativeSwapConnectionHandle]) NativeSwapError! {
-    if handles.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "native swap plan exceeds its connection fact limit"))
-    seen := [String:Bool]{}
+validate_connection_plan_facts: fn(source_id: String, expected_source: NativeSwapSourceIdentity, handles: [NativeSwapConnectionHandle]) NativeSwapError! {
+    if handles.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "native swap plan exceeds its connection fact limit"))
+    seen := [String: Bool]{}
     loop handle in handles {
-        _: validate_identity(handle.id, "connection handle identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_identity(handle.listener_id, "connection listener identity") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: validate_source_identity(handle.source, "connection handle") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        if !handle.source.matches(expected_source) -> return .Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection handle `{handle.id}` belongs to another source"))
-        if seen.insert(handle.id, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "connection handle `{handle.id}` appears more than once"))
+        _: validate_identity(handle.id, "connection handle identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_identity(handle.listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: validate_source_identity(handle.source, "connection handle") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if !handle.source.matches(expected_source) -> return Err(NativeSwapError.input(source_id, .ConnectionHandleStale, "connection handle `{handle.id}` belongs to another source"))
+        if seen.get(handle.id) != None -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "connection handle `{handle.id}` appears more than once"))
+        seen[handle.id] = true
     }
 }
 validate_revision: fn(value: String, label: String) Err! { validate_identity(value, label) }
-validate_fact_list: fn(source_id: String, facts: &[String]) NativeSwapError! {
-    if facts.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "native swap fact list exceeds its bounded fact limit"))
+validate_fact_list: fn(source_id: String, facts: [String]) NativeSwapError! {
+    if facts.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "native swap fact list exceeds its bounded fact limit"))
+    seen := [String: Bool]{}
     loop fact in facts {
-        _: validate_identity(fact, "native swap fact") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-    }
-    seen := [String:Bool]{}
-    loop fact in facts {
-        if seen.insert(fact, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "native swap fact `{fact}` appears more than once"))
+        _: validate_identity(fact, "native swap fact") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        if seen.get(fact) != None -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "native swap fact `{fact}` appears more than once"))
+        seen[fact] = true
     }
 }
-normalized_facts: fn(facts: [String]) -> [String] { facts.sort(); facts }
-bounded_text: fn(value: String, limit: USize) -> String {
+normalized_facts: fn(facts: [String]) -> [String] {
+    sorted := facts
+    sorted.sort()
+    sorted
+}
+// Drops control characters and truncates at a character boundary within `limit` bytes.
+bounded_text: fn(value: String, limit: Int) -> String {
     output := ""
+    used := 0
     loop character in value.chars() {
-        if character.is_control() -> next
-        if output.len() + character.len_utf8() > limit -> break
-        output.push(character)
+        text: "{character}"
+        width: text.bytes().len()
+        if width == 1 && (text.bytes()[0] < 32 || text.bytes()[0] == 127) -> next
+        if used + width > limit -> break
+        output = "{output}{text}"
+        used += width
     }
     output
 }
 restart_or_reject: fn(source_id: String, allows_restart: Bool, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError {
-    if allows_restart && fact.is_restartable() -> NativeSwapError.restart(source_id, fact, detail)
-    else {
-        reason: if fact.is_restartable() -> "capability does not allow a clean restart" else -> "blocking fact cannot be handled by a clean restart"
-        NativeSwapError.input(source_id, fact, "{detail}; {reason}")
-    }
+    if allows_restart && fact.is_restartable() -> return NativeSwapError.restart(source_id, fact, detail)
+    reason: if fact.is_restartable() -> "capability does not allow a clean restart" else -> "blocking fact cannot be handled by a clean restart"
+    NativeSwapError.input(source_id, fact, "{detail}; {reason}")
 }
