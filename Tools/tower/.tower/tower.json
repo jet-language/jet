@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6616,
-    "rev": 93743,
+    "nextNum": 6617,
+    "rev": 93748,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -96301,11 +96301,11 @@
         {
           "n": 1,
           "text": "Docs/audits/2026-11-06-d-host-leaf1-option-e-review.md is on dev and its verdict holds within the stated limits; its two amendments (declared effect rows on pub runtime functions are the introducing leaves; the runtime interface is generated from source with the runtime pack) are part of E.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T21:43:26.872Z"
+          "evidence": "Docs/audits/2026-11-06-d-host-leaf1-option-e-review.md landed on dev as a8ca8c0f63 (lane-commit, CHECK OK). Verdict: holds within limits, with the two amendments (declared effect rows on pub jet_runtime functions are the introducing leaves, proven equal to CoreCallRows effect_kind/effect_leaf at cutover; the runtime interface is generated from source with the runtime pack and embedded). The web-tier gap (Compiler/Prelude/Web/Core/Realtime.js reimplements runtime functions) is c7 on this card.",
+          "at": "2026-11-06T21:56:26.549Z"
         },
         {
           "n": 2,
@@ -96376,7 +96376,54 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T21:43:21.231Z",
-      "updated": "2026-11-06T21:44:51.398Z",
+      "updated": "2026-11-06T21:56:26.549Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c078tv7g",
+      "num": 6616,
+      "title": "Verify batches see self-compile miscompiles before a release does",
+      "body": "a0_030 (e32b979063) failed its release gate on an I2 regression that only the self-built compiler shows: an ICE exits 1 instead of 101 under chain s2/s3, while s1 (built by seed a0_029) exits 101. Main's vb batches build and test s1 only, so vb7 passed and the 33-minute release run was the first to find it. Fix the batch so a cheap probe of the s2-built compiler runs on the rows most exposed to self-compile miscompiles (ICE exit codes, process exit codes, struct-returning verb outputs) on every batch, without adding a full s2 suite to each batch.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "vbatch.sh builds an s2 from the batch's s1 (or reuses one at the same commit) and runs the backend_ice cases plus a process-exit-code golden against it, failing the batch on any row that differs from s1",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:54:15.339Z"
+        },
+        {
+          "n": 2,
+          "text": "A batch on a commit carrying a known self-compile difference (the a0_030 ICE exit) reports it as a batch failure naming the s1/s2 split",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T21:54:16.163Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T21:54:09.666Z",
+      "updated": "2026-11-06T21:54:20.421Z",
       "updatedBy": "Main"
     }
   ],
@@ -185674,6 +185721,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T21:56:26.549Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0bbj6h3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T21:54:20.421Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c078tv7g",
+      "note": "priority"
+    },
+    {
+      "at": "2026-11-06T21:54:16.163Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c078tv7g",
+      "note": "#2 A batch on a commit carrying a known self-compile difference"
+    },
+    {
+      "at": "2026-11-06T21:54:15.339Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c078tv7g",
+      "note": "#1 vbatch.sh builds an s2 from the batch's s1 (or reuses one at"
+    },
+    {
+      "at": "2026-11-06T21:54:09.666Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c078tv7g",
+      "note": "Verify batches see self-compile miscompiles before a release does"
+    },
     {
       "at": "2026-11-06T21:44:51.398Z",
       "by": "Main",
