@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6585,
-    "rev": 92750,
+    "rev": 92765,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -53720,6 +53720,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c1 partial dev 452f1230be (CoreOwnership): all 203 CoreCallSymbol.Rust rows removed; CoreCallRows has 0 Rust rows, enum is { Prelude SourceOwned }. 185 receiver rows unreachable from any symbol or sema lookup deleted; 18 routed to Jet runtime exports (core.mem volatile_read/volatile_write/stream_store lowered as jet_raw_*). Surface-ledger generator rejects any Rust route (new hostile fixture). s1 of e2c746a5a8+patch: ui 2172 PASS, FAIL rows identical to base; cases 2806 PASS, 0 regressions; 23 affected goldens x o0/o1/o2 69/69 PASS; ledger --check-core-call-registry current, hostile 36 rejected / 5 held. Left for c1: 64 gauntlet/perf/bench .rs files and parity-ledger ABSENT items"
+        },
+        {
           "at": "2026-11-05",
           "by": "Main",
           "text": "CoreOwnership status: c1 partial (203 CoreCallSymbol.Rust rows remain in CoreCallRows.jet; 64 .rs files left are comparison/bench code: gauntlet 31, perf 27, compiled_workloads 4, zed 1, Examples/ffi 1; parity ledger has ABSENT/PORTED-UNMERGED items). c3 partial: golden census on 25fb199ce5+c34 1224 pass 0 fail; skips: 32 multi-file no native golden, 20 web-only, 9 host tool, 5 KF (#6366, #6418, #4599x2, #3236); no web-tier or process-tree proof yet. c7 partial: 465 dispatcher rows unowned (333 adapter + 132 plain), mostly __ host leaves. c8: Rust-perf half has no Rust route left to compare; golden half rides on c3. c9 blocked on D-RUST-SCOPE1"
@@ -55218,7 +55223,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-06T10:08:37.412Z",
-      "updated": "2026-11-05T23:32:46.700Z",
+      "updated": "2026-11-06T01:23:41.998Z",
       "updatedBy": "Main",
       "goals": [
         "G14",
@@ -60418,8 +60423,8 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-16T13:36:57.362Z",
-      "updated": "2026-11-06T00:12:26.204Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-06T01:22:31.895Z",
+      "updatedBy": "Main",
       "goals": [
         "G3"
       ]
@@ -70240,7 +70245,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:19.302Z",
-      "updated": "2026-11-05T23:45:15.522Z",
+      "updated": "2026-11-06T00:29:38.293Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -71812,7 +71817,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-05T23:44:54.113Z",
+      "updated": "2026-11-06T00:31:38.992Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -72890,11 +72895,11 @@
         {
           "n": 1,
           "text": "A file- or env-reading test row reruns from the store when its recorded reads are unchanged and re-executes when one changes, proven by a cases row for each.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T18:55:47.470Z"
+          "evidence": "dev 616c0dda34 (TestProfiles): cases test_results_rerun_when_a_read_file_changes and test_results_rerun_when_a_read_env_var_changes 2/2 PASS; testing_tiers 12 PASS / 1 KF (#5454); chain s2 from a93d1800d1+patch, fixed point SAME; no KF rows removed",
+          "at": "2026-11-06T01:22:52.506Z"
         },
         {
           "n": 2,
@@ -72925,7 +72930,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:55:47.470Z",
-      "updated": "2026-10-30T12:27:34.057Z",
+      "updated": "2026-11-06T01:22:52.506Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -86448,8 +86453,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:12:20.739Z",
-      "updated": "2026-11-06T00:18:15.009Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-06T00:32:50.106Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0l09me0",
@@ -92121,7 +92126,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T16:33:50.383Z",
-      "updated": "2026-11-05T23:17:51.016Z",
+      "updated": "2026-11-06T01:23:54.201Z",
       "updatedBy": "Main"
     },
     {
@@ -141151,71 +141156,71 @@
       "id": "D-GAME-PLATFORM1",
       "cardId": "c0776o2m",
       "group": "platform",
-      "title": "Where a game shows pixels, plays sound and reads raw keys",
-      "situation": "Jet's game module runs scenes, input bindings and replays, and a raylib-style module draws shapes and plays sound files. A Doom-style game needs three things neither offers: showing its own pixel buffer, playing raw sound samples, and reading every key and mouse event. You ruled that Jet talks to the display and sound system itself, with no C library. What is left is where these calls live and what they look like. We recommend one platform value inside the game module.",
-      "gist": "Where should a game's pixel, sound and raw-input calls live, and what should they look like?",
-      "lesson": "A game draws each frame itself, hands the finished pixels to the screen, sends sound samples to the speakers and reacts to each key press. These three jobs share one clock: a frame. Keeping them on one value keeps them in step. A headless version of the same value lets tests check pixels and sound without a screen.",
+      "title": "Games and apps share two independent subsystems: ray for visuals and input, audio for sound",
+      "situation": "A Doom-style game must show its own pixel buffer, play raw sound samples and read every key press. Jet's game library cannot do these yet. You ruled that Jet talks to the display and sound system itself, with no C library. You also asked that games and desktop apps share one visual subsystem, our raylib, and one audio subsystem, our miniaudio. They should be independent parts, not one big platform. The web stays different. We recommend exactly that: ray and audio, each usable alone and together.",
+      "gist": "Should games and apps share two independent subsystems, ray for visuals and audio for sound?",
+      "lesson": "A subsystem is a library that owns one kind of hardware. ray owns windows, drawing and the keys and mouse of each window. audio owns speakers and sound mixing. Each works alone, and a program can open several of each. Games, apps and music players combine only the parts they need.",
       "explainer": "",
-      "story": "Ana ports a small Doom-style game. Every frame she draws 320 by 200 pixels with a 256-colour palette, queues a footstep sound and reads the arrow keys. She wants one place to do all three, and a test that checks the same frames without a window.",
-      "inWild": "SDL: one library opens the window, the audio device and the event queue, and a game reads events, queues samples and presents a texture each frame. Source: https://wiki.libsdl.org/SDL3/CategoryAPI\n\nraylib: drawing, sound and key polling are global calls such as IsKeyDown and PlaySound. Source: https://www.raylib.com/cheatsheet/cheatsheet.html",
-      "detail": "TODAY\n\nCore/Game/Game.jet is a 19-line package shell. core.game exports Backend, Replay, Scene and run (Compiler/JetFoundation/Source/Registry/CoreCallRows.jet:1954). game.run(GameScene, GameReplay?, GameBackend?, Int?) returns a transcript (CoreHostSignatures.jet:387). Examples/features/game/core_game_headless.jet uses scene.assets.sound, scene.input.bind(\"jump\", \"Space\"), scene.on_frame and game.Replay.\n\nCore/Game/Raylib.jet (2385 lines, core.game.raylib) has window_open, begin_drawing, set_target_fps, key_down(String), load_sound and play_sound. It cannot present a caller's pixel buffer, queue raw PCM samples, or deliver a raw event queue.\n\nRULINGS AND CARD\n\nD-RAYLIB-DRIVER-LOAD1=A: graphical Jet programs speak the display and sound protocols directly and stay single static files; GPU drawing is a later opt-in.\n\nTower card c0776o2m (owner direction 2026-10-16): the Jet Doom port must be as much Jet as possible. The OS edge (Wayland/X11, Win32, Cocoa; ALSA/PipeWire, WASAPI, CoreAudio) stays inside vetted #Unsafe Core. Acceptance: open a window, present a 320x200 indexed buffer at 35 Hz, play a PCM tone, and log key events on Linux. Headless golden checksums for surface and audio must match on every level.\n\nSHAPE UNDER A (proposed names for this vote)\n\ngame.open(width, height, title, audio_rate) opens a window, the audio device and the window's key and mouse events, and returns a game.Platform. Pacing is set in one place: frames(fps) yields one frame at a time. Each frame has events(), a queue of .KeyDown, .KeyUp, .MouseMove and .MouseButton values in arrival order.\n\nframe.present(pixels, palette) shows an indexed buffer and frame.present(rgba) shows 32-bit pixels. frame.audio.queue(samples) plays 16-bit PCM at 11025-48000 Hz. The clock is core.time's monotonic tick.\n\ngame.open(audio_rate) with no size opens only the audio device. A program then gets no window and no events, which suits a music player.\n\ngame.headless(width, height, audio_rate) returns the same Platform type but opens no device at all. It records each presented frame and each audio block as checksums for goldens, and its events come from a script or replay. Each entry point opens one fixed set of devices, so no flags can conflict. The existing game.run backend takes the same Platform, so scenes and replays ride on it.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. A sound-only program, such as a music player, needs no window and no game module. core.audio.open(rate) returns AudioOut, the same type a game reads as frame.audio. game.Platform composes it, so both paths share one audio implementation.\n\n2. The game module stays small. Audio lives in core.audio; game holds the surface and input, one file each, and composes the three. The public names are frozen in this one vote.\n\nNo loss remains. The headless platform records the same AudioOut stream, so audio goldens work for games and music players alike.\n\nWHY NOT B OR C\n\nB splits pixels, sound and input into three modules. Each then keeps its own clock and device, and every game must keep them in step by hand. Headless tests need three fakes. C grows the raylib-style module with raylib's calls, including its GetKeyPressed-style key queue. Its state is global, so a program cannot hold two platforms, or a headless one beside a real one, as a test needs. Its names also tie Jet's own layer to another library's API.",
+      "story": "Ana ports a small Doom-style game. Every frame she draws 320 by 200 pixels with a 256-colour palette, queues a footstep sound and reads the arrow keys. Her friend writes a notes app with two windows, and another writes a music player with no window. All three want the same libraries, and tests that check pixels and sound without a screen.",
+      "inWild": "SDL: separate subsystems for video, audio and events, each started on its own with SDL_InitSubSystem. Source: https://wiki.libsdl.org/SDL3/SDL_InitSubSystem\n\nraylib and miniaudio: raylib draws windows and reads input; its sound module is built on miniaudio, which can also be used alone. Source: https://miniaud.io/docs/manual/",
+      "detail": "WHAT CHANGED FROM THE LAST DRAFT\n\nThe last draft put window, sound and input into one game.Platform value. You asked for independent, modular systems shared with the app framework, with the web kept apart. Now ray is the visual subsystem and audio is the sound subsystem. Each stands alone; core.game and gui only combine them.\n\nTODAY\n\nCore/Game/Game.jet is a 19-line shell for scenes, input bindings and replays. Core/Game/Raylib.jet (2385 lines, core.game.raylib) opens a window, draws shapes and plays sound files. It cannot show a caller's own pixel buffer, queue raw sound samples, or hand over every input event.\n\nCore/Ui holds app pieces such as dialogs, clipboard and drag and drop, but no window or drawing of its own.\n\nRULINGS IT BUILDS ON\n\n- D-RAYLIB-DRIVER-LOAD1=A: Jet speaks the display and sound protocols itself, and programs stay single static files. GPU drawing is a later opt-in.\n- D-RAYLIB-FONT-HOME1=A: ray is Jet's own game library and font its font engine, used by ray and gui. raylib, the binding to C raylib, stays separate.\n- D-RAY-API1=A: ray keeps raylib's names but draws through explicit window and frame values, so no state is global.\n\n- Card c0776o2m: the Doom port is as much Jet as possible. The operating-system edge (Wayland or X11, ALSA or PipeWire) stays inside vetted #Unsafe Core code. Acceptance: a window shows a 320x200 indexed buffer at 35 Hz, plays a tone and logs key events on Linux. Headless checksums for pixels and sound match on every build level.\n\nSHAPE UNDER A\n\nray, the visual subsystem. ray.open(width, height, title) opens a window, and a program may open several. win.frames(fps) yields one frame at a time. frame.events() lists that window's key, mouse and resize events in arrival order.\n\nEach frame offers two levels of control. frame.present(pixels, palette) or frame.present(rgba) shows your own buffer. raylib-style calls such as frame.draw_rect draw for you. ray.gamepads() lists connected controllers, which belong to no window.\n\naudio, the sound subsystem. audio.open(rate) opens an output device, and a program may open several. out.queue(samples) plays raw 16-bit sound at 11025 to 48000 Hz. audio.mixer(out) adds the miniaudio-style level: load sounds, play voices, set volume, and group voices into buses.\n\nComposition. core.game keeps scenes, input bindings and replays. game.run(scene) opens a window and an audio device for you, or takes ones you opened. gui builds its widgets on ray windows and frames, with font for text. Neither holds device code of its own.\n\nTests. ray.headless(width, height) and audio.headless(rate) return the same types with no device. They record each frame and each block of sound as checksums for golden tests. Their events come from a script or a replay.\n\nWeb. core.web stays separate, as you said. Whether ray can also draw on a browser canvas is a later ballot.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Keeping picture and sound in step. They need no shared clock. The screen shows each frame when it is ready. The speakers play from a buffer at their own steady rate. out.queued() says how much sound is waiting, so a game keeps a few frames ahead; game.run does this for you.\n\n2. More to open than one value. A game that uses game.run opens nothing itself. A program that opens its own parts writes one line per part, and only for parts it uses.\n\n3. Tests need two fakes. Each headless call is one line, and game.run takes both, as the example shows.\n\n4. Two ways to draw. present and the raylib-style calls draw into the same frame. A game may mix them, for example a pixel buffer under drawn text.\n\nNo loss remains.\n\nEDGE CASES\n\n- Closing one of several windows ends only its frame loop. Its events stop and its frames end.\n- No audio device: audio.open returns a typed error, and game.run continues silent with a warning.\n- A sound queue that runs dry plays silence and counts the gap, which the headless report shows.\n\n- Two programs, or two outputs in one program, may share one device; the sound system mixes them.\n- Keys are read per window, so the focused window gets them. A key press with no focused window reaches nobody.\n\nAFTER A LANDS\n\ncore.game.raylib moves into ray, and its sound calls move into audio. The old module is deleted, and every example moves to the new names in the same change.\n\nWHY NOT B OR C\n\nB also splits input from ray. But keys and mouse belong to the focused window, so input has to point back at a window anyway, and a key would be asked about in two places. C keeps one platform value with window, sound and input. An app or music player then takes parts it does not want, and a program cannot have two windows or keep sound running when a window closes.",
       "options": [
         {
           "key": "A",
-          "name": "One platform value in the game module",
-          "detail": "game.open gives one Platform value. Each frame, a game reads raw events, presents its pixel buffer and queues sound samples on it. game.headless gives the same type with no device, recording frames and sound for tests. game.run's scenes and replays use the same value. A sound-only program opens core.audio, which returns the same AudioOut type as frame.audio, with no game module and no window.",
-          "technical": "game.Platform owns the window, audio device and event queue behind vetted #Unsafe Core. frames(fps) paces on core.time. core.audio.open(rate) opens the audio device alone and returns AudioOut, the same type game.Platform hands out as frame.audio; game composes it. game.headless opens no device and records checksums.",
-          "code": "use game :: core.game\n\nfn run() {\n    p :: game.open(width: 320, height: 200, title: \"doom\", audio_rate: 11025)\n    loop frame in p.frames(fps: 35) {\n        loop event in frame.events() {\n            if event == .KeyDown(key) -> print(\"down {key}\")\n        }\n        frame.audio.queue(step_sound)    // [I16] samples\n        frame.present(pixels, palette)   // 320x200, 256 colours\n    }\n}\n\n// sound only: no game module, no window\nuse audio :: core.audio\n\nfn play(music: [I16]) {\n    out :: audio.open(rate: 44100)\n    out.queue(music)                    // the same AudioOut as frame.audio\n}"
+          "name": "Two subsystems: ray and audio",
+          "detail": "ray is the visual subsystem: windows, frames, drawing, and each window's keys and mouse. audio is the sound subsystem: output devices, raw sample queues and a mixer. Each works alone, and a program can open several of each.\n\nGames and desktop apps share both. core.game adds scenes and replays, gui adds widgets, and neither has device code of its own. Headless versions of both return the same types for tests. The web stays separate.",
+          "technical": "ray.Window and audio.Output own their devices behind vetted #Unsafe Core code. win.frames(fps) paces on core.time's steady clock. audio.mixer(out) is a voice and bus graph over one Output. ray.headless and audio.headless open no device and record checksums. game.run takes an optional Window and Output.",
+          "code": "use { ray :: ray, audio :: audio }\n\n// a game: the visual and the audio subsystem, each opened on its own\nfn run() {\n    win :: ray.open(width: 320, height: 200, title: \"doom\")\n    out :: audio.open(rate: 11025)\n    loop frame in win.frames(fps: 35) {\n        loop event in frame.events() {\n            if event == .KeyDown(key) -> print(\"down {key}\")\n        }\n        out.queue(step_sound)            // raw [I16] samples\n        frame.present(pixels, palette)   // your own 320x200 buffer\n    }\n}\n\n// a music player: audio only, no window\nfn play(song: audio.Sound) {\n    mix :: audio.mixer(audio.open(rate: 44100))\n    voice :: mix.play(song)\n    voice.volume(0.8)\n}\n\n// an app: the same windows and frames, drawn by gui\nfn notes() {\n    win :: ray.open(width: 800, height: 600, title: \"notes\")\n    loop frame in win.frames(fps: 60) -> gui.button(frame, \"Save\")\n}\n\n// a test: the same types with no devices, recording checksums\n#Test(\"title screen\") {\n    win :: ray.headless(width: 320, height: 200)\n    out :: audio.headless(rate: 11025)\n    game.run(TitleScene, window: win, audio: out)\n}"
         },
         {
           "key": "B",
-          "name": "Three separate modules",
-          "detail": "core.video, core.audio and core.input each work alone. A game opens all three and keeps them in step itself.",
-          "technical": "Each module owns its own device handle and timing. Headless testing needs a fake for each. The game module's run loop must coordinate three sources.",
-          "code": "win :: video.open(320, 200, \"doom\")\nout :: audio.open(rate: 11025)\nloop win.is_open() {\n    loop event in input.poll() { handle(event) }\n    out.queue(step_sound)\n    win.present(pixels, palette)\n    time.sleep_until(next_tick)\n}"
+          "name": "Three subsystems: visual, input, audio",
+          "detail": "Like A, but input is its own subsystem beside ray and audio. Keys and mouse still come from a focused window, so each input call names a window. A key can be asked about both through input and through the window's events.",
+          "technical": "input.Keyboard and input.Mouse attach to a ray.Window. Gamepads live in input. ray.Frame has no events of its own.",
+          "code": "win :: ray.open(width: 320, height: 200, title: \"doom\")\nkeys :: input.keyboard(win)\nout :: audio.open(rate: 11025)\nloop frame in win.frames(fps: 35) {\n    if keys.down(.Left) -> move_left()\n    out.queue(step_sound)\n    frame.present(pixels, palette)\n}"
         },
         {
           "key": "C",
-          "name": "Grow the raylib-style module",
-          "detail": "Add pixel, sample and key calls to the existing raylib-style module, using raylib's global names.",
-          "technical": "core.game.raylib gains update_texture, an audio stream and get_key_pressed, a key queue like raylib's. State stays global, as in raylib, so one program holds one platform.",
-          "code": "use ray :: core.game.raylib\n\nloop !ray.window_should_close(win) {\n    if ray.key_down(\"Left\") -> move_left()\n    ray.update_audio_stream(stream, step_sound)\n    ray.update_texture(screen, pixels)\n}"
+          "name": "One platform value",
+          "detail": "game.open gives one value holding a window, a sound device and the input queue, as the last draft proposed. Apps and music players take the whole value or build their own.",
+          "technical": "game.Platform owns the window, the audio device and the event queue together. game.headless returns the same type with no devices.",
+          "code": "p :: game.open(width: 320, height: 200, title: \"doom\", audio_rate: 11025)\nloop frame in p.frames(fps: 35) {\n    frame.audio.queue(step_sound)\n    frame.present(pixels, palette)\n}"
         }
       ],
       "comparisons": [
         {
           "lang": "SDL",
-          "note": "One library owns window, audio and events; a frame reads events, queues audio and presents. Source: https://wiki.libsdl.org/SDL3/CategoryAPI",
-          "code": "while (SDL_PollEvent(&e)) { handle(&e); }\nSDL_PutAudioStreamData(stream, samples, len);\nSDL_UpdateTexture(tex, NULL, pixels, pitch);\nSDL_RenderPresent(renderer);"
+          "note": "Video, audio and events are separate subsystems, started one by one. Source: https://wiki.libsdl.org/SDL3/SDL_InitSubSystem",
+          "code": "SDL_InitSubSystem(SDL_INIT_VIDEO);\nSDL_InitSubSystem(SDL_INIT_AUDIO);\nSDL_PutAudioStreamData(stream, samples, len);\nSDL_RenderPresent(renderer);"
         },
         {
-          "lang": "raylib",
-          "note": "Global calls poll keys and play sounds. Source: https://www.raylib.com/cheatsheet/cheatsheet.html",
-          "code": "if (IsKeyDown(KEY_LEFT)) x -= 1;\nPlaySound(step);\nUpdateTexture(screen, pixels);"
+          "lang": "miniaudio",
+          "note": "A sound engine usable alone, or under raylib's sound module. Source: https://miniaud.io/docs/manual/",
+          "code": "ma_engine engine;\nma_engine_init(NULL, &engine);\nma_engine_play_sound(&engine, \"step.wav\", NULL);"
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "Pixels, sound and input share one frame clock, so one value keeps them in step. The same value runs headless, giving golden checksums on every level, and game.run's scenes reuse it.",
+        "why": "It is the design you described: one visual and one audio subsystem, each independent, shared by games and apps, with the web apart. Every program combines only what it needs, and tests swap in headless versions of the same types.",
         "gains": [
-          "One frame loop paces drawing, sound and input.",
-          "Headless tests check pixels and sound without a screen.",
-          "No C library, per your earlier ruling.",
-          "A music player uses core.audio alone, with the same audio type."
+          "Games and apps share one window, drawing and input library.",
+          "A music player uses audio alone, with no window.",
+          "Several windows or sound devices in one program.",
+          "Headless tests check pixels and sound on every build level."
         ],
         "losses": [],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B makes every game keep three devices and clocks in step by hand, and tests need three fakes."
+            "reason": "Keys belong to a window, so a separate input subsystem points back at it and gives two places to ask."
           },
           {
             "key": "C",
-            "reason": "C keeps raylib's global state, so a test cannot run a headless platform beside a real one, and its names tie Jet to raylib."
+            "reason": "One platform value is the monolith you rejected: apps take parts they do not need, and there is one window."
           }
         ],
-        "tradeoff": "A gives games one frame value and gives sound-only programs core.audio, with one audio type for both."
+        "tradeoff": "A splits by hardware into two independent parts. B splits input out too. C keeps one value."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -141224,82 +141229,81 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "Where should a game's pixel, sound and raw-input calls live, and what should they look like?",
-        "lesson": "A game draws each frame, hands the pixels to the screen, sends sound to the speakers and reacts to each key. These share one clock, the frame, so keeping them on one value keeps them in step.",
+        "gist": "Should games and apps share two independent subsystems, ray for visuals and audio for sound?",
+        "lesson": "A subsystem is a library that owns one kind of hardware. ray owns windows, drawing and each window's keys. audio owns speakers and mixing. Each works alone. Games, apps and music players combine only the parts they need.",
         "trio": {
           "current": {
-            "note": "Today the raylib-style module draws shapes and plays files, but can't show your own pixels or queue raw sound.",
-            "code": "use ray :: core.game.raylib\n\nwin :: ray.window_open(320, 200, \"doom\")\nif ray.key_down(\"Left\") -> move_left()\nray.play_sound(step)\n// no call presents a pixel buffer or queues samples"
+            "note": "Today one raylib-style module draws shapes and plays files, but cannot show your pixels or queue raw sound.",
+            "code": "use ray :: core.game.raylib\n\nwin :: ray.window_open(320, 200, \"doom\")\nif ray.key_down(\"Left\") -> move_left()\nray.play_sound(step)\n// no call shows a pixel buffer or queues samples"
           },
           "wild": {
             "lang": "SDL",
-            "note": "One library owns window, audio and events. Source: wiki.libsdl.org/SDL3/CategoryAPI",
-            "code": "while (SDL_PollEvent(&e)) { handle(&e); }\nSDL_PutAudioStreamData(stream, samples, len);\nSDL_RenderPresent(renderer);"
+            "note": "Video, audio and events are separate subsystems. Source: wiki.libsdl.org",
+            "code": "SDL_InitSubSystem(SDL_INIT_VIDEO);\nSDL_InitSubSystem(SDL_INIT_AUDIO);\nSDL_RenderPresent(renderer);"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "One platform value",
-            "gist": "game.open gives one value for pixels, sound and raw input; game.headless tests it.",
+            "name": "Two subsystems: ray and audio",
+            "gist": "ray for windows, drawing and input; audio for sound. Games and apps share both.",
             "gains": [
-              "One frame loop keeps all three in step.",
-              "Headless tests need no screen.",
-              "Sound-only programs use core.audio, not game."
+              "Each part works alone; programs take what they need.",
+              "Several windows or devices per program."
             ],
             "losses": [],
             "proposed": {
-              "code": "p :: game.open(width: 320, height: 200, title: \"doom\", audio_rate: 11025)\nloop frame in p.frames(fps: 35) {\n    loop event in frame.events() {\n        if event == .KeyDown(key) -> print(\"down {key}\")\n    }\n    frame.audio.queue(step_sound)\n    frame.present(pixels, palette)\n}"
+              "code": "win :: ray.open(width: 320, height: 200, title: \"doom\")\nout :: audio.open(rate: 11025)\nloop frame in win.frames(fps: 35) {\n    loop event in frame.events() -> handle(event)\n    out.queue(step_sound)\n    frame.present(pixels, palette)\n}\n\n// music player: audio only\nmix :: audio.mixer(audio.open(rate: 44100))\nmix.play(song)"
             }
           },
           {
             "key": "B",
-            "name": "Three modules",
-            "gist": "Separate video, audio and input modules.",
+            "name": "Three subsystems",
+            "gist": "Like A, with input split out of ray.",
             "gains": [
-              "Each works without the game module."
+              "Input calls live in one library."
             ],
             "losses": [
-              "Games keep three clocks in step."
+              "Keys still belong to a window, so two places to ask."
             ],
             "proposed": {
-              "code": "win :: video.open(320, 200, \"doom\")\nout :: audio.open(rate: 11025)\nloop event in input.poll() { handle(event) }\nout.queue(step_sound)\nwin.present(pixels, palette)"
+              "code": "keys :: input.keyboard(win)\nif keys.down(.Left) -> move_left()"
             }
           },
           {
             "key": "C",
-            "name": "Grow the raylib module",
-            "gist": "Add pixel, sample and key calls with raylib's names.",
+            "name": "One platform value",
+            "gist": "game.open gives window, sound and input in one value.",
             "gains": [
-              "Matches raylib tutorials."
+              "One call for a game."
             ],
             "losses": [
-              "Global state: one platform per program."
+              "A monolith: apps take parts they do not need."
             ],
             "proposed": {
-              "code": "if ray.key_down(\"Left\") -> move_left()\nray.update_audio_stream(stream, step_sound)\nray.update_texture(screen, pixels)"
+              "code": "p :: game.open(width: 320, height: 200, title: \"doom\", audio_rate: 11025)\nloop frame in p.frames(fps: 35) -> frame.present(pixels, palette)"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Pixels, sound and input share one frame clock, so one value keeps them in step and runs headless for tests.",
+          "why": "One visual and one audio subsystem, independent and shared by games and apps, as you described.",
           "gains": [
-            "One loop paces all three.",
-            "Headless goldens check pixels and sound."
+            "Games and apps share ray.",
+            "Music players use audio alone."
           ],
           "losses": [],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Every game keeps three devices in step by hand."
+              "reason": "Keys belong to a window, so input points back at it."
             },
             {
               "key": "C",
-              "reason": "Global state rules out a headless platform beside a real one."
+              "reason": "A monolith with one window."
             }
           ],
-          "tradeoff": "A gives games one value and music players core.audio. B splits all three. C bends raylib's API."
+          "tradeoff": "A: two independent parts. B: three. C: one value."
         }
       },
       "draft": false,
@@ -171967,64 +171971,59 @@
       "id": "D-TEST-INVOKE1",
       "cardId": "c0pgowhn",
       "group": "other",
-      "title": "Per-run choices for a named test profile: shard, list, levels, results, compiler",
-      "situation": "A named test profile, such as golden or ui, is data in the package file, so it is the same on every run. Some choices change on every run, though. A release check splits the golden rows across eight processes and tells each one which slice to run. A census first lists the rows, then runs only some build levels, and saves each verdict to a file. Today these scripts call a separate test-kit program with its own flags. An A/B check also runs the same rows under an older compiler. We recommend five per-run flags on jet test itself, spelled like the profile fields they override.",
-      "gist": "How should one test run pick its slice, list rows, choose levels and save verdicts?",
-      "lesson": "A test profile says what a suite is: which folders, which baseline, which build levels. A single run sometimes needs a different view of it: one slice of eight, just the list of tests, only one level, or the verdicts saved to a file. Flags that override the matching profile field give that without a second tool.",
+      "title": "Every jet test flag is also a setting: shard, list, levels, results, compiler and the rest",
+      "situation": "Some test runs need choices that change each time. A release check splits the golden tests across eight processes. A census first lists the tests, then runs one build level and saves the verdicts to a file. An A/B check runs the same tests under an older compiler. Today these scripts call a separate test-kit program with its own flags. You ruled that every command-line flag must also be a setting. We recommend that each jet test flag is also a test-profile field and an fn test call, with the same name.",
+      "gist": "Should every jet test flag also be a profile field and an fn test call, with one name?",
+      "lesson": "A choice can be written in three places: a test profile in package.jet, code in test.jet's fn test, or a flag on one command. Each place uses the same name. Later places win: the profile, then fn test, then the flag. Build settings already work this way.",
       "explainer": "",
-      "story": "Ana's release script checks a new compiler on the golden profile. It runs eight processes, each told to take one eighth of the rows, then merges the eight verdict files. Her census script lists the rows first, then runs only the jet run level. Both want plain jet test commands.",
-      "inWild": "cargo nextest: --partition count:2/8 runs one of eight slices, and list prints the tests without running them. Source: https://nexte.st/docs/ci-features/partitioning/\n\npytest: --collect-only lists tests without running them, and --junitxml=FILE writes the verdicts. Source: https://docs.pytest.org/en/stable/how-to/usage.html",
-      "detail": "TODAY\n\nD-TEST-PROFILE1=A put test profiles in package.jet. Compiler/package.jet declares quick (the default for a bare jet test Compiler), golden, ui, cases and full profiles over five suites, each with a baseline ledger. A profile already carries suites, baseline, jobs, memory, filter, shard, opt_in, optimize and time_limit. A positional FILTER after the package replaces filter: (Compiler/JetCli/Source/Cli/TestProfile.jet:134-135).\n\nThe corpus suites run in process through the testkit pool (TestProfile.jet:187-226). Verdicts reach disk only through JET_CI_EVIDENCE_DIR/<suite>.json (TestProfile.jet:223-224).\n\njet test already takes --optimize=. When the profile also sets optimize:, the run is refused with E2104 (TestProfile.jet:96-100). Build profiles do the opposite under D-SETTING-ORDER1=A: profile fields apply first, then flags win (Front.jet:869-874).\n\nCALLERS THAT NEED PER-RUN CHOICES\n\nThey call the Tools/testkit binary (run.jet:21-99), which has its own flags.\n\n- release-compiler.mjs:502-503: --shard I/N per process and --results per shard.\n- goldens-census.mjs:216, :228: --list, --tier o0,o1,o2, --shard and --results.\n- compiler-registries.mjs:290: cases with --opt-in and --results.\n- Tools/agent/suite/suite.sh: A/B runs with --jet naming another compiler, including old bases without profile code.\n\nverify-full and native-suite need only per-suite evidence, which JET_CI_EVIDENCE_DIR already gives. Tools/ci/AgentWorkloads.jet:393 needs only a filter, which the positional FILTER gives. --opt-in, --jobs and --timeout are profile fields (opt_in, jobs, time_limit), so a census declares its own profile.\n\nSHAPE UNDER A (proposed)\n\n- --shard=I/N runs the I-th of N slices of the selected rows. Slicing is deterministic, the same rows for the same I/N and tree. It overrides shard:.\n- --list prints the selected row IDs, one per line, after filter and shard, and runs nothing. It exits 0.\n\n- --optimize=none,basic,full takes a list of levels and overrides optimize:. For the corpus, none is o0 (jet run), basic o1 (jet build) and full o2 (release), as the profile maps them today (TestProfile.jet:211-213).\n- --compiler=PATH builds and runs every selected row with that jet. Slicing, baseline and verdicts stay with the running jet, so an A/B run differs only in the compiler. It defaults to the running jet.\n\n- --results=FILE writes every selected row's verdict as JSON. It uses the same row schema and writer as the evidence files.\n\nRule: a flag overrides the profile field of the same name for that run only, as build profiles already do.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. A second word for build level. A adds no --tier: the existing --optimize takes a list. Today's E2104 refusal becomes an override, matching build profiles, and the run prints the levels it used.\n\n2. Shards could clobber the baseline. A sharded run compares against the baseline but never writes it. -u with --shard stays refused with E2104, as -u with shard: is today (TestProfile.jet:93-95).\n\n3. Two result formats. --results and JET_CI_EVIDENCE_DIR share one writer and one row schema. The flag writes one file for all selected suites. The variable writes one file per suite for CI.\n\n4. More flags. Only four are new, since --optimize exists. They are accepted only with --profile and listed under it in jet help test, so a plain jet test reads and runs as before.\n\nEDGE CASES\n\n- --list with -u is refused with E2104: listing runs nothing to bless.\n- --shard=0/8, --shard=9/8 or a malformed value is refused with E2104 and the valid range.\n- --results to an unwritable path fails before any row runs.\n- Concurrent shards must share no scratch. Each run gets its own temp directory for corpus rows, as the tests children already do (TestProfile.jet:252).\n\nAFTER A LANDS\n\nThe four scripts switch to jet test <tree>/Compiler --profile <p> with these flags, and the Tools/testkit binary CLI is deleted. The testkit engine stays as the library jet test calls.\n\nWHY NOT B OR C\n\nB keeps the testkit binary CLI as a second front door to the same engine, with its own words (--tier, a bare suite name). Every new choice then lands twice. C writes static per-shard profiles such as golden_3_of_8 into Compiler/package.jet. That fixes the shard count in data and still cannot list rows or save verdicts to a chosen file.",
+      "story": "Ana's release script checks a new compiler on the golden tests. It starts eight processes, each told to take one eighth of the tests, then merges the eight verdict files. Her census lists the tests first, then runs only the jet run level. She wants plain jet test commands, and the same choices written in her package when they never change.",
+      "inWild": "cargo nextest: --partition count:2/8 runs one of eight slices, and the same choice can live in a profile in .config/nextest.toml. Source: https://nexte.st/docs/configuration/\n\npytest: every flag can also be written in the addopts setting of pytest.ini. Source: https://docs.pytest.org/en/stable/reference/customize.html",
+      "detail": "WHAT CHANGED FROM THE LAST DRAFT\n\nYou ruled that any flag must also be a setting. The last draft added flags only, and only with --profile. Now every jet test flag, old and new, is also a test-profile field and a call on t in fn test. The flags work on every jet test, not only with --profile.\n\nTODAY\n\nTest profiles live in package.jet (D-TEST-PROFILE1=A). A profile already has suites, baseline, jobs, memory, filter, shard, opt_in, optimize and time_limit fields. fn test in test.jet declares code suites with t.suite and has no settings calls (Compiler/test.jet:26-31).\n\nBuild settings already come in three layers (D-SETTING-ORDER1=A): the profile in package.jet, a call in fn build such as b.optimize(.Full), then the flag. jet test instead refuses --optimize when the profile sets optimize:, with E2104 (TestProfile.jet:96-100).\n\nMost jet test flags have no setting at all: --serial, --shuffle, --coverage, --capture, --fresh, --seed, --iterations and the browser flags, among others (Compiler/JetFoundation/Source/Registry/CLICommands.jet:901-953).\n\nScripts that need per-run choices call the separate Tools/testkit program. They are release-compiler.mjs (--shard, --results), goldens-census.mjs (--list, --tier, --shard, --results), compiler-registries.mjs (--opt-in, --results), and suite.sh A/B runs (--jet for another compiler).\n\nSHAPE UNDER A\n\n1. One rule. Every jet test flag has a profile field and a t call with the same name, dashes becoming underscores. --shuffle=7 is shuffle: 7 in a profile and t.shuffle(7) in fn test. A bare flag such as --serial is serial: true and t.serial().\n\n2. One order. The profile applies first, then fn test, then the flag, exactly as build settings do. jet test runs fn test once to collect its settings and suites before any test runs, as jet build runs fn build. The E2104 refusal for --optimize becomes an override.\n\n3. Four new choices, each in all three places. shard runs the I-th of N slices, the same tests for the same slice and tree. list prints the selected test names after filter and shard, runs nothing and exits 0.\n\nresults writes every selected test's verdict as JSON, with the same writer and row format as JET_CI_EVIDENCE_DIR. compiler builds and runs the tests with another jet, while slicing, baseline and verdicts stay with the running jet, so an A/B run differs only in the compiler.\n\n4. optimize takes a list of levels, so a census needs no --tier word. none is jet run, basic is jet build, and full is the release build.\n\n5. Settings that are not choices. --profile selects a profile, so its setting is the existing defaults: { test: ... }. --help, --show-default and --browser-scaffold are actions, not run choices, so they have no setting.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Many new names. Every name is a flag that exists today. One registry row per flag produces the flag, the profile field and the t call, so the three can never drift apart. jet help test shows all three spellings on each line.\n\n2. A setting that should be one-off, such as -u or list, written into a profile by mistake. Such a profile says so in its name, and jet test prints the settings it used and where each came from.\n\n3. Shards overwriting the baseline. A sharded run compares with the baseline but never writes it. -u with shard stays refused with E2104.\n\n4. Two verdict formats. results and JET_CI_EVIDENCE_DIR share one writer and one row format.\n\nNo loss remains.\n\nEDGE CASES\n\n- list with -u is refused with E2104, since listing runs nothing to record.\n- shard 0/8, 9/8 or a malformed value is refused with E2104, naming the valid range.\n- results to an unwritable path fails before any test runs.\n- Parallel shards share no scratch files; each run gets its own temporary directory.\n- A settings call after t.run() is refused with E2104, since the run has already started.\n\nAFTER A LANDS\n\nThe four scripts switch to jet test <tree>/Compiler --profile <p> with these flags, and the Tools/testkit command is deleted. Its engine stays as the library jet test calls.\n\nWHY NOT B OR C\n\nB keeps the test-kit command as a second front door with its own words, so every new choice lands twice. C adds the flags but no settings, which breaks your rule, so a fixed choice can only be typed again on every command.",
       "options": [
         {
           "key": "A",
-          "name": "Five per-run flags on jet test",
-          "detail": "jet test --profile takes --shard, --list, --optimize as a list, --results, and --compiler for A/B runs. Each flag overrides the same-named profile setting for one run. The separate test-kit command is deleted once its callers move.",
-          "technical": "Flags parse in the profile plan and override shard:, optimize: and the row selection. --list prints IDs after filter and shard. --results shares the evidence writer. --compiler sets the jet that builds rows. A sharded run never writes the baseline.",
-          "code": "$ jet test Compiler --profile golden --shard=3/8 --results=shard3.json\n// runs one eighth of the golden rows, saves verdicts\n\n$ jet test Compiler --profile golden --list --optimize=none\n// prints the row IDs at the jet run level, runs nothing\n\n$ jet test Compiler --profile golden --compiler=base/jet\n// same rows and baseline, built by an older compiler"
+          "name": "Every flag is also a setting",
+          "detail": "Every jet test flag, old and new, is also a field of a test profile in package.jet and a call on t in fn test, with the same name. The profile applies first, then fn test, then the flag, as build settings already do.\n\nFour new choices arrive in all three places: shard, list, results and compiler. optimize takes a list of levels. The separate test-kit command is deleted once its scripts move.",
+          "technical": "One registry row per jet test flag generates the flag, the TestProfile field and the Test method. jet test runs fn test in a plan step to collect settings and suites before any row runs. Layering follows D-SETTING-ORDER1=A. --results shares the evidence writer. A sharded run never writes the baseline.",
+          "code": "// package.jet: a profile can set any choice a flag can\ntest: {\n    golden: TestProfile{ suites: [golden, run], baseline: \"known-failing.tsv\" },\n    census: TestProfile{ suites: [golden], list: true, optimize: [none] },\n}\n\n// test.jet: fn test can set the same choices in code\nfn test(t: Test) -> Int {\n    if sys.get(\"CI\") != None -> t.shard(3, 8)\n    t.results(\"shard3.json\")\n    t.run()\n}\n\n// the command line overrides both, for one run\n$ jet test Compiler --profile golden --shard=3/8 --results=shard3.json\n$ jet test Compiler --profile golden --list --optimize=none\n$ jet test Compiler --profile golden --compiler=base/jet"
         },
         {
           "key": "B",
           "name": "Keep the test-kit command too",
-          "detail": "Profiles stay fixed. Scripts that need per-run choices keep calling the separate test-kit command over the same engine.",
-          "technical": "Tools/testkit/run.jet stays a permanent CLI with --shard, --list, --tier, --results, --jet and --scratch. jet test --profile has no per-run flags.",
+          "detail": "Profiles stay as they are. Scripts that need per-run choices keep calling the separate test-kit command, which has its own flag words, over the same engine.",
+          "technical": "Tools/testkit/run.jet stays a permanent command with --shard, --list, --tier, --results, --jet and --scratch. jet test gains no flags or settings.",
           "code": "$ testkit all --jet ./jet --tier o0 --shard 3/8 --results shard3.json"
         },
         {
           "key": "C",
-          "name": "One profile per shard",
-          "detail": "The compiler's package file declares a fixed profile for each slice. Scripts pick a slice by name.",
-          "technical": "Compiler/package.jet gains golden_1_of_8 through golden_8_of_8, each with shard:. Listing rows and saving verdicts to a chosen file stay unsupported.",
-          "code": "test: {\n    golden_3_of_8: TestProfile{ suites: [golden, run], shard: 3/8, baseline: \"...\" },\n}\n\n$ jet test Compiler --profile golden_3_of_8"
+          "name": "Flags only",
+          "detail": "jet test gains --shard, --list, --results and --compiler, and --optimize takes a list. They have no profile field and no fn test call, so a choice that never changes must be typed on every command.",
+          "technical": "The flags parse in the profile plan and override the run for one command. TestProfile and Test gain nothing.",
+          "code": "$ jet test Compiler --profile golden --shard=3/8 --results=shard3.json\n$ jet test Compiler --profile golden --list --optimize=none"
         }
       ],
       "comparisons": [
         {
           "lang": "cargo nextest",
-          "note": "One slice of eight per process; list prints tests. Source: https://nexte.st/docs/ci-features/partitioning/",
-          "code": "cargo nextest run --partition count:3/8\ncargo nextest list"
+          "note": "A slice per process on the command line, or the same settings in a named profile. Source: https://nexte.st/docs/configuration/",
+          "code": "cargo nextest run --partition count:3/8\n\n# .config/nextest.toml\n[profile.ci]\nretries = 2"
         },
         {
           "lang": "pytest",
-          "note": "List without running, and save verdicts to a file. Source: https://docs.pytest.org/en/stable/how-to/usage.html",
-          "code": "pytest --collect-only -q\npytest --junitxml=results.xml"
+          "note": "Any flag can also be written in the config file. Source: https://docs.pytest.org/en/stable/reference/customize.html",
+          "code": "pytest --junitxml=results.xml\n\n# pytest.ini\n[pytest]\naddopts = --junitxml=results.xml"
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "One test command serves both people and scripts. Each flag overrides the profile field it is named after, as build profiles already do, so the separate test-kit command can go.",
+        "why": "It follows your rule: any choice can be written once in the package or in fn test, or typed for one run, always with the same name. Scripts and people use one test command, and the test-kit command goes.",
         "gains": [
-          "Release and census scripts call plain jet test.",
-          "No second test command with its own words.",
-          "Flags match the profile fields they override."
+          "Every jet test flag can also be written in a profile or in fn test.",
+          "One name per choice in all three places, generated from one table.",
+          "Release and census scripts call plain jet test."
         ],
-        "losses": [
-          {
-            "loss": "jet test gains four flags.",
-            "mitigation": "They work only with --profile, so a plain jet test is unchanged."
-          }
-        ],
+        "losses": [],
         "whyNot": [
           {
             "key": "B",
@@ -172032,10 +172031,10 @@
           },
           {
             "key": "C",
-            "reason": "C fixes the shard count in the package file, and still cannot list rows or save verdicts."
+            "reason": "C breaks your rule: choices that never change must be typed on every command."
           }
         ],
-        "tradeoff": "A adds four flags that work only with --profile. B keeps two commands. C multiplies profiles."
+        "tradeoff": "A gives every choice three places with one name. B keeps two commands. C has flags only."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -172044,33 +172043,31 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "How should one test run pick its slice, list rows, choose levels and save verdicts?",
-        "lesson": "A test profile says what a suite is. One run sometimes needs a different view: one slice of eight, just the list, one level, or verdicts in a file. Flags that override the matching profile field give that without a second tool.",
+        "gist": "Should every jet test flag also be a profile field and an fn test call, with one name?",
+        "lesson": "A test choice can be written in a profile, in fn test, or as a flag on one command. Each place uses the same name. Later places win: profile, then fn test, then flag. Build settings already work this way.",
         "trio": {
           "current": {
-            "note": "Today scripts call a separate test-kit command for per-run choices.",
-            "code": "$ jet test Compiler --profile golden        // fixed\n$ testkit all --tier o0 --shard 3/8 --results r.json"
+            "note": "Today most flags have no setting, and scripts call a separate test-kit command.",
+            "code": "$ jet test Compiler --profile golden --serial   // no setting for serial\n$ testkit all --tier o0 --shard 3/8 --results r.json"
           },
           "wild": {
-            "lang": "cargo nextest",
-            "note": "One slice per process; list prints tests. Source: nexte.st",
-            "code": "cargo nextest run --partition count:3/8\ncargo nextest list"
+            "lang": "pytest",
+            "note": "Any flag can also live in the config file. Source: docs.pytest.org",
+            "code": "pytest --junitxml=results.xml\n\n# pytest.ini\naddopts = --junitxml=results.xml"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Five per-run flags",
-            "gist": "jet test takes --shard, --list, --optimize as a list, --results and --compiler.",
+            "name": "Every flag is also a setting",
+            "gist": "Each flag is also a profile field and a t call, with one name.",
             "gains": [
-              "Scripts call plain jet test.",
-              "Flags match profile field names."
+              "Fixed choices are written once, not typed every run.",
+              "Scripts call plain jet test."
             ],
-            "losses": [
-              "Four new flags, used only with --profile."
-            ],
+            "losses": [],
             "proposed": {
-              "code": "$ jet test Compiler --profile golden --shard=3/8 --results=r.json\n$ jet test Compiler --profile golden --list --optimize=none\n$ jet test Compiler --profile golden --compiler=base/jet"
+              "code": "census: TestProfile{ suites: [golden], list: true, optimize: [none] }\n\nfn test(t: Test) -> Int {\n    t.shard(3, 8)\n    t.run()\n}\n\n$ jet test Compiler --profile golden --shard=3/8 --results=r.json\n$ jet test Compiler --profile golden --compiler=base/jet"
             }
           },
           {
@@ -172089,32 +172086,27 @@
           },
           {
             "key": "C",
-            "name": "One profile per shard",
-            "gist": "Fixed per-slice profiles in the package file.",
+            "name": "Flags only",
+            "gist": "New flags on jet test, with no profile field or fn test call.",
             "gains": [
-              "No new flags."
+              "Fewest changes."
             ],
             "losses": [
-              "No listing or results file."
+              "Breaks your rule that every flag is also a setting."
             ],
             "proposed": {
-              "code": "golden_3_of_8: TestProfile{ suites: [golden, run], shard: 3/8 }\n$ jet test Compiler --profile golden_3_of_8"
+              "code": "$ jet test Compiler --profile golden --shard=3/8 --results=r.json"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One test command serves people and scripts, and each flag overrides the profile field it is named after.",
+          "why": "Every choice can be written in the package, in fn test, or for one run, always with one name.",
           "gains": [
-            "Scripts call plain jet test.",
-            "The separate test-kit command goes."
+            "Every flag is also a setting.",
+            "The test-kit command goes."
           ],
-          "losses": [
-            {
-              "loss": "Four new flags on jet test.",
-              "mitigation": "They work only with --profile; plain jet test is unchanged."
-            }
-          ],
+          "losses": [],
           "whyNot": [
             {
               "key": "B",
@@ -172122,10 +172114,10 @@
             },
             {
               "key": "C",
-              "reason": "Fixed shard counts, and no listing or results file."
+              "reason": "Flags without settings break your rule."
             }
           ],
-          "tradeoff": "A adds four --profile flags. B keeps two commands. C multiplies profiles."
+          "tradeoff": "A: three places, one name. B: two commands. C: flags only."
         }
       },
       "draft": false,
@@ -172136,71 +172128,71 @@
       "id": "D-NIX-INDEX-ROOT1",
       "cardId": "c0rdxo6y",
       "group": "other",
-      "title": "How jet cc finds its C toolchain before Jet's signed package index exists",
-      "situation": "To compile C, jet cc fetches a compiler toolchain from the Nix package collection. It first looks the toolchain up in a package index signed by Jet's own key. That key and its index server were never published, so on a fresh machine jet cc stops with an error. Golden tests and packs that compile C cannot run without Nix. Jet's package tool already accepts a local, unsigned package list when the user names it. We recommend letting jet cc use the same thing, with a small list kept in this repo, until the official index is published.",
-      "gist": "Until Jet's signed package index is published, how should jet cc find its C toolchain?",
-      "lesson": "A package index maps a name like clang to the exact files to download. Jet signs its index so nobody can swap those files. The key was never published. A local list, named on purpose, can stand in for the signed index. The downloaded files still carry the Nix cache's own signatures.",
+      "title": "jet cc ships its own C toolchain with jet, like zig cc: no Nix, no index, no key",
+      "situation": "jet cc compiles C code, for example a C library a Jet package wraps. Today it downloads a C compiler from the Nix package collection, found through a package index signed by Jet's own key. That key and index were never published, so on a fresh machine jet cc fails. You said the end shape is not the best of any language, and that Zig just works. Zig ships its C compiler and every C library it needs with zig itself. We recommend the same for Jet.",
+      "gist": "Should jet cc ship its own C toolchain with jet, the way zig cc does?",
+      "lesson": "To compile C, you need a C compiler, a linker and the C library for the machine you build for. Zig ships all of these with zig, so zig cc works on any machine and can build for any other, with nothing else installed. Jet can do the same: the toolchain comes with jet, checked against a hash built into jet.",
       "explainer": "",
-      "story": "Ana clones Jet on a new laptop with no Nix and runs the golden tests. A C test calls jet cc. It has no toolchain yet, asks for the signed index, finds no key, and fails. She wants the tests to run, without trusting a key nobody controls.",
-      "inWild": "Nix: a flake lock pins one nixpkgs revision, and every download is checked against the cache's signing key. Source: https://nixos.org/manual/nix/stable/command-ref/conf-file.html#conf-trusted-public-keys\n\nGo: GOFLAGS=-mod=vendor builds from a reviewed copy in the repo with no download index. Source: https://go.dev/ref/mod#vendoring",
-      "detail": "TODAY\n\njet cc first looks for a verified C toolchain already in the Hangar. If none is there, it provisions one through the provider (Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:256-282). That step builds the client with NixIndexClient.from_roots_with_mode at :265, with allow_local_nix_catalog false at :273.\n\nThe client needs trust/nix-index-v1.ed25519.pub and config/nix-index-v1.endpoint, both installed together (Jetpack/Nix/Source/Index/IndexClient.jet:57-89). With neither installed it fails with \"signed nixpkgs index endpoint and public key must be configured explicitly\", reported as E1348 (Jetpack/Provider/Source/Core/Realized.jet:188, :196-201). It refuses only the test key id jet-test-index-v1 (:79-81).\n\nDocs/spec/packaging/trust-root.md:37-41 leaves the checked-in trust manifest awaiting the key ceremony. index.jet-lang.dev (:57) and keys.jet-lang.dev (:31) do not resolve. DNS, TLS, hosting and signer custody are outside the repo (:107-116).\n\nJetpack already has a local path. jetpack env and update take --local-nix-catalog DIR, or a per-project choice remembered after a prompt (Jetpack/CLI/Source/Env/EnvCommand.jet:343-373). That choice is skipped when an official key or endpoint is installed (:350). The flag is never a stored grant (Flags.jet:11-13). A local catalog resolves records with trust tier LocalUnofficial and an empty signature (IndexClient.jet resolve_local_catalog). It is made by the index producer's generate-local (Tools/jetpack-nix-index/README.md:60-63).\n\nSHAPE UNDER A (proposed)\n\n1. jet cc takes --local-nix-catalog DIR and the remembered project choice, exactly as jetpack env does. The same flag field and the same NixIndexClient.from_local_catalog are used, with no new mechanism.\n\n2. The repo commits a small catalog of only the toolchain packages jet cc needs. It is generated with generate-local from one pinned nixpkgs revision, the one jet cc's toolchain ref names. Repo tools pass the flag.\n\n3. Every downloaded store path is still admitted through the Nix binary-cache closure check, which checks the signed cache response (E1350, Realized.jet:189). The catalog only names which paths to fetch.\n\nTRUST UNDER A\n\nThe catalog is reviewed like code, in git. Receipts record the trust tier local-unofficial, so a release check can tell these builds apart. Changing the catalog can only point to other paths the Nix cache itself signed.\n\nFAILURE AND EDGES UNDER A\n\n- No flag, no remembered choice, no official key: E1348 as today. The fix names --local-nix-catalog.\n- A package missing from the small catalog: the index's not-indexed error names it, and the fix is to regenerate the catalog with it.\n\n- Offline with the toolchain already in the Hangar: no index lookup at all. Offline without it: E1276.\n- Official key and endpoint installed: an explicit flag still wins for that run, since it is the user's grant. Otherwise the official index is used. The committed catalog is then deleted.\n\n- Bumping the pin: the new pin must be a nixpkgs channel revision. generate-local rebuilds the catalog from that revision's public build records, with no Nix on any machine.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. No Jet signature on the catalog. A signature would vouch that each name maps to the right store path; a check gives the same assurance with no key. The pin must be a nixpkgs channel revision, which the Nix build farm evaluates publicly. generate-local reads that evaluation's job outputs. Lane checks regenerate the catalog whenever it or the pin changes and fail on any difference. Every downloaded byte still needs the Nix cache signature.\n\n2. A pin bump needs no Nix. generate-local reads the same public build records over HTTPS, so any machine with jet can regenerate the catalog.\n\n3. A second index source. It is the existing local tier, not a new one, and it ends when the official index lands.\n\nNo loss remains.\n\nB: A DOGFOOD SIGNER\n\nA repo key, repo-dogfood-index-v1, signs a published index. The client accepts it today, since only jet-test-index-v1 is refused. The publishing exporter refuses it as official (Jetpack/TrustRoot/Source/Metadata.jet:249).\n\nIts results are labeled OfficialSigned, the only signed tier (Jetpack/Nix/Source/Index/IndexWire.jet:131-133). That mislabels them. A private key must live on an agent machine, and the index needs a host. If the manifest's expires_unix passes without a re-sign, every fresh build fails with E1348. Revoking the key means replacing the trust file on every machine.\n\nC: THE OWNER'S KEY CEREMONY FIRST\n\nThe owner runs the offline key ceremony and publishes a signed index with publish.sh --sign-index and --sign-manifest. This is the end state under every option. Alone, it blocks C tests on fresh machines until DNS, TLS and hosting exist. Until then jet cc fails with E1348.\n\nNOT OFFERED\n\nGoldens calling the flake's Nix toolchain directly. The hand-off rule is that, with jet present, repo tools run with no Nix. That path would also stop the goldens from testing jet cc.",
+      "story": "Ana installs jet on a new laptop with nothing else on it, and runs jet build on a package that wraps a small C library. It just builds. Then she builds the same package for an ARM board with --target and it builds too, with no Nix, no package index and no second install.",
+      "inWild": "Zig: zig cc is a C compiler shipped inside the zig download, with C library sources for every target, so cross-compiling needs nothing installed. Source: https://ziglang.org/learn/overview/#zig-is-also-a-c-compiler\n\nGo: cgo uses the C compiler already installed on the machine, so it fails where none is. Source: https://pkg.go.dev/cmd/cgo",
+      "detail": "WHAT CHANGED FROM THE LAST DRAFT\n\nThe last draft kept the Nix route and only asked how to trust it before the key exists. You said the end shape itself was not the best, and that Zig just works. The new A drops Nix, the index and the key from jet cc entirely. It ships the toolchain with jet, as Zig does.\n\nTODAY\n\njet cc looks for a verified C toolchain already in the Hangar, Jet's local store. If none is there, it fetches one through the Nix package index (Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:256-282). The index needs a public key and an address that were never published, so it fails with E1348 (Jetpack/Provider/Source/Core/Realized.jet:188-201).\n\nThe owner ordered that every proven compiler be published as a GitHub release with its checksums (card #6564 c4), and that repo tools run with no Nix once jet exists (#6564 c6).\n\nSHAPE UNDER A\n\n1. The toolchain pack. Each jet release publishes one more file beside jet: a C toolchain pack. It holds a static clang and lld, and the source of the musl C library. It also holds the headers and link stubs for each glibc version, as Zig makes them. Today it covers the Linux targets; other systems join when Jet supports them.\n\n2. Trust by hash. The pack's SHA-256 is written into jet itself when the release is built. jet accepts only a pack with that exact hash, so no key, index or signature server is needed. A new pack comes only with a new jet.\n\n3. Just works. The first jet cc, or a jet build that compiles C, downloads the pack from the same release as jet, checks its hash, and keeps it in the Hangar. Later runs use it at once. jet env fetch-toolchain downloads it ahead of time, for a machine that will be offline.\n\n4. Any target. The C library for each target is built from the pack's sources the first time it is needed, and cached, exactly as Zig does. So --target builds for another machine with nothing else installed.\n\n5. Building the pack. The release tool builds it from pinned LLVM and musl sources, so anyone can rebuild it and compare the hash. Nix may help build it on the release machine, but no user ever needs Nix.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Size. A static clang and lld are about 60 MB packed, like Zig's download. The pack is a separate file, fetched only when C is first compiled, so a pure-Jet program never downloads it.\n\n2. Offline first use. jet env fetch-toolchain fetches it ahead of time, and the release also offers one archive with jet and the pack together. A missing pack offline gives one error naming both fixes.\n\n3. Trusting an outside build of clang. The release tool rebuilds the pack from pinned sources and fails if the hash differs. The hash inside jet then guards every download, with no key to lose.\n\n4. Two ways to get C tools. Nix leaves jet cc completely. The Nix index work for jet cc is deleted, and Jetpack's Nix support stays only for system packages a project asks for by name.\n\nNo loss remains.\n\nEDGE CASES\n\n- A machine that already has the pack in its Hangar never touches the network.\n- A pack with the wrong hash is refused and deleted, with an error naming the expected hash.\n- jet cc --target for a system the pack does not cover yet gives a typed error naming the covered targets.\n\n- A C program that needs a library beyond libc, such as zlib, declares it as a package dependency, as today.\n- Updating jet updates the pack with it, since the hash lives in jet.\n\nWHY NOT B OR C\n\nB keeps the Nix route but publishes the signed index first. jet cc then depends on Nix's package servers, a signing key and an index host, and still cannot cross-compile out of the box. C uses the C compiler already on the machine, as Go does. That fails on a clean machine, differs from machine to machine, and cannot build for other targets.",
       "options": [
         {
           "key": "A",
-          "name": "A reviewed local list in the repo",
-          "detail": "jet cc accepts the same named local package list that jetpack env already accepts. This repo keeps a small list of just the toolchain packages. Downloads are still checked against the Nix cache's signatures. The official signed index replaces the list once it is published.",
-          "technical": "jet cc honors --local-nix-catalog and the remembered project choice through NixIndexClient.from_local_catalog. The repo commits a generate-local catalog of toolchain attrs at one pinned revision. Receipts carry the local-unofficial tier. generate-local builds it from the build farm's public evaluation of that channel revision, and lane checks regenerate and compare it.",
-          "code": "$ jet cc -c hello.c --local-nix-catalog Tools/nix-catalog\n// toolchain: clang from the local list (local-unofficial)\n// each download checked against the Nix cache signature\n\n$ jet cc -c hello.c\nerror[E1348]: signed nixpkgs index endpoint and public key\n  must be configured explicitly\n  fix: pass --local-nix-catalog DIR, or install the official key"
+          "name": "Ship the toolchain with jet, like Zig",
+          "detail": "Each jet release ships a C toolchain pack: clang, lld and C library sources for every supported target. jet checks the pack against a hash built into jet, fetches it the first time C is compiled, and keeps it. jet cc then works on any machine and builds for any supported target, with no Nix, no index and no key.",
+          "technical": "release-compiler.mjs builds the pack reproducibly from pinned LLVM and musl sources and embeds its SHA-256 in jet's IDENTITY. jet cc resolves the pack from the Hangar, else fetches it from the release, verifies the hash, and builds per-target libc lazily into a cache. The Nix index path leaves CcDriver.",
+          "code": "$ jet cc -c hello.c\n// first use: fetching the C toolchain for jet 0.4.2 (61 MB)\n//   hash matches the one built into jet\n// hello.o\n\n$ jet cc -c hello.c --target aarch64-linux-musl\n// building musl for aarch64-linux (first time only)\n// hello.o\n\n$ jet env fetch-toolchain    // ahead of time, for an offline machine"
         },
         {
           "key": "B",
-          "name": "A repo signing key",
-          "detail": "A key held for this repo signs and publishes an index, and machines install its public half. It works with the client as it is today.",
-          "technical": "repo-dogfood-index-v1 signs targets and a manifest through publish.sh. Clients install it in trust/ with an endpoint. Results are labeled OfficialSigned.",
-          "code": "$ publish.sh --sign-index dogfood-sign --sign-manifest dogfood-sign --upload up\n$ jet cc -c hello.c\n// toolchain: clang from the dogfood-signed index"
+          "name": "Keep Nix, publish the signed index",
+          "detail": "jet cc keeps fetching clang from Nix's package servers, through an index signed with Jet's key. The key and index must be published first. Building for another target needs a matching toolchain from Nix.",
+          "technical": "Key ceremony, publish.sh with the signer, DNS and TLS for index.jet-lang.dev. Until then a reviewed local list in the repo stands in, as the last draft proposed.",
+          "code": "$ jet cc -c hello.c\n// toolchain: clang from the signed Nix index"
         },
         {
           "key": "C",
-          "name": "Wait for the official key",
-          "detail": "The owner runs the offline key ceremony and publishes the signed index. Until then, jet cc fails on machines without a toolchain.",
-          "technical": "Offline threshold key ceremony, then publish.sh with the production signer, then DNS, TLS and hosting for index.jet-lang.dev. No client change.",
-          "code": "$ jet cc -c hello.c     // until the index is published\nerror[E1348]: signed nixpkgs index endpoint and public key\n  must be configured explicitly"
+          "name": "Use the machine's C compiler",
+          "detail": "jet cc runs the cc already installed, as Go's cgo does. A clean machine has none, results differ between machines, and building for another target needs a separate cross compiler.",
+          "technical": "CcDriver resolves cc or clang on PATH and records its version in receipts. No pack, no index.",
+          "code": "$ jet cc -c hello.c\nerror: no C compiler found on PATH\n  fix: install clang or gcc"
         }
       ],
       "comparisons": [
         {
-          "lang": "Nix",
-          "note": "Every download is checked against the cache's signing key. Source: https://nixos.org/manual/nix/stable/command-ref/conf-file.html#conf-trusted-public-keys",
-          "code": "trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+          "lang": "Zig",
+          "note": "zig cc ships clang and C library sources with zig, so it works and cross-compiles with nothing installed. Source: https://ziglang.org/learn/overview/#zig-is-also-a-c-compiler",
+          "code": "zig cc -o hello hello.c\nzig cc -target aarch64-linux-musl -o hello hello.c"
         },
         {
           "lang": "Go",
-          "note": "Build from a reviewed copy in the repo. Source: https://go.dev/ref/mod#vendoring",
-          "code": "go build -mod=vendor ./..."
+          "note": "cgo uses the installed C compiler, so it fails where there is none. Source: https://pkg.go.dev/cmd/cgo",
+          "code": "CGO_ENABLED=1 go build ./...\n# needs gcc or clang on PATH"
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "It unblocks fresh machines today with a mechanism Jetpack already has. Git review stands in for the missing Jet signature, and the Nix cache signature still guards every download.",
+        "why": "It is the Zig shape you named: jet cc works on a clean machine and builds for any supported target. It needs no Nix, no index and no signing key, because the hash inside jet guards the one download.",
         "gains": [
-          "Fresh clones compile C with no Nix installed.",
-          "No private key on any agent machine.",
-          "Results are honestly labeled unofficial.",
-          "Anyone can recheck or regenerate the list without Nix."
+          "jet cc works on a clean machine with nothing else installed.",
+          "Building C for another target works out of the box.",
+          "No Nix, no package index and no signing key.",
+          "Pure-Jet programs never download the C toolchain."
         ],
         "losses": [],
         "whyNot": [
           {
             "key": "B",
-            "reason": "B puts a private key on an agent machine and labels its results as officially signed. It also fails every fresh build if a re-sign is missed."
+            "reason": "B depends on Nix servers, a signing key and an index host, and still cannot cross-compile out of the box."
           },
           {
             "key": "C",
-            "reason": "C is the end state under every option, but alone it blocks C tests on fresh machines until hosting exists."
+            "reason": "C fails on a clean machine, differs between machines, and cannot build for other targets."
           }
         ],
-        "tradeoff": "A uses a list anyone can regenerate and check now. B trusts a repo key. C waits."
+        "tradeoff": "A ships the toolchain with jet. B fetches it from Nix through a signed index. C relies on the machine."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -172209,82 +172201,83 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "Until Jet's signed package index is published, how should jet cc find its C toolchain?",
-        "lesson": "An index maps a name like clang to exact files to download. Jet signs its index, but the key was never published. A local list, named on purpose, can stand in, while downloads keep the Nix cache's signatures.",
+        "gist": "Should jet cc ship its own C toolchain with jet, the way zig cc does?",
+        "lesson": "Compiling C needs a compiler, a linker and a C library for the target machine. Zig ships all three with zig, so zig cc works anywhere and builds for any target. Jet can do the same, checked by a hash inside jet.",
         "trio": {
           "current": {
-            "note": "Today a fresh machine stops at the missing key.",
+            "note": "Today jet cc needs a signed Nix index that was never published, so it fails on a fresh machine.",
             "code": "$ jet cc -c hello.c\nerror[E1348]: signed nixpkgs index endpoint and public key\n  must be configured explicitly"
           },
           "wild": {
-            "lang": "Go",
-            "note": "Build from a reviewed copy in the repo. Source: go.dev/ref/mod",
-            "code": "go build -mod=vendor ./..."
+            "lang": "Zig",
+            "note": "zig cc ships its compiler and C library sources. Source: ziglang.org",
+            "code": "zig cc -o hello hello.c\nzig cc -target aarch64-linux-musl -o hello hello.c"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Reviewed local list",
-            "gist": "jet cc takes the named local list jetpack env already takes; the repo keeps one.",
+            "name": "Ship the toolchain with jet",
+            "gist": "Each jet release ships a C toolchain checked by a hash inside jet.",
             "gains": [
-              "Fresh clones compile C without Nix.",
-              "No private key on agent machines.",
-              "A check rebuilds the list from public build records."
+              "Works on a clean machine and cross-compiles.",
+              "No Nix, no index, no key."
             ],
             "losses": [],
             "proposed": {
-              "code": "$ jet cc -c hello.c --local-nix-catalog Tools/nix-catalog\n// clang from the local list (local-unofficial)"
+              "code": "$ jet cc -c hello.c\n// first use: fetching the C toolchain (61 MB), hash matches jet\n\n$ jet cc -c hello.c --target aarch64-linux-musl\n// hello.o"
             }
           },
           {
             "key": "B",
-            "name": "Repo signing key",
-            "gist": "A key held for this repo signs a published index.",
+            "name": "Keep Nix, publish the index",
+            "gist": "Fetch clang from Nix through an index signed with Jet's key.",
             "gains": [
-              "Works with the client as it is."
+              "Reuses Nix's builds."
             ],
             "losses": [
-              "A private key on an agent machine."
+              "Needs a key, an index host and Nix servers.",
+              "No cross-compiling out of the box."
             ],
             "proposed": {
-              "code": "$ publish.sh --sign-index dogfood-sign --sign-manifest dogfood-sign\n$ jet cc -c hello.c"
+              "code": "$ jet cc -c hello.c\n// toolchain: clang from the signed Nix index"
             }
           },
           {
             "key": "C",
-            "name": "Wait for the official key",
-            "gist": "You run the key ceremony; jet cc fails until it is published.",
+            "name": "Use the machine's compiler",
+            "gist": "Run whatever cc is installed, as Go does.",
             "gains": [
-              "No interim trust at all."
+              "Nothing to download."
             ],
             "losses": [
-              "Fresh machines can't compile C until then."
+              "Fails on a clean machine.",
+              "No cross-compiling."
             ],
             "proposed": {
-              "code": "$ jet cc -c hello.c\nerror[E1348]: ... must be configured explicitly"
+              "code": "$ jet cc -c hello.c\nerror: no C compiler found on PATH"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "It unblocks fresh machines today with a mechanism Jetpack already has, and the Nix cache still signs every download.",
+          "why": "The Zig shape: jet cc works anywhere and cross-compiles, guarded only by a hash inside jet.",
           "gains": [
-            "Fresh clones compile C with no Nix.",
-            "Results are labeled unofficial."
+            "Works on a clean machine.",
+            "No Nix, index or key."
           ],
           "losses": [],
           "whyNot": [
             {
               "key": "B",
-              "reason": "A private key on agent machines, and results mislabeled as official."
+              "reason": "Needs a key, an index host and Nix servers."
             },
             {
               "key": "C",
-              "reason": "The end state, but alone it blocks fresh machines."
+              "reason": "Fails on a clean machine."
             }
           ],
-          "tradeoff": "A uses a checkable list now. B trusts a repo key. C waits."
+          "tradeoff": "A ships the toolchain. B fetches from Nix. C trusts the machine."
         }
       },
       "draft": false,
@@ -172295,52 +172288,52 @@
       "id": "D-CORE-COVERAGE-RATCHET1",
       "cardId": "c0rqi33c",
       "group": "other",
-      "title": "Reset the Core coverage ceiling to the honest count, per module",
-      "situation": "A check in hosted CI counts the Core library's public functions that nothing ever calls: no test, no example, no doc example. It fails if that count rises above a stored ceiling, and the ceiling can only go down. The ceiling, 37, came from a broken count. The fixed count is 4639 of 7395 functions. The check can never pass again unless the ceiling is reset by hand. We recommend resetting it to the honest count, kept per module, so each module's gap can only shrink and new code must come with a use.",
-      "gist": "The Core coverage ceiling was set from a broken count. Reset it, or stay red until 37?",
-      "lesson": "A ratchet is a number in the repo that may only go down. The check fails when the real count rises above it. That only works if the stored number was counted correctly. When the counter was wrong, the honest move is one reset to the true count, after which it ratchets down again.",
+      "title": "Reset the Core untested-function list to the honest count, by function",
+      "situation": "Every public function in the Core library should have a test that runs it and proves it works. A check in hosted CI counts the public Core functions that no test, example or doc example runs yet. It fails when that count rises above a stored ceiling. The ceiling, 37, came from a broken count; the true count is 4639 of 7395. Nothing is removed or judged useless: an untested function is work owed, a missing test. We recommend recording today's untested functions by name, so the list only shrinks as tests are written.",
+      "gist": "The untested-function ceiling came from a broken count. Reset it to the true list, or stay red?",
+      "lesson": "A public function is tested when some test, example or doc example runs it. Untested does not mean unused or unwanted: it means nothing proves the function works yet. The check stops the number of untested functions from growing. It only works if the stored starting point was counted correctly.",
       "explainer": "",
-      "story": "Ana adds a function to the Core text module. Hosted CI fails: the Core coverage check says 4640 functions are uncovered, against a ceiling of 37. Her change added one. The other 4602 were always there; the old count simply missed them.",
-      "inWild": "Detekt (Kotlin): `detekt --create-baseline` records existing findings, so only new findings fail the build. Source: https://detekt.dev/docs/introduction/baseline/",
-      "detail": "TODAY\n\nTools/agent/core-coverage-census.mjs counts each public Core declaration, methods included, as covered when a test, example or doctest calls it. It counts source call sites, not executed lines (:2-6). --check fails when the total uncovered count exceeds Tools/agent/core-coverage-ratchet.json. --write initializes or lowers the ceiling and never raises it (:9-10, ratchetDecision at :355-359). Hosted CI runs --check (.github/workflows/ci.yml:27-30).\n\nThe ceiling file holds {\"version\": 1, \"uncovered\": 37}. It was written in a checkpoint commit on 2026-10-02 (7bc7cc9d19), not by a decision.\n\nCommit 73e720ed17 fixed the census. It threw on duplicate ids: a bare impl Display inside a type took the trait's name, and operator overloads shared one id. Its module names also kept CamelCase paths (core.Time.Expiring), so no call site matched. Now every part is snake_cased, matching all 113 source modules in Prelude/Core.jet.\n\nThe honest run on 2026-11-05 reports 7395 public functions, 4639 uncovered, over 128 modules. 13 modules are fully covered and 115 have gaps. For example, core.files has 92 of 226 uncovered, core.text 68 of 108 and core.time 129 of 343.\n\nSHAPE UNDER A (proposed)\n\nThe ceiling file becomes version 2 and lists each module's uncovered public functions by name and signature. The owner's reset writes today's list once, in a commit that cites this decision.\n\n--check fails when an uncovered function is not listed. A new module has no list, so it must be fully covered. --write removes names that gained a use and never adds one. The message names the module and the function, and says how to cover it.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. The stored number jumps from 37 to 4639. Under A no number is stored. The file names today's uncovered functions, so it guards each one: a covered function that loses its last use fails the check, which no count can catch.\n\n2. A count would let new untested functions in whenever old ones gain tests. A name list stops that: any uncovered function not on the list fails.\n\n3. A reset by hand could become a habit. --write can only remove names. Adding one needs a hand edit citing an owner decision, which the gate's message says.\n\n4. Moving a function. A moved uncovered function keeps its entry, matched by name and signature, so a move needs no new test.\n\nNo loss remains.\n\nEDGE CASES\n\n- Moving an uncovered function keeps its entry: --check matches it by name and signature once its old entry is gone, and --write moves the entry.\n\n- Deleting a module removes its list on the next --write. A stale entry with no function is ignored by --check.\n\n- A future census fix that finds more uncovered functions needs the same owner reset. It cannot slip in through --write.\n\nWHY NOT B OR C\n\nB keeps hosted CI red until 4602 functions gain uses, which takes weeks at best. A check that is always red hides real regressions, because nobody reads it. C deletes the check and tracks coverage on a card. That loses the guard that stops new untested Core functions.",
+      "story": "Ana adds a function to the Core text module, with a test. Hosted CI still fails: the check says 4639 Core functions are untested, against a ceiling of 37. Hers is tested. The 4602 extra were always untested; the old count simply missed them.",
+      "inWild": "Detekt (Kotlin): detekt --create-baseline records existing findings, so only new findings fail the build, and the baseline shrinks as findings are fixed. Source: https://detekt.dev/docs/introduction/baseline/",
+      "detail": "WHAT CHANGED FROM THE LAST DRAFT\n\nThe last draft said uncovered and talked about functions gaining a use. That read as if a function nobody in this repo calls were unwanted. It never meant that, and nothing in any option removes a Core function. The check asks one thing: does a test prove this function works? The ballot now says untested.\n\nTODAY\n\nTools/agent/core-coverage-census.mjs lists each public Core function, methods included. It marks one tested when a test, example or doc example in the repo calls it (:2-6). It reads calls in source; it does not run anything.\n\n--check fails when the untested count rises above the number in Tools/agent/core-coverage-ratchet.json. --write can lower that number but never raise it (:9-10, :355-359). Hosted CI runs --check (.github/workflows/ci.yml:27-30).\n\nThe stored number is 37. It was written in a checkpoint commit on 2026-10-02 (7bc7cc9d19), not by a decision.\n\nCommit 73e720ed17 fixed the census. It used to crash on repeated names, and its module names never matched any call, so it missed most functions. The honest run on 2026-11-05 finds 7395 public functions, 4639 of them untested, over 128 modules. For example, core.files has 92 of 226 untested, core.text 68 of 108 and core.time 129 of 343.\n\nSHAPE UNDER A\n\nThe stored file lists each module's untested functions by name and signature, instead of one number. The reset writes today's list once, in a commit that cites this decision.\n\n--check fails when an untested function is not on the list. So a new function must arrive with a test, and a tested function that loses its last test fails too. --write only removes names, as tests are written. The message names the module and function and says to add a test, example or doc example that runs it.\n\nWriting the missing tests becomes tracked work on this ballot's card, module by module. Each test removes its function from the list.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. The stored size jumps from 37 to 4639. Under A no count is stored at all. The file names each untested function, so it guards each one, which no count can.\n\n2. A count would let new untested functions in whenever old ones gain tests. The name list stops that.\n\n3. A reset by hand could become a habit. --write can only remove names. Adding one needs a hand edit citing an owner decision, and the check's message says so.\n\n4. Moving or renaming. A moved untested function keeps its entry, matched by name and signature, so a move needs no test it did not already need.\n\nNo loss remains.\n\nEDGE CASES\n\n- Deleting a module removes its list on the next --write. An entry for a function that no longer exists is ignored by --check.\n- If a later census fix finds more untested functions, it needs the same owner reset; --write cannot add them.\n\nWHY NOT B OR C\n\nB keeps hosted CI red until 4602 functions gain tests, which takes weeks. A check that is always red hides real regressions, because nobody reads it. C deletes the check and tracks the gap on a card. Then nothing stops new untested Core functions.",
       "options": [
         {
           "key": "A",
-          "name": "Reset to today's uncovered list",
-          "detail": "You reset the check once to today's true list of uncovered functions, by module and name. After that the list can only shrink: new code needs a test, example or doc example, and covered code stays covered.",
-          "technical": "core-coverage-ratchet.json version 2 lists uncovered functions per module by name and signature. --check fails on any uncovered function not listed; a moved function keeps its entry. --write removes names and never adds one.",
-          "code": "// Tools/agent/core-coverage-ratchet.json after the reset\n{\n  \"version\": 2,\n  \"uncovered\": {\n    \"core.text\": [\"<function>(<signature>)\", ...],\n    \"core.time\": [\"<function>(<signature>)\", ...]\n  }\n}\n\n$ node Tools/agent/core-coverage-census.mjs --check\ncore.text: <function> is uncovered and not listed\n  fix: call it from a test, example or doc example"
+          "name": "Reset to today's untested list",
+          "detail": "You reset the check once to today's true list of untested functions, by module and name. After that the list can only shrink. A new function needs a test, example or doc example that runs it, and a tested function stays tested. No function is removed.",
+          "technical": "core-coverage-ratchet.json version 2 lists untested functions per module by name and signature. --check fails on any untested function not listed; a moved function keeps its entry. --write removes names and never adds one.",
+          "code": "// Tools/agent/core-coverage-ratchet.json after the reset\n{\n  \"version\": 2,\n  \"untested\": {\n    \"core.text\": [\"<function>(<signature>)\", ...],\n    \"core.time\": [\"<function>(<signature>)\", ...]\n  }\n}\n\n$ node Tools/agent/core-coverage-census.mjs --check\ncore.text: <function> has no test and is not listed\n  fix: add a test, example or doc example that runs it"
         },
         {
           "key": "B",
           "name": "Stay red until 37",
-          "detail": "The ceiling stays at 37. Hosted CI fails until 4602 more functions gain a use.",
+          "detail": "The ceiling stays at 37. Hosted CI fails on every push until 4602 more functions have tests.",
           "technical": "No change. --check fails with 4639 > 37 on every push.",
-          "code": "$ node Tools/agent/core-coverage-census.mjs --check\nCore coverage regressed: 4639 uncovered > ceiling 37"
+          "code": "$ node Tools/agent/core-coverage-census.mjs --check\nCore untested functions: 4639 > ceiling 37"
         },
         {
           "key": "C",
           "name": "Drop the check",
-          "detail": "Remove the check from hosted CI and track Core coverage on a card instead.",
+          "detail": "Remove the check from hosted CI and track untested Core functions on a card instead.",
           "technical": "Delete the CI step and the ceiling file. The census stays as a report.",
-          "code": "$ node Tools/agent/core-coverage-census.mjs\ntotal: 7395 public functions; 4639 uncovered"
+          "code": "$ node Tools/agent/core-coverage-census.mjs\ntotal: 7395 public functions; 4639 untested"
         }
       ],
       "comparisons": [
         {
           "lang": "Detekt",
-          "note": "A baseline records existing findings; only new ones fail. Source: https://detekt.dev/docs/introduction/baseline/",
+          "note": "A baseline records existing findings; only new ones fail, and fixing one shrinks it. Source: https://detekt.dev/docs/introduction/baseline/",
           "code": "detekt --create-baseline --baseline detekt-baseline.xml"
         }
       ],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "The old ceiling came from a broken count, so no work can meet it. One reset to the true count, kept per module, keeps the check honest and stops new untested code.",
+        "why": "No work can meet a ceiling taken from a broken count. One reset to the true list, by name, keeps the check honest, keeps every function, and makes sure each new one arrives with a test.",
         "gains": [
           "Hosted CI goes green and stays meaningful.",
-          "New Core functions must come with a use.",
-          "A covered function can never quietly lose its last use."
+          "Every new Core function arrives with a test.",
+          "A tested function can never quietly lose its last test."
         ],
         "losses": [],
         "whyNot": [
@@ -172353,7 +172346,7 @@
             "reason": "C loses the guard that stops new untested Core functions."
           }
         ],
-        "tradeoff": "A records today's gaps by name and lets the list only shrink. B waits red. C stops checking."
+        "tradeoff": "A records today's untested functions by name and lets the list only shrink. B waits red. C stops checking."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -172362,12 +172355,12 @@
       "reviewPasses": null,
       "checkInstructions": null,
       "surface": {
-        "gist": "The Core coverage ceiling was set from a broken count. Reset it, or stay red until 37?",
-        "lesson": "The check stores a number that may only go down, and fails when the real count rises above it. When the counter was wrong, the honest move is one reset to the true count.",
+        "gist": "The untested-function ceiling came from a broken count. Reset it to the true list, or stay red?",
+        "lesson": "A Core function is tested when some test, example or doc example runs it. Untested does not mean unwanted; it means nothing proves it works yet. The check stops untested functions from growing. The old starting number was miscounted.",
         "trio": {
           "current": {
-            "note": "Today every push fails against a ceiling from the broken count.",
-            "code": "$ node Tools/agent/core-coverage-census.mjs --check\nCore coverage regressed: 4639 uncovered > ceiling 37"
+            "note": "Today every push fails against a ceiling taken from the broken count.",
+            "code": "$ node Tools/agent/core-coverage-census.mjs --check\nCore untested functions: 4639 > ceiling 37"
           },
           "wild": {
             "lang": "Detekt",
@@ -172378,21 +172371,21 @@
         "options": [
           {
             "key": "A",
-            "name": "Reset to today's list",
-            "gist": "Reset once to today's uncovered functions by name; the list only shrinks.",
+            "name": "Reset to today's untested list",
+            "gist": "Reset once to today's untested functions by name; the list only shrinks.",
             "gains": [
               "CI goes green and stays meaningful.",
-              "New functions need a use; covered ones stay covered."
+              "New functions arrive with tests; no function is removed."
             ],
             "losses": [],
             "proposed": {
-              "code": "$ node Tools/agent/core-coverage-census.mjs --check\ncore.text: <function> is uncovered and not listed"
+              "code": "$ node Tools/agent/core-coverage-census.mjs --check\ncore.text: <function> has no test and is not listed\n  fix: add a test, example or doc example that runs it"
             }
           },
           {
             "key": "B",
             "name": "Stay red until 37",
-            "gist": "Keep 37; CI fails until 4602 more functions gain a use.",
+            "gist": "Keep 37; CI fails until 4602 more functions have tests.",
             "gains": [
               "No reset."
             ],
@@ -172400,30 +172393,30 @@
               "CI red for weeks."
             ],
             "proposed": {
-              "code": "Core coverage regressed: 4639 uncovered > ceiling 37"
+              "code": "Core untested functions: 4639 > ceiling 37"
             }
           },
           {
             "key": "C",
             "name": "Drop the check",
-            "gist": "Remove it from CI; track coverage on a card.",
+            "gist": "Remove it from CI; track untested functions on a card.",
             "gains": [
               "No red CI."
             ],
             "losses": [
-              "Nothing stops new untested code."
+              "Nothing stops new untested functions."
             ],
             "proposed": {
-              "code": "total: 7395 public functions; 4639 uncovered"
+              "code": "total: 7395 public functions; 4639 untested"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "No work can meet a ceiling from a broken count. One reset per module keeps the check honest and stops new untested code.",
+          "why": "A ceiling from a broken count cannot be met. One reset to the true list keeps every function and makes new ones arrive tested.",
           "gains": [
             "CI green and meaningful.",
-            "New functions need a use; covered ones stay covered."
+            "New functions arrive with tests."
           ],
           "losses": [],
           "whyNot": [
@@ -172436,7 +172429,7 @@
               "reason": "Nothing stops new untested Core functions."
             }
           ],
-          "tradeoff": "A lists today's gaps and only shrinks. B waits red. C stops checking."
+          "tradeoff": "A lists today's untested functions and only shrinks. B waits red. C stops checking."
         }
       },
       "draft": false,
@@ -172735,174 +172728,170 @@
       "id": "D-TEST-SCHEDULES1",
       "cardId": "c09f1iks",
       "group": "syntax",
-      "title": "How a concurrent test asks jet test to try many task orders",
-      "situation": "Some bugs only appear when two tasks take turns in one unlucky order, such as two tasks both reading a counter before either writes it back. Today `jet test` runs a concurrent test once, so that test passes almost every time and the bug ships. Anyone writing concurrent Jet code feels this, because the failure later shows up rarely and cannot be reproduced. The vote decides how a test asks to be run under many seeded turn orders. We recommend a `schedules:` argument on the test line, with the existing `--seed` flag replaying a failing order exactly.",
-      "gist": "How does a test ask `jet test` to run its tasks in many different orders?",
-      "lesson": "Two tasks can take turns in many orders, and a bug may show in only one of them. A test can rerun its body many times, each time with a different turn order picked from a number called a seed. Jet already records turn order for exact replay. What is owed whichever option wins: the seeded turn-taking mode, the per-seed report, and replay by seed.",
+      "title": "How a test asks to be rerun with its tasks taking turns differently each time",
+      "situation": "Some bugs only happen when two tasks take turns in one unlucky order. For example, both tasks read a counter before either writes it back, so one increase is lost. Today jet test runs such a test once, so it passes almost every time and the bug ships. This vote picks how a test asks to be rerun many times, with the tasks taking turns differently each time. We recommend writing reruns: 100 on the test line.",
+      "gist": "How should a test ask to be rerun many times, with its tasks taking turns differently each time?",
+      "lesson": "When two tasks run at once, their steps can interleave in many orders. A bug may appear in only one order. Rerunning the test many times, in a different order each time, finds it. Every rerun must pass, and Jet never retries a failure. Each order has a number, so a failing order can be replayed exactly.",
       "explainer": "",
-      "story": "Priya writes a counter that two tasks bump. Her test passes on every run on her laptop. In production one bump is lost once a week, and no rerun reproduces it. She wants `jet test` to try the bad order for her and hand back a number that replays it.",
-      "inWild": "// Shuttle (Rust), README example: randomized schedules, run count 100\nshuttle::check_random(|| { /* test body */ }, 100);\n// https://github.com/awslabs/shuttle\n// Loom (Rust): exhaustive order search, inspiration for Shuttle\nloom::model(|| { /* test body */ });\n// https://github.com/tokio-rs/loom",
-      "detail": "TODAY\n\nA concurrent `#Test` runs once, in whatever order the scheduler picks. The replay recorder that logs task order was built in the Rust era (D-REPLAY-ORDER1=A, #4252) and must be ported to the Jet runtime first, under any option.\nCard #6012 asks for exploration with a run count, a per-seed report, two planted bugs found within the default count, and replay by seed three times in a row.\n\nPRECEDENTS\n\n- `#Test(\"…\", expected_fail: true)` is a typed `#Test` argument (D-TEST-XFAIL1=A, syntax-decisions.md:8072).\n- Counts and seeds are plain `Int` (D-TEST-COUNT1=A, syntax-decisions.md:3936).\n- `jet test` already takes `--seed=<n>` and `--iterations=<n>` (Docs/spec/reference/cli.md:215).\n- History tests record a `schedule` per case and call themselves bounded exploration, not proof (syntax-decisions.md:3945-3965).\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Run time. Each schedule is independent, so schedules run in parallel on the profile's workers. Sleeps use virtual time. A test with few distinct orders runs each once and stops.\nA passing test whose reads are unchanged is reused from the result store (D-TEST-READS1=A). The remaining cost is negligible for the small bodies that exploration targets.\n\n2. Sampling misses. A small test is checked in every order, so its planted race cannot slip through. A large test samples seeded orders; `--schedules=<n>` raises the count in CI.\n\n3. A magic default. The count is always written, as D-TEST-COUNT1 asks of counts. The concurrency guide's first test writes `schedules: 100`, matching Shuttle's own README example.\n\n4. A new argument to learn. It is opt-in, sits beside `expected_fail:`, and a race report names it. A beginner who never writes it sees no change.\n\nEDGE CASES\n\n- A test that never starts a second task runs once and reports `1 schedule (no concurrent tasks)`.\n- `expected_fail: true` with `schedules:` expects some schedule to fail; all passing is an unexpected pass.\n- A property test (`#Test fn p(x: Int)`) with `schedules:` is a compile error. Its fix moves the concurrent part into a plain `#Test`, so cases times schedules never multiply silently.\n- Host work outside the scheduler, such as a blocking file read or a child process, is one indivisible step.\n- The profile `time_limit` bounds each schedule.\n\nWHY 100 IN THE GUIDE\n\nFor a two-task lost update, about half of random orders fail, so 100 schedules miss it with odds near 2^-100. A two-lock deadlock needs about one order in four, so 100 schedules miss it below 10^-12.\nBoth planted bugs here also have few enough orders to be covered exhaustively. These odds are estimates for uniform random switching, not measurements.\n\nWHY NOT B OR C\n\nB explores only when someone passes a flag, so a plain local `jet test` still hides the race, and the source never says which tests need it.\nC reruns only a block inside the body, so state made before the block leaks between orders and causes failures that are not races. It is also a second way to configure a test.",
+      "story": "Priya writes a counter that two tasks increase. Her test passes every time on her laptop. In production one increase is lost once a week, and nobody can make it happen again. She wants jet test to find the bad order for her and print a command that replays it.",
+      "inWild": "Shuttle (Rust) reruns a test body 100 times in random task orders, in its README example: shuttle::check_random(|| { ... }, 100). Source: https://github.com/awslabs/shuttle\n\nLoom (Rust) reruns a test in every possible task order: loom::model(|| { ... }). Source: https://github.com/tokio-rs/loom",
+      "detail": "WHAT CHANGED FROM THE LAST DRAFT\n\nThe word is now reruns, as you suggested, and the ballot is rewritten in plain words. Schedules named the machinery, not what you see. Following your rule that every flag is also a setting, the count can also be set in a test profile and in fn test.\n\nTODAY\n\nA test that starts two tasks runs once, in whatever order the machine picks. Jet already records task order so a run can be replayed (D-REPLAY-ORDER1=A). That recorder must move into the Jet runtime under every option.\n\nCard #6012 asks for: a rerun count, a report per order, two planted bugs found within the guide's count, and replay of a failing order three times in a row.\n\nPRECEDENTS\n\n- expected_fail: true is already an argument on the #Test line (D-TEST-XFAIL1=A).\n- Counts and seeds are plain whole numbers (D-TEST-COUNT1=A).\n- jet test already takes --seed=<n> (Docs/spec/reference/cli.md:215).\n\nWHY THE WORD RERUNS\n\nSome tools use rerun to mean trying a failed test again until it passes, such as pytest-rerunfailures. That hides bugs. Jet has no such retry: here every rerun must pass, and the report says so. B and C use the same word, so the vote is only about where it is written.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Time. Reruns are independent, so they run side by side on the profile's workers. Sleeps and timers use simulated time during reruns. A small test stops after its few possible orders. A passing test whose inputs did not change is reused from the test cache (D-TEST-READS1=A).\n\n2. Missing a bad order by chance. A small test is rerun in every possible order, so its bug cannot slip through. A large test samples orders, and a deep run raises the count.\n\n3. A hidden default. The count is always written, as D-TEST-COUNT1 asks of counts. The guide's first example writes reruns: 100, the same number as Shuttle's README.\n\nEDGE CASES\n\n- A test that never starts a second task runs once and says so: 1 run (no tasks take turns).\n- expected_fail: true with reruns: expects some rerun to fail. If all pass, that is an unexpected pass.\n- A property test, which already runs many generated inputs, cannot also take reruns:. The error's fix moves the task part into a plain #Test, so the two counts never multiply silently.\n\n- A blocking file read or a child process counts as one step that no other task can interrupt.\n- The profile's time_limit applies to each rerun.\n- --reruns=<n>, reruns: and t.reruns(n) change the count only for tests that already ask for reruns. They never turn reruns on for other tests.\n\nWHY 100 IN THE GUIDE\n\nFor the two-task lost update, about half of all orders fail, so 100 random reruns miss it with odds near 2^-100. A two-lock deadlock fails in about one order in four, so 100 reruns miss it with odds below 10^-12. Both planted bugs also have few enough orders to be checked completely. These are estimates, not measurements.\n\nWHY NOT B OR C\n\nB reruns only when someone passes a flag, so a plain jet test on your machine still hides the bug, and the code never says which tests need it. C reruns only a block inside the test. Values made before the block carry over from one rerun to the next and cause failures that are not real bugs.",
       "options": [
         {
           "key": "A",
-          "name": "Test argument",
-          "detail": "Syntax. `schedules:` is a typed `#Test` argument, like `expected_fail: true` (D-TEST-XFAIL1). Its value is an `Int` of at least 1, a plain count as D-TEST-COUNT1 rules.\nAn absent argument means one ordinary run. A count below 1 is a compile error with a registered code, What/Why/Fix and a UI snapshot.\n\nBehavior. `jet test` runs the body once per schedule. Each schedule runs the test's tasks on one worker.\n\nAt every switch point the replay recorder already logs (D-REPLAY-ORDER1), a seeded choice picks the next runnable task.\nSwitch points are spawn, join, lock take and release, channel send and receive, `shared` get and set, and yield.\nWhen the test has no more distinct orders than its count, Jet runs each distinct order once, depth first, and reports `all 6 orders`.\n\nOtherwise it draws the count of seeded orders. Schedules are independent, so they run in parallel on the profile's `jobs` workers.\nSleeps and timers use virtual time during exploration. The run stops at the first failing schedule.\n\nReport. A pass prints one line: `pass counter keeps every increment (100 schedules)`. `--verbose` and `--json` list every seed with its outcome.\nA failure prints the schedule number, the seed, the numbered interleaving with task, operation and source line, the failure, and the exact replay command.\nA deadlock is a failure: every live task is blocked, reported as which task holds which lock and waits for which.\nA schedule that exceeds the per-test step budget is reported as a suspected livelock, with its seed.\n\nReplay. `jet test FILE \"name\" --seed=<n>` runs exactly that schedule through the replay recorder and checks the recorded order matches. `--seed` is the flag `jet test` already has.\n\nDeep runs. `--schedules=<n>` replaces the count of every explored test for one run, borrowed from B, so CI can run 10000. It never turns exploration on for a test without `schedules:`.\n\nBeginner path: add `schedules: 100`, run `jet test`, copy the printed replay command. Expert path: pick a count per test, raise all counts in CI with `--schedules=<n>`, replay a seed under `jet debug`.",
-          "technical": "Parsed by the existing typed `#Test` argument path in MarkerRules.jet; sema checks the count. The generated test entry loops schedules and hands them to the profile's workers. The runtime gains a seeded single-worker scheduler whose choice points are the replay recorder's switch points (D-REPLAY-ORDER1=A); a depth-first walk over the same choices covers small trees exhaustively. The test-result store (D-TEST-READS1=A) reuses a passing explored test while its reads are unchanged.",
-          "code": "#Test(\"counter keeps every increment\", schedules: 100) {\n    count :: shared(0)\n    group {\n        spawn { n :: count.get(); count.set(n + 1) }\n        spawn { n :: count.get(); count.set(n + 1) }\n    }\n    assert_eq(count.get(), 2)\n}\n\n// $ jet test\n// FAIL counter keeps every increment: schedule 37 of 100\n//   seed: 8213470021\n//   1  task 1  count.get() -> 0   run.jet:4\n//   2  task 2  count.get() -> 0   run.jet:5\n//   3  task 2  count.set(1)       run.jet:5\n//   4  task 1  count.set(1)       run.jet:4\n//   assert_eq failed: left 1, right 2   run.jet:7\n//   replay: jet test run.jet \"counter keeps every increment\" --seed=8213470021\n\n#Test(\"two locks\", schedules: 100) { ... }\n// FAIL two locks: deadlock in schedule 3 of 100, seed 551\n//   task 1 holds a, waits for b   run.jet:14\n//   task 2 holds b, waits for a   run.jet:18\n\n#Test(\"empty\", schedules: 0) { }\n// error: `schedules:` needs a count of at least 1"
+          "name": "reruns: on the test line",
+          "detail": "Write reruns: 100 on the #Test line, beside expected_fail:. The value is a whole number of at least 1. Without it, a test runs once, as today. A value below 1 is a compile error with a registered code and a UI snapshot.\n\nWhat happens. jet test runs the test 100 times, and each time the tasks take turns in a different order. The order is chosen wherever a task can pause. Those points are starting or joining a task, a lock, a channel send or receive, a shared read or write, and yielding.\n\nSmall tests. If a test has fewer possible orders than its count, Jet runs each possible order once and stops. The report then says all 6 orders, so a small test is checked completely, not by chance.\n\nReport. A pass prints one line, such as pass counter keeps every increment (100 reruns). A failure prints which rerun failed, its order number, each step in order with its source line, and the command that replays it. A deadlock, where every task waits on another, names who holds what and who waits.\n\nReplay. jet test FILE \"name\" --seed=<n> replays exactly that order. --seed is a flag jet test already has.\n\nDeep runs. The count is also a setting, as every flag must be. reruns: in a test profile and t.reruns(n) in fn test set it for a whole run. --reruns=<n> sets it for one command. They apply in that order, as build settings do.\n\nBeginner path: add reruns: 100, run jet test, and copy the printed replay command. Expert path: pick a count per test, raise every count in a deep profile, and replay one order under jet debug.",
+          "technical": "The typed #Test argument path parses reruns:, and sema checks the count. The generated test entry loops reruns and hands them to the profile's workers. The runtime gains a seeded one-worker scheduler whose choice points are the replay recorder's switch points. A depth-first walk over the same choices covers small tests completely. TestProfile and the Test value of fn test gain reruns, layered profile, then fn test, then the flag.",
+          "code": "#Test(\"counter keeps every increment\", reruns: 100) {\n    count :: shared(0)\n    group {\n        spawn { n :: count.get(); count.set(n + 1) }\n        spawn { n :: count.get(); count.set(n + 1) }\n    }\n    assert_eq(count.get(), 2)\n}\n\n// $ jet test\n// FAIL counter keeps every increment: rerun 37 of 100\n//   order number (seed): 8213470021\n//   1  task 1  count.get() -> 0   run.jet:4\n//   2  task 2  count.get() -> 0   run.jet:5\n//   3  task 2  count.set(1)       run.jet:5\n//   4  task 1  count.set(1)       run.jet:4\n//   assert_eq failed: left 1, right 2   run.jet:7\n//   replay: jet test run.jet \"counter keeps every increment\" --seed=8213470021\n\n#Test(\"two locks\", reruns: 100) { ... }\n// FAIL two locks: deadlock in rerun 3 of 100, seed 551\n//   task 1 holds a, waits for b   run.jet:14\n//   task 2 holds b, waits for a   run.jet:18\n\n// For a whole run, in package.jet or test.jet's fn test:\n//   deep: TestProfile{ suites: [tests], reruns: 10000 }\n//   t.reruns(10000)\n// For one command:\n//   $ jet test --reruns=10000"
         },
         {
           "key": "B",
-          "name": "Command flag",
-          "detail": "`jet test --schedules=<n>` explores every `#Test` whose body starts a second task, n seeded orders each. No source change. Replay is `--seed=<n>` with a filter, as in A. A plain `jet test` runs each test once, so exploration happens only where someone passes the flag, usually continuous integration. The source never shows which tests are concurrent enough to need it, and every concurrent test pays the same count. B gets the same parallel and exhaustive scheduling as A.",
-          "technical": "The flag sets an environment variable the harness reads; the runtime scheduler mode is the same as A's. Detection of 'starts a second task' happens at run time, after the first schedule.",
-          "code": "#Test(\"counter keeps every increment\") { ... }\n// $ jet test              -> runs once, passes\n// $ jet test --schedules=100\n// FAIL ... seed: 8213470021"
+          "name": "A flag only",
+          "detail": "jet test --reruns=<n> reruns every test that starts a second task, n times each. The code does not change. A plain jet test runs each test once, so reruns happen only where someone passes the flag, usually on the build server. The code never shows which tests need reruns, and every such test pays the same count. Replay uses --seed=<n>, as in A.",
+          "technical": "The flag and its matching profile and fn test settings set the count for the harness. Whether a test starts a second task is found while it runs. The scheduler is the same as A's.",
+          "code": "#Test(\"counter keeps every increment\") { ... }\n// $ jet test              -> runs once, passes\n// $ jet test --reruns=100\n// FAIL ... seed: 8213470021"
         },
         {
           "key": "C",
-          "name": "Body call",
-          "detail": "`t.explore(n) { ... }` inside the test reruns only the block under n seeded orders. Setup before the block runs once, so every order shares its values. A change made in one order leaks into the next and causes failures that are not real races. `jet test` sees exploration only while the body runs. Listings and `--schedules` overrides cannot see it in advance. It adds a second way to configure a test beside `#Test` arguments. C gets the same parallel and exhaustive scheduling as A.",
-          "technical": "Needs a closure rerun boundary inside the harness and a Core testing API; the scheduler mode is the same as A's.",
-          "code": "#Test(\"counter keeps every increment\") {\n    t.explore(100) {\n        count :: shared(0)\n        // spawn, assert\n    }\n}"
+          "name": "A block inside the test",
+          "detail": "reruns(100) { ... } inside a test reruns only that block. Code before the block runs once, so every rerun shares its values. A change made in one rerun carries into the next and causes failures that are not real bugs. jet test learns about the reruns only while the test runs, so it cannot list them first. It also adds a second place for test options beside the #Test line.",
+          "technical": "Needs a rerun boundary inside the harness and a new Core testing call. The scheduler is the same as A's.",
+          "code": "#Test(\"counter keeps every increment\") {\n    reruns(100) {\n        count :: shared(0)\n        // start tasks, check\n    }\n}"
         }
       ],
       "comparisons": [
         {
           "lang": "Rust (Shuttle)",
-          "note": "Randomized scheduler with probabilistic guarantees (PCT); README example runs 100 schedules and reports failures that replay deterministically. https://github.com/awslabs/shuttle (README read 2026-10-30).",
+          "note": "Reruns the body in random task orders; its README example uses 100. A failure replays exactly. Source: https://github.com/awslabs/shuttle",
           "code": "shuttle::check_random(|| { /* body */ }, 100);"
         },
         {
           "lang": "Rust (Loom)",
-          "note": "Exhaustive order search; the Shuttle README names it as its inspiration and contrasts exhaustive soundness with randomized scale. https://github.com/tokio-rs/loom",
+          "note": "Reruns the body in every possible task order. Source: https://github.com/tokio-rs/loom",
           "code": "loom::model(|| { /* body */ });"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "The test says it needs exploring, every plain run explores it, and replay reuses the existing `--seed` flag. It is written like the `expected_fail:` argument.",
+        "rec": "A",
+        "why": "The test itself says it needs reruns, every plain jet test does them, and a failure prints the command that replays it. It is written like expected_fail:, which people already know.",
         "gains": [
-          "Races are hunted on every plain `jet test`, not only in special runs.",
-          "Small tests are checked in every possible order, not just sampled.",
-          "A failure prints the seed and the exact command that replays it."
+          "These bugs are found on every plain jet test, not only in special runs.",
+          "Small tests are checked in every possible order.",
+          "A failure prints the order number and the exact replay command."
         ],
         "losses": [
           {
-            "loss": "An explored test takes longer than one run.",
-            "mitigation": "Orders run in parallel with virtual time, small tests stop after their few orders, and unchanged passing tests are reused."
+            "loss": "A test with reruns takes longer than one run.",
+            "mitigation": "Reruns run side by side on simulated time, small tests stop early, and unchanged passing tests are reused."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "A flag nobody passes locally leaves races hidden; the source never says which tests need it."
+            "reason": "A flag nobody passes on their own machine leaves the bug hidden, and the code never says which tests need it."
           },
           {
             "key": "C",
-            "reason": "State outside the block leaks between orders, and it adds a second way to configure a test."
+            "reason": "Values made before the block carry between reruns and cause false failures, and it adds a second place for test options."
           }
         ],
-        "tradeoff": "Explored tests cost a little more time, spread across cores, for races found on every plain run.",
-        "rec": "A"
+        "tradeoff": "A spends a little test time, spread across cores, to find these bugs on every plain run."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: claude (TestProfiles). Adversarial model family: claude. Fresh agent: Main. The pass made the count a plain Int, as D-TEST-COUNT1 rules, instead of a Bool-or-Int value. It added exhaustive coverage for small order trees and parallel schedules, and reduced A's losses to one negligible one."
+        "adversarial": "Author model family: claude (TestProfiles, rewritten by Main). Adversarial model family: claude. Fresh agent: Main. The pass kept the count a plain Int, added complete checking of small tests, and made the flag also a setting."
       },
       "checkInstructions": null,
       "surface": {
-        "gist": "How does a test ask `jet test` to run its tasks in many different orders?",
-        "lesson": "Two tasks can take turns in many orders, and a bug may show in only one of them. A test can rerun its body many times, each time in a different turn order. A number called a seed picks each order, so a failing order can be replayed. Owed under every option: the seeded turn-taking mode, the per-seed report, and replay by seed.",
+        "gist": "How should a test ask to be rerun many times, with its tasks taking turns differently each time?",
+        "lesson": "Two tasks running at once can interleave their steps in many orders. A bug may appear in only one. Rerunning the test in a different order each time finds it. Every rerun must pass; Jet never retries a failure. A printed number replays the failing order.",
         "trio": {
           "current": {
-            "note": "Today a concurrent test runs once, in whatever order the scheduler picks. It passes almost every time, so the lost update hides.",
+            "note": "Today a test with two tasks runs once. It passes almost every time, so the lost increase hides.",
             "code": "#Test(\"counter keeps every increment\") {\n    count :: shared(0)\n    group {\n        spawn { n :: count.get(); count.set(n + 1) }\n        spawn { n :: count.get(); count.set(n + 1) }\n    }\n    assert_eq(count.get(), 2)   // passes nearly always\n}"
           },
           "wild": {
             "lang": "Rust (Shuttle)",
-            "note": "Shuttle wraps the test body and names the run count, 100 in its own README example (github.com/awslabs/shuttle).",
-            "code": "shuttle::check_random(|| {\n    // spawn threads, assert\n}, 100);"
+            "note": "Shuttle reruns the body in random task orders, 100 times in its README (github.com/awslabs/shuttle).",
+            "code": "shuttle::check_random(|| {\n    // start threads, check\n}, 100);"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Test argument",
-            "gist": "Write `schedules: 100` on the `#Test` line; `--seed` replays one order.",
+            "name": "reruns: on the test line",
+            "gist": "Write reruns: 100 on the #Test line; --seed replays a failing order.",
             "gains": [
-              "The test itself says it is explored, beside `expected_fail:`.",
-              "A plain `jet test` always explores it.",
+              "The test itself says it needs reruns.",
+              "A plain jet test always does them.",
               "Small tests are checked in every order."
             ],
             "losses": [
-              "An explored test takes longer than one run."
+              "A test with reruns takes longer than one run."
             ],
             "proposed": {
-              "code": "#Test(\"counter keeps every increment\", schedules: 100) {\n    // same body: up to 100 orders\n}\n#Test(\"queue drains\", schedules: 2000) { ... }\n// jet test --seed=8213470021 \"counter keeps\""
+              "code": "#Test(\"counter keeps every increment\", reruns: 100) {\n    // same body, run in up to 100 orders\n}\n// FAIL counter keeps every increment: rerun 37 of 100\n//   replay: jet test run.jet \"counter keeps every increment\" --seed=8213470021\n\n// deeper, for a whole run or one command:\n//   t.reruns(10000)   or   jet test --reruns=10000"
             }
           },
           {
             "key": "B",
-            "name": "Command flag",
-            "gist": "`jet test --schedules=100` explores every test that starts tasks.",
+            "name": "A flag only",
+            "gist": "jet test --reruns=100 reruns every test that starts tasks.",
             "gains": [
-              "No change to test source.",
-              "One switch for deep runs in continuous integration."
+              "No change to test code."
             ],
             "losses": [
-              "A plain `jet test` never explores, so the race still hides locally.",
-              "The source does not show which tests need exploring.",
-              "Every concurrent test pays the same count, needed or not."
+              "A plain jet test never reruns, so the bug hides.",
+              "The code never says which tests need it."
             ],
             "proposed": {
-              "code": "#Test(\"counter keeps every increment\") { ... }\n// jet test --schedules=100"
+              "code": "#Test(\"counter keeps every increment\") { ... }\n// jet test --reruns=100"
             }
           },
           {
             "key": "C",
-            "name": "Body call",
-            "gist": "Wrap the concurrent part in `t.explore(100) { ... }` inside the test.",
+            "name": "A block inside the test",
+            "gist": "Wrap the task part in reruns(100) { ... } inside the test.",
             "gains": [
-              "Only the wrapped part reruns; setup outside runs once.",
-              "Looks like Shuttle's wrapper."
+              "Code before the block runs only once."
             ],
             "losses": [
-              "State made outside the block leaks between orders, a new bug source.",
-              "`jet test` learns about exploration only while the body runs.",
-              "A second way to set test options beside `#Test` arguments."
+              "Values carry between reruns and cause false failures.",
+              "A second place for test options."
             ],
             "proposed": {
-              "code": "#Test(\"counter keeps every increment\") {\n    t.explore(100) {\n        // spawn tasks, assert\n    }\n}"
+              "code": "#Test(\"counter keeps every increment\") {\n    reruns(100) {\n        // start tasks, check\n    }\n}"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "The test says it needs exploring, every plain run explores it, and replay reuses the existing `--seed` flag. It matches the `expected_fail:` argument people already write.",
+          "why": "The test says it needs reruns, every plain run does them, and a failure prints its replay command.",
           "gains": [
-            "Races are hunted on every plain `jet test`.",
-            "A failure prints the command that replays it."
+            "Bugs found on every plain jet test.",
+            "A failure prints the exact replay command."
           ],
           "losses": [
             {
-              "loss": "An explored test takes longer than one run.",
-              "mitigation": "Orders run in parallel, small tests stop early, unchanged tests are reused."
+              "loss": "Reruns take longer than one run.",
+              "mitigation": "They run side by side, and small tests stop early."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "A flag nobody passes locally leaves races hidden; the source never says which tests need it."
+              "reason": "Nobody passes the flag locally, so the bug hides."
             },
             {
               "key": "C",
-              "reason": "State outside the block leaks between orders, and it adds a second way to configure a test."
+              "reason": "Values carry between reruns and cause false failures."
             }
           ],
-          "tradeoff": "A little more test time, spread across cores, for races found on every run."
+          "tradeoff": "A little test time, spread across cores, finds these bugs on every run."
         }
       },
       "draft": false,
@@ -174859,9 +174848,11 @@
       "by": "owner",
       "kind": "question",
       "text": "this would be an extra library we will not have right now",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-05T23:05:47.901Z"
+      "status": "answered",
+      "answer": "Right, and that is why A was recommended and is what you ratified. Only option B needed an outside library (nanoarrow or Arrow C++). Under A, Core reads Arrow files in Jet code, beside the Parquet reader, with Jet's own LZ4 and Zstandard decoders. So Jet gains no library and no native dependency. BallotLead builds A on #6419.",
+      "created": "2026-11-05T23:05:47.901Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "qh2zvbft",
@@ -174870,9 +174861,11 @@
       "by": "owner",
       "kind": "question",
       "text": "the end shape alone does not look like the best version compared to any language, i think zig just works",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-05T23:07:19.134Z"
+      "status": "answered",
+      "answer": "Agreed. The ballot is redone around the Zig shape. Recommended A: each jet release ships a C toolchain pack (static clang and lld, plus C library sources for every supported target) as a file beside jet. Its hash is built into jet. The first jet cc fetches it from the same release, checks the hash and keeps it. After that, jet cc works on a clean machine and builds for any supported target. It needs no Nix, no package index and no signing key. Pure-Jet programs never download it, and jet env fetch-toolchain prepares an offline machine. B keeps the old Nix and signed-index route; C uses the machine's own cc, like Go.",
+      "created": "2026-11-05T23:07:19.134Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "qihioell",
@@ -174881,9 +174874,11 @@
       "by": "owner",
       "kind": "question",
       "text": "as ive stated before, any flag for the cli should also be a setting for the options, in this case fn test.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-05T23:08:14.432Z"
+      "status": "answered",
+      "answer": "Agreed, and the ballot now makes it the rule for jet test. Every jet test flag, old and new, is also a test-profile field in package.jet and a call on t in fn test, with the same name: --shard=3/8 is shard: 3/8 and t.shard(3, 8); --serial is serial: true and t.serial(). The profile applies first, then fn test, then the flag, as build settings do. One registry row per flag generates all three spellings, so they cannot drift. The flags also work on every jet test, not only with --profile. Only --help, --show-default and --browser-scaffold, which are actions rather than choices, get no setting.",
+      "created": "2026-11-05T23:08:14.432Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     },
     {
       "id": "qjysjdvk",
@@ -174892,9 +174887,37 @@
       "by": "owner",
       "kind": "question",
       "text": "Should this be separate from the app/web framework? I think web should probably be a little different but app and our version of raylib should probably be the same, where our version of raylib is like the visual subsystem & our version of miniaudio is the audio subsystem. They should likely be independent modular scalable controllable systems rather than a monolith so more complex situations can be expressed.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-06T00:12:26.204Z"
+      "status": "answered",
+      "answer": "Agreed, and the ballot is redesigned around it. Recommended A now has two independent subsystems shared by games and desktop apps. ray, our raylib, is the visual one: windows, frames, drawing and each window's keys and mouse. audio, our miniaudio, is the sound one: devices, raw sample queues and a mixer. Each works alone, and a program can open several of each. core.game (scenes, replays) and gui (widgets) only combine them, with no device code of their own. Headless versions of both serve tests. The web stays separate. B splits input out too, and C is the old single platform value.",
+      "created": "2026-11-06T00:12:26.204Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
+    },
+    {
+      "id": "qkungko5",
+      "cardId": "c0rqi33c",
+      "decisionId": "D-CORE-COVERAGE-RATCHET1",
+      "by": "owner",
+      "kind": "question",
+      "text": "Just because something isn't used directly in this specific repo doesn't mean we shouldn't have it or it isn't useful. Why would we act like that?",
+      "status": "answered",
+      "answer": "We would not, and no option removes or devalues any Core function. The old wording (uncovered, gaining a use) was misleading. The check asks one thing: does some test, example or doc example run this function, so we know it works? 4639 public functions have no test yet. That is test work owed, not a sign they are unwanted. The ballot now says untested throughout. Recommended A records today's untested functions by name. Each new function must arrive with a test, and the list shrinks as the missing tests are written.",
+      "created": "2026-11-06T00:22:44.160Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
+    },
+    {
+      "id": "ql538rta",
+      "cardId": "c09f1iks",
+      "decisionId": "D-TEST-SCHEDULES1",
+      "by": "owner",
+      "kind": "question",
+      "text": "I don't understand this ballot, redo in plain English. I don't think schedules makes sense if I understand correctly, wouldn't reruns or something be better?",
+      "status": "answered",
+      "answer": "Redone in plain words, and the word is now reruns, as you suggested: #Test(\"counter keeps every increment\", reruns: 100). jet test reruns that test 100 times, and each time its tasks take turns in a different order, because some bugs only show in one unlucky order. Every rerun must pass; unlike pytest's reruns, Jet never retries a failure. A failure prints the order number and the command that replays it. Per your flag rule, the count is also a profile setting (reruns:) and an fn test call (t.reruns(n)), with --reruns=<n> for one command.",
+      "created": "2026-11-06T00:23:54.448Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -175751,6 +175774,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T01:23:54.201Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qh2zvbft",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T01:23:53.537Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-NIX-INDEX-ROOT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T01:23:41.998Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqi33c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T01:22:52.506Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0slmlyv",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T01:22:31.895Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qjysjdvk",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T01:22:31.245Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-GAME-PLATFORM1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T00:32:50.106Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qg66683h",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T00:32:40.218Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qkungko5",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T00:32:39.571Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-CORE-COVERAGE-RATCHET1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T00:31:38.992Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qihioell",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T00:31:38.336Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-TEST-INVOKE1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T00:29:38.293Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "ql538rta",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T00:29:37.646Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-TEST-SCHEDULES1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T00:23:54.448Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "ql538rta",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T00:22:44.160Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "qkungko5",
+      "note": ""
+    },
     {
       "at": "2026-11-06T00:20:36.848Z",
       "by": "owner",
