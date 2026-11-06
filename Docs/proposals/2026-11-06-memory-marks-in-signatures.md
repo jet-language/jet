@@ -9,7 +9,7 @@ for editing and `&&` for moving as a prefix sigil".
 
 Counts below were measured on dev `b486d6c09a` over every `.jet` file in the
 repository (18,352 files, 1,254,763 code lines, comment lines removed), with
-`~/.cache/jet-dev/scratch/Main/ballots/census-marks.js`. They are regex counts,
+`$JET_STATE_ROOT/scratch/Main/ballots/census-marks.js`. They are regex counts,
 so treat them as accurate to a few percent. No program was compiled for this
 proposal. The examples show the proposed syntax, which the compiler does not
 accept yet.

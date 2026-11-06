@@ -9,7 +9,7 @@ each instance holds.
 
 Counts were measured on dev `b486d6c09a` over every `.jet` file (18,352 files,
 1,254,763 code lines) with
-`~/.cache/jet-dev/scratch/Main/ballots/census-marks.js`. The example files
+`$JET_STATE_ROOT/scratch/Main/ballots/census-marks.js`. The example files
 show proposed syntax that the compiler does not accept yet. They also use the
 two companion proposals in
 [`2026-11-06-memory-marks-in-signatures.md`](2026-11-06-memory-marks-in-signatures.md)
