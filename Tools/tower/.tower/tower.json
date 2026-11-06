@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6590,
-    "rev": 92875,
+    "nextNum": 6592,
+    "rev": 92900,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -37745,6 +37745,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c190 partial, 12da3c76b5 (JetpackEngine): the JetpackStore handoff landed (CacheLease, LeaseSnapshot, projections, ShellEnv, CLI/Services/JetOS consumers, ExecutableLease), which fixes the c83c1385c4 Engine assembly break; the ClosureJournal jet-cc hunk stays with the #6564 c23 lane. Engine --tests default tier 518/548 vs 513/548 on HEAD with StoreCache reverted; the FAIL set is a strict subset of baseline (store ingest child-replaced and disappearing-output now pass); 3 c190 known-failing rows removed. Remaining: 2 c190 rows that SIGSEGV in compiler codegen on &opt_handle == .Val(x) (see the new compiler-crash card), plus 'incomplete generation...' and 'lease recovery waits for descendant', which also fail on baseline. AOT tier pending."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "7cb9c8825a (JetpackEngine): prepush jet check fixes. RefSpec tests bind their lists before the loop head. Jetpack/Environment E0624 came from the 4 starter components (since dffc9af603) each declaring fn run: starters moved to Source/Components/Starters, views became methods, UiNode->UINode; this unmasked ~500 sema errors (16 files missing imports, 2 E0957 test embeds), all fixed. jet check Jetpack/PackageModel and Jetpack/Environment: 0 problems."
         },
         {
@@ -39887,7 +39892,7 @@
       "parentId": "c0v95zs3",
       "needsAcceptance": false,
       "created": "2026-09-27T23:27:03.232Z",
-      "updated": "2026-11-06T03:03:24.544Z",
+      "updated": "2026-11-06T04:52:05.183Z",
       "updatedBy": "Main",
       "goals": [
         "G2"
@@ -53766,6 +53771,16 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c108 partial, 6bee890a10 (CoreOwnership): v2 Core coverage ratchet (name + signature per module; --check fails an unlisted item with file:line; --write only removes; moved items re-filed) and a reset list of 4837 built from a HEAD archive; node --test 13/13 and --check OK locally; pushed to origin/dev. Remaining: a hosted CI run. .github/workflows/ci.yml runs only on pushes to master and on pull requests, and origin/master is held by owner order, so the hosted run needs the owner (a master push or a PR)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c3 partial, process-tree evidence (CoreOwnership) at dev 69d5a9a4cb: seed a0_025 built s1, pack1, s2, pack2 and s3 fresh with no stage store, each with nix cargo/rustc dropped from PATH and strace -f on execve/openat. FIXED_POINT s2==s3 1f9eb56dca91 (s1 980c4ea5). Across all stages: 0 rustc/cargo/rustup/cranelift/interpreter execs and 0 reads of .rs, Cargo.toml/lock, .cargo, .rustup or target/; 33 distinct programs ran (jet, clang, ar, nm, node, coreutils, nix, git). Logs: $JET_SCRATCH_ROOT/lanes/CoreOwnership/c3out/*.strace. Remaining for c3: the web-tier contract proof, and the commit-bound broad milestone proof (Main)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c7 partial dev a06f759af7 (CoreOwnership): 9 dead or duplicate dispatcher rows deleted (6 unused core.mem leaves, core.compiler.__reject, 2 NUL-named core.tasks channel rows duplicating __channel_new/__channel_bounded; sema channel<T>() now uses those). Unowned rows 465 -> 458: 436 private __ leaves called from Core source (declared provider leaves), 6 declared raw host leaves. s1 of 452f1230be+patch: ui 2176 PASS 0 regressions, cases 2822 PASS 0 regressions, 4 channel goldens x o0/o1/o2 12/12, ledger hostile 41 held. Left: 16 public rows with no Jet owner (reactive.signal, args.decode/merge, process.argv, plugin.load, testing.world, game.run, crypto.wipe, compute.gradient/value_and_gradient/vjp/jvp, ui.button/text_input/reactive_render, web.form)"
         },
         {
@@ -54312,11 +54327,11 @@
         {
           "n": 3,
           "text": "The composed Jet-native CLI/compiler/package/runtime path passes its exact golden/diagnostic/examples and applicable O0/O1/O2/web contracts with one meaning; recorded producer/input/process-tree evidence proves no rustc, Cargo, Cranelift or retiring interpreter is needed by the final cutover. Broad milestone proof is separately admitted and commit-bound before closure.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-09T00:04:05.642Z"
+          "evidence": "dev 69d5a9a4cb + 8f1681f68f (CoreOwnership). Process tree: seed a0_025 built s1, pack1, s2, pack2 and s3 fresh under no-Rust PATH plus strace -f execve/openat; FIXED_POINT s2==s3 1f9eb56dca91; 0 rustc/cargo/rustup/cranelift/interpreter execs and 0 Rust-input reads. Contracts with that s2: golden census 1224 pass (on the card); golden --filter=web 85/85 on o0/o1/o2; all 3 browser-target goldens pass (ui_web_mount case, ui_web_reactive, web_hello after correcting its stale JS golden 100 -> 100.0 to match web_hello.out, I9); 0 Rust execs in the web traces (jet dev's watcher reads repo .rs/Cargo.toml as data only). Evidence $JET_SCRATCH_ROOT/lanes/CoreOwnership/c3out. The broad commit-bound milestone proof remains for card closure.",
+          "at": "2026-11-06T05:11:43.576Z"
         },
         {
           "n": 4,
@@ -54433,11 +54448,11 @@
         {
           "n": 16,
           "text": "(was #3690) (was #3667) `JET_GOLDEN_FILTER=crypto/ cargo test --test golden examples_compile_and_run` passes with identical AOT/default-run/interpreter output. It includes a new `Examples/features/crypto/file_seal_jetc.jet` that seals a multi-chunk file to JETC v2, reopens it, prints the X25519 public-key text form and round-trips it through `from_text`. `cargo test --test core_crypto_api` and `cargo test --test core_crypto_argon2id -- argon2id_parallel_lanes_match_rfc_vector_across_tiers` also pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:21.301Z"
+          "evidence": "dev 69d5a9a4cb (CoreOwnership), cargo targets read as their Jet testkit rows: golden crypto/ 57 PASS on o0/o1/o2, including new Examples/features/crypto/file_seal_jetc.jet (3-record JETC v2 seal and reopen, X25519 public-key text form round-tripped through from_text, Bech32m); cases --filter=crypto 42 PASS 0 FAIL, including the three core_crypto_api cases and argon2id parallel-lanes RFC vector across tiers; 7 stale known-failing rows removed. Also: a non-codable decode<T> reports E0905 once, not twice (JetSema Calls/Data.jet).",
+          "at": "2026-11-06T04:33:47.570Z"
         },
         {
           "n": 17,
@@ -54523,11 +54538,11 @@
         {
           "n": 26,
           "text": "(was #3690) (was #3669) New `cargo test --test core_data_parquet -- parquet_limits_int96_and_error_kinds_agree_across_tiers` writes fixtures with the parquet crate. It covers over-limit rows/bytes (`DataErrorKind.Limit`), an INT96 column at the declared resolution, an unsupported type (typed error) and a corrupt page (typed kind from provider codes, not message substrings). All must be identical across tiers.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:33.491Z"
+          "evidence": "dev b3ed361346 (CoreOwnership), cargo/parquet-crate test read as its Jet golden: tooling/parquet_limits over apache parquet-testing fixtures passes at O0/O1/O2 (golden --filter=parquet 3 PASS) with identical output. Covers DataErrorKind.Limit for rows and for bytes, Unsupported for DATA_PAGE_V2, Decode for a corrupt page type and a truncated file, and INT96 read as UTC at microsecond resolution; the program branches on err.kind, never on message text.",
+          "at": "2026-11-06T04:41:49.730Z"
         },
         {
           "n": 27,
@@ -55066,11 +55081,11 @@
         {
           "n": 86,
           "text": "(was #4766) (was #4249) [#4352] Mapped file windows and lines have element type View<U8>.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:40:42.966Z"
+          "evidence": "dev d1e6c214e1 (CoreOwnership): MappedFile.window and window_len return a View<U8> into the mapping and lines() yields one View<U8> per line (LF and a preceding CR excluded), Jet-native in JetRuntime CompilerMapped.jet with IR building the View<U8> header. Chain FIXED_POINT; cases --filter=mapped 4/4 PASS including the formerly known-failing mapped tiers case; a probe covers window/window_len success and error, CRLF and empty lines, and an empty file.",
+          "at": "2026-11-06T05:07:06.170Z"
         },
         {
           "n": 87,
@@ -55281,7 +55296,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-06T10:08:37.412Z",
-      "updated": "2026-11-06T04:23:49.204Z",
+      "updated": "2026-11-06T05:11:43.576Z",
       "updatedBy": "Main",
       "goals": [
         "G14",
@@ -65911,11 +65926,11 @@
         {
           "n": 1,
           "text": "(was #4679) Int * Decimal is rejected and unary minus refuses Decimal values",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:07:08.987Z"
+          "evidence": "dev 0d4560cc63 (GoldenRoots3): Int * Decimal is accepted (qty * price with an Int variable), unary minus negates a Decimal, and Decimal / Int gives a Fraction; case exact_number_tiers/decimal_mixes_with_int_and_negates. A/B vs 55b3322ee1: ui, cases exact/numeric/auto_derive/decimal and golden decimal/exact/numeric/index/serde/codable/math lose 0.",
+          "at": "2026-11-06T05:01:27.381Z"
         },
         {
           "n": 2,
@@ -65956,20 +65971,20 @@
         {
           "n": 6,
           "text": "(was #4976) codegen: IndexMut lookup for a concrete owner matches any trait named IndexMut",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:17:53.241Z"
+          "evidence": "dev 8823426873 (GoldenRoots3): a user trait named IndexMut no longer routes g[k] = v; only the core IndexMut does. ui index_hook_ignores_user_trait_named_indexmut. A/B vs 55b3322ee1: ui, cases exact/numeric/auto_derive/decimal and golden decimal/exact/numeric/index/serde/codable/math lose 0.",
+          "at": "2026-11-06T05:01:28.076Z"
         },
         {
           "n": 7,
           "text": "(was #4977) codegen: trait default-body call on a concrete receiver lowers as a dynamic trait call",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T20:18:00.460Z"
+          "evidence": "dev 38725500cb (GoldenRoots3): a default-body trait call on a concrete receiver calls the body directly; ir_trait_call is used only for TraitObject receivers. A new case pins it. A/B vs 55b3322ee1: ui, cases exact/numeric/auto_derive/decimal and golden decimal/exact/numeric/index/serde/codable/math lose 0.",
+          "at": "2026-11-06T05:01:28.804Z"
         },
         {
           "n": 8,
@@ -66199,11 +66214,11 @@
         {
           "n": 33,
           "text": "A user trait method named encode is not refused with a misleading E0105 'defined twice'; a case shows the trait and its impl compile and run (found by Prep 2026-11-04).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T14:31:59.030Z"
+          "evidence": "dev c2635c41a7 (GoldenRoots3): impl Point.Codec { fn encode } compiles and runs beside #Codable with no E0105; case auto_derive_policy/user_trait_method_named_encode_compiles_and_runs passes under jet run and --release. A/B vs 55b3322ee1: ui, cases exact/numeric/auto_derive/decimal and golden decimal/exact/numeric/index/serde/codable/math lose 0.",
+          "at": "2026-11-06T05:01:26.655Z"
         },
         {
           "n": 34,
@@ -66286,7 +66301,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-04T23:47:19.997Z",
+      "updated": "2026-11-06T05:01:28.804Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -84684,6 +84699,16 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "2e43f154cf (JetpackEngine): one jetpack engine lookup order, JETPACK_BIN, then beside jet, then PATH; a bad JETPACK_BIN is E1228 with no fall-through. The same choice is the jet test --jetpack setting (flag and setting from one row, per the owner's every-flag-is-a-setting rule); documented in environment.md. Cases A/B vs HEAD s1: the only change is the new engine_dispatch/jetpack_bin case, FAIL to PASS. Unblocks c138's test runs from picking up a stale jetpack."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "7b596406ec (JetpackEngine): c40 partial, since pkg/cli_concurrent_publish_keeps_one_immutable_version passes but the Engine claim 'publication tuf original cli_concurrent_publish...' is still known-failing. c7 partial: shape6_registry_routes snapshot mismatch; quiet_suppresses blocked on jet init writing no license (E2607); the E1218 API-snapshot gate is not ported. c138 blocked: jet fetch runs jetpack __package-v1 but jet finds jetpack next to itself or on PATH and ignores JETPACK_BIN, so tests pick up a stale jetpack (discovery fix next). The Engine AOT test binary hangs in a futex on both patch and baseline; likely #6590."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "JetpackEngine takes c7 (jet publish + registry keygen), c138 (registry publish + fetch, Engine advisory claim), c39/c40 (publish/yank/concurrent rows), c93 (keygen/publish entropy + no-sign cases) and the Engine/publication tuf * known-failing rows; this unblocks #3590 c9's success proof (publish to a file:// registry, fetch on first run, offline second run). Builder4 keeps c5 (--web-graph/--cost open)."
         },
         {
@@ -85123,11 +85148,11 @@
         {
           "n": 39,
           "text": "(was #3) Legacy substrate: cache/index envelope schema — completion owned by #395/#421/#434 [precut audit: failing on 9c7ddf1359: C:pkg/cli_publish_unreachable_registry_e1235 KNOWN-FAILING #6418 `jet publish` is not built yet (E2104): stream predicate ~ failed (known-failing #6418: `jet publish` is not built yet (E2104)); C:pkg/cli_yank_flips_index_entry KNOWN-FAILING #6418 `jet…]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:32:11.255Z"
+          "evidence": "dev 7b596406ec (JetpackEngine): jet publish and jet yank are built; the audit cases pkg/cli_publish_unreachable_registry_e1235 and pkg/cli_yank_flips_index_entry pass on s1 of HEAD+patch (--fresh) and left known-failing (11 known-failing rows removed as UNEXPECTED-PASS across cases and the Engine e1234 claim).",
+          "at": "2026-11-06T05:07:26.066Z"
         },
         {
           "n": 40,
@@ -85609,11 +85634,11 @@
         {
           "n": 93,
           "text": "(was #1610 c1) The three entropy-simulation pkg tests pass: cli_keygen_entropy_failure_is_exact_e1292_and_artifact_free, cli_publish_auto_keygen_entropy_failure_mutates_nothing, cli_publish_no_sign_leaves_signature_empty [precut audit: failing on 9c7ddf1359: C:pkg/cli_publish_no_sign_leaves_signature_empty KNOWN-FAILING #6418 `jet publish` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet publish` is not built yet (E2104))]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:33:01.027Z"
+          "evidence": "dev 7b596406ec (JetpackEngine): the three entropy-simulation pkg cases cli_keygen_entropy_failure_is_exact_e1292_and_artifact_free, cli_publish_auto_keygen_entropy_failure_mutates_nothing and cli_publish_no_sign_leaves_signature_empty pass on s1 of HEAD+patch (--fresh) and left known-failing.",
+          "at": "2026-11-06T05:07:26.849Z"
         },
         {
           "n": 94,
@@ -86057,7 +86082,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-06T02:53:16.392Z",
+      "updated": "2026-11-06T05:22:33.489Z",
       "updatedBy": "Main"
     },
     {
@@ -93266,7 +93291,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -93275,7 +93300,17 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "process.run_all keeps up to jobs children running at once, proven by a timing case, with throughput near xargs -P on the same probes",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 55b3322ee1 (GoldenRoots3): new case process_sessions/run_all_keeps_jobs_children_running_at_once times 8 sleeps under jobs 8 (<3 s, one wave) and jobs 2 (four waves) on O0 and O2, PASS. 84 jet check probes at jobs 8: 4.3 s via jet run, 3.7 s AOT, vs 3.4 s for xargs -P8; CoreModuleCheck --jobs 8 5.8 s vs 31 s at --jobs 1. run_all was already concurrent on HEAD; the reported 20 s likely included the tool's cold compile.",
+          "at": "2026-11-06T04:37:03.065Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -93284,8 +93319,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T23:04:07.901Z",
-      "updated": "2026-11-05T23:04:07.901Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-06T04:37:04.686Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T04:37:04.686Z"
     },
     {
       "id": "c0ug03od",
@@ -93589,6 +93625,89 @@
       "created": "2026-11-06T03:02:51.022Z",
       "updated": "2026-11-06T03:02:51.022Z",
       "updatedBy": "Main"
+    },
+    {
+      "id": "c0jn1coj",
+      "num": 6590,
+      "title": "Compiler segfaults in codegen on &opt_handle == .Val(x)",
+      "body": "Found by JetpackEngine on dev 12da3c76b5: compiling a comparison of a borrowed optional handle against .Val(x) (&opt_handle == .Val(x)) crashes the compiler with SIGSEGV in codegen. Two #3590 c190 known-failing Store rows hit it. I2: checked code the backend cannot lower must be an internal compiler error (exit 101), never a crash, and this shape should lower. Fix the lowering and add a reduced case that runs on O0/O1/O2.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Repro (JetpackEngine): $JET_SCRATCH_ROOT/lanes/JetpackEngine/repro6590/v2.jet, the match form from CacheLease.copy_profile_executable: if &members[index].file == { .Val(input) -> { input.stat() ... } .None -> ... } over [Member{file: FileReader?}] borrowed as &[...]. jet build --optimize=none of it produces a binary that hangs in a futex (fault-handler deadlock, exit 124 under timeout 10). The statement form if &...file == .Val(input) { and the variants with seek/read and an == None precheck pass. The LeaseSnapshot.jet:314 SIGSEGV is not reduced yet; the in-Engine claim reproduces it. So: wrong code from the match-on-borrowed-optional lowering, plus a fault handler that deadlocks instead of reporting."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G2"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T04:52:06.103Z",
+      "updated": "2026-11-06T04:59:25.342Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0fz569a",
+      "num": 6591,
+      "title": "A child's stdout line reaches the parent only after the child exits",
+      "body": "Found by CoreOwnership on dev d1e6c214e1: in golden foundations/storage, crash_recovery waits for a child to print 'ready' while it keeps running, but the parent receives the line only after the child exits, so the program panics. Streaming a running child's stdout must deliver each line as it is written (no buffering until exit), on O0/O1/O2. Add a case where the parent reads 'ready' from a child that then waits for the parent.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Restated (CoreOwnership, Main): the runtime follows ratified D-STDOUT-BUFFER1=A (spec.md:321-325: pipe stdout is written when its buffer fills, or before a stderr write, stdin read, child start or stop; Host.jet host_stdout_write). The foundations/storage child printed 'ready' into a pipe and slept without flushing, so the example is wrong, not the runtime. Fix: the example flushes stdout after 'ready', plus a case where the child prints ready, flushes and waits, and the parent streams the line on O0/O1/O2. Line-buffered pipes would need an owner re-ballot of D-STDOUT-BUFFER1."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Under D-STDOUT-BUFFER1=A, the foundations/storage example flushes its ready line and passes on O0/O1/O2, and a case proves a flushed child line reaches the parent while the child waits",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev bd4d5bb844 (CoreOwnership): the storage crash writer flushes its ready line; golden foundations/storage added, o0/o1/o2 PASS; new case process_sessions/flushed_child_line_reaches_the_parent_while_the_child_waits PASS on O0/O1/O2 and the built binary.",
+          "at": "2026-11-06T05:14:42.262Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T05:07:07.070Z",
+      "updated": "2026-11-06T05:14:43.285Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-06T05:14:43.285Z"
     }
   ],
   "decisions": [
@@ -176687,6 +176806,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T05:22:33.489Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hn7w1n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T05:14:43.285Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fz569a",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-06T05:14:42.262Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fz569a",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T05:14:41.536Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fz569a",
+      "note": "#1 Under D-STDOUT-BUFFER1=A, the foundations/storage example fl"
+    },
+    {
+      "at": "2026-11-06T05:12:49.683Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fz569a",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T05:11:43.576Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-06T05:11:01.467Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqi33c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T05:07:27.559Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hn7w1n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T05:07:26.849Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hn7w1n",
+      "note": "#93"
+    },
+    {
+      "at": "2026-11-06T05:07:26.066Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hn7w1n",
+      "note": "#39"
+    },
+    {
+      "at": "2026-11-06T05:07:07.070Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0fz569a",
+      "note": "A child's stdout line reaches the parent only after the child exits"
+    },
+    {
+      "at": "2026-11-06T05:07:06.170Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#86"
+    },
+    {
+      "at": "2026-11-06T05:01:28.805Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-06T05:01:28.077Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-06T05:01:27.381Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T05:01:26.655Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#33"
+    },
+    {
+      "at": "2026-11-06T04:59:25.342Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jn1coj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T04:52:06.104Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0jn1coj",
+      "note": "Compiler segfaults in codegen on &opt_handle == .Val(x)"
+    },
+    {
+      "at": "2026-11-06T04:52:05.183Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uwol3w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T04:43:00.736Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqi33c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T04:41:49.730Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-06T04:37:04.686Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08cndtc",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-06T04:37:03.065Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08cndtc",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T04:37:02.055Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08cndtc",
+      "note": "#1 process.run_all keeps up to jobs children running at once, p"
+    },
+    {
+      "at": "2026-11-06T04:33:47.571Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#16"
+    },
     {
       "at": "2026-11-06T04:30:26.777Z",
       "by": "Main",
