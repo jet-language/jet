@@ -39,6 +39,7 @@ use {
         JetDriverHostFacts,
         JetDriverVerbOutput,
         JET_DRIVER_EXIT_USER_ERROR,
+        jet_driver_report_problems,
         jet_driver_compile,
         jet_driver_compile_keep_going,
         jet_driver_lowering_inputs,
@@ -61,7 +62,7 @@ use {
     ]
     jet_backend.[x64_link_runtime_image, x64_link_runtime_pack]
     jet_ir.[IRLibraryExportRow, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
-    jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
+    jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
     jet_sema.[SemaOutputIntent]
     jet_web.[web_runtime_partition]
 }
@@ -1398,6 +1399,7 @@ fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, entry: String?, options
             selected.comptime_input_log = input_log.copy()
             if options.profile != "" -> selected.profile = options.profile
             selected.setting_overrides = options.settings.copy()
+            selected.gate_set.allowed = options.gates.copy()
             contributed := jet_cli_contributed_request(^selected, color)
             // copy: `refusal` is a payload view of `contributed`.
             if contributed.refusal == .Val(refusal) -> return JetCLIExecutableCompiled.Refused{output: refusal.copy()}
@@ -1441,13 +1443,19 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
 }
 
 // The request that compiles `snapshot` against the Core sources of this
-// toolchain; `core_checked` as jet_cli_core_sources's `checked`.
+// toolchain; `core_checked` as jet_cli_core_sources's `checked`. The
+// organization's gate policy (`JET_ORG_UNSAFE_POLICY`) is its outermost policy
+// rung; a configured policy that can't be read is refused (E3109), never
+// skipped.
 fn jet_cli_prepare_request(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_checked: Bool) -> JetCLIPrepared {
     core_sources :: if jet_cli_core_sources(snapshot.entry_path, core_checked) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> { return jet_cli_prepare_refused(what, fix, color) }
     }
-    JetCLIPrepared.Prepared{request: jet_cli_driver_request(snapshot, core_sources, threads, mode), snapshot: snapshot}
+    organization :: pkg_load_organization_gate_policy() ? declarations -> declarations ! error -> return JetCLIPrepared.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", error.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+    request := jet_cli_driver_request(snapshot, core_sources, threads, mode)
+    request.organization_policy = organization
+    JetCLIPrepared.Prepared{request: ^request, snapshot: snapshot}
 }
 
 // Whether the entry at `entry_path` (or its overlay) is a script: its first

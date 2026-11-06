@@ -103,6 +103,10 @@ struct JetEvalConfig {
     // The evaluated item sits inside an `#Impure` block: a Tier-2 effect is
     // refused for the missing invocation gate (E3411), not the block (E3410).
     impure: Bool{false}
+    // The invocation opened the impure gate (`--gate impure=allow`): a Tier-2
+    // effect inside `#Impure` is refused only because the evaluator runs no
+    // host effect (E3401), never as a missing gate.
+    impure_gate: Bool{false}
 }
 
 fn jet_eval_default_config() -> JetEvalConfig Never! {

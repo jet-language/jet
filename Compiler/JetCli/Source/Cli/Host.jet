@@ -99,6 +99,7 @@ use {
         diagnostic_registry_row,
         diagnostic_render_all,
         gate_ledger_push,
+        policy_key_name,
         sha256_hex,
         sha256_hex_bytes,
         compiler_transfer_rows,
@@ -1430,7 +1431,7 @@ fn jet_cli_finish(output: JetDriverVerbOutput) -> Never {
 // started from it ends with jet (parent_death; jet runs this on its main thread).
 // Launching its own path again runs it the way it runs now: this jet, this
 // profile and build-option flags, this invocation's authority
-// (`jet run [--profile=…] [--optimize=…] [-A] [--allow=…] [--deny=…]`).
+// (`jet run [--profile=…] [--optimize=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
 fn jet_cli_launch_plan(file: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?) -> X64Launch {
     executable :: cli_files.absolute(file) ?? file
     argv := [String]{executable}
@@ -1441,6 +1442,7 @@ fn jet_cli_launch_plan(file: String, program_args: [String], options: BuildOptio
         if choice.layer == BuildOptionLayer.Flag -> &relaunch.push(choice.written)
     }
     loop setting in options.settings -> &relaunch.push("--set={setting.name}={setting.value}")
+    loop key in options.gates -> &relaunch.push("--gate={policy_key_name(key)}=allow")
     if invocation == .Val(rows) {
         if rows.all -> &relaunch.push("-A")
         if rows.allow.len() > 0 -> &relaunch.push("--allow={rows.allow.join(",")}")

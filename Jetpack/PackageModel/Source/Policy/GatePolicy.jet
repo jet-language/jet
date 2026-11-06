@@ -2,8 +2,8 @@
 // organization floor. Gates run before creating directories or process locks.
 use {
     jet_foundation.[
-        Diagnostic, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span,
-        diagnostic_from_registry, policy_key_is_audited_gate, policy_key_name, policy_scope_rank,
+        Diagnostic, PolicyDeclaration, PolicyKey, PolicyScope, Span,
+        diagnostic_from_registry, policy_gate_forbidding, policy_key_is_audited_gate, policy_key_name,
     ]
     sys :: core.sys
     files :: core.files
@@ -20,18 +20,10 @@ struct PackageGateError {
     }
 }
 
-// crates/jet-foundation/src/Policy.rs:1092 `gate_refusal`: the earliest
-// .Forbid wins, including when an inner declaration attempts to widen it.
+// The registered E3415 refusal of the `key` gate at `site` when an owning
+// declaration forbids it (Foundation policy_gate_forbidding).
 fn pkg_gate_refusal(key: PolicyKey, site: String, span: Span?, declarations: [PolicyDeclaration]) -> Diagnostic? Never! {
-    selected := PolicyDeclaration?{None}
-    loop declaration in declarations {
-        if declaration.key != key || declaration.value != PolicyValue.Forbid -> next
-        if selected == .Val(outer) {
-            if policy_scope_rank(outer.scope) <= policy_scope_rank(declaration.scope) -> next
-        }
-        selected = Val(declaration)
-    }
-    declaration :: selected ?? return None
+    declaration :: policy_gate_forbidding(key, declarations) ?? return None
     Val(pkg_manifest_diagnostic_from_row("E3415", [ManifestEntry]{
         ManifestEntry{key: "gate", value: policy_key_name(key)},
         ManifestEntry{key: "site", value: site},
@@ -44,7 +36,7 @@ fn pkg_load_organization_gate_policy() -[FS, Env]> [PolicyDeclaration] PackageGa
     path :: sys.get("JET_ORG_UNSAFE_POLICY") ?? return Ok([PolicyDeclaration]{})
     source :: files.read(path) ?? return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
         "cannot read the configured organization gate policy",
-        "JET_ORG_UNSAFE_POLICY names `{path}`, but it could not be read: {err}",
+        "JET_ORG_UNSAFE_POLICY names `{path}`, but it could not be read: {pkg_io_cause(err)}",
         "fix the policy path or remove the environment variable")}})
     declarations := pkg_parse_policy_document(source) ?? return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
         "the configured organization gate policy is malformed",

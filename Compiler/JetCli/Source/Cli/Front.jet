@@ -50,6 +50,7 @@ use {
         diagnostic_from_registry,
         diagnostic_registry_row,
         diagnostic_render_all,
+        policy_gate_parse,
         policy_key_parse,
         test_setting_flag,
         test_setting_flag_row,
@@ -882,7 +883,7 @@ fn jet_cli_doc(jet_argv: [String], args: [String], color: Bool, quiet: Bool, jso
 // Build flags whose Jet port has not landed: refused, never ignored.
 JET_CLI_BUILD_UNPORTED_FLAGS :: [String]{
     "--lib", "--verify", "--import",
-    "--builder", "-p", "--output", "--gate",
+    "--builder", "-p", "--output",
     // D-BUILD-WATCH1=A (#6322 C4): refused until the shared watch engine
     // drives `jet build`, never a silent single build.
     "--watch",
@@ -951,6 +952,11 @@ fn jet_cli_build_options(jet_argv: [String], command: String, file: String, sour
         .Refused(plan) -> return JetCLIBuildOptions.Refused{plan: plan}
         .Given(given) -> settings = given.copy()
     }
+    gates := [PolicyKey]{}
+    if jet_cli_gate_flags(jet_argv, color) == {
+        .Refused(plan) -> return JetCLIBuildOptions.Refused{plan: plan}
+        .Given(given) -> gates = given.copy()
+    }
     if build_option_flags(jet_argv) == {
         .Refused(code, what, fix) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)}
         .Resolved(given, _) -> flags = given.written
@@ -1010,6 +1016,7 @@ fn jet_cli_build_options(jet_argv: [String], command: String, file: String, sour
             }
             selected := options.copy()
             selected.settings = settings
+            selected.gates = gates
             return JetCLIBuildOptions.Selected{options: selected, notes: text}
         }
     }
@@ -1041,6 +1048,28 @@ fn jet_cli_setting_flags(jet_argv: [String], color: Bool) -> JetCLISettingFlags 
         &settings.push(BuildSettingOverride{name: parts[0].trim(), value: value})
     }
     JetCLISettingFlags.Given{settings: settings}
+}
+
+enum JetCLIGateFlags {
+    Given(gates: [PolicyKey])
+    Refused(plan: JetCLIPlan)
+}
+
+// `--gate name=allow` and `--gate=name=allow`, in argv order: each opens one
+// audited gate for the compile (policy_gate_parse); an owning `.Forbid` still
+// refuses it (E3415). Any other word is a usage error (E2104).
+fn jet_cli_gate_flags(jet_argv: [String], color: Bool) -> JetCLIGateFlags Never! {
+    gates := [PolicyKey]{}
+    loop (index, argument) in jet_argv {
+        if argument == "--" -> break
+        written := String?{None}
+        if argument.starts_with("--gate=") -> written = Val(argument.removeprefix("--gate="))
+        if argument == "--gate" -> written = Val(if index + 1 < jet_argv.len() -> jet_argv[index + 1].copy() else -> "")
+        spec :: written ?? next
+        key :: policy_gate_parse(spec) ? found -> found ! error -> return JetCLIGateFlags.Refused{plan: jet_cli_fail("E2104", "`--gate {spec}` doesn't open a gate: {error.message}", jet_cli_why("E2104"), "write `--gate name=allow` with an audited gate name, such as `--gate impure=allow`", color, JET_DRIVER_EXIT_USAGE)}
+        if !gates.contains(key) -> &gates.push(key)
+    }
+    JetCLIGateFlags.Given{gates: gates}
 }
 
 // The stock `release` profile: `optimize: full`, and `debug_info: split`,
@@ -1268,7 +1297,7 @@ fn jet_cli_build_args_refused(file: String, color: Bool) -> JetCLIPlan Never! {
 // refused until its port lands, never ignored; an unregistered one was
 // already refused by E2102, or is ignored by the `jet <file>` shorthand as
 // the Rust host ignores it.
-JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set"}
+JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate"}
 
 // `jet run [<file>]` under its build options (jet_cli_build_options); `watch`
 // makes it `jet dev`.

@@ -174,13 +174,15 @@ struct BuildSettingOverride {
 // (`release`, a declared name), "" when none is; `written` keeps every
 // non-stock value in layer order, so a `fn build` layer can still go under the
 // flags; `values` is the resolved value of each row, in table order.
-// `settings` are the `--set` writers in argv order.
+// `settings` are the `--set` writers in argv order; `gates` the audited gates
+// `--gate name=allow` opens for the compile, in argv order.
 struct BuildOptions {
     command: String
     profile: String
     written: [BuildOptionChoice]
     values: [BuildOptionChoice]
     settings: [BuildSettingOverride]{[BuildSettingOverride]{}}
+    gates: [PolicyKey]{[PolicyKey]{}}
 }
 
 enum BuildOptionsResolved {

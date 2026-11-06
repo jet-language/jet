@@ -3,7 +3,7 @@
 // no CLI reader re-scans source text to discover an unsafe operation.
 use {
     jet_foundation.[GateLedger, Diagnostic, Item, Program, ast_program, compiler_transfer_rows, diagnostic_with_source_path, gate_ledger_sort]
-    jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, SemaSourceOrigin, sema_gate_ledger_collect, sema_gate_checked_text_names, sema_gate_policy_diagnostics, sema_unsafe_inspect]
+    jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, SemaSourceOrigin, sema_gate_ledger_collect, sema_gate_checked_text_names, sema_gate_policy_diagnostics, sema_gate_source_policy_diagnostics, sema_unsafe_inspect]
 }
 
 fn jet_driver_doc_gate_projection(docs: &[JetDriverDocModule], graph: SemaGraphResult, registration: SemaRegistrationGraph, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo]) Never! {
@@ -96,14 +96,18 @@ fn jet_driver_gate_module_policy(row: &SemaGateModule, request: JetDriverCompile
     }
 }
 
-// (D-UNSAFE-OBLIG1=A): every check runs the unsafe obligation pass and the
-// package `policy.unsafe` / `policy.expert` surface over the loaded programs
-// before registration. Compiler-owned Core sources carry no package policy and
-// are not inspected. Each program's items move into its row for the read and
+// (D-UNSAFE-OBLIG1=A): every check runs the unsafe obligation pass, the
+// package `policy.unsafe` / `policy.expert` surface and the owning policies'
+// refusal of the other written gates over the loaded programs before
+// registration. Compiler-owned Core sources carry no package policy and
+// are not inspected. A row is keyed by the file's physical path, which its
+// refusals name as the gate's site; each diagnostic is reported against the
+// unit's own path. Each program's items move into its row for the read and
 // back after it.
 fn jet_driver_unsafe_check(request: JetDriverCompileRequest, load: &JetDriverLoadResult) Never! {
     modules := [SemaGateModule]{}
     owners := [Int]{}
+    unit_paths := [String:String]{}
     loop index in 0..<load.modules.len() {
         unit_index :: load.modules[index].source_unit_index
         if jet_driver_unit_is_core(load.source_units[unit_index]) -> next
@@ -114,18 +118,21 @@ fn jet_driver_unsafe_check(request: JetDriverCompileRequest, load: &JetDriverLoa
         if load.source_units[unit_index].source_origin == SemaSourceOrigin.Snapshot && root_index >= 0 && file_index >= 0 {
             physical = request.authorized_sources.roots[root_index].files[file_index].path
         }
+        unit_paths[physical] = source
         program := ast_program()
         compiler_transfer_rows<Item>(&program.items, &load.modules[index].program.items)
         program.policy_declarations = load.modules[index].program.policy_declarations.copy()
         program.rule_facts = load.modules[index].program.rule_facts.copy()
         program.no_prelude = load.modules[index].program.no_prelude
-        row := SemaGateModule{source: source, program: ^program}
+        row := SemaGateModule{source: physical, program: ^program}
         jet_driver_gate_module_policy(&row, request, load.packages, load.modules[index].package_identity, physical)
         &modules.push(^row)
         &owners.push(index)
     }
     if modules.len() == 0 -> return
     inspection :: sema_unsafe_inspect(modules, request.gate_set)
+    refusals :: sema_gate_source_policy_diagnostics(modules)
     loop position in 0..<owners.len() -> compiler_transfer_rows<Item>(&load.modules[owners[position]].program.items, &modules[position].program.items)
-    loop entry in inspection.diagnostics -> &load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, entry.source, 0))
+    loop entry in inspection.diagnostics -> &load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))
+    loop entry in refusals -> &load.diagnostics.push(diagnostic_with_source_path(entry.diagnostic, unit_paths.get(entry.source) ?? entry.source, 0))
 }

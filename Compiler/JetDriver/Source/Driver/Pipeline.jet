@@ -94,6 +94,8 @@ use {
         AUTHORITY_AMBIENT_BASIC_EFFECTS,
         AUTHORITY_PANIC_ROOT,
         BuildSettingOverride,
+        PolicyKey,
+        policy_gate_allows,
         CompilerThreads,
         CompilerTraceSink,
         DIAGNOSTIC_ERROR,
@@ -1611,6 +1613,7 @@ fn jet_driver_comptime_flush(
         if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.eval", source.source_file, source.name)
         item_config := jet_driver_comptime_eval_config(request.eval_config, jet_driver_comptime_inputs_for(request, source.source_file), Val(compiler_queries))
         item_config.impure = source.impure
+        item_config.impure_gate = policy_gate_allows(request.gate_set, PolicyKey.Impure)
         eval_result :: jet_eval_native_run(&native, item, [TComptimeValue]{}, item_config, comptime_request.span)
         if request.trace_sink == .Val(sink) -> sink.end("comptime.eval", 1)
         jet_driver_record_eval_result(&trace, eval_result)

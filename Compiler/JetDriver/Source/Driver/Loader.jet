@@ -4477,15 +4477,17 @@ fn jet_driver_load_reach(request: JetDriverCompileRequest, use_driven: Bool) -> 
 
     source_units := catalog.source_units
     selected_entry :: source_units[entry_index ?? 0]
-    // Rust read_load threads the entry package's policy through the entire
-    // user-source closure, including imports, not each dependency's own floor.
-    package_policy := [PolicyDeclaration]{}
+    // Rust read_load threads the organization floor, then the entry package's
+    // policy, through the entire user-source closure, including imports, not
+    // each dependency's own floor.
+    // copy: the request keeps its organization rows for the rest of the compile.
+    package_policy := request.organization_policy.copy()
     loop package in catalog.packages {
         if package.identity == catalog.entry_package_identity {
             // copy: `catalog` keeps its package rows for the rest of the load (catalog.source_units
             // and the package walk read them below), while the entry policy is threaded separately
             // through every loaded unit.
-            package_policy = package.policy_declarations.copy()
+            &package_policy.extend(package.policy_declarations.copy())
             break
         }
     }

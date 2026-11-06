@@ -1,6 +1,6 @@
 // Read-only unsafe inspection, adapted from origin/port/compiler.
 // The current integration passes module rows rather than a Rust ProgramBundle.
-use jet_foundation.[Diagnostic, Span, Expr, Call, Func, Item, Program, Stmt, GateSet, PolicyDeclaration, EffectivePolicy, PolicyKey, PolicyScope, PolicyValue, policy_resolve_with_gates, policy_default_gate_value, policy_gate_allows, policy_scope_name, policy_value_display]
+use jet_foundation.[Diagnostic, Span, Expr, Call, Func, Item, Program, Stmt, GateSet, PolicyDeclaration, EffectivePolicy, PolicyKey, PolicyScope, PolicyValue, policy_resolve_with_gates, policy_default_gate_value, policy_gate_allows, policy_gate_forbidding, policy_scope_name, policy_value_display]
 
 struct SemaGateModule {
     source: String
@@ -259,8 +259,13 @@ fn sema_unsafe_visit_gate(target: Span, span: Span, is_function: Bool, reason: S
     effective := if policy_resolve_with_gates(PolicyKey.Unsafe, chain, gates) == {
         .Ok(policy) -> policy
         .Err(_) -> {
-            code :: if policy_gate_allows(gates, PolicyKey.Unsafe) -> "E3415" else -> "E0355"
-            sema_unsafe_diagnostic(&result, source, code, Val(span), "audited gate denied by effective policy", "an organization or package policy can refuse an audited escape, including its invocation gate", "remove `--gate unsafe=allow` or change the owning policy")
+            // An allowed `--gate unsafe=allow` cannot widen an owning `.Forbid`.
+            forbidding :: policy_gate_forbidding(PolicyKey.Unsafe, chain)
+            if policy_gate_allows(gates, PolicyKey.Unsafe) && forbidding == .Val(policy) {
+                &result.diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_gate_denied(PolicyKey.Unsafe, "{source}:{span.start}..{span.end}", Val(span), policy.source)})
+            } else {
+                sema_unsafe_diagnostic(&result, source, "E0355", Val(span), "audited gate denied by effective policy", "an organization or package policy can refuse an audited escape, including its invocation gate", "remove `--gate unsafe=allow` or change the owning policy")
+            }
             None
         }
     }
