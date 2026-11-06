@@ -2,8 +2,10 @@
 # `t.<setting>(…)` call on test.jet's `Test`, layered profile, then `fn test`, then flag.
 # `jet test` prints the settings it used and where each came from. `list` names the tests
 # and runs none, `shard` runs one slice and never writes the baseline, `results` writes
-# one document of the run's rows, and `compiler` names the jet the children run. Each
-# part has its negative control.
+# one document of the run's rows (one for every level of a multi-level run), and
+# `compiler` names the jet the children run. The corpus-pool settings need a corpus
+# suite, and a `fn test` setting after `t.run()` is refused. Each part has its negative
+# control.
 fixture: fixtures/test_profiles
 env: NO_COLOR=1
 env: TERM=dumb
@@ -44,6 +46,27 @@ step: jet test --capture=all
 cwd: {work}/app
 exit: 0
 stderr: ~ "2 rows recorded as the baseline" # an unsharded run records it
+step: jet test --show-default --optimize=none,basic --results=lv.json --compiler={jet}
+cwd: {work}/app
+exit: 0
+file: app/lv.json ~ "\"tier\":\"tests at optimize none\"" # one document holds every level's rows
+file: app/lv.json ~ "\"tier\":\"tests at optimize basic\"" # one document holds every level's rows
+file: app/lv.json ~ "\"suites\":[\"tests\"]" # under the tests suite
+file: app/lv.none.json absent # no file per level
+step: jet test --show-default --jobs=2
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jobs` (flag) steers the corpus suites, and this run has none" # a plain run has no corpus pool
+stderr: ~ "E2104" # refused with the settings code
+stdout: !~ "passed" # no test ran
+step: jet test --profile quick --diagnostic-coverage
+cwd: {work}/app
+exit: 2
+stderr: ~ "`diagnostic_coverage` (flag) steers the corpus suites, and this run has none" # quick runs only #Tests
+step: jet test --profile full --jobs=1
+cwd: {work}/app
+exit: 0
+stdout: ~ "PASS\ttests/golden/greet.jet\to0" # a profile with a corpus suite takes the pool width
 copy: alt/settings-test.jet app/test.jet
 step: jet test
 cwd: {work}/app
@@ -63,4 +86,10 @@ step: jet test
 cwd: {work}/app
 exit: 2
 stderr: ~ "`t.shard(…)` needs I/N with 1 <= I <= N, such as `2/4`, not `9/8`" # a bad call is refused before any test runs
+stdout: !~ "passed" # no test ran
+copy: alt/late-setting-test.jet app/test.jet
+step: jet test
+cwd: {work}/app
+exit: 2
+stderr: ~ "`t.serial(…)` comes after `t.run()`, whose tests already ran without it" # a late call is refused
 stdout: !~ "passed" # no test ran

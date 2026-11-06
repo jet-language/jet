@@ -251,8 +251,19 @@ struct JetCLITestMemberRun {
 // jet_cli_native_test_width allows (one per core, fewer while free memory
 // can't hold JET_NATIVE_TEST_CHILD_MEMORY for each); the runs of one package
 // (each optimize level, another compiler) run one at a time, as each is a
-// whole parallel test run. The exit status is the most severe child's.
-fn jet_cli_test_workspace(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, quiet: Bool) -> JetDriverVerbOutput {
+// whole parallel test run. With `results` the runs' rows, each at its
+// `tiers` entry, are one document (TestSettingLayers.jet
+// jet_cli_test_runs_results_write). The exit status is the most severe
+// child's.
+fn jet_cli_test_workspace(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, results: String, tiers: [String], quiet: Bool) -> JetDriverVerbOutput {
+    if results == "" -> return jet_cli_test_workspace_run(names, member_args, envs, executable, heading, results, tiers, "", quiet)
+    scratch :: cli_files.temp_dir("jet-test-results") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: couldn't create a scratch directory for the `results` document: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    jet_cli_test_workspace_run(names, member_args, envs, executable, heading, results, tiers, scratch.path, quiet)
+}
+
+// jet_cli_test_workspace with `scratch` ("" without `results`) holding each
+// child's evidence report.
+fn jet_cli_test_workspace_run(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, results: String, tiers: [String], scratch: String, quiet: Bool) -> JetDriverVerbOutput {
     // copy: the plan keeps its executable; each argv owns its program word.
     program :: if executable == "" -> cli_sys.executable() else -> executable.copy()
     argvs := [[String]]{}
@@ -261,14 +272,16 @@ fn jet_cli_test_workspace(names: [String], member_args: [[String]], envs: [[Stri
         loop argument in args -> &argv.push(argument.copy()) // copy: the plan keeps its words.
         &argvs.push(^argv)
     }
-    child_envs := [[String]]{}
-    loop index in 0..<argvs.len() -> &child_envs.push(if index < envs.len() -> envs[index].copy() else -> [String]{}) // copy: each child task owns its environment row.
+    child_envs :: jet_cli_test_runs_envs(envs, argvs.len(), scratch)
     width :: if heading == "member" -> jet_cli_native_test_width(cli_sys.cpu_count(), jet_cli_memory_available()) else -> 1
     exit_code := JET_DRIVER_EXIT_OK
     loop run in jet_cli_test_members_run(heading, names, argvs, child_envs, width, quiet) {
         if run.code > exit_code -> exit_code = run.code
     }
-    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
+    if results == "" -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
+    problems :: jet_cli_test_runs_results_write(results, scratch, names, tiers, program)
+    if problems != "" && JET_DRIVER_EXIT_USER_ERROR > exit_code -> exit_code = JET_DRIVER_EXIT_USER_ERROR
+    JetDriverVerbOutput{stdout: "", stderr: problems, exit_code: exit_code}
 }
 
 // Runs each argv as a child with its `envs` row of name, value pairs set, at
@@ -1831,15 +1844,18 @@ fn jet_cli_test_result(file: String, source: String, doctests: [JetCLIDoctestFil
     if how == .Logged && reuse == .Val(store) -> jet_cli_test_reuse_keep(store, run, passed)
     exit_code :: if passed -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
     show :: options.capture == "all" || (!passed && options.capture == "failed")
-    // The canonical report always prints; the children's own streams follow the capture policy.
-    stdout :: if show -> ran.output else -> ran.receipt.output
+    // The canonical report always prints; the children's own streams follow
+    // the capture policy. A code suite's child runs no #Test, so its report
+    // is the rows its suite recorded (TestProfile.jet), not the #Test count.
+    stdout := if show -> ran.output else -> ran.receipt.output
+    if code_suite -> stdout = "{stdout.removesuffix(ran.receipt.output)}{jet_cli_test_code_suite_summary()}"
     stderr :: if show -> ran.errors else -> ran.receipt.errors
     if measure == None {
         outcome :: jet_cli_test_outcome(file, source, options.build, wires, claims, run.contracts, passed, floor) ?? return jet_cli_ice(err.message)
         persisted :: jet_cli_test_persist(outcome.report)
         // `results`: the run's verdicts as one document (TestSettingLayers.jet).
         if test_settings_get(options.settings, "results") == .Val(results_path) {
-            written :: jet_cli_test_results_write(results_path, jet_cli_test_record_results(outcome.report.records, "tests", "tests"), [String]{"tests"})
+            written :: jet_cli_test_results_write(results_path, jet_cli_test_record_results(outcome.report.records, "tests", "tests"), [String]{"tests"}, cli_sys.executable())
             if written == .Val(problem) -> return jet_cli_build_failed(problem, jet_cli_why("E2105"), "name a writable `results` file", color)
         }
         plural :: if wires.len() == 1 -> "" else -> "s"
@@ -2982,7 +2998,7 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
             output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink))
         }
         .Test(file, source, color, verbose, threads, options) -> output = jet_cli_compile_test(file, source, color, verbose, threads, options, trace_sink)
-        .TestWorkspace(names, member_args, envs, executable, heading, quiet) -> output = jet_cli_test_workspace(names, member_args, envs, executable, heading, quiet)
+        .TestWorkspace(names, member_args, envs, executable, heading, results, tiers, quiet) -> output = jet_cli_test_workspace(names, member_args, envs, executable, heading, results, tiers, quiet)
         .TestProfile(profile, root, settings, runs, update, quiet) -> output = jet_cli_test_profile(profile, root, settings, runs, update, quiet)
         .New(name, template, annotated, quiet, json, color) -> output = jet_cli_new_project(name, template, annotated, quiet, json, color)
 

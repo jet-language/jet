@@ -11,15 +11,21 @@ fn kit_exec_defaults() -> KitOptions {
 }
 
 
+// The corpus ids `options` selects of `all_ids`. A `cases` file names only
+// corpus ids, unless others_selected lets it name the run's other tests too.
 fn kit_exec_select_ids(all_ids: [String], options: KitOptions) -> KitSelection {
     requested := [String]{}
-    if options.cases != "" {
+    listed :: options.cases != ""
+    if listed {
         text :: files.read(options.cases) ?? return KitSelection{ids: [], error: "read cases file: {err}"}
         loop raw in text.split("\n") {
             id :: raw.trim().copy()
             if id == "" || id.starts_with("#") -> next
             if kit_expect_named(requested, id) -> return KitSelection{ids: [], error: "duplicate case ID: {id}"}
-            if !kit_expect_named(all_ids, id) -> return KitSelection{ids: [], error: "unknown case ID: {id}"}
+            if !kit_expect_named(all_ids, id) {
+                if options.others_selected -> next
+                return KitSelection{ids: [], error: "unknown case ID: {id}"}
+            }
             &requested.push(id)
         }
     }
@@ -31,7 +37,7 @@ fn kit_exec_select_ids(all_ids: [String], options: KitOptions) -> KitSelection {
     }
     selected := [String]{}
     loop (index, id) in all_ids {
-        if requested.len() > 0 && !kit_expect_named(requested, id) -> next
+        if listed && !kit_expect_named(requested, id) -> next
         if options.bless.ids.len() > 0 && !kit_expect_named(options.bless.ids, id) -> next
         if options.filter != "" && !id.contains(options.filter) -> next
         if index % options.shard_count != options.shard_index - 1 -> next

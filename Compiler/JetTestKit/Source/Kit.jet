@@ -88,6 +88,9 @@ struct KitOptions {
     cases_corpora: [String]{[String]{}}
     // The accepted-failing ledger (kit_known_load): an absolute path, "" is none.
     ledger: String{""}
+    // A selection (`filter`, `cases`) that matches no corpus entry is no rows
+    // rather than an error: the run selects other tests beside the corpus.
+    others_selected: Bool{false}
 }
 
 struct KitCtx {
@@ -779,6 +782,7 @@ fn kit_execute_suites(options: KitOptions, root: String, selected_suites: [Strin
     selection :: kit_exec_select_ids(corpus.map(item -> item.entry.path), options)
     if selection.error != "" -> return kit_execution_refused("REFUSED\tselection\t\t{selection.error}")
     entries :: corpus.filter(item -> kit_expect_named(selection.ids, item.entry.path))
+    if entries.len() == 0 && options.others_selected -> return KitExecution{code: 0, failures: []}
     if entries.len() == 0 -> return kit_execution_refused("ERROR\tselection\t\tno matching corpus entries")
     if options.list {
         loop item in entries -> print("{item.entry.suite}\t{item.entry.path}")

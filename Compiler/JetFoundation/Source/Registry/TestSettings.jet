@@ -340,22 +340,29 @@ fn test_settings_number(settings: [TestSetting], name: String) -> Int Never! {
 
 // The settings as `name<TAB>value<TAB>source` lines (TEST_SETTINGS_ENV), and
 // back. The plan file's lines are `name<TAB>value`, each from the `source`
-// the reader names.
+// the reader names; one the plan step wrote after `fn test` called
+// `t.run()` starts with TEST_SETTING_AFTER_RUN (JetRuntime TestSuite.jet).
 fn test_settings_lines(settings: [TestSetting]) -> String Never! {
     text := ""
     loop setting in settings -> text = "{text}{setting.name}\t{setting.value}\t{setting.source}\n"
     text
 }
 
+// The mark of a plan line whose `t.<name>(…)` call came after `t.run()`.
+TEST_SETTING_AFTER_RUN :: "!"
+
 // The settings `text` holds; a line without its own source is from
 // `source`. Err names the first line that is no setting, no value of its
-// row, or a row not ported yet, as the `t.<name>(…)` call that wrote it.
+// row, a row not ported yet, or a call after `t.run()`, as the
+// `t.<name>(…)` call that wrote it.
 fn test_settings_parse_lines(text: String, source: String) -> [TestSetting] TestSettingError! {
     settings := [TestSetting]{}
     loop line in text.split("\n").to_list() {
         if line == "" -> next
-        parts :: line.split("\t").to_list()
+        late :: line.starts_with(TEST_SETTING_AFTER_RUN)
+        parts :: line.removeprefix(TEST_SETTING_AFTER_RUN).split("\t").to_list()
         row :: test_setting_row(parts[0]) ?? return Err(TestSettingError{message: "`{parts[0]}` is not a `jet test` setting"})
+        if late -> return Err(TestSettingError{message: "`t.{row.name}(…)` comes after `t.run()`, whose tests already ran without it"})
         raw :: if parts.len() > 1 -> parts[1].copy() else -> ""
         value :: test_setting_value(row, raw) ?? return Err(TestSettingError{message: "`t.{row.name}(…)` needs {test_setting_hint(row)}, not `{raw}`"})
         if !row.ported -> return Err(TestSettingError{message: "`t.{row.name}(…)` is not ported to the Jet test runner yet"})
@@ -414,6 +421,7 @@ fn test_settings_parse_lines(text: String, source: String) -> [TestSetting] Test
     assert_eq((test_settings_parse_lines("optimize\t[\"none\", \"full\"]\n", "fn test") ?? panic(err.message))[0].value, "none,full")
     assert_eq(test_settings_refusal("coverage\ttrue\n"), "`t.coverage(…)` is not ported to the Jet test runner yet")
     assert_eq(test_settings_refusal("shard\t9/8\n"), "`t.shard(…)` needs I/N with 1 <= I <= N, such as `2/4`, not `9/8`")
+    assert_eq(test_settings_refusal("serial\ttrue\n!shard\t3/8\n"), "`t.shard(…)` comes after `t.run()`, whose tests already ran without it")
 }
 
 // Why `fn test`'s plan lines `text` are refused, "" when they aren't.

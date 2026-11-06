@@ -683,7 +683,8 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
 // Every jet flag: the fixed rows, with one row per build option
 // (BuildOptions.jet) after `--profile` and one per `jet test` setting
 // (TestSettings.jet) after `--explain-partition`. A setting whose flag is a
-// fixed row shared with other commands keeps that row.
+// fixed row shared with other commands keeps that row; one whose flag is a
+// build option's (`--optimize`) shares that option's row, which says both.
 JET_CLI_FLAGS :: comptime { jet_cli_flag_rows() }
 
 fn jet_cli_flag_rows() -> [JetCLIFlagSpec] Never! {
@@ -692,26 +693,49 @@ fn jet_cli_flag_rows() -> [JetCLIFlagSpec] Never! {
         &rows.push(spec.copy())
         if spec.long == "--profile" {
             loop option in JET_BUILD_OPTIONS {
-                scope :: if option.name == "optimize" -> "build/run/dev" else -> "build/run/dev/test"
-                &rows.push(JetCLIFlagSpec{long: build_option_flag(option.name), help: "With {scope}: {option.help}"})
+                flag :: build_option_flag(option.name)
+                help := "With build/run/dev/test: {option.help}"
+                if jet_cli_test_setting_of_flag(flag) == .Val(row) -> help = "{help}; with test: {jet_cli_test_setting_text(row)}"
+                &rows.push(JetCLIFlagSpec{long: flag, help: help})
             }
         }
         if spec.long != "--explain-partition" -> next
         loop setting in JET_TEST_SETTINGS {
             flag :: test_setting_flag(setting.name)
-            // The lambda takes its own name: a capture moves the name it reads.
-            fixed_flag :: flag.copy()
+            // The lambdas take their own names: a capture moves the name it reads.
+            fixed_flag :: flag.copy() // copy: the fixed-row lambda's own name.
             if JET_CLI_FIXED_FLAGS.any(fixed -> fixed.long == fixed_flag) -> next
+            option_flag :: flag.copy() // copy: the build-option lambda's own name.
+            if JET_BUILD_OPTIONS.any(option -> build_option_flag(option.name) == option_flag) -> next
             &rows.push(JetCLIFlagSpec{long: flag, help: jet_cli_test_setting_help(setting)})
         }
     }
     rows
 }
 
+// The `jet test` setting whose flag is `flag`, if one is.
+fn jet_cli_test_setting_of_flag(flag: String) -> TestSettingRow? Never! {
+    loop setting in JET_TEST_SETTINGS {
+        if test_setting_flag(setting.name) == flag -> return Val(setting.copy()) // copy: the registry keeps its row.
+    }
+    None
+}
+
+#Test("--optimize is one flag row that says what it does for a build and for jet test") {
+    rows :: JET_CLI_FLAGS.filter(row -> row.long == "--optimize")
+    assert_eq(rows.len(), 1)
+    assert(rows[0].help.starts_with("With build/run/dev/test: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level"))
+}
+
 // A setting's help line: what it does and its three spellings.
 fn jet_cli_test_setting_help(setting: TestSettingRow) -> String Never! {
+    "With test: {jet_cli_test_setting_text(setting)}"
+}
+
+// A setting's help after its `With test: ` scope.
+fn jet_cli_test_setting_text(setting: TestSettingRow) -> String Never! {
     ported :: if setting.ported -> "" else -> " (not ported to the Jet test runner yet)"
-    "With test: {setting.help}{ported}; {test_setting_spellings(setting)}"
+    "{setting.help}{ported}; {test_setting_spellings(setting)}"
 }
 
 JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{

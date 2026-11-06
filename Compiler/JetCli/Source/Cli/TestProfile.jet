@@ -115,11 +115,15 @@ fn jet_cli_test_profile_plan(jet_argv: [String], positionals: [String], show_def
     if facts.test_suites_refusal(code_suites) == .Val(refusal) {
         return Val(jet_cli_fail("E1215", "`package.jet` has a shape error", refusal, "declare each suite once, in `suites:` or with `t.suite` in test.jet's `fn test`, and name only declared suites in a profile", color, JET_DRIVER_EXIT_USER_ERROR))
     }
+    corpus := false
+    ui := false
     loop suite in profile.suites {
         if suite == TEST_SUITE_TESTS || code_suites.contains(suite) -> next
         stock :: facts.test_suite(suite) ?? next
-        corpus :: jet_cli_rooted_join(root, stock.corpus)
-        if !cli_files.is_dir(corpus) {
+        corpus = true
+        if stock.kind.as_str() == "ui" -> ui = true
+        directory :: jet_cli_rooted_join(root, stock.corpus)
+        if !cli_files.is_dir(directory) {
             return Val(jet_cli_fail("E2105", "test suite `{suite}` names the corpus `{stock.corpus}`, which isn't a directory", jet_cli_why("E2105"), "create the corpus directory or correct `{stock.kind.as_str()}_corpus:` in package.jet", color, JET_DRIVER_EXIT_USER_ERROR))
         }
     }
@@ -128,7 +132,10 @@ fn jet_cli_test_profile_plan(jet_argv: [String], positionals: [String], show_def
     }
     code :: jet_cli_test_code_layer(root) ?? return Val(jet_cli_test_code_refusal(err.message, color))
     settings :: test_settings_layered(test_settings_layered(profile.settings, code), flags)
-    if jet_cli_test_settings_refusal(settings, color) == .Val(refusal) -> return Val(refusal)
+    if jet_cli_test_settings_refusal(settings, corpus, color) == .Val(refusal) -> return Val(refusal)
+    if test_settings_on(settings, "diagnostic_coverage") && !ui {
+        return Val(jet_cli_fail("E2104", "`diagnostic_coverage` ({jet_cli_test_setting_source(settings, "diagnostic_coverage")}) checks the ui suite, and profile `{chosen}` runs none", jet_cli_why("E2104"), "drop `--diagnostic-coverage`, or run a test profile whose suites include a ui corpus", color, JET_DRIVER_EXIT_USAGE))
+    }
     words := jet_cli_test_child_words(jet_argv)
     // A child's streams are captured, so a colored run asks for color.
     if color && !words.any(argument -> argument == "--color" || argument.starts_with("--color=")) -> &words.push("--color=always")
@@ -172,7 +179,7 @@ fn jet_cli_test_profile(profile: String, root: String, settings: [TestSetting], 
         loop result in results {
             if !suites.contains(result.suite) -> &suites.push(result.suite.copy()) // copy: the rows keep their suite names.
         }
-        if jet_cli_test_results_write(path, results, suites) == .Val(problem) {
+        if jet_cli_test_results_write(path, results, suites, test_settings_get(settings, "compiler") ?? cli_sys.executable()) == .Val(problem) {
             output.stderr = "{output.stderr}jet test: profile `{profile}`: {problem}\n"
             if JET_DRIVER_EXIT_USER_ERROR > output.exit_code -> output.exit_code = JET_DRIVER_EXIT_USER_ERROR
         }
@@ -237,12 +244,13 @@ fn jet_cli_test_profile_corpus(profile: String, root: String, settings: [TestSet
     options.jobs = test_settings_number(settings, "jobs")
     options.memory = test_settings_number(settings, "memory")
     options.opt_in = test_settings_on(settings, "opt_in")
+    // A profile with #Tests beside its corpora runs a filter that matches only #Tests.
+    options.others_selected = chosen.suites.contains(TEST_SUITE_TESTS)
     options.shard_index = test_settings_shard_index(settings)
     options.shard_count = test_settings_shard_count(settings)
     options.sharded = options.shard_count > 1
     options.list = test_settings_on(settings, "list")
     options.coverage = test_settings_on(settings, "diagnostic_coverage")
-    if options.coverage && options.ui_corpora.len() == 0 -> return JetDriverVerbOutput{stdout: "", stderr: "{site}: `diagnostic_coverage` checks the ui suite, and the profile runs none\n", exit_code: JET_DRIVER_EXIT_USAGE}
     if test_settings_time_limit_ms(settings) == .Val(limit) -> options.timeout = (limit + 999) /% 1000
     // `optimize` picks the golden tiers: none is o0 (`jet run`), basic o1
     // (`jet build`), full o2 (`jet build --release`); unset runs all three.
@@ -475,6 +483,23 @@ fn jet_cli_test_code_rows(text: String, stopped: String?) -> JetCLITestCodeRows 
     JetCLITestCodeRows{rows: rows, failures: failures}
 }
 
+// A code suite's child's report (Host.jet jet_cli_compile_test): the rows
+// the suite of JET_CLI_TEST_SUITE_ENV wrote to JET_CLI_TEST_SUITE_ROWS_ENV.
+fn jet_cli_test_code_suite_summary() -[FS, Env]> String Never! {
+    suite :: cli_sys.get(JET_CLI_TEST_SUITE_ENV) ?? ""
+    // A suite that wrote no row leaves no file: it has no rows.
+    text :: cli_files.read(cli_sys.get(JET_CLI_TEST_SUITE_ROWS_ENV) ?? "") ?? ""
+    jet_cli_test_code_rows_summary(suite, text)
+}
+
+// `suite `<name>`: N rows, P passed, F failed` for TestRows lines `text`.
+fn jet_cli_test_code_rows_summary(suite: String, text: String) -> String Never! {
+    code :: jet_cli_test_code_rows(text, None)
+    passed :: code.rows.filter(row -> jet_cli_test_row_state(row) == JET_CLI_TEST_ROW_PASSED).len()
+    plural :: if code.rows.len() == 1 -> "" else -> "s"
+    "suite `{suite}`: {code.rows.len()} row{plural}, {passed} passed, {code.failures.len()} failed\n"
+}
+
 // A code-suite row's state as its `results` verdict: a row that neither
 // passed nor failed (`skipped`, …) is UNSUPPORTED.
 fn jet_cli_test_code_status(state: String) -> String Never! {
@@ -582,6 +607,8 @@ fn jet_cli_test_rows_report(site: String, shown: String, count: Int, diff: JetCL
     assert_eq(code.rows, [String]{"odd\tskipped", "size a\tfailed", "size b\tfailed", "stopped\tfailed"})
     assert_eq(code.failures, [String]{"size b: grew 9%", "size a: duplicate row id", "stopped: panic: out of disk"})
     assert_eq(jet_cli_test_code_rows("", None).rows.len(), 0)
+    assert_eq(jet_cli_test_code_rows_summary("perf", "size a\tpassed\t\nsize b\tfailed\tgrew 9%\nodd\tskipped\tno data\n"), "suite `perf`: 3 rows, 1 passed, 1 failed\n")
+    assert_eq(jet_cli_test_code_rows_summary("perf", ""), "suite `perf`: 0 rows, 0 passed, 0 failed\n")
     assert_eq(jet_cli_test_stop_reason("building\npanic: no disk\n", 101), "panic: no disk")
     assert_eq(jet_cli_test_stop_reason("", 3), "exit code 3")
 }

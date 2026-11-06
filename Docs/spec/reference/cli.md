@@ -575,7 +575,8 @@ The options below are intentionally named exactly as in `jet help`:
   builds or runs, every value gives the same diagnostics and output bytes,
   and `build --verbose` reports the cap it used. No
   environment variable sets it. `--jobs` and `-j` are usage errors (E2102)
-  that point to `--threads`, because `jobs` names project jobs.
+  that point to `--threads`, because `jobs` names project jobs; `jet test
+  --jobs=<n>` is the test setting that sizes the corpus pool.
 
 For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `-c`, `-o`, `-MMD`, `-MD`, `-MF`, `-MT`, reserved `--sysroot`, `-I`, `-D`, `-L`,
@@ -739,16 +740,25 @@ when it lists more than one), `time_limit=<duration>`, `opt_in`,
 `shard=<i/n>` (the tests and corpus rows sorted, then every n-th from the
 i-th), `list` (prints the selected tests and corpus rows, runs nothing, exits
 0), `cases=<file>` (only the tests and corpus rows the file names, one name
-or ID per line; blank and `#` lines skipped), `jobs=<n>` and `memory=<size>`
+or ID per line; blank and `#` lines skipped; beside #Tests, a `filter` or
+`cases` that matches no corpus row selects none instead of failing, and a
+corpus-only run refuses a name that is no row), `jobs=<n>` and `memory=<size>`
 (the corpus pool's width and its memory bound, such as `16G`),
 `allow_shrink=<ids>` (ui rows `-u` may bless with fewer diagnostics,
 comma-separated), `diagnostic_coverage` (the ui suite's coverage entry instead
 of its rows), `results=<file>` (one JSON document of every verdict, the
-testkit's results shape) and `compiler=<jet>` (the jet that builds and runs the
-tests). `list` beside `-u`, a shard beside `-u`, a shard outside
-`1 <= i <= n`, a `cases` file that can't be read and a `results` file that
-can't be written are refused with E2104 before any test runs. A child run
-gets the decided settings in `JET_TEST_SETTINGS` and decides nothing again.
+testkit's results shape, whose `jet` is the compiler that ran them; a run of
+several levels or another `compiler` writes its children's verdicts there,
+each level's rows at the tier `tests at optimize <level>`) and
+`compiler=<jet>` (the jet that builds and runs the tests). `list` beside `-u`,
+a shard beside `-u`, a shard outside `1 <= i <= n`, `jobs`, `memory`,
+`allow_shrink` or `diagnostic_coverage` in a run with no corpus suite,
+`diagnostic_coverage` in a profile with no ui suite, a
+`cases` file that can't be read and a `results` file that can't be written are
+refused with E2104 before any test runs, as is a `t.<setting>(…)` call that
+`fn test` makes after `t.run()`. A child run gets the decided settings in
+`JET_TEST_SETTINGS` and decides nothing again; the parent keeps `compiler`,
+`optimize`, `results` and the corpus-pool settings.
 It also honors
 `--show-default`, `--release`, `--profile`, `--verbose`, `--quiet`,
 `--color`, `--threads` and `--json`.

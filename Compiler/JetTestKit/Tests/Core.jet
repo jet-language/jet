@@ -107,7 +107,7 @@ fn kit_test_core_scratch(label: String) -> String {
     assert_eq(all, ids)
 }
 
-#Test("unknown and duplicate exact case lists are refused") {
+#Test("unknown and duplicate exact case lists are refused, unless other tests may own the names") {
     root :: kit_test_core_scratch("selection")
     path :: files.join(root, "cases.txt")
     options := kit_exec_defaults()
@@ -116,6 +116,12 @@ fn kit_test_core_scratch(label: String) -> String {
     assert(kit_exec_select_ids(["a", "b"], options).error.contains("duplicate"))
     kit_exec_write(path, "not-known\n")
     assert(kit_exec_select_ids(["a", "b"], options).error.contains("unknown"))
+    // Beside other tests, a case list may name them: an unknown id is theirs.
+    options.others_selected = true
+    kit_exec_write(path, "not-known\nb\n")
+    assert_eq(kit_exec_select_ids(["a", "b"], options).ids, ["b"])
+    kit_exec_write(path, "not-known\n")
+    assert_eq(kit_exec_select_ids(["a", "b"], options).ids.len(), 0)
     files.remove_all(root) ?? panic("remove selection scratch")
 }
 

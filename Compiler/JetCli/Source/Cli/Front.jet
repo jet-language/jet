@@ -40,6 +40,7 @@ use {
         JET_CLI_COMMANDS,
         JET_CLI_HANDLERS,
         JET_COMPILER_SERVICE_VERB,
+        JET_TEST_SETTINGS,
         Diagnostic,
         PolicyKey,
         TEST_SETTINGS_ENV,
@@ -116,8 +117,9 @@ enum JetCLIPlan {
     // each child's words after the executable (`executable`, "" for this
     // jet), `envs` each child's environment as name/value pairs (empty:
     // none), and `heading` names a child in the summary (Host.jet
-    // `jet_cli_test_workspace`).
-    TestWorkspace(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, quiet: Bool)
+    // `jet_cli_test_workspace`). `results` ("" for none) is the one document
+    // the runs' rows go to, each run's at its `tiers` entry.
+    TestWorkspace(names: [String], member_args: [[String]], envs: [[String]], executable: String, heading: String, results: String, tiers: [String], quiet: Bool)
     // `jet test` under the test profile `profile` of the package at `root`:
     // each of `runs` is a child `jet test`, compared with its baseline, and
     // the corpus suites run in process (TestProfile.jet
@@ -682,12 +684,14 @@ JET_CLI_THREADS_COMMANDS :: [String]{"build", "run", "check", "test", "dev", "in
 // `--threads N` (or `--threads=N`) before `--`: `None` when absent, else the
 // cap, or the usage error that names the flag.
 // `--jobs` and `-j`, the spelling other build tools use, are refused on the
-// compiling commands with a pointer to `--threads`; `jet jobs` is unchanged.
+// compiling commands with a pointer to `--threads`; `jet jobs` is unchanged,
+// and `jet test --jobs=<n>` is its corpus pool's width (TestSettings.jet).
 fn jet_cli_threads(jet_argv: [String], command: String, color: Bool) -> JetCLIThreads Never! {
     compiling :: JET_CLI_THREADS_COMMANDS.contains(command)
     loop (index, argument) in jet_argv {
         jobs_flag :: argument == "--jobs" || argument.starts_with("--jobs=") || argument == "-j" || (argument.starts_with("-j") && argument.len() > 2)
-        if compiling && jobs_flag {
+        pool_width :: command == "test" && argument.starts_with("--jobs=")
+        if compiling && jobs_flag && !pool_width {
             return JetCLIThreads.Refused{plan: jet_cli_fail("E2102", "`{argument.split("=").to_list()[0]}` isn't a flag jet understands", "`jet jobs` runs your project's named jobs; the compiler's thread cap is `--threads`", "write `--threads N` to cap the compiler at N threads", color, JET_DRIVER_EXIT_USAGE)}
         }
         value := String?{None}
@@ -709,6 +713,25 @@ fn jet_cli_threads(jet_argv: [String], command: String, color: Bool) -> JetCLITh
 enum JetCLIThreads {
     Cap(threads: Int?)
     Refused(plan: JetCLIPlan)
+}
+
+#Test("every jet test setting flag gets past the compiler's --jobs and -j refusal") {
+    loop row in JET_TEST_SETTINGS {
+        flag :: test_setting_flag(row.name)
+        if jet_cli_threads_refused([String]{"test", "{flag}=1"}, "test") -> panic("`jet test {flag}=1` is refused as a thread cap")
+    }
+    assert(jet_cli_threads_refused([String]{"build", "--jobs=2"}, "build"))
+    assert(jet_cli_threads_refused([String]{"test", "--jobs", "2"}, "test"))
+    assert(jet_cli_threads_refused([String]{"test", "-j4"}, "test"))
+}
+
+// Whether jet_cli_threads refuses `jet_argv` for `command`.
+fn jet_cli_threads_refused(jet_argv: [String], command: String) -> Bool Never! {
+    if jet_cli_threads(jet_argv, command, false) == {
+        .Refused(_) -> return true
+        else -> {}
+    }
+    false
 }
 
 // The commands `--trace[=FILE]` streams the compiler's trace for.
@@ -1462,7 +1485,7 @@ fn jet_cli_test_workspace_plan(jet_argv: [String], target_at: Int, names: [Strin
         loop argument in rest -> &args.push(argument)
         &member_args.push(args)
     }
-    JetCLIPlan.TestWorkspace{names: names, member_args: member_args, envs: [[String]]{}, executable: "", heading: "member", quiet: quiet}
+    JetCLIPlan.TestWorkspace{names: names, member_args: member_args, envs: [[String]]{}, executable: "", heading: "member", results: "", tiers: [String]{}, quiet: quiet}
 }
 
 // One test file (or a package entry file): the harness collects every #Test the file and
@@ -1484,7 +1507,9 @@ fn jet_cli_test_file(jet_argv: [String], file: String, color: Bool, verbose: Boo
         code :: jet_cli_test_code_layer(code_root) ?? return jet_cli_test_code_refusal(err.message, color)
         settings = test_settings_layered(code, flags)
     }
-    if jet_cli_test_settings_refusal(settings, color) == .Val(refusal) -> return refusal
+    // A file's run has no corpus suite; a profile run's children keep none
+    // of the corpus-pool settings (JET_CLI_TEST_PARENT_SETTINGS).
+    if jet_cli_test_settings_refusal(settings, false, color) == .Val(refusal) -> return refusal
     if jet_cli_test_settings_fan_out(jet_argv, settings, quiet) == .Val(plan) -> return plan
     jet_cli_test_settings_apply(&options, settings)
     if !inherited && !quiet -> options.status = "{options.status}{jet_cli_test_settings_notice(settings)}"
