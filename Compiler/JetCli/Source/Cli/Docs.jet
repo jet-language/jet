@@ -9,6 +9,7 @@
 use {
     jet_driver.[
         JetDriverDocModule,
+        jet_driver_doc_kind_rank,
     ]
     jet_foundation.[
         Func,
@@ -277,18 +278,6 @@ jet_cli_doc_qualified: fn(parent: String, name: String) -> String Never! {
     // the new value owns its own.
     if parent == "" -> return name.copy()
     "{parent}::{name}"
-}
-
-jet_cli_doc_kind_rank: fn(kind: String) -> Int Never! {
-    if kind == {
-        "module" -> 0
-        "marker" | "fact" -> 1
-        "protocol" | "trait" | "tag" | "effect" -> 2
-        "struct" | "enum" | "distinct" | "type_alias" | "unit_family" -> 3
-        "field" | "variant" -> 4
-        "function" -> 5
-        else -> 6
-    }
 }
 
 jet_cli_doc_marker_names: fn(markers: [Marker]) -> [String] Never! {
@@ -663,7 +652,7 @@ jet_cli_doc_item_order: fn(left: JetCLIDocItem, right: JetCLIDocItem) -> Int Nev
     if by_module != 0 -> return by_module
     by_name: jet_cli_doc_compare_text(left.qualified_name, right.qualified_name)
     if by_name != 0 -> return by_name
-    by_kind: jet_cli_doc_compare_int(jet_cli_doc_kind_rank(left.kind), jet_cli_doc_kind_rank(right.kind))
+    by_kind: jet_cli_doc_compare_int(jet_driver_doc_kind_rank(left.kind), jet_driver_doc_kind_rank(right.kind))
     if by_kind != 0 -> return by_kind
     jet_cli_doc_compare_int(left.source.start, right.source.start)
 }

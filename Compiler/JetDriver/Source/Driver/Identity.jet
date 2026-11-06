@@ -158,6 +158,20 @@ JetDriverDocModule: struct {
     app_route_roots: [AppRouteRoot]{[AppRouteRoot]{}}
 }
 
+// The order of a documented item's kind among items of one qualified name:
+// `jet doc` and the semantic index's documentation graph both sort by it.
+jet_driver_doc_kind_rank: fn(kind: String) -> Int Never! {
+    if kind == {
+        "module" -> 0
+        "marker" | "fact" -> 1
+        "protocol" | "trait" | "tag" | "effect" -> 2
+        "struct" | "enum" | "distinct" | "type_alias" | "unit_family" -> 3
+        "field" | "variant" -> 4
+        "function" -> 5
+        else -> 6
+    }
+}
+
 // One Core library source module the host embeds (a CORE_SOURCE_OWNED_ROWS
 // row): a public `source_module` of Prelude/Core.jet, a compiler-private
 // part of Prelude/CoreSourceParts.tsv, or a private runtime unit. `path` is the repository path;

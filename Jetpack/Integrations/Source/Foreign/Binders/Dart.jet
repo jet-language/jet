@@ -4,7 +4,8 @@
 // Dart owns the isolate. The generated host loads a native Jet plugin,
 // initializes `dart_api_dl`, and pins isolate-local callbacks for Jet calls.
 use {
-    jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST, foundation_sanitize_crate_name]
+    jet_foundation.[JET_TYPE_NAMES]
+    jetpack_foundation.[JET_KEYWORD_LIST, foundation_sanitize_crate_name]
     files: core.files
     jet_pkg_model.[
         BinderHostOS, ForeignBindError, ForeignLanguage, pkg_binder_append_artifact_boundary,
@@ -619,7 +620,7 @@ pkg_dart_strip_comments: fn(source: String) -> String Never! {
 }
 
 pkg_dart_reserved_name: fn(value: String) -> Bool Never! {
-    JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
+    JET_KEYWORD_LIST.contains(value) || JET_TYPE_NAMES.contains(value)
 }
 
 pkg_dart_reserved_function: fn(value: String) -> Bool Never! {

@@ -21,6 +21,7 @@ use jet_foundation.[
     ast_binding,
     ast_empty_call_arg_flags,
     ast_empty_lambda_meta,
+    core_enum_variants,
     core_source_receiver_method,
     expr_span,
     type_name,
@@ -873,14 +874,21 @@ sema_http_route_find_json_body: fn(body: LambdaBody, request_names: [String]) ->
     }
 }
 
+// The route verbs are the cases of `core.http`'s `Method` enum (`Get` is
+// `mux.get`), except `Custom`, whose token is a run-time value.
+sema_http_route_verbs: fn() -> [String] Never! {
+    variants: core_enum_variants("Method") ?? [String]{}
+    verbs := [String]{}
+    loop variant in variants {
+        if variant != "Custom" {
+            verbs.push(variant.lower())
+        }
+    }
+    verbs
+}
+
 sema_http_route_method_name: fn(method: String) -> String Never! {
-    if method == "get" -> return "GET"
-    if method == "post" -> return "POST"
-    if method == "put" -> return "PUT"
-    if method == "delete" -> return "DELETE"
-    if method == "patch" -> return "PATCH"
-    if method == "head" -> return "HEAD"
-    "OPTIONS"
+    method.upper()
 }
 
 sema_http_route_operation_id: fn(method: String, path: String) -> String Never! {
@@ -966,8 +974,7 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
     receiver_name := sema_call_http_nominal_leaf(receiver_value.ty)
     if receiver_name != "HTTPRouter" && receiver_name != "HTTPMux" -> return SemaMethodSpecialCheck{handled: false, value: None}
     if receiver_name == "HTTPMux" && method == "mount" -> return sema_call_http_mount(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-    supported := if receiver_name == "HTTPRouter" -> method == "get" || method == "post" || method == "put" || method == "delete" else -> method == "get" || method == "post" || method == "put" || method == "delete" || method == "patch" || method == "head" || method == "options"
-    if !supported -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_http_route_verbs().contains(method) -> return SemaMethodSpecialCheck{handled: false, value: None}
     literal: if updated_args.len() > 0 -> sema_http_route_check_literal(updated_args[0], environment, program, scopes, diagnostics) else -> SemaHTTPRouteLiteral{pattern: None, interpolated: false, invalid: false}
     if updated_args.len() != 2 {
         diagnostics.push(sema_call_arity_diagnostic(method, 2, updated_args.len(), false, span))

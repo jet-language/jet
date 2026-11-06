@@ -80,6 +80,8 @@ use {
         marker_registered_accepts_arguments,
         owned_trait_arithmetic,
         owned_trait_arithmetic_listed,
+        target_os_key,
+        target_os_named,
     ]
     jet_lexer.[
         TOKEN_AMP,
@@ -1847,7 +1849,7 @@ parser_function_web_partition: fn(state: &JetParserState, marker: Marker) -> Web
     segments: name.split(".").to_list()
     if segments.len() > 1 && segments[0] == "OS" {
         os: segments[1..<segments.len()].join(".")
-        if os != "Linux" && os != "MacOS" && os != "Windows" {
+        if target_os_named(os) == None {
             parser_add_fatal_code(state, "E0003", expr_span(target), "`#Target(OS.{os})` is not a known native OS", "native OS targets are `OS.Linux`, `OS.MacOS`, or `OS.Windows`", "write `#Target(OS.Linux)`, `#Target(OS.MacOS)`, or `#Target(OS.Windows)`")
             return None
         }
@@ -2794,9 +2796,7 @@ parser_impl_os_target: fn(markers: [Marker]) -> String? {
         if marker.name != "Target" || marker.args.len() != 1 -> next
         if marker.args[0] == .Expr(value) {
             if parser_marker_target_path(value) == .Val(path) {
-                if path == "OS.Linux" -> return Val("linux")
-                if path == "OS.MacOS" -> return Val("macos")
-                if path == "OS.Windows" -> return Val("windows")
+                if path.starts_with("OS.") && target_os_named(path.slice(3, path.len())) == .Val(os) -> return Val(target_os_key(os))
             }
         }
     }

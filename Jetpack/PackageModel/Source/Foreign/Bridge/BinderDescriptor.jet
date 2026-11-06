@@ -930,8 +930,6 @@ CLib: struct {
     module_idx: Int
 }
 
-FFI_BOUNDARY_OBLIGATIONS: [String]{"abi", "layout", "width", "alignment", "ownership", "lifetime", "cleanup", "encoding", "nullability", "errors", "exceptions", "callbacks", "task-thread", "target", "copy-cost", "effects"}
-
 // Lower-layer carrier projected from ForeignBoundaryContract.
 FFIBoundaryObligation: struct {
     name: String
@@ -996,7 +994,7 @@ FFIBoundaryFacts: struct {
             if names.contains(obligation.name) -> return Err(ForeignBridgeError{message: "foreign boundary carrier repeats `{obligation.name}` obligation"})
             names.push(obligation.name)
         }
-        loop obligation in FFI_BOUNDARY_OBLIGATIONS {
+        loop obligation in FOREIGN_BOUNDARY_OBLIGATIONS {
             if !names.contains(obligation) -> return Err(ForeignBridgeError{message: "foreign boundary carrier omits `{obligation}` obligation"})
         }
     }

@@ -2,7 +2,8 @@
 // jet_pkg_model::LuaBind. Each session owns one embedded Lua state; values
 // cross as JSON Dyns or as zero-copy table views.
 use {
-    jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
+    jet_foundation.[JET_TYPE_NAMES]
+    jetpack_foundation.[JET_KEYWORD_LIST]
     json: core.encoding.json
     files: core.files
     time: core.time
@@ -260,7 +261,7 @@ pkg_lua_reserved: fn(value: String) -> Bool Never! {
     loop entry in fixed {
         if entry.name == value -> return true
     }
-    PKG_LUA_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
+    PKG_LUA_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_NAMES.contains(value)
 }
 
 PKG_LUA_JET_SESSION: comptime { ```impl Session.Close {

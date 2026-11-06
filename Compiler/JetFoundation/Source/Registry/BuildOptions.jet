@@ -96,9 +96,10 @@ JET_BUILD_OPTIONS: comptime { [BuildOptionRow]{
     // is a `link_override` gate the owning policy can
     // refuse (E3415).
     {name: "link_args", kind: BuildOptionKind.List, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "More native link inputs: -L<dir>, -l<name> or a .a archive path"},
-    // The operating system the image runs on. The native backend writes Linux
-    // x86-64 ELF images, and `jet build` also writes web builds
-    // (`--target web`), so every other value is refused (E2104).
+    // The operating system the image runs on: the key of each TARGET_OS_ALL
+    // OS, in that order, then the OS-less `web` and `freestanding` targets. The
+    // native backend writes Linux x86-64 ELF images, and `jet build` also writes
+    // web builds (`--target web`), so every other value is refused (E2104).
     {name: "os", kind: BuildOptionKind.Choice, values: [String]{"linux", "macos", "windows", "web", "freestanding"}, stock_build: "linux", stock_run: "linux", removes_check: [String]{}, help: "The operating system the image runs on: linux, macos, windows, web or freestanding"},
     // The oldest OS version the image runs on (a Mach-O image's minimum
     // version). A Linux ELF image has no versioned ABI floor, so a non-empty

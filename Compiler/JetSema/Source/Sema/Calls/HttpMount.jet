@@ -38,16 +38,9 @@ sema_http_route_marker_verb: fn(marker: Marker, graph: SemaRegistrationGraph, mo
     declaration: resolved.declaration ?? return None
     module_index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return None
     if graph.modules[module_index].module_name != "core.http.server" -> return None
-    leaf: declaration.name
-    verb := ""
-    if leaf == "Get" -> verb = "get"
-    if leaf == "Post" -> verb = "post"
-    if leaf == "Put" -> verb = "put"
-    if leaf == "Delete" -> verb = "delete"
-    if leaf == "Patch" -> verb = "patch"
-    if leaf == "Head" -> verb = "head"
-    if leaf == "Options" -> verb = "options"
-    if verb == "" -> return None
+    // A route marker is named for its `Method` case: `#Get` registers `get`.
+    verb: declaration.name.lower()
+    if !sema_http_route_verbs().contains(verb) -> return None
     Val(verb)
 }
 

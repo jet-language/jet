@@ -1,6 +1,5 @@
 // IR Web HTTPRouter carrier and typed route registration.
 const JET_HTTP_ROUTE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const JET_HTTP_ROUTE_METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
 const JET_HTTP_MAX_BODY_BYTES = 1024 * 1024;
 const JET_HTTP_TEXT_ENCODER = new TextEncoder();
 
@@ -378,7 +377,9 @@ function jet_http_router_register(router, method, pattern, handler, file, line, 
   ) {
     throw new Error("invalid HTTP router");
   }
-  if (!JET_HTTP_ROUTE_METHODS.includes(method)) {
+  // Sema admits only the verbs of core.http's `Method` cases, so a registration
+  // carries an upper-case method token.
+  if (typeof method !== "string" || method.length === 0 || method !== method.toUpperCase()) {
     throw new Error(`invalid HTTP method: ${String(method)}`);
   }
   if (typeof handler !== "function") throw new Error("invalid HTTP route handler");

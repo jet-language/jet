@@ -2,7 +2,7 @@
 // against the Jet registries that replaced the Rust ones.
 use {
     registry_coverage_files: core.files
-    jet_foundation.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, DiagnosticRegistryStatus, FOUNDATION_FACT_READ_ROWS, FactRead, MARKER_SOURCE, REGISTRATION_FACT_ROWS, REGISTRATION_TRUTH_ROWS, RegistrationFactTarget, diagnostic_explanation, diagnostic_registry_row, diagnostic_registry_rows, diagnostic_stage_is_registered, fact_read_reflection_kind, lint_code_for_name, lint_name_for_code, lint_registered_lints, marker_source_read]
+    jet_foundation.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, DiagnosticRegistryStatus, FOUNDATION_FACT_READ_ROWS, FactRead, JET_BUILD_OPTIONS, MARKER_SOURCE, REGISTRATION_FACT_ROWS, REGISTRATION_TRUTH_ROWS, RegistrationFactTarget, TARGET_OS_ALL, diagnostic_explanation, diagnostic_registry_row, diagnostic_registry_rows, diagnostic_stage_is_registered, fact_read_reflection_kind, lint_code_for_name, lint_name_for_code, lint_registered_lints, marker_source_read, target_os_key, target_os_name, target_os_named]
 }
 
 registry_coverage_is_snake_case: fn(name: String) -> Bool Never! {
@@ -306,4 +306,38 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3014", "E3215"
     }
     assert(planes > 0, "the registry holds no value plane")
     assert_eq(violations.join("\n"), "")
+}
+
+// Each TTargetOS case is listed once in TARGET_OS_ALL (the exhaustive match
+// fails to compile when a case is added), and the `os` build option values
+// are the keys of that list, then `web` and `freestanding`.
+#Test("the os build option and the os dispatch read one os list") {
+    loop os in TARGET_OS_ALL {
+        listed := 0
+        loop candidate in TARGET_OS_ALL {
+            if candidate == os -> listed += 1
+        }
+        assert_eq(listed, 1)
+        assert(target_os_named(target_os_name(os)) == Val((os)))
+    }
+    cases := 0
+    loop os in TARGET_OS_ALL {
+        cases += if os == {
+            .Linux -> 1
+            .MacOS -> 1
+            .Windows -> 1
+        }
+    }
+    assert_eq(cases, 3)
+    expected := [String]{}
+    loop os in TARGET_OS_ALL -> expected.push(target_os_key(os))
+    expected.push("web")
+    expected.push("freestanding")
+    found := false
+    loop row in JET_BUILD_OPTIONS {
+        if row.name != "os" -> next
+        found = true
+        assert_eq(row.values.join(" "), expected.join(" "))
+    }
+    assert(found, "the build option table has no `os` row")
 }

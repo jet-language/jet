@@ -137,6 +137,8 @@ use {
         jet_target_machine_wasm_wasi,
         jet_target_machine_wasm_no_os,
         jet_target_package_version_from_compiler_identity,
+        target_os_key,
+        target_os_parse,
         source_file_id,
         symbol_id,
         body_each_expr_child,
@@ -630,9 +632,7 @@ jet_driver_record_eval_result: fn(trace: &JetDriverCompileTrace, result: JetEval
 }
 
 jet_driver_host_os_key: fn(value: String) -> String Never! {
-    if value == "windows" || value == "Windows" || value == "OS.Windows" -> return "windows"
-    if value == "macos" || value == "MacOS" || value == "OS.MacOS" -> return "macos"
-    if value == "linux" || value == "Linux" || value == "OS.Linux" -> return "linux"
+    if target_os_parse(value) == .Val(os) -> return target_os_key(os)
     ""
 }
 

@@ -30,6 +30,7 @@ use {
         name_find,
         name_index,
         sema_casing_marker_qualifier,
+        target_os_named,
         type_name,
     ]
     jet_lexer.[
@@ -1190,7 +1191,7 @@ parser_apply_file_target: fn(state: &JetParserState, program: &Program, marker: 
     here: parser_current(state).span
     if kept.len() == 2 && kept[0] == "OS" {
         os: kept[1]
-        if os != "Linux" && os != "MacOS" && os != "Windows" {
+        if target_os_named(os) == None {
             parser_add_error(state, expr_span(target), "`#Target(OS.{os})` is not a known native OS", "native OS targets are `OS.Linux`, `OS.MacOS`, or `OS.Windows`", "write `#Target(OS.Linux)`, `#Target(OS.MacOS)`, or `#Target(OS.Windows)`")
             return
         }

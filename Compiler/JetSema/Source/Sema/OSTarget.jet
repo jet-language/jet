@@ -7,7 +7,7 @@
 //   takes or returns a value of a type whose impl is OS-gated. The check reads
 //   signatures only, as the web partition's ABI check does; a `$build.os`
 //   dispatch arm that constructs the type is folded before this runs.
-use jet_foundation.[Diagnostic, Func, Span, WebBucket, diagnostic_registry_row]
+use jet_foundation.[Diagnostic, Func, Span, WebBucket, diagnostic_registry_row, target_os_name, target_os_parse]
 
 sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) {
     gate_of_type := [String:String]{}
@@ -107,10 +107,6 @@ sema_os_target_flag: fn(function: Func, own_gate: String?, type_name: String, ga
 // The parser spells an impl's OS as sema reads it (`linux`, `macos`,
 // `windows`); diagnostics name the marker's variant.
 sema_os_target_name: fn(os: String) -> String Never! {
-    if os == {
-        "linux" -> "Linux"
-        "macos" | "mac_os" -> "MacOS"
-        "windows" -> "Windows"
-        else -> os
-    }
+    if target_os_parse(os) == .Val(target) -> return target_os_name(target)
+    os.copy()
 }

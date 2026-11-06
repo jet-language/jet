@@ -14,6 +14,7 @@ use {
     jet_foundation.[
         BUILTIN_NUMERIC_SOURCES,
         ImportDecl,
+        JET_TYPE_NAMES,
         Item,
         Span,
         Type,
@@ -188,7 +189,7 @@ jet_cli_symbol_is_result: fn(ty: Type?) -> Bool Never! {
 jet_cli_language_symbols: fn() -> [JetCLISymbol] Never! {
     symbols := [JetCLISymbol]{}
     no_examples: [String]{}
-    loop ty in JET_CLI_TYPE_LIST {
+    loop ty in JET_TYPE_NAMES {
         symbols.push(jet_cli_symbol_builtin("builtin:type:{ty}", ty, ty, None, "core", JetCLISymbolKind.Type, "type {ty}", "Built-in Jet type.", no_examples))
     }
     symbols.push(jet_cli_symbol_builtin("builtin:fact:$origin", "$origin", "$origin", None, "compiler", JetCLISymbolKind.Member, "$origin: OriginInfo?", "Compiler-owned typed fact.", no_examples))

@@ -9,6 +9,7 @@
 use {
     doc_text: core.text
     doc_os_path: core.files.runtime.kernel_path_components
+    jet_driver.[jet_driver_doc_kind_rank]
     jet_foundation.[Span, foundation_json_quote]
     jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph, sema_registration_module_index]
     jet_pkg_model.[EffectProjection, pkg_render_effect_projection_object]
@@ -134,7 +135,7 @@ doc_sort_modules: fn(rows: &[DocModule]) Never! {
     rows.sort_by((left: DocModule, right: DocModule) -> (left.path <=> right.path).then(left.name <=> right.name))
 }
 doc_sort_items: fn(rows: &[DocItem]) Never! {
-    rows.sort_by((left: DocItem, right: DocItem) -> (left.module_path <=> right.module_path).then(left.qualified_name <=> right.qualified_name).then(doc_kind_rank(left.kind) <=> doc_kind_rank(right.kind)).then(left.source.start <=> right.source.start))
+    rows.sort_by((left: DocItem, right: DocItem) -> (left.module_path <=> right.module_path).then(left.qualified_name <=> right.qualified_name).then(jet_driver_doc_kind_rank(left.kind) <=> jet_driver_doc_kind_rank(right.kind)).then(left.source.start <=> right.source.start))
 }
 doc_sort_impls: fn(rows: &[DocImpl]) Never! {
     rows.sort_by((left: DocImpl, right: DocImpl) -> (left.module_path <=> right.module_path).then(left.type_name <=> right.type_name).then(doc_trait_name_order(left.trait_name, right.trait_name)).then(left.source.start <=> right.source.start))
@@ -279,17 +280,6 @@ doc_module_name: fn(path: String, alias: String, platform: doc_os_path.PathPlatf
 }
 doc_qualified: fn(parent: String, name: String) -> String Never! {
     if parent == "" -> name.copy() else -> "{parent}::{name}"
-}
-doc_kind_rank: fn(kind: String) -> Int Never! {
-    if kind == {
-        "module" -> 0
-        "marker" | "fact" -> 1
-        "protocol" | "trait" | "tag" | "effect" -> 2
-        "struct" | "enum" | "distinct" | "type_alias" | "unit_family" -> 3
-        "field" | "variant" -> 4
-        "function" -> 5
-        else -> 6
-    }
 }
 // #4357: output receivers retain the Rust pair without an allocated list or
 // extra schema record. Columns count UTF8 bytes, NOT Unicode/display cells.

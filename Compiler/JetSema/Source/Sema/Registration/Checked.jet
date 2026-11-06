@@ -100,6 +100,7 @@ use {
         owned_trait_is_operator,
         owned_trait_literal,
         owned_trait_structural_names,
+        target_os_parse,
         symbol_kind_name,
         type_identity_equal,
         type_name,
@@ -2879,13 +2880,7 @@ sema_checked_nested_impl_key: fn(module_row: SemaRegistrationModule, type_name: 
 }
 
 sema_checked_target_os: fn(target: String?) -> TTargetOS? {
-    value: target ?? return None
-    if value == {
-        "linux" -> Val(TTargetOS.Linux)
-        "macos" | "mac_os" -> Val(TTargetOS.MacOS)
-        "windows" -> Val(TTargetOS.Windows)
-        else -> None
-    }
+    target_os_parse(target ?? return None)
 }
 
 sema_checked_serde_codec: fn(trait_name: String?) -> TSerdeCodec? {

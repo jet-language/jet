@@ -163,7 +163,7 @@ sema_call_http_source_text: fn(value: &&TExpr, span: Span, environment: SemaScop
 
 sema_call_http_static_known: fn(type_name: String, method: String) -> Bool Never! {
     if type_name == "HTTPClientType" && method == "new" -> return true
-    if type_name == "HTTPMethod" && (method == "custom" || method == "get" || method == "head" || method == "post" || method == "put" || method == "delete" || method == "connect" || method == "options" || method == "trace" || method == "patch") -> return true
+    if type_name == "HTTPMethod" && (method == "custom" || sema_http_route_verbs().contains(method)) -> return true
     if type_name == "HTTPStatus" && method == "new" -> return true
     if type_name == "HTTPVersion" && (method == "http_1_0" || method == "http_1_1" || method == "http_2") -> return true
     if (type_name == "HTTPHeaderName" || type_name == "HTTPHeaderValue") && method == "new" -> return true

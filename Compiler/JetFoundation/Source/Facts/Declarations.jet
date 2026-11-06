@@ -239,10 +239,47 @@ TTraitDef: struct {
     methods: [TTraitMethod]
 }
 
+// The native OSes: the one list `#Target(OS.*)`, a `$build.os` dispatch and
+// the native values of the `os` build option read. A `web` or `freestanding`
+// target runs on no OS of this list.
 TTargetOS: enum {
     Linux
     MacOS
     Windows
+}
+
+TARGET_OS_ALL: comptime { [TTargetOS]{TTargetOS.Linux, TTargetOS.MacOS, TTargetOS.Windows} }
+
+// `OS.MacOS` is `MacOS`.
+target_os_name: fn(os: TTargetOS) -> String Never! {
+    if os == {
+        .Linux -> "Linux"
+        .MacOS -> "MacOS"
+        .Windows -> "Windows"
+    }
+}
+
+// The `os` build option value and the impl gate spelling: `macos`.
+target_os_key: fn(os: TTargetOS) -> String Never! {
+    target_os_name(os).lower()
+}
+
+// The OS a bare variant name (`MacOS`) names.
+target_os_named: fn(name: String) -> TTargetOS? Never! {
+    loop os in TARGET_OS_ALL {
+        if target_os_name(os) == name -> return Val(os)
+    }
+    None
+}
+
+// The OS a variant name (`MacOS`), a qualified one (`OS.MacOS`) or a key
+// (`macos`) names; None for any other text.
+target_os_parse: fn(text: String) -> TTargetOS? Never! {
+    bare: if text.starts_with("OS.") -> text.slice(3, text.len()) else -> text
+    loop os in TARGET_OS_ALL {
+        if bare == target_os_name(os) || bare == target_os_key(os) -> return Val(os)
+    }
+    None
 }
 
 TOperatorMarker: enum {

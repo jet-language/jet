@@ -40,6 +40,7 @@ use jet_foundation.[
     SymbolKind,
     TBinaryOp,
     TComptimeValue,
+    TARGET_OS_ALL,
     TDestructureBinding,
     TFailureCarrier,
     TForInMethod,
@@ -80,6 +81,7 @@ use jet_foundation.[
     symbol_id,
     checked_generated_local,
     checked_symbol_local,
+    target_os_name,
     type_carrier_identity,
     type_identity_equal,
     type_identity_key,
@@ -8598,7 +8600,7 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
         sema_check_unsupported(context, "the `comptime if $build.os` dispatch at offset {span.start} has no build facts to fold on")
         return false
     }
-    oses: [String]{"Linux", "MacOS", "Windows"}
+    oses: loop os in TARGET_OS_ALL -> target_os_name(os)
     seen := [String]{}
     valid := true
     loop arm in arms {

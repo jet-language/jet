@@ -640,14 +640,15 @@ jet_target_package_version_from_compiler_identity: fn(identity: String) -> Strin
     Val(build_parts[0])
 }
 
+// The OS `$build.os` folds on: the triple's OS, else the host's (`host_os` is
+// a key such as `macos`), else Linux. A web, Wasm or freestanding triple names
+// no OS, so it folds on the host's.
 jet_target_active_os_name: fn(target_triple: String, host_os: String) -> String Never! {
     if {
-        target_triple.contains("windows") -> "Windows"
-        target_triple.contains("apple") || target_triple.contains("darwin") -> "MacOS"
-        target_triple.contains("linux") -> "Linux"
-        host_os == "windows" -> "Windows"
-        host_os == "macos" -> "MacOS"
-        else -> "Linux"
+        target_triple.contains("windows") -> target_os_name(TTargetOS.Windows)
+        target_triple.contains("apple") || target_triple.contains("darwin") -> target_os_name(TTargetOS.MacOS)
+        target_triple.contains("linux") -> target_os_name(TTargetOS.Linux)
+        else -> target_os_name(target_os_parse(host_os) ?? TTargetOS.Linux)
     }
 }
 

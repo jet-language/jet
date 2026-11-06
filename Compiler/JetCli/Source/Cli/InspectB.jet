@@ -17,6 +17,7 @@ use {
     jet_foundation.[
         CORE_MODULE_EXPORTS,
         DIAGNOSTIC_ERROR,
+        JET_TYPE_NAMES,
         Diagnostic,
         DiagnosticRegistryFix,
         MARKER_SOURCE,
@@ -125,15 +126,6 @@ JET_CLI_KEYWORD_LIST: [String]{
     "self", "Unsafe", "Impure", "Context", "task", "freeze", "shared", "Transact", "Job", "Test",
     "Todo", "State", "Transition", "state", "protocol", "client", "server", "validate",
     "check", "true", "false", "None", "it",
-}
-
-// Syntax `JET_TYPE_LIST`: the built-in type names a user writes in source.
-JET_CLI_TYPE_LIST: [String]{
-    "Int", "Float", "Bool", "String", "()", "Char", "Err", "Shared", "SharedSnapshot",
-    "SharedRevisionError", "SharedGuard", "Shared.Weak", "Condition", "Task", "Receiver",
-    "Sender", "TaskFailure", "HashMap", "BTreeMap", "Map", "Queue", "Set", "Rank",
-    "PriorityQueue", "Cache", "Tally", "Bits", "Bytes", "ViewIter", "I8", "I16", "I32", "I64",
-    "U8", "U16", "U32", "U64", "F32", "F64",
 }
 
 // Syntax `FIRST_PARTY_RESERVED` (S51): first-party short names reserved
@@ -398,7 +390,7 @@ jet_cli_llm_digest: fn() -> String Never! {
         jet_cli_digest_section("Core source rules", core_rules_body),
         jet_cli_digest_section("Canonical idiom suites", idiom_suites_body),
         jet_cli_digest_section("Keywords", jet_cli_digest_list(JET_CLI_KEYWORD_LIST)),
-        jet_cli_digest_section("Built-in type names", jet_cli_digest_list(JET_CLI_TYPE_LIST)),
+        jet_cli_digest_section("Built-in type names", jet_cli_digest_list(JET_TYPE_NAMES)),
         jet_cli_digest_section("Reserved first-party names", jet_cli_digest_list(JET_CLI_FIRST_PARTY_RESERVED)),
         jet_cli_digest_section("Markers", marker_body),
         jet_cli_digest_section("Core module index", core_body),
