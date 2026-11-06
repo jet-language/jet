@@ -3745,7 +3745,7 @@ reactive conformance corpus.
 | `signal<T>(value: T) -> Signal<T>` | signal | Create mutable reactive state. |
 | `computed<T>(compute: fn() -> T) -> Computed<T>` | computed | Compute an initial value from a body. |
 | `derived<T>(compute: fn() -> T) -> Derived<T>` | derived | Compute an initial derived value. |
-| `effect(body: fn()) -> Effect` | effect | Run a body once and retain an active effect record. |
+| `autorun(body: fn()) -> Effect` | effect | Run a body once and retain an active effect record. |
 | `get<T>(sig: Signal<T>) -> T` / `version<T>(sig: Signal<T>) -> Int` | value/version | Read a signal and its version. |
 | `set<T>(sig: Signal<T>, value: T) -> Signal<T>` | signal | Set a signal value and increment its version. |
 | `update(sig: Signal<Int>, delta: Int) -> Signal<Int>` | signal | Add a delta to an integer signal. |
