@@ -1655,11 +1655,15 @@ jet_cli_inspect_impact_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
 // `check_result_value` for a passed explicit-file check: the `jet.check/v1`
 // record impact and expand carry.
 jet_cli_inspect_check_value: fn(source: String, elapsed_ms: Int, diagnostics: Int) -> JetCLIStatusValue Never! {
-    jet_cli_status_object(jet_cli_check_result_fields(source, elapsed_ms, diagnostics))
+    fields := [JetCLIStatusField]{jet_cli_status_field("status", jet_cli_status_text("passed"))}
+    loop field in jet_cli_check_result_fields(source, elapsed_ms, diagnostics) -> fields.push(field)
+    jet_cli_status_object(fields)
 }
 
-// The `jet.check/v1` fields of a passed explicit-file check: the record impact
-// and expand nest, and the fields a clean `jet check --json <file>` status carries.
+// The `jet.check/v1` fields of a passed explicit-file check. A clean
+// `jet check --json <file>` carries them on its status envelope, whose `ok`
+// is the verdict (the envelope has no legacy `status` key); the record impact
+// and expand nest also leads with `status: passed`.
 jet_cli_check_result_fields: fn(source: String, elapsed_ms: Int, diagnostics: Int) -> [JetCLIStatusField] Never! {
     rows := [JetCLIStatusValue]{}
     loop row in JET_CLI_EXPLICIT_FILE_PROOF_ROWS {
@@ -1679,7 +1683,6 @@ jet_cli_check_result_fields: fn(source: String, elapsed_ms: Int, diagnostics: In
         jet_cli_status_field("diagnostics", jet_cli_status_int(diagnostics)),
     })
     [JetCLIStatusField]{
-        jet_cli_status_field("status", jet_cli_status_text("passed")),
         jet_cli_status_field("contract", jet_cli_status_text("jet.check/v1")),
         jet_cli_status_field("schema_version", jet_cli_status_int(1)),
         jet_cli_status_field("scope", jet_cli_status_text("explicit-file")),

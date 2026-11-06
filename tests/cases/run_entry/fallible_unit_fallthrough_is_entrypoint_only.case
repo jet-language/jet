@@ -3,6 +3,8 @@
 # All original public predicates retained.
 fixture: fallible_unit_fallthrough_is_entrypoint_only.fixture
 env: NO_COLOR=1
+# E0114 is only for a non-unit success result (spec.md "must return that result on every path"),
+# so a unit `helper` may fall through like `run`; the original unit-fallthrough E0114 premise is retired.
 step: jet check --json main.jet
-exit: nonzero
-json: stdout doc $.reports[?code="E0114"] #>= 1
+exit: 0
+json: stdout doc $.reports[?code="E0114"] #= 0
