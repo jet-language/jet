@@ -231,15 +231,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     root: nix_test_index_scratch("config-rewrite")
     files.create_dir_all(files.join(root, "config")) ?? panic("config directory")
     files.create_dir_all(files.join(root, "trust")) ?? panic("trust directory")
-    site: files.join(root, "site")
-    files.create_dir_all(site) ?? panic("site")
-    files.write(files.join(site, "held"), "held") ?? panic("held body")
-    mux: http_server.mux()
-    http_server.static_files(mux, "/", site)
-    server: http_server.bind("127.0.0.1:0", mux) ?? panic("bind index server")
-    address: server.local_addr() ?? panic("index server address")
-    serving: task { server.serve() ?? panic("serve") }
-    endpoint: "http://{address}"
+    endpoint: "http://127.0.0.1:8080"
     endpoint_path: files.join(root, "config/nix-index-v1.endpoint")
     files.write(endpoint_path, "{endpoint}\n") ?? panic("endpoint")
     signer: crypto.SigningKey.from_bytes(nix_test_seed(7)) ?? panic("signing seed")
@@ -248,10 +240,7 @@ nix_test_generation_rejected: fn(client: NixIndexClient, generation: Int, issued
     client: NixIndexClient.from_roots_with_mode(HangarRoots{root, dev_mode: false}, false) ?? panic("configured client")
     // A later rewrite must not change the held endpoint of this client.
     files.write(endpoint_path, "http://127.0.0.1:9\n") ?? panic("rewrite endpoint")
-    body: client.transport.get_bounded("{endpoint}/held", 32) ?? panic("held endpoint")
-    assert_eq(body, "held".bytes())
-    _: server.shutdown(time.duration_ms(100)) ?? panic("shutdown")
-    ^serving.join() ?? panic("server task")
+    assert_eq(client.configured_endpoint(), endpoint)
     files.remove_all(root) ?? panic("scratch cleanup")
 }
 

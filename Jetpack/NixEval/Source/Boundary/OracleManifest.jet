@@ -212,6 +212,11 @@ NixEvalOracleManifest: struct {
         nixeval_sorted(self.builds.keys().to_list())
     }
 
+    // The pinned oracle build for `system`, if the manifest names one.
+    build: fn(self, system: String) -> NixEvalOracleBuild? Never! {
+        self.builds.get(system)
+    }
+
     product_ready: fn(self) -> Bool Never! {
         if self.corpus_status != NixEvalCorpusStatus.BitExact -> return false
         loop entry in self.builds {
