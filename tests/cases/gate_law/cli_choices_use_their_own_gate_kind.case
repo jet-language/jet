@@ -1,20 +1,21 @@
-# Original tests/gate_law.rs:77-85; source and predicates preserved.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+# Original tests/gate_law.rs:77-85, Jet-era surface: `jet inspect gates` records each
+# invocation choice under its own gate kind before the policy query, so an owning
+# `.Forbid` refuses it with E3415. `--offline` is the session flag (the Rust-era
+# `--trust` is not a jet flag); `jet check` takes none of these flags.
 fixture: cli_choices_use_their_own_gate_kind.fixture
-# KNOWN-FAILING #4843: invocation choices must refuse for their own gate kind.
-step: jet check main.jet --allow=Net --json
+step: jet inspect gates main.jet --allow=Net --json
 cwd: {work}/build_flag
 exit: nonzero
 json: machine doc $.reports[?code="E3415"][?what~="build_flag"][?what~="--allow=Net"] #>= 1
-step: jet check main.jet --allow=Net --json
+step: jet inspect gates main.jet --allow=Net --json
 cwd: {work}/dependency_grant
 exit: nonzero
 json: machine doc $.reports[?code="E3415"][?what~="dependency_grant"][?what~="--allow=Net"] #>= 1
-step: jet check main.jet --trust --json
+step: jet inspect gates main.jet --offline --json
 cwd: {work}/session_flag
 exit: nonzero
-json: machine doc $.reports[?code="E3415"][?what~="session_flag"][?what~="--trust"] #>= 1
-step: jet check main.jet --force --json
+json: machine doc $.reports[?code="E3415"][?what~="session_flag"][?what~="--offline"] #>= 1
+step: jet inspect gates main.jet --force --json
 cwd: {work}/force_pin
 exit: nonzero
 json: machine doc $.reports[?code="E3415"][?what~="force_pin"][?what~="--force"] #>= 1
