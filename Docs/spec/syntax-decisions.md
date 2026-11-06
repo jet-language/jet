@@ -170,7 +170,7 @@ rule are in [ui-case-law.md](ui-case-law.md).
 
 **D-CORENS1 — Single `core.*` namespace** *(D-CORENS-CANON1)*: every
 first-party library (built-in module or ring package) is `core.<name>`. No
-`jet.*`, `std.*`, or `jet.core` spellings (old ring spelling → E0341).
+`jet.*`, `std.*`, or `jet.core` spellings.
 
 **D-CORE-TREE1=A — Canonical Core namespace tree** *(ratified 2026-08-06,
 card #1495)*: the current tree keeps `core.files`,

@@ -786,21 +786,25 @@ count is `5`.
 ## JSON numbers and canonical output
 
 Keep one JSON number tokenizer for dynamic and typed decoding. Untyped
-`json.parse` maps integral numbers to exact `Int` and fractional numbers to
-`Float`. Typed `json.decode<T>` and `data.json<T>` retain each valid number
-token until the target consumes it. `Decimal` parses the token directly,
+`json.parse` keeps each valid number token as `Dyn.Number`, preserving its
+exact spelling: `1.50` re-renders as `1.50`, and `1e400` and integers beyond
+any machine width parse exactly. Typed `json.decode<T>` and `data.json<T>`, and
+a typed read of a parsed `Dyn.Number`, consume that token at the destination,
+which checks range there. `Decimal` parses the token directly,
 preserving sign, exponent, and lexical scale (`12.340` remains `12.340`).
 The exact integer destination is arbitrary-precision `Int` under D-INTBIG1 and
 D-TYPE2-NUM1; `JetBigInt` is internal storage, not a user-facing decode
-target. Exact `Int` rejects non-integral fractions. Neither target falls back
-to quoted text or round-trips through binary64.
+target. Exact `Int` rejects non-integral fractions. `Float` rejects a token
+outside binary64's finite range, so `json.decode<Float>("1e9999")` is an
+error. Neither target falls back to quoted text or round-trips through
+binary64.
 
 Whole-value and stream decoding share the tokenizer, projection, limits, and
-field-error vocabulary. Invalid JSON, non-finite input, target mismatch,
-fixed-width overflow, and digit/exponent-limit failures remain ordinary JSON
-or `[FieldError]` values. Canonical output uses the separate JSON
-canonicalization law; this decision adds no second writer. (D-JSON-EXACTNUM1=A;
-D-INTBIG1; D-TYPE2-NUM1)
+field-error vocabulary. Invalid JSON, `NaN` and `Infinity` spellings, target
+mismatch, non-finite `Float` reads, fixed-width overflow, and
+digit/exponent-limit failures remain ordinary JSON or `[FieldError]` values.
+Canonical output uses the separate JSON canonicalization law; this decision
+adds no second writer. (D-DATATREE-RULES1=A; D-INTBIG1; D-TYPE2-NUM1)
 
 Use RFC 8785 JSON Canonicalization Scheme for hashing and signing. It must not
 depend on incidental renderer behavior: `json.canonical` is the JCS contract,
