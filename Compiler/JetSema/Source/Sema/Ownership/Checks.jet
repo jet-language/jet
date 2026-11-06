@@ -3333,10 +3333,6 @@ sema_ownership_param_for_arg: fn(params: [SemaCallParam], arg: CallArg, source_i
     Val(params[slot])
 }
 
-sema_ownership_call_diag_write_required: fn(callee: String, name: String, span: Span) -> Diagnostic {
-    sema_error("E0202", span, "parameter `{name}` requires the write-access marker `&` at the call site", "`{callee}` needs to edit this value with the write-access marker `&`; passing it without that marker grants only read access", "write the write-access marker `&` (`&{name}`) when calling `{callee}`")
-}
-
 // `&` grants write access to a place — a name followed by
 // field, index, or range projections. Only a temporary lacks one.
 sema_ownership_call_diag_write_place: fn(span: Span) -> Diagnostic {
@@ -3442,7 +3438,7 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
     known: diagnostics.len()
     value_callee: single_use && sema_ownership_callee_is_value(callee, scopes)
     loop index in 0..<args.len() {
-        arg: args[index]
+        arg := args[index]
         param: sema_ownership_param_for_arg(params, arg, index) ?? {
             complete = false
             next
@@ -3464,12 +3460,14 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
             accepted = false
             next
         }
+        // D-CALLSITE-MARK2=A: an unmarked place a write parameter receives is
+        // its write access, checked as `&place` was.
+        if sema_call_unmarked_write_place(param, arg) {
+            arg.convention = AccessConvention.Write
+            args[index].convention = AccessConvention.Write
+        }
         decision: sema_call_argument_convention(param, arg)
         if decision == {
-            .RequiresWrite -> {
-                accepted = false
-                &diagnostics.push(sema_ownership_call_diag_write_required(callee, sema_ownership_argument_name(arg), arg.span))
-            }
             .RejectsMove -> {
                 accepted = false
                 &diagnostics.push(sema_ownership_call_diag_move_rejected(arg.span))
@@ -4127,51 +4125,36 @@ sema_receiver_mark_is_write_window: fn(state: SemaOwnershipState, root: String) 
     false
 }
 
-// A taking call on a whole local at its last use moves
-// the local with no mark, so the compiler chooses and `^` stays optional
-// there. A writing call still needs `&`, and a take anywhere else (a field,
-// or a local read again later) still needs `^`.
+// D-CALLSITE-MARK2=A: the resolved method's signature says whether a call
+// reads, writes, or takes its receiver, so an unmarked receiver needs no mark.
+// A written mark is still checked against that convention.
 // A compiler-generated body names no receiver marks: its frame closes unread.
-sema_receiver_mark_finish: fn(state: &SemaOwnershipState, receiver: Expr, scopes: SemaScopeTable, receiver_last_use: Bool, compiler_generated: Bool, diagnostics: &[Diagnostic]) {
+sema_receiver_mark_finish: fn(state: &SemaOwnershipState, receiver: Expr, scopes: SemaScopeTable, compiler_generated: Bool, diagnostics: &[Diagnostic]) {
     frame: &state.receiver_frames.pop() ?? return
     if compiler_generated -> return
     root: sema_receiver_mark_place_root(receiver)
     places: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
     is_place: root != None && places.len() > 0
-    if frame.mark == .Val(mark) {
-        written: if mark.access == PlaceAccess.Take -> "^" else -> "&"
-        if !is_place {
-            &diagnostics.push(sema_receiver_mark_remove(mark, written, "`{written}` marks a fresh value, not a named place", "a mark binds a name plus fields, indexes, or ranges; a call result or literal is new, so the call receives it without a mark"))
-            return
-        }
-        convention: frame.convention ?? return
-        if {
-            convention == AccessConvention.Write && mark.access == PlaceAccess.Take -> &diagnostics.push(sema_receiver_mark_replace(mark, written, "&", "writes"))
-            convention == AccessConvention.Move && mark.access == PlaceAccess.Write -> &diagnostics.push(sema_receiver_mark_replace(mark, written, "^", "takes"))
-            convention == AccessConvention.Read && mark.access == PlaceAccess.Write && (frame.write_mark_optional || sema_receiver_mark_is_write_window(state, root ?? "")) -> {}
-            convention == AccessConvention.Read -> &diagnostics.push(sema_receiver_mark_remove(mark, written, "this call only reads its receiver, so it takes no `{written}` mark", "a mark shows that a call writes (`&`) or takes (`^`) the named place; a read call leaves the place unmarked"))
-            else -> {}
-        }
+    mark: frame.mark ?? return
+    written: if mark.access == PlaceAccess.Take -> "^" else -> "&"
+    if !is_place {
+        &diagnostics.push(sema_receiver_mark_remove(mark, written, "`{written}` marks a fresh value, not a named place", "a mark binds a name plus fields, indexes, or ranges; a call result or literal is new, so the call receives it without a mark"))
         return
     }
-    if !is_place -> return
-    needed: if frame.convention == {
-        .Val(convention) -> if convention == {
-            .Write -> "&"
-            .Move -> "^"
-            else -> ""
+    convention: frame.convention ?? return
+    if {
+        convention == AccessConvention.Write && mark.access == PlaceAccess.Take -> {
+            &diagnostics.push(sema_receiver_mark_replace(mark, written, "&", "writes"))
         }
-        .None -> ""
+        convention == AccessConvention.Move && mark.access == PlaceAccess.Write -> {
+            &diagnostics.push(sema_receiver_mark_replace(mark, written, "^", "takes"))
+        }
+        convention == AccessConvention.Read && mark.access == PlaceAccess.Write && (frame.write_mark_optional || sema_receiver_mark_is_write_window(state, root ?? "")) -> {}
+        convention == AccessConvention.Read -> {
+            &diagnostics.push(sema_receiver_mark_remove(mark, written, "this call only reads its receiver, so it takes no `{written}` mark", "a mark shows that a call writes (`&`) or takes (`^`) the named place; a read call leaves the place unmarked"))
+        }
+        else -> {}
     }
-    if needed == "" -> return
-    if needed == "&" && sema_ownership_place_under_edit_guard(receiver, scopes) -> return
-    if needed == "^" && receiver_last_use -> return
-    verb: if needed == "&" -> "writes" else -> "takes"
-    place_name: sema_ownership_place_name(places[0])
-    // The whole receiver place (`holder.buf`), so the caret and the `^` edit
-    // sit where the mark belongs; a field's own span is only its name.
-    span: expr_source_span(receiver)
-    &diagnostics.push(diagnostic_with_edit(sema_error("E0224", span, "this call {verb} `{place_name}`, but `{place_name}` has no `{needed}` mark", "the method is declared with `{needed}self`, so the call {verb} the named place it is called on; the mark sits on that place, the same way `edit(&buf)` and `consume(^text)` mark arguments", "write `{needed}{place_name}`"), TextEdit{span: Span{start: span.start, end: span.start}, new_text: needed}))
 }
 
 sema_ownership_check_method_call: fn(state: &SemaOwnershipState, callee: String, receiver: Expr, receiver_convention: AccessConvention, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {

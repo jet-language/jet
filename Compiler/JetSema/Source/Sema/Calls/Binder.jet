@@ -43,7 +43,6 @@ SemaCallArgSource: enum {
 SemaCallConventionDecision: enum {
     Accepted
     NeedsImplicitClone
-    RequiresWrite
     RejectsMove
 }
 
@@ -546,21 +545,29 @@ sema_call_binding_slot: fn(binding: SemaCallBinding, source_index: Int, arg: Cal
     if source_index >= 0 && source_index < binding.slots.len() -> binding.slots[source_index] else -> -1
 }
 
-// Rust `bare_arg_name`, `check_callable_argument_ownership`, and the cross-file
-// call check: an unmarked argument is an implicit clone (owning parameter) or a
-// missing write-access marker (write parameter) only when it is a bare name.
-// Any other unmarked argument (a call result, literal, field, or other
-// temporary) passes: an owning parameter takes it as a move and a write
-// parameter edits it in place. The move marker `^` on a read or write parameter
-// is always rejected.
+// D-CALLSITE-MARK2=A: memory marks live in signatures, so a call passes its
+// arguments plain. An unmarked place a write parameter receives is that
+// parameter's write access (sema_call_unmarked_write_place). An unmarked bare
+// name a take parameter receives is its take: at its last use the ownership
+// check moves it, and anywhere else the typed argument check marks it as the
+// take `^name` was, so a later use reports the move into this call. Any other
+// unmarked argument (a call result, literal, field, or other temporary)
+// passes: an owning parameter takes it as a move. The move marker `^` on a
+// read or write parameter is always rejected.
 sema_call_argument_convention: fn(param: SemaCallParam, arg: CallArg) -> SemaCallConventionDecision Never! {
     if {
         arg.convention == AccessConvention.Move && param.convention != AccessConvention.Move -> SemaCallConventionDecision.RejectsMove
         arg.convention != AccessConvention.Read || !sema_call_argument_is_bare_name(arg) -> SemaCallConventionDecision.Accepted
-        param.convention == AccessConvention.Write -> SemaCallConventionDecision.RequiresWrite
         param.convention == AccessConvention.Move -> SemaCallConventionDecision.NeedsImplicitClone
         else -> SemaCallConventionDecision.Accepted
     }
+}
+
+// An unmarked named place (a name plus fields, indexes, or a range) passed to
+// a write parameter: the call writes it as `&place` did, and a range place is
+// a write window (`sort_part(values[0..2])`).
+sema_call_unmarked_write_place: fn(param: SemaCallParam, arg: CallArg) -> Bool Never! {
+    arg.convention == AccessConvention.Read && param.convention == AccessConvention.Write && sema_receiver_mark_place_root(arg.expr) != None
 }
 
 sema_call_argument_is_bare_name: fn(arg: CallArg) -> Bool Never! {

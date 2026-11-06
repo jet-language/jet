@@ -1297,12 +1297,19 @@ parser_task_spawn: fn(state: &JetParserState, head: Span, take_names: [NamedSpan
     parser_task_call(&state, head, "task.spawn", head, body_lambda, body_span)
 }
 
-// Only the complete `task` surface spawns: `task {`, `task ^name`, a
+// Only the complete `task` surface spawns: `task {`, `task &&name`, a
 // `task.all/race/any/group/timeout` selector, or an atom or control operand.
 // Followed by `(`, `[`, another `.`, or an operator, `task` is an ordinary name.
 parser_task_surface_ahead: fn(state: &JetParserState) -> Bool Never! {
     next: parser_kind_at(&state, 1)
     if next == TOKEN_LBRACE || next == TOKEN_CARET -> return true
+    // `task &&name` takes a name written right after the mark; `task && ok`
+    // stays a boolean operand.
+    if next == TOKEN_AND_AND {
+        mark: parser_lookahead(&state, 1)
+        taken: parser_lookahead(&state, 2)
+        return taken.kind == TOKEN_IDENT && mark.span.end == taken.span.start
+    }
     if next == TOKEN_DOT {
         selector: parser_lookahead(&state, 2)
         if selector.kind != TOKEN_IDENT -> return false
@@ -1382,12 +1389,13 @@ parser_parse_task_surface: fn(state: &JetParserState, depth: Int) -> ParsedExpr 
         span: parser_cover(head, close.span)
         return ParsedExpr{expr: parser_task_call(&state, head, "task.{name}", selector.span, argument, list_span), span: span}
     }
-    // `task ^name { … }` consumes one enclosing binding.
+    // `task &&name { … }` consumes one enclosing binding.
     take_names := [NamedSpan]{}
-    if parser_current_kind(&state) == TOKEN_CARET {
-        caret: parser_bump(&state)
-        taken: parser_expect_name(&state, "after the task capture `^`")
-        &take_names.push(NamedSpan{name: parser_value(state, taken), span: parser_cover(caret.span, taken.span)})
+    if parser_current_kind(&state) == TOKEN_AND_AND || parser_current_kind(&state) == TOKEN_CARET {
+        mark: parser_bump(&state)
+        mark_text: parser_text(state, mark)
+        taken: parser_expect_name(&state, "after the task capture `{mark_text}`")
+        &take_names.push(NamedSpan{name: parser_value(state, taken), span: parser_cover(mark.span, taken.span)})
     }
     if parser_current_kind(&state) != TOKEN_LBRACE {
         value: parser_parse_expression(&state, 1, depth + 1)

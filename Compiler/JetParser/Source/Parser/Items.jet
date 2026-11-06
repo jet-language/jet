@@ -83,6 +83,7 @@ use {
     ]
     jet_lexer.[
         TOKEN_AMP,
+        TOKEN_AND_AND,
         TOKEN_BANG,
         TOKEN_CARET,
         TOKEN_COLON,
@@ -838,21 +839,24 @@ parser_parse_param: fn(state: &JetParserState, zone: ParamZone) -> Param {
         keyword_text: parser_text(state, keyword_token)
         parser_add_error(&state, keyword_token.span, "expected a name for a parameter name, found the keyword `{keyword_text}`", "names start with a letter or `_`", "e.g. `main`, `count`, `_tmp`")
     }
+    leading_mark := ""
     if access_kind == {
         TOKEN_AMP -> {
             parser_bump(&state)
             convention = AccessConvention.Write
+            leading_mark = "&"
         }
-        TOKEN_CARET -> {
-            parser_bump(&state)
+        TOKEN_AND_AND | TOKEN_CARET -> {
+            mark: parser_bump(&state)
             convention = AccessConvention.Move
+            leading_mark = parser_text(state, mark)
         }
         else -> {}
     }
     name := if parser_current_kind(&state) == TOKEN_SELF -> parser_bump(&state) else -> parser_expect_name(&state, "for a parameter name")
     // An expert receiver may state its field footprint
     // with a field or the ratified member spread: `&self.log`,
-    // `&self.[log, hits]`. A consuming `^self` takes the whole value.
+    // `&self.[log, hits]`. A consuming `&&self` takes the whole value.
     declared_footprint := [NamedSpan]?{None}
     if name.kind == TOKEN_SELF && convention != AccessConvention.Move && parser_current_kind(&state) == TOKEN_DOT {
         parser_bump(&state)
@@ -902,13 +906,14 @@ parser_parse_param: fn(state: &JetParserState, zone: ParamZone) -> Param {
                 parser_add_error(&state, name.span, "expected `:` after the parameter `{param_name}`", "every parameter except `self` needs a type after its name", "write `{param_name}: Type`")
             }
             cap_kind := parser_current_kind(&state)
-            if cap_kind == TOKEN_AMP || cap_kind == TOKEN_CARET {
+            if cap_kind == TOKEN_AMP || cap_kind == TOKEN_AND_AND || cap_kind == TOKEN_CARET {
                 cap: parser_bump(&state)
                 type_convention := AccessConvention.Move
                 if cap.kind == TOKEN_AMP -> type_convention = AccessConvention.Write
                 if convention != AccessConvention.Read {
-                    leading_label: if convention == AccessConvention.Write -> "the write-access marker `&`" else -> "the move marker `^`"
-                    type_label: if type_convention == AccessConvention.Write -> "the write-access marker `&`" else -> "the move marker `^`"
+                    leading_label: if convention == AccessConvention.Write -> "the write-access marker `&`" else -> "the take marker `{leading_mark}`"
+                    type_text: parser_text(state, cap)
+                    type_label: if type_convention == AccessConvention.Write -> "the write-access marker `&`" else -> "the take marker `{type_text}`"
                     name_text: parser_text(state, name)
                     parser_add_error_code(&state, "E0029", name.span, "`{name_text}` has two access markers", "{leading_label} before the parameter name conflicts with {type_label} on its type; a parameter can declare only one access marker", "keep one access marker on the type or receiver and remove the other")
                 }
