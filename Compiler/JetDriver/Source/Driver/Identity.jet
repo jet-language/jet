@@ -238,10 +238,11 @@ JetDriverCompileRequest: struct {
     // the same diagnostics and output bytes.
     compiler_threads: CompilerThreads
     mode: JetDriverCompileMode{JetDriverCompileMode.Program}
-    // A Test compile for one code suite of test.jet (`jet test --profile`'s
-    // JET_TEST_SUITE child): it runs that suite and no #Test, so a package
-    // without #Tests is no E0601.
-    code_suite: Bool{false}
+    // A Test compile where a package without #Tests is no E0601: a code suite
+    // of test.jet (`jet test --profile`'s JET_TEST_SUITE child, which runs
+    // that suite and no #Test) or a member a test profile runs, whose rows are
+    // then none.
+    tests_optional: Bool{false}
     // Selection is separate from compilation/lowering mode: checking validates
     // all links/defaults; running selects one address; testing selects Checks.
     output_intent: SemaOutputIntent{SemaOutputIntent.Check}

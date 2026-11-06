@@ -50,7 +50,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, short), short, ctx).status, "PASS")
     kit_exec_write(files.join(root, entry.expected), short)
     assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, canonical), canonical, ctx).status, "PASS")
-    loop changed in [short.replace("E0109", "E0107"), short.replace("mismatch", "different"), short.replace(":2:4", ":2:5"), short.replace("Why: example.jet", "Why: tests/ui/example.jet"), short.replace("imported.jet", "elsewhere.jet")] {
+    loop changed in [short.replace("jet.OperatorTypeMismatch", "jet.ArgumentTypeMismatch"), short.replace("mismatch", "different"), short.replace(":2:4", ":2:5"), short.replace("Why: example.jet", "Why: tests/ui/example.jet"), short.replace("imported.jet", "elsewhere.jet")] {
         assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, changed), changed, ctx).status, "FAIL")
     }
     files.remove_all(root) ?? panic("remove primary-source scratch: {err}")

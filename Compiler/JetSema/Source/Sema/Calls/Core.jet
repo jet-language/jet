@@ -1536,7 +1536,7 @@ sema_call_core_identity_value: fn(value: TExpr, type_args: [Type], expected: Typ
     moves: [Bool]{false, true}
     loop row in CORE_CALLS {
         loop moved in moves {
-            previous: (row.module_name == "core.math" && (row.member == "cmp" || row.member == "is_finite")) ||
+            previous: (row.module_name == "core.math" && (row.member == "cmp" || row.member == "is_finite" || row.member == "sqrt")) ||
                 (row.module_name == "core.net.tls" && row.member == "client" && moved)
             worker: row.module_name == "core.service" && row.member == "worker"
             assert(sema_call_core_native_resource_consumer(row.module_name, row.member, moved) == (previous || worker))

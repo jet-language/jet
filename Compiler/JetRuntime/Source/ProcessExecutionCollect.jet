@@ -105,6 +105,12 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
             process_execution_first_error(child, HOST_IO_OP_READ, if (stream == I64{1}) -> rt_static_text("process stdout") else -> rt_static_text("process stderr"), host_errno_cause(-count))
             process_execution_stop(child)
         }
+        // A terminal master reads EIO once the child closes its last slave
+        // descriptor, which it may do before it exits (cat closes stdout in its
+        // exit handler). Closing the master then hangs up the terminal and
+        // SIGHUPs a child that has not exited yet, so the master stays open
+        // until the collector has reaped the child.
+        if (offset == I64{56} && count == I64{-5}) -> return true
         if (count <= I64{0}) {
             sync_mutex_lock(native)
             spawn_close(fd_word(native, offset))
@@ -196,6 +202,9 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
     sync_mutex_lock(native)
     spawn_close(fd_word(native, I64{32}))
     fd_put(native, I64{32}, I64{-1})
+    // The terminal master the capture kept open past the child's last slave close.
+    spawn_close(fd_word(native, I64{56}))
+    fd_put(native, I64{56}, I64{-1})
     sync_mutex_unlock(native)
     sync_mutex_lock(child)
     if !process_execution_validate_output(child, wrapping(scratch + I64{8232})) {
