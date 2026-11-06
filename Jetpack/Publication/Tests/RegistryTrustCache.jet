@@ -5,7 +5,9 @@ use {
     jet_pkg_model.[PublicationRegistryConfig]
     jetpack_foundation.[foundation_hardened_git_command, foundation_open_directory_authority]
     jetpack_publication.[
-        publication_ensure_index_clone, publication_ensure_local_index_clone,
+        PublicationRegistryAuthorityError, PublicationRegistryNet, PublicationRegistryTransport,
+        publication_ensure_index_clone, publication_ensure_index_clone_with_network,
+        publication_ensure_local_index_clone, publication_ensure_local_index_clone_with_network,
         publication_registry_cache_component, publication_registry_cache_lock_name,
         publication_registry_clone_stage_name, publication_registry_origin_matches,
         publication_registry_root_key_is_hex, publication_registry_trust_path,
@@ -147,20 +149,62 @@ fn publication_trust_cache_test_git(args: [String], cwd: String) -[Env, Exec, Ti
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// A real public registry fixture is required: no localhost bypass, canned DNS
-// answer or fabricated IP pin. The #3595 resolver/#3593 FS closure is mandatory.
+// The canned public registry behind the client's network seam: the host
+// resolves to one public address, and a clone fetches a local bare repository
+// where the pinned network remote would be. The URL policy and the
+// public-address check run unchanged on the configured URL.
+struct PublicationTrustCacheTestNet {
+    host: String
+    bare: String
+}
+impl PublicationTrustCacheTestNet.PublicationRegistryNet {
+    fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] PublicationRegistryAuthorityError! {
+        assert_eq(host, self.host)
+        assert(port == 9418 || port == 22)
+        Ok([[U8]]{[U8]{93, 184, 216, 34}})
+    }
+
+    fn fetch_remote(self, url: String, transport: PublicationRegistryTransport) -> String Never! {
+        if transport == .Local -> panic("{url} is a network registry")
+        "file://{self.bare}"
+    }
+}
+fn publication_trust_cache_test_publish(seed: String, bare: String, review: String, text: String) -[FS, Env, Exec, Time.Wait]> {
+    files.create_dir_all(files.dirname(files.join(seed, review))) ?? panic("review directory")
+    files.write(files.join(seed, review), text) ?? panic("review")
+    publication_trust_cache_test_git([String]{"add", "--", review}, seed)
+    publication_trust_cache_test_git([String]{"commit", "-m", "publish review"}, seed)
+    publication_trust_cache_test_git([String]{"push", bare, "HEAD:refs/heads/main"}, seed)
+}
 #Test("registry git and ssh two refreshes preserve offline configured origin") {
     previous :: sys.get("JET_REGISTRY_CACHE_DIR")
     root :: files.join(sys.temp_dir(), "jet-registry-network-cache-test-{publication_registry_unique_suffix()}")
-    sys.set("JET_REGISTRY_CACHE_DIR", root)
+    sys.set("JET_REGISTRY_CACHE_DIR", files.join(root, "cache"))
+    review :: "reviews/net-kit/1.0.0.review"
     loop scheme in ([String]{"git", "ssh"}) {
-        fixture :: sys.get("JET_TRUST_CACHE_TEST_{scheme.to_ascii_upper()}_URL") ?? panic("real public git/ssh registry fixture is required")
-        assert(fixture.starts_with("{scheme}://"))
-        registry :: PublicationRegistryConfig.private("network-{scheme}", fixture, false)
-        first :: publication_ensure_index_clone(registry) ?? panic("initial pinned clone")
-        second :: publication_ensure_index_clone(registry) ?? panic("second pinned refresh")
+        bare :: files.join(root, "{scheme}.git")
+        seed :: files.join(root, "{scheme}-seed")
+        files.create_dir_all(seed) ?? panic("seed")
+        publication_trust_cache_test_git([String]{"init", "--bare", bare}, root)
+        publication_trust_cache_test_git([String]{"init"}, seed)
+        publication_trust_cache_test_git([String]{"config", "user.email", "test@localhost"}, seed)
+        publication_trust_cache_test_git([String]{"config", "user.name", "cache test"}, seed)
+        publication_trust_cache_test_publish(seed, bare, review, "first\n")
+        publication_trust_cache_test_git([String]{"symbolic-ref", "HEAD", "refs/heads/main"}, bare)
+        url :: "{scheme}://registry.jet-lang.dev/index.git"
+        network :: PublicationTrustCacheTestNet{host: "registry.jet-lang.dev", bare: bare}
+        registry :: PublicationRegistryConfig.private("network-{scheme}", url, false)
+        first :: publication_ensure_index_clone_with_network(registry, network) ?? panic("initial pinned clone")
+        assert_eq(files.read(files.join(first, review)) ?? panic("first review"), "first\n")
+        publication_trust_cache_test_publish(seed, bare, review, "second\n")
+        second :: publication_ensure_index_clone_with_network(registry, network) ?? panic("second pinned refresh")
         assert_eq(first, second)
-        assert_eq(publication_ensure_local_index_clone(registry) ?? panic("offline origin validation"), first)
+        assert_eq(files.read(files.join(second, review)) ?? panic("refreshed review"), "second\n")
+        origin :: foundation_hardened_git_command().args_extend([String]{"remote", "get-url", "origin"}).cwd(second).run() ?? panic("origin")
+        assert(publication_registry_origin_matches(url, origin.success, origin.output))
+        // Offline validates the configured origin and never fetches the now missing remote.
+        files.remove_all(bare) ?? panic("remove remote")
+        assert_eq(publication_ensure_local_index_clone_with_network(registry, network) ?? panic("offline origin validation"), first)
     }
     publication_trust_cache_test_restore_env("JET_REGISTRY_CACHE_DIR", previous)
     files.remove_all(root) ?? panic("cleanup")

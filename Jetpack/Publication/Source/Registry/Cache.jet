@@ -144,9 +144,9 @@ fn publication_registry_clone_failure(registry: PublicationRegistryConfig, paren
         .Err(error) -> publication_registry_attach_clone_cleanup(primary, path, error)
     }
 }
-fn publication_clone_registry_to(registry: PublicationRegistryConfig, parent: FoundationDirectoryAuthority, path: String, transport: PublicationRegistryTransport) PublicationDiagnosticError! -[FS, Env, Exec, Time.Wait]> {
+fn publication_clone_registry_to<N: PublicationRegistryNet>(registry: PublicationRegistryConfig, parent: FoundationDirectoryAuthority, path: String, transport: PublicationRegistryTransport, network: N) PublicationDiagnosticError! -[FS, Env, Exec, Time.Wait]> {
     command :: publication_registry_git_command(transport) ?? return Err(publication_registry_clone_failure(registry, parent, path, "{err}"))
-    output :: command.args_extend(publication_registry_clone_arguments(registry.url, transport.remote(registry.url), path)).run() ?? return Err(publication_registry_clone_failure(registry, parent, path, "{err}"))
+    output :: command.args_extend(publication_registry_clone_arguments(registry.url, network.fetch_remote(registry.url, transport), path)).run() ?? return Err(publication_registry_clone_failure(registry, parent, path, "{err}"))
     if !output.success -> return Err(publication_registry_clone_failure(registry, parent, path, "git clone exited with {output.code}"))
 }
 fn publication_install_registry_clone(registry: PublicationRegistryConfig, dir: String, parent: FoundationDirectoryAuthority, partial_path: String, replace_existing: Bool) -[FS, Env, Time]> String PublicationDiagnosticError! {
@@ -182,24 +182,27 @@ fn publication_install_registry_clone(registry: PublicationRegistryConfig, dir: 
     publication_registry_clone_cleanup(parent, backup) ?? return Err(publication_registry_cache_error(registry, "refreshed registry cache installed but old-cache cleanup failed: {err}"))
     Ok(dir)
 }
-fn publication_ensure_index_clone_locked(registry: PublicationRegistryConfig, dir: String, parent: FoundationDirectoryAuthority, transport: PublicationRegistryTransport) -[FS, Env, Time, Exec, Time.Wait]> String PublicationDiagnosticError! {
+fn publication_ensure_index_clone_locked<N: PublicationRegistryNet>(registry: PublicationRegistryConfig, dir: String, parent: FoundationDirectoryAuthority, transport: PublicationRegistryTransport, network: N) -[FS, Env, Time, Exec, Time.Wait]> String PublicationDiagnosticError! {
     existing :: publication_validate_existing_index_clone(registry, dir, transport)
     partial :: publication_registry_clone_stage_name(registry.name, "partial", publication_registry_unique_suffix())
     if parent.entry_stat(partial) == .Ok(_) -> return Err(publication_registry_cache_error(registry, "registry cache has a colliding partial clone"))
     path :: files.join(files.dirname(dir), partial)
-    publication_clone_registry_to(registry, parent, path, transport)
+    publication_clone_registry_to(registry, parent, path, transport, network)
     publication_install_registry_clone(registry, dir, parent, path, existing)
 }
 fn publication_ensure_index_clone(registry: PublicationRegistryConfig) -[FS, Env, Time, Time.Wait, Exec, Net]> String PublicationDiagnosticError! {
+    network :: PublicationRegistryNetwork{}
+    publication_ensure_index_clone_with_network(registry, network)
+}
+fn publication_ensure_index_clone_with_network<N: PublicationRegistryNet>(registry: PublicationRegistryConfig, network: N) -[FS, Env, Time, Time.Wait, Exec, Net]> String PublicationDiagnosticError! {
     // Required validated transport: pre-DNS Endpoint is NOT an authority.
-    // Canonical transport closure is intentionally gated #3595, never faked.
-    transport :: publication_validate_registry_transport(registry)
+    transport :: publication_validate_registry_transport_with_network(registry, network)
     dir :: publication_index_repo_path(registry)
     parent_path :: files.dirname(dir)
     if parent_path == "" -> return Err(publication_registry_cache_error(registry, "registry cache path has no parent"))
     authority :: foundation_open_directory_authority(parent_path, true) ?? return Err(publication_registry_cache_error(registry, "{err}"))
     lock :: publication_acquire_registry_lock(parent_path, publication_registry_cache_lock_name(registry.name), 50, "registry cache refresh is busy") ?? return Err(publication_registry_cache_error(registry, "{err}"))
-    if publication_ensure_index_clone_locked(registry, dir, authority, transport) == {
+    if publication_ensure_index_clone_locked(registry, dir, authority, transport, network) == {
         .Ok(path) -> {
             close(^lock)
             Ok(path)
@@ -211,7 +214,11 @@ fn publication_ensure_index_clone(registry: PublicationRegistryConfig) -[FS, Env
     }
 }
 fn publication_ensure_local_index_clone(registry: PublicationRegistryConfig) -[FS, Env, Exec, Net, Time.Wait]> String PublicationDiagnosticError! {
-    transport :: publication_validate_registry_transport(registry)
+    network :: PublicationRegistryNetwork{}
+    publication_ensure_local_index_clone_with_network(registry, network)
+}
+fn publication_ensure_local_index_clone_with_network<N: PublicationRegistryNet>(registry: PublicationRegistryConfig, network: N) -[FS, Env, Exec, Net, Time.Wait]> String PublicationDiagnosticError! {
+    transport :: publication_validate_registry_transport_with_network(registry, network)
     dir :: publication_index_repo_path(registry)
     if !publication_validate_existing_index_clone(registry, dir, transport) -> return Err(publication_registry_cache_error(registry, "the local registry cache is unavailable; locked mode never downloads a new index"))
     Ok(dir)
