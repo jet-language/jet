@@ -1,13 +1,11 @@
-# Port of build_entry.rs:857-897. PENDING-GRAMMAR: copy/remove/file equality.
-# JET_STORE_DIR is set twice in the original; the later run-cache wins, so the
-# blobs it drops ("every blob, the cached image among them") live in run-cache/cas.
+# Port of build_entry.rs:857-897. A dev build keeps no out-of-tree blob store
+# (JET_STORE_DIR is retired), so the rebuild after the image is removed must
+# reproduce it byte for byte from the same sources.
 fixture: fixtures/function-cache
-env: JET_STORE_DIR={work}/run-cache
 env: NO_COLOR=1
 step: jet build main.jet
 copy: .jet/build/main first-image
 remove: .jet/build/main
-remove: run-cache/cas
 step: jet build main.jet
 file: .jet/build/main == first-image
 step: built
