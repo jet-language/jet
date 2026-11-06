@@ -6,6 +6,7 @@ use {
     time :: core.time
     crypto :: core.crypto
     base64 :: core.encoding.base64
+    process :: core.process
 }
 
 PEER_REVISION :: "c8f90650c15282fa8656a041bfbbd2403997a9a7"
@@ -173,22 +174,23 @@ fn peer_object_count(counts: [String: Int], path: String, kind: String) -> Int {
 }
 
 fn peer_control(port: String, path: String) {
-    stream :: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect fixture control")
-    net.tcp_write_text(stream, "GET /{path} HTTP/1.1{PEER_CRLF}Host: 127.0.0.1{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write fixture control")
+    stream := net.tcp_connect("127.0.0.1:{port}") ?? panic("connect fixture control")
+    net.tcp_write_text(&stream, "GET /{path} HTTP/1.1{PEER_CRLF}Host: 127.0.0.1{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write fixture control")
     bytes := [U8]{}
     loop {
-        chunk :: net.tcp_read_bytes(stream, 16384) ?? panic("read fixture control")
+        chunk :: net.tcp_read_bytes(&stream, 16384) ?? panic("read fixture control")
         if chunk.len() == 0 -> break
         loop byte in chunk -> &bytes.push(byte)
     }
-    net.tcp_close(stream) ?? panic("close fixture control")
+    net.tcp_close(&stream) ?? panic("close fixture control")
     response :: String.from_bytes(bytes) ?? panic("control response UTF-8")
     assert(response.starts_with("HTTP/1.1 200 OK{PEER_CRLF}"))
     start :: response.index("{PEER_CRLF}{PEER_CRLF}") ?? panic("control response header")
     print(response.slice(start + 4, response.len()))
 }
 
-fn run(args: [String]) {
+fn run() {
+    args :: process.args()
     assert(args.len() > 0)
     if args[0] == "counts" || args[0] == "stop" {
         assert_eq(args.len(), 2)
@@ -209,11 +211,11 @@ fn run(args: [String]) {
     files.rename("{ready}.tmp", ready) ?? panic("publish fixture READY")
     counts := [String: Int]{}
     loop {
-        stream :: net.tcp_accept(listener) ?? panic("accept Nix fixture request")
+        stream := net.tcp_accept(listener) ?? panic("accept Nix fixture request")
         request := [U8]{}
         first_line := false
         loop !first_line {
-            chunk :: net.tcp_read_bytes(stream, 16384) ?? panic("read Nix fixture request")
+            chunk :: net.tcp_read_bytes(&stream, 16384) ?? panic("read Nix fixture request")
             assert(chunk.len() > 0)
             loop byte in chunk {
                 &request.push(byte)
@@ -230,12 +232,12 @@ fn run(args: [String]) {
         body :: if path == "/counts" -> Val("{{\"root\":{peer_object_count(counts, PEER_ROOT, "root")},\"lib\":{peer_object_count(counts, PEER_LIB, "lib")},\"runtime\":{peer_object_count(counts, PEER_RUNTIME, "runtime")}}}".bytes()) else if stop -> Val("".bytes()) else -> routes.get(path)
         if body == {
             .Val(bytes) -> {
-                net.tcp_write_text(stream, "HTTP/1.1 200 OK{PEER_CRLF}Content-Length: {bytes.len()}{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write Nix fixture header")
-                net.tcp_write_all_bytes(stream, bytes) ?? panic("write Nix fixture bytes")
+                net.tcp_write_text(&stream, "HTTP/1.1 200 OK{PEER_CRLF}Content-Length: {bytes.len()}{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write Nix fixture header")
+                net.tcp_write_all_bytes(&stream, bytes) ?? panic("write Nix fixture bytes")
             }
-            .None -> net.tcp_write_text(stream, "HTTP/1.1 503 Service Unavailable{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write Nix fixture miss")
+            .None -> net.tcp_write_text(&stream, "HTTP/1.1 503 Service Unavailable{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write Nix fixture miss")
         }
-        net.tcp_close(stream) ?? panic("close Nix fixture request")
+        net.tcp_close(&stream) ?? panic("close Nix fixture request")
         if stop -> break
     }
 }
