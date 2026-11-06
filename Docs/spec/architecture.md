@@ -2193,38 +2193,10 @@ owner directive #59, native cutover executes those runners directly and reports
 formal qualification/closeout separately as **NOT MET (deferred)**, never as a
 suite pass.
 
-Native cutover uses one outer process trace. Testkit's exec-only
-`native-command.mjs` labels each case without changing its command PID or streams;
-`native-trace.mjs` audits ancestry, cwd and successful executions after the trace
-closes. Rust/LLVM defaults to a violation. The committed
-`Tools/testkit/user-rust-ffi.allow` has four columns: case identity, exact reason,
-compiled source provenance and declared dependencies. A `.case` names precisely
-the fixture sources its commands compile; direct Jet cases name themselves.
-Receipts retain source hashes. Pure-Jet fixtures receive no Rust exception.
-Generated helper manifests must reside in the cache that the command actually
-uses: an explicit `JET_FFI_CACHE_DIR` is preserved verbatim, otherwise the
-external case/dependency-digest cache applies. Dependencies and admitted Jet
-foreign ancestry must match. Cargo metadata is restricted to
-`metadata --format-version 1 --manifest-path <generated helper manifest>`,
-under the same checks as builds. The immutable tracing wrapper enables retained
-private workspaces beneath `<cache>/<full-key>/.trace-workspaces/<pid>-<attempt>`;
-the source is mounted readonly at `/work/source`, output writable at
-`/work/output`. Audit maps those exact mounts back to retained manifests, rejects
-escapes and any mount or overlay that obscures them, admits only memory-backed
-`--tmp-overlay` layers (the registry overlay), and records the manifests' bytes
-and hashes. Case/tier scratch is retained
-only for the outer audit; ordinary runs keep their existing cleanup.
-The exact `rustc -vV` identity query is admitted only in an allowlisted case's
-Jet foreign branch, and is recorded separately. Extra query arguments or sysroot
-probes do not inherit that exception. Jet program compilation/linking/running
-never gets a Rust
-exception. Receipts distinguish zero-Rust cases, observed user-FFI builds and
-violations; performance peers remain separate product comparisons.
-
-UI `.fixed.jet` companions carry their own case marker and exact allowlist row,
-not the negative fixture's identity. A source-declared `extern rust "std"`
-uses the generated Cargo staticlib helper with an empty dependency set; it is
-not a zero-Rust case. Empty sets are admitted only for actual extern-Rust source.
+Testkit runs each case's commands directly, as the case wrote them; no
+wrapper or outer process trace stands between a row and the `jet` under test.
+The FFI helper cache is the kit state's `ffi` directory unless a case sets its
+own `JET_FFI_CACHE_DIR`, which is passed through verbatim.
 The missing-Cargo fixture always runs with a case-local PATH containing no
 Cargo or rustup shim and a cleared case-private foreign cache. Installed tools
 or a warmed helper cannot turn its E0703 contract into a skipped observation.

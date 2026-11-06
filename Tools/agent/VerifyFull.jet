@@ -13,7 +13,6 @@
 //                         verify-full.json go (default <scratch>/evidence)
 //   JET_VERIFY_TIMEOUT_MS per-child timeout (default one hour)
 //   JET_TEST_SHARD, JET_TEST_SHARD_COUNT   the shard (default 0 of 1)
-//   JET_NATIVE_TRACE_LOG  run the suites under the native trace
 //
 // The closeout gate runs first and is a prerequisite, not an escape hatch. The
 // source is pinned to the commit of an inherited `../source.manifest.json`, or
@@ -129,12 +128,6 @@ run: fn() {
     root: state.repo.copy()
     state.env.push(Setting{name: "JET_TOOLCHAIN_ROOT", value: root.copy()})
     state.env.push(Setting{name: "JET_SCRATCH_ROOT", value: scratch_root()})
-    if process.env_get("JET_NATIVE_TRACE_LOG") != None {
-        cache: "{evidence}/native-ffi-cache"
-        files.create_dir_all(cache) ?? return abort("verify-full: `{cache}` cannot be created: {err}")
-        state.env.push(Setting{name: "JET_NATIVE_TRACE_NODE", value: process.which("node") ?? "node"})
-        state.env.push(Setting{name: "JET_NATIVE_TRACE_CACHE_ROOT", value: cache})
-    }
 
     suites: shard_suites(state)
     files.write("{evidence}/test-targets.txt", "{suites.join("\n")}\n") ?? return abort("verify-full: test-targets.txt cannot be written: {err}")

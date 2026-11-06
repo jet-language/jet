@@ -109,7 +109,7 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
         // Cases run outside the checkout: the compiler under test reads this checkout's Core.
         name == "JET_TOOLCHAIN_ROOT" -> Val(sys.get(name) ?? env.root)
         name == "JET_STORE_DIR" -> Val(files.join(env.scratch, "store"))
-        name == "JET_FFI_CACHE_DIR" -> if env.trace_node != "" -> sys.get(name) else if env.ffi_cache != "" -> Val(env.ffi_cache) else -> Val(files.join(env.scratch, "ffi"))
+        name == "JET_FFI_CACHE_DIR" -> if env.ffi_cache != "" -> Val(env.ffi_cache) else -> Val(files.join(env.scratch, "ffi"))
         // A row's tools that stage files of their own keep them in its tree.
         name == "TMPDIR" || name == "TMP" || name == "TEMP" || name == "JET_TEST_SCRATCH_DIR" -> Val(files.join(scratch, "tmp"))
         name == "HOME" -> Val(kit_exec_home(scratch))
@@ -130,16 +130,7 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
 // Cache roots are run-wide; temporary, schema, jetpack and home roots are
 // case-local. Callers check kit_exec_home_refusal before spawning.
 kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, overlay: [KitEnvVar]) -> ProcessSpec {
-    commands: if env.trace_node != "" && env.trace_case != "" -> {
-        cache_override := kit_exec_base_value("JET_FFI_CACHE_DIR", env, scratch) ?? ""
-        loop variable in overlay {
-            if variable.name == "JET_FFI_CACHE_DIR" -> cache_override = variable.value ?? ""
-        }
-        marked := [String]{env.trace_node, files.join(env.root, "Tools/testkit/native-command.mjs"), "--case", env.trace_case, "--root", env.root, "--cwd", cwd, "--jet", env.jet, "--cache-root", env.trace_cache, "--ffi-cache", cache_override, "--"}
-        loop argument in argv -> marked.push(argument.copy())
-        marked
-    } else -> { argv }
-    spec := process.cmd(commands).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream).timeout(env.timeout)
+    spec := process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream).timeout(env.timeout)
     if env.env_clear -> spec = spec.env_clear()
     else {
         spec = spec.env_remove("JET_COMPILER_EXTENSION")

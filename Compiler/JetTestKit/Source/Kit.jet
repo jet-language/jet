@@ -23,9 +23,6 @@ KitEnv: struct {
     env_clear: Bool{false}
     version: String{""}
     version_error: String{""}
-    trace_case: String{""}
-    trace_node: String{""}
-    trace_cache: String{""}
     // The entry's memory claim so far (kit_exec_run): its children's largest
     // resident peak plus the files a row held on a memory-backed scratch. None
     // keeps none.
@@ -829,13 +826,6 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     if files.exists(run_scratch) -> return kit_execution_refused("ERROR\tselection\t\tscratch already exists: {run_scratch}")
     files.create_dir_all(run_scratch) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: files.join(state, "ffi"), scratch_memory: kit_exec_memory_backed(canonical)}
-    if sys.get("JET_NATIVE_TRACE_LOG") != None {
-        env.trace_node = sys.get("JET_NATIVE_TRACE_NODE") ?? ""
-        env.trace_cache = sys.get("JET_NATIVE_TRACE_CACHE_ROOT") ?? ""
-        if env.trace_node == "" || env.trace_cache == "" {
-            return kit_execution_refused("ERROR\tselection\t\tnative trace requires JET_NATIVE_TRACE_NODE and JET_NATIVE_TRACE_CACHE_ROOT")
-        }
-    }
     if entries.any(item -> item.suite == "ui" && item.entry.mode != "coverage") -> kit_ui_stage(root, run_scratch, entries.any(item -> item.suite == "ui" && item.entry.mode.ends_with("project")), options.ui_corpora)
     version_run: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
     if version_run.code == 0 && kit_exec_process_failure(version_run) == None {
@@ -857,12 +847,10 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     }
     kit_history_save(history_dir, ran_suites, history, results)
     if options.bless.ids.len() > 0 || options.bless.all -> print("bless: ids={options.bless.ids} all={options.bless.all} reason={options.bless.reason}")
-    if env.trace_node == "" {
-        kit_exec_remove_tree(run_scratch) ?? {
-            results.push(KitCaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
-            kit_report_row(results[results.len() - 1])
-            false
-        }
+    kit_exec_remove_tree(run_scratch) ?? {
+        results.push(KitCaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
+        kit_report_row(results[results.len() - 1])
+        false
     }
     kit_execute_finish(jet, results, ran_suites, selected_suites, reports, options.results)
 }
@@ -1116,7 +1104,6 @@ kit_execute_entry: fn(index: Int, item: KitSelected, options: KitOptions, env: K
     }
     run.ran = true
     context := KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless, known: known}
-    context.env.trace_case = entry.path
     context.env.resident_limit = guard
     claim: shared KitPeak{bytes: 0}
     context.env.peak = Val(claim.copy())
@@ -1124,11 +1111,9 @@ kit_execute_entry: fn(index: Int, item: KitSelected, options: KitOptions, env: K
         run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code, diff: outcome.verdict.diff})
     }
     kit_exec_stop_strays(scratch)
-    if env.trace_node == "" {
-        kit_exec_remove_tree(scratch) ?? {
-            run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
-            false
-        }
+    kit_exec_remove_tree(scratch) ?? {
+        run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
+        false
     }
     held: claim.guard_read()
     peak: held.value.bytes
