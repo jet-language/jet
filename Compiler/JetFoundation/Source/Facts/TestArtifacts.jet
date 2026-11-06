@@ -59,6 +59,33 @@ fn checked_test_expected_fail(test: TestDef) -> Bool Never! {
     test.expected_fail
 }
 
+// D-TESTFAULT1=A: the checked `faults:` marker list's effect paths (`Rand`,
+// `FS.Read`) are the test's selectors. Sema reports E0119 for an unknown
+// root, so each checked element is an effect path.
+fn checked_test_faults(test: TestDef) -> [String] Never! {
+    if test.faults_expr == .Val(expression) {
+        if expression == .ListLit(elements, _, _) {
+            faults := [String]{}
+            loop element in elements {
+                if checked_test_fault_path(element) == .Val(path) -> &faults.push(path)
+            }
+            return faults
+        }
+    }
+    test.faults
+}
+
+fn checked_test_fault_path(expression: Expr) -> String? Never! {
+    if expression == {
+        .Ident(name, _, _) -> Val(name)
+        .Field(base, member, _, _) -> {
+            path :: checked_test_fault_path(base) ?? return None
+            Val("{path}.{member}")
+        }
+        else -> None
+    }
+}
+
 fn checked_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFact Never! {
     parameters := [TTestParamFact]{}
     index := 0
@@ -84,7 +111,7 @@ fn checked_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFa
         span: test.span,
         kind: if test.params.len() == 0 -> TTestKind.Unit else -> TTestKind.Property,
         parameters: parameters,
-        faults: test.faults,
+        faults: checked_test_faults(test),
         expected_failure: checked_test_expected_fail(test),
         contract_generated: false,
         eligibility: None,

@@ -9,8 +9,9 @@ use {
 }
 
 // One selected native unit test: `id` is the identity its outcome record
-// carries (`JET_NATIVE_TEST <id>`); `key` its checked function.
-struct JetNativeTestCase { id: U64, key: String, name: String, expected_failure: Bool }
+// carries (`JET_NATIVE_TEST <id>`); `key` its checked function; `faults` its
+// canonical `#Test(faults: [...])` selectors.
+struct JetNativeTestCase { id: U64, key: String, name: String, expected_failure: Bool, faults: [String]{[]} }
 struct JetNativeTestRecord { function: U64, wire: String }
 struct JetNativeTestCursor { bytes: [U8], at: Int }
 struct JetNativeTestChild { test: JetNativeTestCase, child: ProcessChild, path: String }
@@ -158,7 +159,7 @@ fn jet_cli_native_test_selection(tests: [TTestFact], functions: [FnBody], filter
             next
         }
         id :: U64.from_int(index + 1) ?? panic("test count fits U64")
-        &rows.push(JetNativeTestRow{test: JetNativeTestCase{id: id, key: test.function.key, name: test.name, expected_failure: test.expected_failure}, module_name: module_name, start: test.span.start})
+        &rows.push(JetNativeTestRow{test: JetNativeTestCase{id: id, key: test.function.key, name: test.name, expected_failure: test.expected_failure, faults: test.faults}, module_name: module_name, start: test.span.start})
     }
     if faults.len() > 0 -> return Err(faults.join("\n"))
     &rows.sort_by((left: JetNativeTestRow, right: JetNativeTestRow) -> {

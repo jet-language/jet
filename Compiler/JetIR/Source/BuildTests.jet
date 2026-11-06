@@ -38,8 +38,9 @@ use {
 }
 
 // One test the harness runs: its checked function `key`, the identity `id`
-// its outcome record carries, its report name and whether it must fail.
-struct IRTestCase { id: Int, key: String, name: String, expected_failure: Bool }
+// its outcome record carries, its report name, whether it must fail and the
+// canonical `#Test(faults: [...])` selectors it runs under (D-TESTFAULT1).
+struct IRTestCase { id: Int, key: String, name: String, expected_failure: Bool, faults: [String]{[]} }
 
 // A selected Check Output: its name and its checked zero-argument function.
 struct IROutputCheck { name: String, key: String }
@@ -405,8 +406,17 @@ fn ir_test_unit(m: &IRModule, p: IRProgram, test: IRTestCase, body: Int, failure
     expected :: ir_test_bool(&m, &b, test.expected_failure)
     code :: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.FunctionAddress, code, invoke, -1, -1, b.line)
-    symbol :: if m.functions[body].param_count > 0 -> "jet_rt_test_property" else -> "jet_rt_test_unit"
-    outcome :: ir_runtime(&m, &b, symbol, [Int]{name, expected, env, code}, pointer_row)
+    property :: m.functions[body].param_count > 0
+    outcome := -1
+    if test.faults.len() > 0 {
+        selectors :: ir_test_text(&m, &b, test.faults.join("\n"))
+        flag :: ir_test_bool(&m, &b, property)
+        outcome = ir_runtime(&m, &b, "jet_rt_test_unit_faults", [Int]{name, expected, env, code, selectors, flag}, pointer_row)
+        ir_test_drop(&m, &b, selectors)
+    } else {
+        symbol :: if property -> "jet_rt_test_property" else -> "jet_rt_test_unit"
+        outcome = ir_runtime(&m, &b, symbol, [Int]{name, expected, env, code}, pointer_row)
+    }
     ir_test_drop(&m, &b, name)
     ir_emit(&b.f, IROp.Return, -1, outcome, -1, -1, b.line)
     ir_test_finish(&m, p, ^b, id, &failures)
