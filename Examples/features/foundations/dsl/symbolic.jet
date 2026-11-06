@@ -38,7 +38,7 @@ code: &[Node],
         top :: operators[operators.len() - 1]
         if top == "(" || precedence(top) < precedence(operator) -> break
         popped :: &operators.pop() ?? ""
-        emit_operator(popped, code)
+        emit_operator(popped, &code)
     }
 }
 
@@ -52,7 +52,7 @@ fn parse(source: String) -> Expr? {
     loop token in tokens {
         if token == "" -> next
 
-        if Int.parse(token) == .Val(value) {
+        if Int.parse(token) == .Ok(value) {
             if !expect_value -> return None
             &code.push(Node.Const(Float.from_int(value)))
             expect_value = false
@@ -73,7 +73,7 @@ fn parse(source: String) -> Expr? {
                     found_open = true
                     break
                 }
-                emit_operator(popped, code)
+                emit_operator(popped, &code)
             }
             if !found_open -> return None
             expect_value = false
