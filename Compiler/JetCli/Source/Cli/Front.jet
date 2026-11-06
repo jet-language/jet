@@ -936,9 +936,10 @@ fn jet_cli_build_options(jet_argv: [String], command: String, file: String, sour
                 name == "debug" -> profile = ""
                 name == "ci" || name == "hardened" -> return JetCLIBuildOptions.Refused{plan: jet_cli_not_ported("{command} --profile {name}", color)}
                 // The registered E1219 row is the unknown-profile report; its holes name the profile.
+                // An undeclared profile name is a user problem (exit 1), not a malformed flag (exit 2).
                 else -> {
                     row :: diagnostic_registry_row("E1219") ?? panic("E1219 is not registered")
-                    return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E1219", row.what.replace("{{name}}", name), row.why.replace("{{name}}", name), row.fix.replace("{{name}}", name), color, JET_DRIVER_EXIT_USAGE)}
+                    return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E1219", row.what.replace("{{name}}", name), row.why.replace("{{name}}", name), row.fix.replace("{{name}}", name), color, JET_DRIVER_EXIT_USER_ERROR)}
                 }
             }
         }
