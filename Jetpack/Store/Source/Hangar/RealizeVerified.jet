@@ -341,7 +341,10 @@ store_realize_verified: fn(verification: &StoreVerification, roots: HangarRoots,
         }
     }
 
-    candidate: store_find_by_reference(verification, roots, reference)
+    // The raw record, not the self-healing listing: a recorded output that
+    // was deleted or changed must fail here as E2604 and be quarantined, so
+    // the next realization builds it again, never silently rebuilt or reused.
+    candidate: store_find_by_reference_read_only(roots, reference)
     if candidate == .Val(found) {
     if expectation == .Val(wanted) {
         hit: if store_find_verified_by_reference(verification, roots, reference, wanted) == {
