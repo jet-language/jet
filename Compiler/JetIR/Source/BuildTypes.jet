@@ -794,15 +794,16 @@ fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: In
         "Float" -> kind == .Float
         "Flag" -> kind == .Bool
         "List.Byte" -> kind == .Aggregate && lent.header_bytes > 0
-        else -> lent.kind.starts_with("Handle.") || (lent.kind.starts_with("Option.Handle.") && ir_untag(field_ty) == .Option(_))
+        else -> lent.kind.starts_with("Handle.") || ((lent.kind.starts_with("Option.Handle.") || lent.kind.starts_with("Option.Tag.")) && ir_untag(field_ty) == .Option(_))
     }
     if !matches -> return -2
     symbol :: "jet_rt_handle_field_{runtime_abi_atom(handle.runtime)}_{runtime_abi_atom(name)}"
     pointer_row :: ir_pointer_row(&m)
     view := -1
-    if lent.kind.starts_with("Option.Handle.") {
-        // The payload is a fresh retain of the handle, so the Option owns it.
-        carrier :: IRRouteCarrier.Handle{name: lent.kind.remove_prefix("Option.Handle.")}
+    if lent.kind.starts_with("Option.") {
+        // A Handle payload is a fresh retain of the handle (or a new record),
+        // so the Option owns it; a Tag payload is the variant's word.
+        carrier :: if lent.kind.starts_with("Option.Tag.") -> IRRouteCarrier.Tag{name: lent.kind.remove_prefix("Option.Tag."), variants: ""} else -> IRRouteCarrier.Handle{name: lent.kind.remove_prefix("Option.Handle.")}
         value :: ir_route_option(&m, p, &b, symbol, [Int]{base}, carrier, field_ty, span)
         ir_release(&m, &b, base)
         return value

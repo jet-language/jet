@@ -73,3 +73,35 @@ fn ui_transfer_color(node: I64, offset: I64, kind_word: I64, word: I64) {
     ui_carrier_store(wrapping(node + UI_NODE_KEY), I64{0})
     node
 }
+// jet_ui_text_input (route): a TextInput node of the borrowed `state` text,
+// one scalar per column on one row, with its IME slot present as the
+// UIIMEMode variant word `ime` (0 Native, 1 Disabled).
+fn ui_text_scalars(text: I64) -> I64 {
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    at := I64{0}
+    count := I64{0}
+    loop at < length {
+        count += I64{1}
+        at += rt_text_width(wrapping(data + at))
+    }
+    count
+}
+#Export(c) fn jet_ui_text_input(state: I64, ime: I64) -> I64 {
+    if (ime < I64{0} || ime > I64{1}) -> ui_transfer_defect()
+    node :: jet_rt_alloc(UI_NODE_BYTES, I64{8})
+    offset := I64{0}
+    loop offset < UI_NODE_BYTES {
+        ui_carrier_store(wrapping(node + offset), I64{0})
+        offset += I64{8}
+    }
+    ui_carrier_store(wrapping(node + UI_NODE_LABEL), jet_rt_string_clone(state))
+    ui_carrier_store(wrapping(node + UI_NODE_WIDTH), rt_f64_bits(Float{ui_text_scalars(state)}))
+    ui_carrier_store(wrapping(node + UI_NODE_HEIGHT), rt_f64_bits(Float{1.0}))
+    ui_carrier_store(wrapping(node + UI_NODE_ROLE), UI_ROLE_TEXT_INPUT)
+    ui_carrier_store(wrapping(node + UI_NODE_KIND), UI_KIND_TEXT_INPUT)
+    ui_carrier_store(wrapping(node + UI_NODE_CHILDREN), data_sequence_new(I64{0}, UI_NODE_CHILD_BYTES))
+    ui_carrier_store(wrapping(node + UI_NODE_ABSENT_MASK), UI_NODE_OPTION_MASK.bit_and(I64{-1} - UI_NODE_SLOT_IME))
+    ui_carrier_store(wrapping(node + UI_NODE_IME), ime)
+    node
+}

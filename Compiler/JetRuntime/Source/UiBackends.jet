@@ -940,12 +940,13 @@ fn ui_button_node(label: I64) -> I64 {
     node
 }
 #Export(c) fn jet_ui_button(label: I64) -> I64 { ui_button_node(label) }
-// jet_ui_button_on_click: the label, the optional shortcut and accessible
-// label (borrowed Option boxes, null when absent) and the handler closure,
-// which the click slot takes over.
+// jet_ui_button_on_click: the label, the optional shortcut (a borrowed
+// UIShortcut record, null when absent), the optional accessible label (a
+// borrowed Option box, null when absent) and the handler closure, which the
+// click slot takes over.
 #Export(c) fn jet_ui_button_on_click(label: I64, shortcut: I64, accessible_label: I64, env: I64, invoke: I64, release: I64) -> I64 {
     node :: ui_button_node(label)
-    if (shortcut != I64{0}) -> ui_carrier_store(wrapping(node + UI_NODE_SHORTCUT), jet_rt_handle_clone_jet_ui_shortcut(ui_carrier_word(shortcut)))
+    if (shortcut != I64{0}) -> ui_carrier_store(wrapping(node + UI_NODE_SHORTCUT), jet_rt_handle_clone_jet_ui_shortcut(shortcut))
     if (accessible_label != I64{0}) {
         accessibility :: jet_rt_alloc(UI_ACCESSIBILITY_BYTES, I64{8})
         ui_carrier_store(wrapping(accessibility + UI_ACCESSIBILITY_NAME), jet_rt_string_clone(ui_carrier_word(accessible_label)))

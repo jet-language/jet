@@ -29,7 +29,7 @@ DECLARE(JetUiFsGrant);
 extern void jet_rt_handle_field_jet_ui_node_label(H, Text *);
 extern H jet_rt_handle_field_jet_ui_node_width(H);
 extern H jet_rt_handle_field_jet_ui_node_height(H);
-extern void jet_rt_handle_field_jet_ui_shortcut_key(H, Text *);
+extern Text *jet_rt_record_get_jet_ui_shortcut_key(H);
 extern H jet_rt_handle_field_jet_tui_style_bold(H);
 extern H jet_rt_handle_field_jet_tui_style_dim(H);
 extern H jet_rt_handle_field_jet_tui_style_underline(H);
@@ -159,14 +159,14 @@ static void node_cases(void) {
     words(b)[2] = UINT64_C(0x7ff8000000000001); assert(!jet_rt_handle_eq_jet_ui_node(b,b)); words(b)[2] = 0;
     Text view; jet_rt_handle_field_jet_ui_node_label(b,&view); header_is(&view,(H)words(b)[0]);
     assert(jet_rt_handle_field_jet_ui_node_width(b) == b+8 && jet_rt_handle_field_jet_ui_node_height(b) == b+16);
-    jet_rt_handle_field_jet_ui_shortcut_key((H)words(b)[18],&view); header_is(&view,(H)words((H)words(b)[18])[0]);
+    Text *key = jet_rt_record_get_jet_ui_shortcut_key((H)words(b)[18]); assert(key != (Text *)(uintptr_t)words((H)words(b)[18])[0]);
     H bs = (H)words((H)words(b)[17])[4];
     for (unsigned i=2;i<=4;++i) { words(bs)[2*i+1] ^= 1; assert(!jet_rt_handle_eq_jet_ui_node(a,b)); words(bs)[2*i+1] ^= 1; }
     words(bs)[0] = 1; assert(!jet_rt_handle_eq_jet_ui_node(a,b)); words(bs)[0] = 0;
     words(bs)[1] = 0; assert(jet_rt_handle_eq_jet_ui_node(a,b));
     words((H)words(b)[18])[1] ^= 1; assert(!jet_rt_handle_eq_jet_ui_node(a,b)); words((H)words(b)[18])[1] ^= 1;
     jet_rt_handle_drop_jet_ui_node(a);
-    assert(view.len == 3 && memcmp(view.data,"key",3) == 0);
+    assert(key->len == 3 && memcmp(key->data,"key",3) == 0); jet_rt_string_drop(key);
     jet_rt_handle_drop_jet_ui_node(b);
     jet_rt_handle_drop_jet_ui_node(0); jet_rt_handle_drop_jet_ui_accessibility(0); jet_rt_handle_drop_jet_ui_shortcut(0);
 }
