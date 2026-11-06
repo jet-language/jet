@@ -301,7 +301,8 @@ s2_syntax_artifact_extensions_are_one_closed_kind_specific_family: fn() {
     failures := [String]{}
     loop root in roots {
         loop path in s2_syntax_paths(root) {
-            if path.ends_with(".rs") || path.ends_with("tests/guards/syntax_reconciliation.jet") -> next
+            // Dated evidence keeps its words as recorded (retirement_ratchet.jet).
+            if path.ends_with(".rs") || path.ends_with("tests/guards/syntax_reconciliation.jet") || guards_dated_evidence(path) -> next
             source: s2_syntax_files_api.read(path) ?? next
             loop (index, line) in source.lines() {
                 loop suffix in retired {
