@@ -2755,29 +2755,32 @@ jet_driver_c_export_rows: fn(graph: SemaRegistrationGraph, entry_module_identity
     rows
 }
 
-// One `#Job` function of the entry module that argv can select:
-// its symbol key, its name (the program word that selects
-// it) and whether it is `#Job(.Ship)`, the only scope a release binary
-// exposes. `.Internal` jobs never reach argv, so they have no row.
+// One `#Job` function of the entry module: its symbol key,
+// its name (the program word that selects it), whether it is `#Job(.Ship)`,
+// the only scope a release binary exposes, and whether argv can select it:
+// `.Internal` jobs never reach argv, and typed job arguments
+// are not built, so a job with parameters is not selectable either.
 JetDriverJobRow: struct {
     key: String
     name: String
     shipped: Bool
+    selectable: Bool
 }
 
-// The entry module's argv-selectable jobs in declaration order, read from
-// the registration graph as jet_driver_c_export_rows reads its exports. Only
-// a job without parameters is selectable: typed job arguments
-// are not built.
+// The entry module's jobs in declaration order, read from the registration
+// graph as jet_driver_c_export_rows reads its exports: the list a run's
+// unknown-job report (E1294) names and a release build's stripped-job line
+// counts.
 jet_driver_job_rows: fn(graph: SemaRegistrationGraph, entry_module_identity: String) -> [JetDriverJobRow] Never! {
     rows := [JetDriverJobRow]{}
     loop registration_module in graph.modules {
         if registration_module.module_identity != entry_module_identity -> next
         loop row in registration_module.functions {
-            if !row.declaration.is_job || row.declaration.params.len() > 0 -> next
+            // An inline module's job (a generated `__jet_` path name) is not the entry's (JobRegistry.from_items).
+            if !row.declaration.is_job || row.declaration.name.starts_with("__jet_") -> next
             metadata: row.declaration.job_metadata ?? ast_job_metadata()
-            if metadata.scope == .Internal -> next
-            rows.push(JetDriverJobRow{key: row.symbol.id.key, name: row.declaration.name, shipped: metadata.scope == .Ship})
+            selectable: metadata.scope != .Internal && row.declaration.params.len() == 0
+            rows.push(JetDriverJobRow{key: row.symbol.id.key, name: row.declaration.name, shipped: metadata.scope == .Ship, selectable: selectable})
         }
     }
     rows
@@ -3091,11 +3094,15 @@ JetDriverCheckedProjectionResult: struct {
     source_modules: [Int]
     entry_module: Int?
     schema_ingress: JetDriverSchemaIngress?
+    // The entry module's jobs (jet_driver_job_rows): the list a run's
+    // unknown-job report (E1294) names.
+    job_rows: [JetDriverJobRow]{[JetDriverJobRow]{}}
 }
 JetDriverCheckedProjectionCapture: struct {
     source_modules: [Int]{[Int]{}}
     entry_module: Int?{None}
     schema_ingress: JetDriverSchemaIngress?{None}
+    job_rows: [JetDriverJobRow]{[JetDriverJobRow]{}}
     // `jet_driver_lowering_inputs`: stop right before IR lowering and keep its inputs.
     stop_before_lowering: Bool{false}
     lowering_inputs: JetDriverLoweringInputs?{None}
@@ -3108,7 +3115,7 @@ JetDriverCheckedProjectionCapture: struct {
 // the entry module; the key of the executable entry
 // (jet_driver_resolve_entry_key), None for a program without one; the entry
 // module's `#Export(c)` rows (jet_driver_c_export_rows), the exports of a
-// library, and its argv-selectable jobs (jet_driver_job_rows). A Test
+// library, and its jobs (jet_driver_job_rows). A Test
 // compile has no entry: it carries the tests and Check
 // Outputs its harness runs (jet_driver_test_plan) instead.
 JetDriverLoweringInputs: struct {
@@ -3122,7 +3129,7 @@ JetDriverLoweringInputs: struct {
     tests: [TTestFact]{[TTestFact]{}}
     output_checks: [TOutputCheckFact]{[TOutputCheckFact]{}}
     c_exports: [JetDriverCExportRow]{[JetDriverCExportRow]{}}
-    // The entry module's argv-selectable jobs (jet_driver_job_rows).
+    // The entry module's jobs (jet_driver_job_rows).
     jobs: [JetDriverJobRow]{[JetDriverJobRow]{}}
 }
 
@@ -3299,8 +3306,9 @@ jet_driver_checked_projection: fn(request: &&JetDriverCompileRequest) -> JetDriv
     if !compile.complete {
         capture.source_modules = [Int]{}
         capture.entry_module = None
+        capture.job_rows = [JetDriverJobRow]{}
     }
-    JetDriverCheckedProjectionResult{compile: compile.move(), source_modules: capture.source_modules, entry_module: capture.entry_module, schema_ingress: capture.schema_ingress}
+    JetDriverCheckedProjectionResult{compile: compile.move(), source_modules: capture.source_modules, entry_module: capture.entry_module, schema_ingress: capture.schema_ingress, job_rows: capture.job_rows}
 }
 
 jet_driver_compile: fn(request: &&JetDriverCompileRequest) -> JetDriverCompileResult {
@@ -3868,6 +3876,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // print each goal card from a Doc projection (Rust `render_goal_report`).
     if request.mode == JetDriverCompileMode.Check -> load.typed_goals = jet_driver_has_typed_goals(checked_graph.modules)
     if checked_projection {
+        capture.job_rows = jet_driver_job_rows(registration_graph, load.entry_module_identity)
         resolved_registration := sema_comptime_graph_with_values(registration_graph, comptime_values)
         schema_ingress: capture.schema_ingress ?? return jet_driver_compile_internal_result(load, trace, "the retained checked projection lost its actual schema input")
         retained := jet_driver_project_completed_check(request, load, resolved_registration, checked_graph, comptime_values, canonical_effect_module_identity, schema_ingress, trace)

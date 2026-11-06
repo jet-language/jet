@@ -148,7 +148,7 @@ use {
         jet_format_source,
     ]
     jet_plugin.[jet_plugin_link]
-    jet_sema.[SemaCheckedForeignFunction, sema_no_run_diagnostic, sema_user_template_ct_value]
+    jet_sema.[SEMA_CLI_ENTRY_NAME, SemaCheckedForeignFunction, sema_no_run_diagnostic, sema_user_template_ct_value]
     jet_pkg_model.[
         ClaimsGrade,
         LockFile,
@@ -1229,8 +1229,9 @@ jet_cli_native_level: fn(options: BuildOptions) -> Int Never! {
 // `backtrace` goes to the runtime, and so does a counting `allocator:`
 // policy of the entry package with its cap. The program's first word selects
 // a job of the entry module: a bare, `.Dev` or `.Ship` job
-// in a dev build, a `.Ship` job only in a `release` build, where a stripped
-// job's word reports an unknown command.
+// in a dev build, a `.Ship` job only in a `release` build. Any other first
+// word is the unknown-job report (E1294), naming every declared job in a dev
+// build and the shipped ones in a release build.
 jet_cli_ir_checks: fn(result: JetDriverCompileResult, inputs: JetDriverLoweringInputs, options: BuildOptions) -> IRChecks Never! {
     bounds: build_options_value(options, "bounds")
     dead_code: build_options_value(options, "dead_code")
@@ -1242,9 +1243,42 @@ jet_cli_ir_checks: fn(result: JetDriverCompileResult, inputs: JetDriverLoweringI
     }
     checks := ir_checks_of(bounds, build_options_value(options, "backtrace"), dead_code, modules)
     if result.allocator == .Counting(cap) -> checks.counting = Val(if cap == .Val(size) -> size.bytes else -> 0)
+    // A release binary ships `#Job(.Ship)` jobs only: the others are not
+    // declared to its unknown-job report, and a selectable one's word is
+    // refused with the fix (IRJob stripped).
     release: options.profile == "release"
-    loop job in inputs.jobs -> checks.jobs.push(IRJob{key: job.key.copy(), name: job.name.copy(), stripped: release && !job.shipped})
+    loop job in inputs.jobs {
+        stripped: release && !job.shipped
+        if !stripped -> checks.declared_jobs.push(job.name.copy())
+        if job.selectable {
+            checks.jobs.push(IRJob{key: job.key.copy(), name: job.name.copy(), stripped: stripped})
+        } else {
+            checks.passthrough_jobs.push(job.name.copy())
+        }
+    }
+    // A typed `run: fn(args: T)` starts at its generated CLI wrapper, which
+    // parses argv itself: its words are no unknown jobs.
+    if inputs.jobs.len() > 0 && inputs.entry_key == .Val(entry_key) {
+        checks.unknown_jobs = true
+        loop function in inputs.functions {
+            if function.key == entry_key && function.name.starts_with(SEMA_CLI_ENTRY_NAME) -> checks.unknown_jobs = false
+        }
+    }
     checks
+}
+
+// A release binary exposes only `#Job(.Ship)` jobs, so a
+// release build names the jobs it leaves out; a release can't silently lose
+// a command its author expected to ship.
+jet_cli_release_job_summary: fn(inputs: JetDriverLoweringInputs?, options: BuildOptions) -> String Never! {
+    if options.profile != "release" -> return ""
+    lowering: inputs ?? return ""
+    stripped := [String]{}
+    loop job in lowering.jobs {
+        if !job.shipped -> stripped.push(job.name.copy())
+    }
+    if stripped.len() == 0 -> return ""
+    "stripped {stripped.len()} dev job(s): {stripped.join(", ")} (mark #Job(.Ship) to include)\n"
 }
 
 // A resolved build option value that removes a runtime check
@@ -1369,9 +1403,9 @@ jet_cli_present_shown: fn(result: JetDriverCompileResult, snapshot: JetDriverAut
 // (under `json`, one failed `diagnostics` status on stderr), check the
 // application authority, then write the executable, or under `os: web` the
 // web build (jet_cli_build_web). `sbom` (`--sbom`) also writes the SPDX
-// document next to the executable (jet_cli_build_sbom). Every build ends with
-// the one-line effect summary on stderr, which `quiet` and the
-// `json` channel leave out.
+// document next to the executable (jet_cli_build_sbom). A human build ends
+// with the one-line effect summary on stderr, which `quiet` leaves out; under
+// `json` the same projection is the one `build.effects` status on stdout.
 jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool, options: BuildOptions, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, quiet: Bool, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     // Only the errors are presented (jet_cli_present_shown).
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
@@ -1384,6 +1418,7 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     authority: jet_cli_traced_authority(source, invocation, result)
     if jet_cli_authority_report(file, source, color, false, "build", authority) == .Val(refusal) -> return refusal
     summary: if json || quiet -> "" else -> "{jet_cli_effect_projection_line(authority)}\n"
+    stripped_jobs: if json || quiet -> "" else -> jet_cli_release_job_summary(inputs, options)
     built := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if build_options_value(options, "os") == "web" {
         built = jet_cli_build_web(file, color, options, result, inputs, snapshot)
@@ -1395,8 +1430,26 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
             }
         }
     }
-    if built.exit_code == JET_DRIVER_EXIT_OK -> built.stderr = "{summary}{built.stderr}"
+    if built.exit_code == JET_DRIVER_EXIT_OK {
+        if json {
+            built.stdout = jet_cli_build_effects_json(authority)
+        } else {
+            built.stderr = "{summary}{built.stderr}"
+            built.stdout = "{stripped_jobs}{built.stdout}"
+        }
+    }
     built
+}
+
+// The `build.effects` status: `effects` repeats `required_effects` for
+// readers of the effect list alone.
+jet_cli_build_effects_json: fn(authority: JetCLIAuthority) -> String Never! {
+    status: jet_cli_status_render("build.effects", true, [
+        jet_cli_status_field("effects", jet_cli_status_texts(authority.required)), jet_cli_status_field("required_effects", jet_cli_status_texts(authority.required)),
+        jet_cli_status_field("granted_effects", jet_cli_status_texts(authority.granted)), jet_cli_status_field("denied_effects", jet_cli_status_texts(authority.denied)),
+        jet_cli_status_field("authority", jet_cli_status_text(authority.authority)),
+    ])
+    "{status}\n"
 }
 
 // `jet build --sbom`: the SPDX 2.3 document of the build's
@@ -3069,6 +3122,10 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> J
             jet_cli_write_notice(notice)
             output = if watch -> jet_cli_dev_loop(file, entry, color, options, verbose, json, threads, program_args, invocation, trace_sink) else -> jet_cli_run_step(jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink))
         }
+        .Jobs(file, color, json, notice) -> {
+            jet_cli_write_notice(notice)
+            output = jet_cli_compile_jobs(file, color, json)
+        }
         .Test(file, source, color, verbose, threads, options) -> output = jet_cli_compile_test(file, source, color, verbose, threads, options, trace_sink)
         .TestWorkspace(names, member_args, envs, executable, heading, results, tiers, quiet) -> output = jet_cli_test_workspace(names, member_args, envs, executable, heading, results, tiers, quiet)
         .TestProfile(profile, root, settings, runs, update, quiet) -> output = jet_cli_test_profile(profile, root, settings, runs, update, quiet)
@@ -3111,7 +3168,7 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> J
         .Codemod(action, path, yes, color, json) -> output = jet_cli_codemod_host(action, path, yes, color, json)
         .PolicyExplain(key, file, site, line, color, json) -> output = jet_cli_execute(jet_cli_policy_explain_host(key, file, site, line, color, json))
         .DiagnosticTypeExplain(name, file, color, json) -> output = jet_cli_execute(jet_cli_diagnostic_type_explain_host(name, file, color, json))
-        .BuildFactExplain(key, file, profile, settings, color, json) -> output = jet_cli_execute(jet_cli_build_fact_explain_host(key, file, profile, settings, color, json))
+        .BuildFactExplain(key, file, profile, settings, module_value, color, json) -> output = jet_cli_execute(jet_cli_build_fact_explain_host(key, file, profile, settings, module_value, color, json))
         .Gates(file, gate_args, color, json, notice) -> {
             jet_cli_write_notice(notice)
             output = jet_cli_gates_run(file, gate_args, color, json)

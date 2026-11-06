@@ -301,6 +301,29 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
     I64{1}
 }
 
+// E1294: after the job branches of a program whose argv can
+// select a job (JetIR ir_entry_unknown_job), a first word (argv[1]) that is
+// not a flag names no job: end the process with the report `prefix`, the
+// word, then `suffix` (which lists the declared jobs). Without such a word,
+// return and the entry runs.
+#Export(c) jet_rt_entry_job_unknown: fn(prefix: I64, prefix_length: I64, suffix: I64, suffix_length: I64) {
+    host_arguments_require()
+    if (host_argc < I64{2}) { return }
+    bytes: host_argument_bytes(I64{1})
+    length: host_startup_byte_length(bytes)
+    first := I64{0}
+    if (length > I64{0}) {
+        #Unsafe("argv[1] is an immutable startup string of `length` bytes") {
+            first = os_load_u8(bytes)
+        }
+    }
+    if (first == I64{45}) { return }
+    text: rt_text_copy(prefix, prefix_length)
+    rt_text_append(text, bytes, length)
+    rt_text_append(text, suffix, suffix_length)
+    jet_rt_entry_error_exit(text)
+}
+
 // jet_std_io_args: std::env::args().collect(), argv[0] first, through the
 // generated list-out ABI (an exact count*8 buffer of owned Text words, 0 when
 // empty). Args::next unwraps into_string, so a non-UTF-8 argument panics.

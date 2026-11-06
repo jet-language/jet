@@ -244,8 +244,16 @@ IRChecks: struct {
     // jet_rt_program_allocator_configure); None keeps the system heap.
     counting: Int?{None}
     // The jobs the program's first word can select ahead of
-    // the entry; the entry function calls each (ir_entry_function).
+    // the entry; the entry function calls each (ir_entry_function). The word
+    // of a `passthrough_jobs` job (an `.Internal` one, or one with typed
+    // arguments) is an ordinary program argument. Under `unknown_jobs` (an
+    // entry that parses no argv of its own) and a job that is not stripped,
+    // any other first word is the unknown-job report (E1294), which lists
+    // `declared_jobs`.
     jobs: [IRJob]{[IRJob]{}}
+    passthrough_jobs: [String]{[String]{}}
+    declared_jobs: [String]{[String]{}}
+    unknown_jobs: Bool{false}
     // `--checked-alloc` (the `checked_alloc` build option): the entry calls
     // jet_rt_alloc_check_link, so the link keeps the runtime's checked heap
     // (ir_checked_alloc_link).
@@ -254,7 +262,7 @@ IRChecks: struct {
 
 // An argv-selectable job: the checked function `key` that the program word
 // `name` runs instead of the entry. A `stripped` job is one a release build
-// does not ship (any but `#Job(.Ship)`): its word is an unknown command.
+// does not ship (any but `#Job(.Ship)`): its word is an unknown job.
 IRJob: struct {
     key: String
     name: String
@@ -626,8 +634,7 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     owner_methods := [String:Int]{}
     render_impls := [String:Int]{}
     loop (index, function) in owned {
-        operator_hook: function.name == "add" || function.name == "sub" || function.name == "mul" || function.name == "div"
-        if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" && !operator_hook -> next
+        if function.name != "display" && function.name != "show" && function.name != "close" && function.name != "compare" -> next
         if function.kind == {
             .TopLevel -> {}
             .Method(_, owner_type) -> {
@@ -644,13 +651,6 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
                     render_key: "{trait_short}|{owner_key}"
                     if render_impls.get(render_key) == None -> render_impls[render_key] = index
                 }
-                // A generic `T: Add` body's `+` (ir_operator_impl) runs the
-                // instantiation's hook for its own right-hand type.
-                operator_trait: (trait_short == "Add" && function.name == "add") || (trait_short == "Sub" && function.name == "sub") || (trait_short == "Mul" && function.name == "mul") || (trait_short == "Div" && function.name == "div")
-                if operator_trait && function.params.len() == 1 {
-                    operator_key: "{trait_short}|{owner_key}|{ir_render_type_key(p.type_rows, p.types, function.params[0].ty)}"
-                    if render_impls.get(operator_key) == None -> render_impls[operator_key] = index
-                }
             }
         }
     }
@@ -666,12 +666,33 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
         }
     }
     p.trait_methods = ir_trait_methods(owned, p.type_rows, p.types, p.impl_slots, p.impl_traits)
+    // A generic `T: Add` body's `+` (ir_operator_impl) runs the
+    // instantiation's hook for its own right-hand type: a method of the
+    // owner's operator-trait implementation, local trait or Core's.
+    loop hook in ([String]{"add", "sub", "mul", "div"}) {
+        trait_short: if hook == "add" -> "Add" else if hook == "sub" -> "Sub" else if hook == "mul" -> "Mul" else -> "Div"
+        loop index in (p.trait_methods.get("{trait_short}|{hook}") ?? [Int]{}) {
+            if owned[index].params.len() != 1 -> next
+            if owned[index].kind == {
+                .Method(_, owner) -> ir_operator_hook_key(p, render_impls, trait_short, owner, owned[index].params[0].ty, index)
+                .TraitMethod(_, _, owner, _, _) -> ir_operator_hook_key(p, render_impls, trait_short, owner, owned[index].params[0].ty, index)
+                .TopLevel -> {}
+            }
+        }
+    }
     p.spawn_sites = ir_spawn_sites(owned)
     p.functions = owned.move()
     p.rows = rows
     ir_program_bind_decls(p, decls)
     p.render_impls = render_impls
     p.close_methods = close_methods
+}
+
+// Selects function `index` as `owner`'s `trait_short` hook for the
+// right-hand type `rhs` (ir_operator_impl), unless one is selected already.
+ir_operator_hook_key: fn(p: IRProgram, render_impls: &[String:Int], trait_short: String, owner: Type, rhs: Type, index: Int) Never! {
+    key: "{trait_short}|{ir_render_type_key(p.type_rows, p.types, owner)}|{ir_render_type_key(p.type_rows, p.types, rhs)}"
+    if render_impls.get(key) == None -> render_impls[key] = index
 }
 
 // The bound functions' DeclID rows over `decls` (IRProgram.decl_rows): a
@@ -1199,7 +1220,8 @@ IR_STARTUP_FUNCTION_PREFIX: "__startup_"
 // IRChecks.counting), computes every constant computed at startup
 // (p.startup, through ir_startup_guard), then runs the job the program's
 // first word names (jet_rt_entry_job_selected over
-// IRChecks.jobs) or else `entry`, through ir_entry_call.
+// IRChecks.jobs), reports any other job word as unknown (E1294,
+// ir_entry_unknown_job) or else runs `entry`, through ir_entry_call.
 ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row: m.functions[entry].result
     if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0 && !p.checks.checked_alloc) -> return entry
@@ -1233,7 +1255,15 @@ ir_entry_function: fn(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuil
         guard_operands: ir_args(b.f, [Int]{})
         ir_emit(b.f, IROp.Call, -1, guard, guard_operands, 0, b.line)
     }
-    loop job in p.checks.jobs -> ir_entry_job(m, p, b, job, span)
+    loop job in p.checks.jobs -> ir_entry_job(m, p, b, job, p.checks.declared_jobs, span)
+    selectable := false
+    loop job in p.checks.jobs {
+        if !job.stripped -> selectable = true
+    }
+    if p.checks.unknown_jobs && selectable {
+        loop name in p.checks.passthrough_jobs -> ir_entry_passthrough(m, p, b, name, entry, row, ty, span)
+        ir_entry_unknown_job(m, b, p.checks.declared_jobs)
+    }
     ir_entry_call(m, p, b, entry, row, ty, span)
     ir_emit(b.f, IROp.Return, -1, -1, -1, -1, b.line)
     if b.error != "" {
@@ -1255,26 +1285,21 @@ ir_checked_alloc_link: fn(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
 
 // The branch of the entry function that runs `job` when the program's first
 // word names it, and returns. A job a release build strips (`job.stripped`)
-// is not built: its word ends the process with the unknown-command report
-// and the `#Job(.Ship)` fix.
-ir_entry_job: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRJob, span: Span) Never! {
+// is not built: its word ends the process with the unknown-job report
+// (E1294, listing `declared`) and the `#Job(.Ship)` fix.
+ir_entry_job: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRJob, declared: [String], span: Span) Never! {
     job_row: ir_function_row(p, job.key) ?? return ir_fail(b, span, "the job {job.name} is not among the checked functions")
     function: p.functions[job_row]
-    name: ir_static_text(m, b, job.name)
-    word_row: ir_word_row(m)
-    selected: ir_runtime(m, b, "jet_rt_entry_job_selected", name, word_row)
-    zero: ir_word_const(m, b, 0)
-    chosen: ir_bool_op(m, b, IROp.Ne, selected, zero)
-    ir_open_if(b.f, chosen, b.line)
+    ir_entry_word_if(m, b, job.name)
     if job.stripped {
-        message: ir_static_text(m, b, "unknown command `{job.name}`: a release binary runs only `#Job(.Ship)` jobs; mark `{job.name}` `#Job(.Ship)` to ship it")
+        message: ir_static_text(m, b, "unknown command `{job.name}` (E1294: no job named `{job.name}`; declared jobs: {declared.join(", ")}): a release binary runs only `#Job(.Ship)` jobs; mark `{job.name}` `#Job(.Ship)` to ship it")
         string_row: ir_string_row(m)
         text: ir_runtime(m, b, "jet_rt_string_from_static", message, string_row)
         _: ir_runtime(m, b, "jet_rt_entry_error_exit", [Int]{text}, -1)
         ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
     } else {
-        declared: if function.ret == .Val(written) -> Val(ir_fact(p, b, written, function.source_span)) else -> Type?{None}
-        job_ty: ir_executable_return_in(function, declared) ?? Type.Named{name: "Unit"}
+        returned: if function.ret == .Val(written) -> Val(ir_fact(p, b, written, function.source_span)) else -> Type?{None}
+        job_ty: ir_executable_return_in(function, returned) ?? Type.Named{name: "Unit"}
         job_result := -1
         if !ir_unit_type(job_ty) && !ir_never_type(job_ty) {
             job_result = ir_value_type(m, p, job_ty) ?? return ir_fail(b, function.source_span, "job result type {ir_type_name(job_ty)}")
@@ -1284,6 +1309,40 @@ ir_entry_job: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRJob, span: Sp
         ir_emit(b.f, IROp.Return, -1, -1, -1, -1, b.line)
     }
     ir_end(b.f, b.line)
+}
+
+// Opens the branch taken when the program's first word is `name`
+// (jet_rt_entry_job_selected).
+ir_entry_word_if: fn(m: &IRModule, b: &IRBuilder, name: String) Never! {
+    text: ir_static_text(m, b, name)
+    word_row: ir_word_row(m)
+    selected: ir_runtime(m, b, "jet_rt_entry_job_selected", text, word_row)
+    zero: ir_word_const(m, b, 0)
+    chosen: ir_bool_op(m, b, IROp.Ne, selected, zero)
+    ir_open_if(b.f, chosen, b.line)
+}
+
+// The branch for the word of a job argv can't select (IRChecks
+// passthrough_jobs): the word is an ordinary program argument, so the entry
+// runs ahead of the unknown-job report.
+ir_entry_passthrough: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, entry: Int, row: Int, ty: Type, span: Span) Never! {
+    ir_entry_word_if(m, b, name)
+    ir_entry_call(m, p, b, entry, row, ty, span)
+    ir_emit(b.f, IROp.Return, -1, -1, -1, -1, b.line)
+    ir_end(b.f, b.line)
+}
+
+// After the job branches: a first word that is not a flag and names no job
+// ends the process with the unknown-job report (E1294),
+// which lists `declared` (jet_rt_entry_job_unknown); without one the entry
+// runs.
+ir_entry_unknown_job: fn(m: &IRModule, b: &IRBuilder, declared: [String]) Never! {
+    prefix: ir_static_text(m, b, "E1294: no job named `")
+    suffix: ir_static_text(m, b, "`; the first program word must name a `#Job fn`; declared jobs: {declared.join(", ")}")
+    operands := [Int]{}
+    loop operand in prefix -> operands.push(operand)
+    loop operand in suffix -> operands.push(operand)
+    _: ir_runtime(m, b, "jet_rt_entry_job_unknown", operands, -1)
 }
 
 // Calls the program's start `callee` (the entry or a selected job) with
