@@ -24,7 +24,8 @@ control_loop: fn() -> ControlStats {
 
     // Absolute deadlines avoid accumulating sleep drift. A miss is a host
     // observation (the loop began after its due time), not a hard deadline.
-    loop ticks < 10000 {
+    // One second of 1 ms ticks shows the loop; it is wall time on every tier.
+    loop ticks < 1000 {
         time.sleep_until(next_due)
         due_us: (ticks + 1) * 1000
         observed_us: started.elapsed().in(.Microseconds)

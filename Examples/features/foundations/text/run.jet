@@ -91,8 +91,10 @@ encode_text: fn(source: String, model: BPEModel) -> [String] {
     return encoded
 }
 
+// A 256 KiB corpus and a 25 MB log keep every tier of this golden row under a
+// few seconds; the sizes still exercise BPE training and a mapped line scan.
 corpus_fixture: fn() -> String {
-    target: 1_048_576
+    target: 262_144
     seed: "Hello café नमस्ते سلام — Jet text views\n"
     seed_bytes: text.byte_count(seed)
     repeats: target /% seed_bytes
@@ -108,9 +110,9 @@ write_log_fixture: fn(path: Path) -> Int {
     padding: "{"X".repeat(block_size - base_bytes - 1)}\n"
     block: "{base}{padding}"
     if text.byte_count(block) != block_size -> panic("log fixture block size")
-    blocks: 100_000
-    files.write(path, block.repeat(blocks)) ?? panic("write 100 MB log fixture")
-    files.fsync(path) ?? panic("fsync 100 MB log fixture")
+    blocks: 25_000
+    files.write(path, block.repeat(blocks)) ?? panic("write 25 MB log fixture")
+    files.fsync(path) ?? panic("fsync 25 MB log fixture")
     return blocks
 }
 
@@ -162,7 +164,7 @@ run: fn() {
     model: train_bpe(corpus)
     bpe_millis: bpe_started.elapsed_millis()
     sample_tokens: encode_text("Hello café नमस्ते سلام", model)
-    if corpus_bytes != 1_048_576 -> panic("corpus fixture size")
+    if corpus_bytes != 262_144 -> panic("corpus fixture size")
     if model.merges.len() != 12 -> panic("BPE did not run twelve rounds")
     if sample_tokens.len() == 0 -> panic("BPE encoder returned no tokens")
     // Elapsed times vary per host; the example measures them but prints only
@@ -186,10 +188,10 @@ run: fn() {
     print("casefold_equal={caseless}")
 
     scratch: files.temp_dir("jet-foundation-text") ?? panic("text temp dir")
-    log_path: Path.from(scratch.path).join("logs_100m.txt")
+    log_path: Path.from(scratch.path).join("logs_25m.txt")
     expected_matches: write_log_fixture(log_path)
     scan: scan_logs(log_path)
-    if scan.bytes != 100_000_000 -> panic("100 MB scan size")
+    if scan.bytes != 25_000_000 -> panic("25 MB scan size")
     if scan.matches != expected_matches -> panic("streaming scan match count")
     if scan.millis < 0 -> panic("scan clock ran backwards")
     print("scan bytes={scan.bytes} lines={scan.lines} matches={scan.matches}")
