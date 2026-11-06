@@ -133,16 +133,18 @@ json: stdout doc $.action = "cli"
 json: stdout doc $.ok = false
 json: stdout doc $.reports #= 1
 json: stdout doc $.reports[0].code = "E2104"
+# A package query `jet explain` cannot answer itself goes to the Jetpack
+# engine, which owns the envelope: no Hangar record is its E1274.
 step: jet explain --json missing.jet
 cwd: empty
 exit: 2
 stdout: lines = 1 # one status line
 stderr: empty
 json: stdout doc $.schema = "jet.status/v1"
-json: stdout doc $.action = "cli"
+json: stdout doc $.action = "explain"
 json: stdout doc $.ok = false
 json: stdout doc $.reports #= 1
-json: stdout doc $.reports[0].code = "E2104"
+json: stdout doc $.reports[0].code = "E1274"
 # The `jet prove` front owns its refusals: a missing target is its E2105 line.
 step: jet prove --json missing.jet
 cwd: empty
@@ -154,9 +156,11 @@ json: stdout doc $.action = "prove"
 json: stdout doc $.ok = false
 json: stdout doc $.reports #= 1
 json: stdout doc $.reports[0].code = "E2105"
+# fetch, add and remove run in a project; outside one they refuse with the
+# shared project-root E2104 as a user error.
 step: jet fetch --json missing.jet
 cwd: empty
-exit: 2
+exit: 1
 stdout: lines = 1 # one status line
 stderr: empty
 json: stdout doc $.schema = "jet.status/v1"
@@ -186,7 +190,7 @@ json: stdout doc $.reports #= 1
 json: stdout doc $.reports[0].code = "E2104"
 step: jet add --json missing.jet
 cwd: empty
-exit: 2
+exit: 1
 stdout: lines = 1 # one status line
 stderr: empty
 json: stdout doc $.schema = "jet.status/v1"
@@ -226,7 +230,7 @@ json: stdout doc $.reports #= 1
 json: stdout doc $.reports[0].code = "E2104"
 step: jet remove --json missing.jet
 cwd: empty
-exit: 2
+exit: 1
 stdout: lines = 1 # one status line
 stderr: empty
 json: stdout doc $.schema = "jet.status/v1"
@@ -254,16 +258,17 @@ json: stdout doc $.action = "cli"
 json: stdout doc $.ok = false
 json: stdout doc $.reports #= 1
 json: stdout doc $.reports[0].code = "E2104"
+# `jet debug` reads its target first: a missing one is its E2105 line.
 step: jet debug --json missing.jet
 cwd: empty
-exit: 2
+exit: 1
 stdout: lines = 1 # one status line
 stderr: empty
 json: stdout doc $.schema = "jet.status/v1"
 json: stdout doc $.action = "cli"
 json: stdout doc $.ok = false
 json: stdout doc $.reports #= 1
-json: stdout doc $.reports[0].code = "E2104"
+json: stdout doc $.reports[0].code = "E2105"
 step: jet db --json missing.jet
 cwd: empty
 exit: 2
@@ -331,9 +336,9 @@ json: stdout doc $.new.path = "demo/"
 json: stdout doc $.new.files = ["package.jet","run.jet",".gitignore"]
 file: empty/demo/package.jet is-file
 file: empty/demo/run.jet is-file
-# A valid `jet prove` request past the front whose lens is not built yet
+# A valid `jet prove` request past the front whose form is not built yet
 # stops there, and that refusal is one status line too.
-step: jet prove --json demo/run.jet --lens tests
+step: jet prove --json demo/run.jet --save base
 cwd: empty
 exit: 2
 stdout: lines = 1 # one status line
