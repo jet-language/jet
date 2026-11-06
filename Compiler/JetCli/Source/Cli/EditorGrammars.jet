@@ -25,7 +25,8 @@ JET_CLI_GRAMMAR_TEXTMATE: "Tools/editors/jet.tmGrammar"
 JET_CLI_GRAMMAR_TREE_SITTER: "Tools/editors/tree-sitter/grammar.js"
 JET_CLI_GRAMMAR_ZED: "Tools/editors/zed/languages/jet/highlights.scm"
 
-// One HighlightClass, in emission order: sigils before operators so a
+// One HighlightClass, in emission order: the take mark before sigils and
+// sigils before operators, so `&&` in a parameter list is the take mark and a
 // sigil wins over an operator it starts with.
 JetCLIGrammarClass: struct {
     name: String
@@ -45,6 +46,7 @@ JET_CLI_GRAMMAR_CLASSES: [JetCLIGrammarClass]{
     {name: "TypeBuiltin", textmate: "storage.type.builtin.jet", zed: "@type.builtin", label: "type.builtin", tree_sitter: "JET_HIGHLIGHT_TYPE_BUILTIN", keyword: false},
     {name: "Builtin", textmate: "support.function.builtin.jet", zed: "@function.builtin", label: "builtin", tree_sitter: "JET_HIGHLIGHT_BUILTIN", keyword: false},
     {name: "MarkerRule", textmate: "entity.name.tag.rule.jet", zed: "@attribute", label: "marker.rule", tree_sitter: "JET_HIGHLIGHT_MARKER_RULE", keyword: false},
+    {name: "TakeMark", textmate: "keyword.other.ownership.take.jet", zed: "@keyword", label: "take", tree_sitter: "JET_HIGHLIGHT_TAKE_MARK", keyword: false},
     {name: "Sigil", textmate: "keyword.operator.sigil.jet", zed: "@operator", label: "sigil", tree_sitter: "JET_HIGHLIGHT_SIGIL", keyword: false},
     {name: "Operator", textmate: "keyword.operator.jet", zed: "@operator", label: "operator", tree_sitter: "JET_HIGHLIGHT_OPERATOR", keyword: false},
 }
@@ -436,7 +438,7 @@ jet_cli_grammar_vscode_pattern: fn(scope: String, pattern: String) -> String Nev
 
 jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never! {
     patterns := [String]{}
-    loop class in JET_CLI_GRAMMAR_CLASSES {
+    loop (class_index, class) in JET_CLI_GRAMMAR_CLASSES {
         texts: jet_cli_grammar_class_texts(tokens, class.name)
         words := [String]{}
         symbols := [String]{}
@@ -451,7 +453,7 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
         // Longest first, so `:=` is never read as `:` and `=`.
         loop width in 0..<longest {
             loop text in texts {
-                if !jet_cli_grammar_is_word(text) && text.count_bytes() == longest - width -> symbols.push(jet_cli_grammar_regex_escape(text))
+                if !jet_cli_grammar_is_word(text) && text.count_bytes() == longest - width -> symbols.push(jet_cli_grammar_symbol_pattern(tokens, class_index, text))
             }
         }
         global := [String]{}
@@ -489,9 +491,34 @@ jet_cli_grammar_render_vscode: fn(tokens: [JetCLIGrammarToken]) -> String Never!
                 patterns.push(jet_cli_grammar_vscode_pattern(scope, "(?<![.A-Za-z0-9_])({rest.join("|")})(?=\\s*(?:\\{{|[A-Za-z_][A-Za-z0-9_]*\\s*:))"))
             }
         }
-        if symbols.len() > 0 -> patterns.push(jet_cli_grammar_vscode_pattern(scope, "({symbols.join("|")})"))
+        if symbols.len() > 0 {
+            alternation: symbols.join("|")
+            // D-MOVE-SIGIL1=A: `&&` is the take mark only where a parameter
+            // type or a task capture starts (`(&&self)`, `file: &&GzFile`,
+            // `task &&job`); elsewhere it is logical and.
+            pattern: if class.name == "TakeMark" -> "(?:(?<=[(,:])|(?<=[(,:]\\s)|(?<=\\btask\\s))({alternation})" else -> "({alternation})"
+            patterns.push(jet_cli_grammar_vscode_pattern(scope, pattern))
+        }
     }
     "      \"comment\": \"{JET_CLI_GRAMMAR_START}\",\n      \"patterns\": [\n{patterns.join(",\n")}\n      ],\n      \"endComment\": \"{JET_CLI_GRAMMAR_END}\"\n"
+}
+
+// The pattern for one symbol of class `class_index`. TextMate takes the first
+// pattern that matches, so a symbol refuses to start a longer symbol of a later
+// class: the sigil `&` is not the first half of logical and `&&`.
+jet_cli_grammar_symbol_pattern: fn(tokens: [JetCLIGrammarToken], class_index: Int, text: String) -> String Never! {
+    rests := [String]{}
+    loop (index, later) in JET_CLI_GRAMMAR_CLASSES {
+        if index <= class_index -> next
+        loop other in jet_cli_grammar_class_texts(tokens, later.name) {
+            if jet_cli_grammar_is_word(other) || other.count_bytes() <= text.count_bytes() || !other.starts_with(text) -> next
+            rest: jet_cli_grammar_regex_escape(jet_cli_grammar_slice(other, text.count_bytes(), other.count_bytes()))
+            if !rests.contains(rest) -> rests.push(rest)
+        }
+    }
+    escaped: jet_cli_grammar_regex_escape(text)
+    if rests.len() == 0 -> return escaped
+    "{escaped}(?!{rests.join("|")})"
 }
 
 jet_cli_grammar_render_tree_sitter: fn(tokens: [JetCLIGrammarToken], separator: String) -> String Never! {

@@ -288,6 +288,21 @@ gh_grammar_keyword_words: fn() -> [String] {
     assert_eq(missing.join("\n"), "")
 }
 
+// D-MOVE-SIGIL1=A: the editor grammars colour the take mark `&&` apart from
+// logical and. TextMate reads it only where a parameter type or a task capture
+// starts and keeps the sigil `&` off the first half of `&&`; Zed marks it in a
+// parameter list and after `task`.
+#Test("take_mark_is_coloured_apart_from_logical_and") {
+    vscode: gh_generated_section(GH_VSCODE)
+    assert(vscode.contains("keyword.other.ownership.take.jet"), "{GH_VSCODE} has no take-mark scope")
+    assert(vscode.contains("(?<=\\\\btask\\\\s))(&&)"), "{GH_VSCODE} take mark is not limited to parameter and task positions")
+    assert(vscode.contains("&(?!&)"), "{GH_VSCODE} sigil `&` still matches the first half of logical and")
+    assert(gh_generated_section(GH_TREE_SITTER).contains("const JET_HIGHLIGHT_TAKE_MARK = [\"&&\"];"), "{GH_TREE_SITTER} has no take-mark class")
+    zed: gh_read(GH_ZED)
+    assert(zed.contains("(parameters \"&&\" @keyword)"), "{GH_ZED} does not mark `&&` in parameter lists")
+    assert(zed.contains("((control_keyword) . \"&&\" @keyword)"), "{GH_ZED} does not mark `&&` after `task`")
+}
+
 // The `#X: value` marker line: the tree-sitter section renders the
 // registry's separator, and the grammar's `inbody_marker` rule parses it.
 #Test("tree_sitter_parses_the_inbody_marker_line_with_the_registry_separator") {

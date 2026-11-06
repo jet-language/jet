@@ -100,6 +100,7 @@
 
 ; builtin: assert assert_eq channel check freeze input join print
 ; marker.rule: ABI Allow Arithmetic Bindgen CLI Close Codable CodableAsBase Commutative Comparable Context Debug DebugOnly Decode DenyUnknownFields Deprecated DevPanel Discriminant Doc Encode Env Equatable Error Every FFI FX Flag Flatten HTML Impure Inline Interrupt Job Kernel Layout Live Local Memo Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PublishedSchema Reactive Receipt Redact Region Rename RenameAll Replayable Root SQL Scalar Scrub Shared Shield Short SingleUse Skip State Static Target Test Todo Track Transact Transition Undo UnitFamily Unsafe Untagged WasmExport wire
+; take: &&
 ; sigil: # $ & ... : := :> <:
 ; operator: ! != % %% %%= %= && * *= + += - -= -> .. ..< .[ / /% /%= /= < << <<= <= <=> == > >= >> >>= ? ?. ?? | ||
 ; END GENERATED JET SYNTAX HIGHLIGHTS
@@ -124,6 +125,13 @@
 (attribute_list
   "#[" @attribute
   "]" @attribute)
+
+; The take mark `&&` (D-MOVE-SIGIL1=A) in a parameter list or function type
+; (`file: &&GzFile`, `fn(&&Map)`) and right after a control word
+; (`task &&job`) is an ownership word, apart from logical and: a control
+; word is never the left operand of `&&`.
+(parameters "&&" @keyword)
+((control_keyword) . "&&" @keyword)
 
 ; `{expr}` inside a string is live Jet: the braces are delimiters and the
 ; expression keeps its own colors.
