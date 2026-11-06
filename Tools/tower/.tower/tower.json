@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6585,
-    "rev": 92775,
+    "nextNum": 6587,
+    "rev": 92799,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34265,6 +34265,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner 2026-11-06 reballot: D-CALLSITE-MARK2 (marks in signatures only, calls carry none) and D-MOVE-SIGIL1 (&& for take) are ballot-ready on #6586. If D-CALLSITE-MARK2=A, this card's receiver-mark criteria are superseded by that cutover."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main 2026-11-06: c1-c4 were written for D-CAP-RECEIVER1=D (mark the receiver). D-RECEIVER-MARK1=A (2026-10-30) reversed that for write receivers; the compiler still requires &values.push (Checks.jet:4090-4110, E0224 snapshot receiver_mark_missing_write). Build to the new criterion; take receivers (^buf.seal()) keep D-CALLSITE-MARK1=A: no ^ needed at a whole local's last use."
+        },
+        {
           "at": "2026-10-23",
           "by": "agent",
           "text": "Board burndown 2026-10-22: re-phased (no building work logged since before 2026-10-20)."
@@ -34451,6 +34461,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-04T17:59:02.268Z"
+        },
+        {
+          "n": 14,
+          "text": "D-RECEIVER-MARK1=A (supersedes D-CAP-RECEIVER1=D for receivers): a method that writes its receiver is called with no mark on a := value or & parameter (c.bump()); a :: value stays an error; argument writes keep & (grow(&c)); the editor shows the filled-in & as an inlay hint; #Policy(writes: .Explicit) restores the required receiver & with E0224; tests/ui/receiver_mark_missing_write and every Examples/ caller migrate in one cutover",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T01:34:59.223Z"
         }
       ],
       "refs": [
@@ -34479,7 +34498,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-16T01:42:57.695Z",
-      "updated": "2026-11-01T07:20:50.120Z",
+      "updated": "2026-11-06T02:04:48.098Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -37726,6 +37745,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "partial dev 36c7e78625 (JetpackEngine): code calling b.generate names compiles through one expansion pass (staging check reruns keep-going; final check and every target compile load the plan's generated modules; lone build files use .jet/generated/<stem>/). s1 966e755ef269a2b3: build_entry 59 PASS +2 UNEXPECTED-PASS (generated_sources_materialize_and_compile_as_one_program, package_manifest_build_entry_uses_the_same_pipeline_as_a_file_entry; KF rows removed), 0 regressions; cases 'generat' A/B 0 regressions, ui 'build' identical. Still KF: action_generated_jet_reenters, root_fn_build (#4833), duplicate_generated (E3502 fixture), imported_build_function (E0623 Rust-era fixture)"
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c59 partial dev e7ca630f54 (JetpackModel): git/ssh trust-cache claim runs through a PublicationRegistryNet seam + test-only double (public-shaped URL, policy and public-address check kept, env dependency deleted); Publication --tests 292/0. c59 still needs every area's check (--each). c25 skipped: winegcc COM claim is Windows-only (no-Windows owner order)"
         },
         {
@@ -39848,7 +39872,7 @@
       "parentId": "c0v95zs3",
       "needsAcceptance": false,
       "created": "2026-09-27T23:27:03.232Z",
-      "updated": "2026-11-06T00:09:46.760Z",
+      "updated": "2026-11-06T01:59:02.973Z",
       "updatedBy": "Main",
       "goals": [
         "G2"
@@ -50358,6 +50382,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c76 follow-up dev ce5343187f (GoldenRoots3): router handlers Net-only (router-owned handler list; HTTPMux __select split into __pick + handle). s1 7c9a5fd1a9+patch: cases http_router_dispatch and http_router_named_catchall_and_encoded_marker_literals PASS, KF rows removed; golden web/ o0/o1/o2 79/0; golden net/ 136/0; ui http_route 8 PASS; cases http 27 FAIL identical to base (0 regressions)"
+        },
+        {
           "at": "2026-11-05",
           "by": "Main",
           "text": "c9 partial dev 3fa1dfa440 (GoldenRoots3): web/state_surface 15 check errors fixed, jet check clean; jet run ICEs 101 on o0/o1/o2: core.web.store Derived<T>!E generic results unlowered, core.web Auth struct lowering, runtime routes jet_openapi_router_inputs and jet_http_router_new missing. app_hello, forms_table, web_compute_webgpu PASS o0/o1/o2; browser_surface PASS o0, UNSUPPORTED o1/o2 (E2104 browser.report_json)"
@@ -51305,11 +51334,11 @@
         {
           "n": 76,
           "text": "(was #5991) (was #5578) Backend does not lower HTTPRouterRegister / jet_http_mux_new routes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:36:47.731Z"
+          "evidence": "dev 6bfbe39f2c (GoldenRoots3): HTTPRouter is a source-owned Core struct over HTTPMux; http.router/dispatch/web.openapi run in Jet; jet_http_router_new/__dispatch/__openapi_inputs/__openapi_render rows, the HTTPRouter runtime handle and HTTPRouterRegister removed. golden web/state_surface o0/o1/o2 3/3 PASS on s1 of 8a6d501edc+patch; its known-failing row removed. Follow-up: http_router_dispatch and named_catchall cases fail E1803 FS.Read from the shared mux handler type (in progress)",
+          "at": "2026-11-06T01:54:39.987Z"
         },
         {
           "n": 77,
@@ -51608,7 +51637,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-05T10:55:41.702Z",
-      "updated": "2026-11-05T23:42:43.826Z",
+      "updated": "2026-11-06T02:01:08.918Z",
       "updatedBy": "Main",
       "goals": [
         "G1",
@@ -53722,6 +53751,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c7 partial dev a06f759af7 (CoreOwnership): 9 dead or duplicate dispatcher rows deleted (6 unused core.mem leaves, core.compiler.__reject, 2 NUL-named core.tasks channel rows duplicating __channel_new/__channel_bounded; sema channel<T>() now uses those). Unowned rows 465 -> 458: 436 private __ leaves called from Core source (declared provider leaves), 6 declared raw host leaves. s1 of 452f1230be+patch: ui 2176 PASS 0 regressions, cases 2822 PASS 0 regressions, 4 channel goldens x o0/o1/o2 12/12, ledger hostile 41 held. Left: 16 public rows with no Jet owner (reactive.signal, args.decode/merge, process.argv, plugin.load, testing.world, game.run, crypto.wipe, compute.gradient/value_and_gradient/vjp/jvp, ui.button/text_input/reactive_render, web.form)"
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c1 partial dev 452f1230be (CoreOwnership): all 203 CoreCallSymbol.Rust rows removed; CoreCallRows has 0 Rust rows, enum is { Prelude SourceOwned }. 185 receiver rows unreachable from any symbol or sema lookup deleted; 18 routed to Jet runtime exports (core.mem volatile_read/volatile_write/stream_store lowered as jet_raw_*). Surface-ledger generator rejects any Rust route (new hostile fixture). s1 of e2c746a5a8+patch: ui 2172 PASS, FAIL rows identical to base; cases 2806 PASS, 0 regressions; 23 affected goldens x o0/o1/o2 69/69 PASS; ledger --check-core-call-registry current, hostile 36 rejected / 5 held. Left for c1: 64 gauntlet/perf/bench .rs files and parity-ledger ABSENT items"
         },
         {
@@ -55232,7 +55266,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-06T10:08:37.412Z",
-      "updated": "2026-11-06T01:32:51.729Z",
+      "updated": "2026-11-06T01:34:45.205Z",
       "updatedBy": "Main",
       "goals": [
         "G14",
@@ -70892,6 +70926,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c15 partial dev 7c9a5fd1a9 (Recover3): ui A/B on s1 from clean export: impure_net_stub gained (E3412 at a comptime statement site), 0 lost; base 48d7299e3f 2174 PASS/133 FAIL -> 8a6d501edc+patch 2175/132. c3 partial dev b486d6c09a: CompiledWorkloadPeerLauncherCheck.jet:189 personal path replaced by JET_SCRATCH_ROOT / XDG_CACHE_HOME; self-test passed; lane-check CHECK OK"
+        },
+        {
           "at": "2026-11-05",
           "by": "Main",
           "text": "c3 partial dev 9725cc2472 (GatePort): compiled-workload peer-launcher self-test ported to Tools/ci/CompiledWorkloadPeerLauncherCheck.jet + Jet probe; same verdict as the deleted .mjs both ways (no bwrap: fail-closed unavailable host rc=0; nix bwrap 0.12: all sandbox checks passed rc=0). core.http.client is built, so 'http client' blocked-route census rows are stale; runner port next"
@@ -71889,7 +71928,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-06T01:32:48.586Z",
+      "updated": "2026-11-06T01:56:23.175Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -84621,6 +84660,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c5 partial (8e6182c320, Builder4): --set name=value (build/run/dev/check; undeclared E0302, same-layer conflict E3521) + jet explain <build fact> share one writer chain (BuildFactChain.jet). s1 b486d6c09a A/B: 256->261 PASS, 0 regressions; FAIL->PASS explain_build_fact_golden, explain_typed_build_setting_golden, typed_settings_preserves_tier_parity_and_cli_override, set_flag_refuses_undeclared_malformed_and_conflicting_writers (new), ui typed_settings_undeclared_cli (reblessed to $build.settings). Open: --web-graph (no web graph projection), --cost (no per-fn cost list); jet test still refuses --set"
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "dev 48c09c37bc (SemaParity): 9 tests/cases/debug rows UNEXPECTED-PASS, now unlisted from known-failing (break_then_continue, finish, help, locals_and_print, missing_run_e0101, next_steps_over, quit_e2204, step_into_call_and_backtrace, step_stops_at_first_line); main() frame predicates now expect run(); 2 DAP rows retagged #6386; JetDebug Tests 37/0/0 incl. live lldb. 4 canvas_* debug cases fail on the shared client fixture (url.split on Iter)"
         },
         {
@@ -85984,8 +86028,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-06T00:18:15.009Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-06T02:03:37.048Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c081c9o8",
@@ -86005,6 +86049,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c4 evidence (GoldenRoots3): golden web/browser_surface passes o0/o1/o2 (3/3) on s1 ce5343187f; E2104 browser.report_json no longer reproduces. Left unmet until the 'browser runtime written in Jet' clause is confirmed. c6/c7 wait on owner ballot D-DATA-ARROW-IPC1."
+        },
         {
           "at": "2026-11-05",
           "by": "Main",
@@ -86113,11 +86162,11 @@
         {
           "n": 8,
           "text": "(was #5204) Examples/features/foundations/distributed/run.jet match their goldens on o0 (jet run) and o1 (jet build), or the error becomes the intended diagnostic and the golden is updated with a reason.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:24:43.544Z"
+          "evidence": "dev 6ff4512caa (GoldenRoots3): golden foundations/distributed passes o0/o1/o2 (3/3, new distributed.out) on core.data event-time windows written in Jet; s1 ce5343187f+patch; golden stream 48/48, data 150 PASS (data_battery fails on base too); cases stream/data FAILs a subset of base",
+          "at": "2026-11-06T02:04:13.525Z"
         },
         {
           "n": 9,
@@ -86131,11 +86180,11 @@
         {
           "n": 10,
           "text": "(was #268) Prove or remove the internal `jet.raylib` namespace alias [precut audit: failing on 9c7ddf1359: C:corelib/jet_raylib_namespace_is_not_a_core_module_alias KNOWN-FAILING #6419 unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1002): JSON filter selected no values (known-failing #6419: unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1002))]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:38:57.868Z"
+          "evidence": "dev 6ff4512caa (GoldenRoots3): jet.raylib ring alias removed from Loader.jet; case jet_raylib_namespace_is_not_a_core_module_alias passes and its known-failing row is removed",
+          "at": "2026-11-06T02:04:14.227Z"
         },
         {
           "n": 11,
@@ -86525,7 +86574,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:12:20.739Z",
-      "updated": "2026-11-06T00:32:50.106Z",
+      "updated": "2026-11-06T02:04:31.692Z",
       "updatedBy": "Main"
     },
     {
@@ -92880,7 +92929,17 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Canvas replay tier: a recorded Canvas debug session (run_session_recorded) replays exactly (run_session_replay) through the native O0 image, proven by a tests/cases/debug row; the call sites removed from JetDevserver at #6576 c2 are restored against the real functions",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T01:40:47.432Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -92889,7 +92948,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T21:45:12.492Z",
-      "updated": "2026-11-05T21:45:20.354Z",
+      "updated": "2026-11-06T01:40:47.432Z",
       "updatedBy": "Main"
     },
     {
@@ -92994,20 +93053,20 @@
         {
           "n": 2,
           "text": "Canvas debugging (DebugSourceGit.jet and the other JetDevserver debug files) builds the program natively with jet build --optimize=none and LLDB, never rustc; those files report 0 jet check problems (the rest of JetDevserver is #6582)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-05T23:07:57.578Z"
+          "evidence": "dev e5875c8c41 (CoreOwnership): debug closure has 0 jet check problems on all 4 sources in a scratch package; jet test 11/0 incl. a real build --optimize=none + LLDB pause/resume/stop; run_session_recorded/run_session_replay call sites removed. Core gap noted: no Mutex/AtomicU64 in core.sync, so DebugSessions is &self state on the single Canvas request task",
+          "at": "2026-11-06T02:03:37.746Z"
         },
         {
           "n": 3,
           "text": "JetLSP's debug tests build their fixtures natively, never with rustc",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-05T23:07:58.811Z"
+          "evidence": "dev 30a20432b1 (CoreOwnership): Rust-era JetLSP/Tests/Integration/Debug.jet and DebugTests.jet deleted (they built fixtures with rustc against a removed DebugEngine API; jet check gave 210 errors). Their journeys run natively as tests/cases/debug rows (21 existing + loop_next_edges_are_line_mapped, structured_session_status_ignores_program_output). RustEraRatchet DEBUG_TIER drops both. cases --filter debug/ on s1 of HEAD: 13 PASS incl. both new rows and the 9 native CLI rows; 7 DAP rows KF #6386; 4 canvas FAIL + 1 REFUSED unchanged (c2)",
+          "at": "2026-11-06T01:37:03.784Z"
         },
         {
           "n": 4,
@@ -93036,7 +93095,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T21:56:11.026Z",
-      "updated": "2026-11-06T00:00:29.728Z",
+      "updated": "2026-11-06T02:03:37.746Z",
       "updatedBy": "Main"
     },
     {
@@ -93283,7 +93342,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "partial dev 8a6d501edc (JetpackStore): store fd-leak fix; case PASS o0/o1/o2+aot, ui A/B identical; full fixed-point chain not yet run. Owner now JetpackEngine (handoff ~/jetlanes/handoff/JetpackStore.md)"
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [],
@@ -93293,7 +93358,67 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T23:19:56.137Z",
-      "updated": "2026-11-05T23:19:56.138Z",
+      "updated": "2026-11-06T01:42:44.169Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c006v2ot",
+      "num": 6585,
+      "title": "jet debug: a breakpoint on a loop's next line slides to the following statement, and stepping never stops on a next line",
+      "body": "Found by CoreOwnership at 30a20432b1 (#6576). On the native O0 image under LLDB, break N where line N is a loop 'next' statement binds to the next statement, and step/next never stop on a 'next' line. The line table likely gives the 'next' jump no is_stmt row of its own. Proof: a tests/cases/debug row that breaks on a 'next' line, stops there, and steps onto it.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G2"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T01:37:04.722Z",
+      "updated": "2026-11-06T01:37:04.722Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0ofw8u4",
+      "num": 6586,
+      "title": "Owner reballot: memory marks in signatures only, && for take, name: value declarations",
+      "body": "Owner ask 2026-11-06: (1) reballot call-site memory marks so marks live in signatures only and calls carry none (D-CALLSITE-MARK2); (2) investigate & for edit and && for take, freeing ^ (D-MOVE-SIGIL1); (3) every declaration written name: value (D-DECL-COLON1). Proposals: Docs/proposals/2026-11-06-memory-marks-in-signatures.md and Docs/proposals/2026-11-06-colon-declarations.md. On ratification each outcome becomes a one-commit greenfield cutover (jet fix over the parse tree, grammars, syntax registry, spec, examples, snapshots, editor highlighting). Supersedes #3452's open criteria if D-CALLSITE-MARK2=A.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [
+        "syntax"
+      ],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T02:04:25.306Z",
+      "updated": "2026-11-06T02:04:39.747Z",
       "updatedBy": "Main"
     }
   ],
@@ -172989,6 +173114,527 @@
       "created": "2026-11-05T23:45:14.373Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-06"
+    },
+    {
+      "id": "D-CALLSITE-MARK2",
+      "cardId": "c0ofw8u4",
+      "group": "syntax",
+      "title": "Memory marks live in signatures only; calls carry no & or ^",
+      "situation": "Today a Jet call repeats what the called function's signature already says. An argument the function edits carries &, so you write grow(&c). A method that edits its receiver was ratified to need no mark, but the compiler still demands &values.push(3). A take carries ^ in four special cases and not at a last use. You said marks at every call are ugly, tedious and distracting, and that the split rule is hard to teach. We recommend one rule: the signature says what happens, and calls carry no marks.",
+      "gist": "Should & and ^ appear only in function signatures, so every call is written plainly?",
+      "lesson": "A function's signature already says whether it edits or takes each input. Writing the same mark again at every call repeats that fact about 105,000 times in Jet's code. Under this rule the signature carries the mark, calls look like reads, and the editor shows the marks as faint hints.",
+      "explainer": "",
+      "story": "Mia writes scores.push(10) and bump(score), with no marks, exactly as she would in Python. Her editor shows a faint & before score. When she declares score :: 0 by mistake, the error says bump edits its input and score is fixed, and offers score := 0.",
+      "inWild": "Mojo: a parameter says mut or owned in the signature, and the call is plain. Source: https://docs.modular.com/mojo/manual/values/ownership\n\nKotlin, Java, Python and C++ references: calls carry no edit marks. Rust and Swift mark changed arguments but not receivers. Source: Docs/research/2026-10-29-write-sigil-at-call-sites.md",
+      "detail": "WHAT YOU ASKED\n\nOn 2026-11-06 you said marks belong in declarations, that marks at every call are ugly, tedious and distracting, and that a split rule is hard to teach. The full proposal, with counts and examples, is Docs/proposals/2026-11-06-memory-marks-in-signatures.md.\n\nTODAY\n\nD-CALLSITE-MARK1=A keeps & on edited arguments and drops ^ at a last use, except for four kinds of take. D-RECEIVER-MARK1=A drops & on receivers, but that is not built: the compiler still reports E0224. D-COPY-MOVE-SPELL1=A spells an early move x.move(), also not built.\n\nCounts on dev b486d6c09a: 69,758 & marks on arguments, about 29,800 on receivers, 4,222 ^ on arguments, about 1,230 ^ in value positions. Signatures hold 14,246 & and 3,147 ^ marks.\n\nTHE RULE UNDER A\n\nA signature says what a function does to each input: fn bump(c: &Counter), fn seal(^self). Every call is plain: bump(score), items.push(3), buf.seal(). A mark stays only where no signature decides. Those places are a write window bound to a name (edit :: &values[2..3]), a match that writes into its subject (if &shape == { … }), and a task that takes a name.\n\nAn early move is x.move(), as already ratified, and the ^x value form retires. A part of a list passed to a writing parameter becomes a write window by itself.\n\nWHAT STAYS CHECKED\n\nSafety never depended on the call mark. A call that edits a value needs a changeable value, declared := or received as a & parameter. Two overlapping inputs, one edited, stay an error. A value used after a call took it is an error that names the call, with the fix x.copy() or a reorder. A call never copies on its own.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Seeing changes in plain text. The editor shows & and ^ as faint hints at each call, and the language server underlines a changed argument. In the terminal, jet audit writes lists every call that edits or takes a named value, as jet audit copies lists copies.\n\n2. Teams that want marks in text. #Policy(writes: .Explicit), already ratified for receivers, extends to arguments. It requires the marks everywhere, with a Safe fix that inserts them. No new mechanism is added.\n\n3. A value with cleanup closing at a plain call. The take is in the signature and shown as a hint, and any later use is an error naming the closing call.\n\n4. Errors losing the mark they pointed at. Each memory error quotes the signature line that causes it.\n\n5. The cutover. The compiler knows every mark, so jet fix removes about 105,000 in one commit, with grammars, spec, examples and snapshots.\n\nNo loss remains.\n\nEDGE CASES\n\n- values.push(values.len()) stays legal: the length is read before the push writes.\n- A function value keeps its marks in its type, fn(&Map), and is called plainly.\n- A foreign function keeps its marks in its signature.\n\nWHY NOT B OR C\n\nB keeps today's split, which you called messy: arguments marked, receivers not, and four take cases marked. C marks every call again, which is the 105,000 repeated marks you called tedious.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Signatures only",
+          "detail": "Marks appear in signatures and on the few places no signature decides: a named write window, a writing match, a task that takes a name. Every call is plain. The editor shows marks as hints, and #Policy(writes: .Explicit) restores them for teams that want them.",
+          "technical": "Sema already resolves each argument's convention from the callee. E0202 (missing write mark) and E0224 (missing receiver mark) retire; the changeability checks they guarded quote the parameter instead. jet fix strips call marks from the parse tree. jet audit gains writes.",
+          "code": "fn grow(list: &[Int], extra: ^[Int]) { … }\nfn run() {\n    xs := [1, 2]\n    more :: [3]\n    grow(xs, more)\n    xs.push(4)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep today's split",
+          "detail": "Edited arguments keep &, receivers are plain, a last-use take is plain, and four kinds of take keep ^. This is D-CALLSITE-MARK1 with D-RECEIVER-MARK1, once built.",
+          "technical": "Build D-RECEIVER-MARK1's receiver change; argument checks stay as they are.",
+          "code": "fn run() {\n    xs := [1, 2]\n    grow(&xs, more)\n    xs.push(4)\n}"
+        },
+        {
+          "key": "C",
+          "name": "Mark every call",
+          "detail": "Every argument and receiver that a call edits or takes carries & or ^, as D-CAP-RECEIVER1=D first ratified. Nothing is inferred at calls.",
+          "technical": "Revert D-RECEIVER-MARK1 and D-CALLSITE-MARK1's last-use rule; keep E0224 and E0202.",
+          "code": "fn run() {\n    xs := [1, 2]\n    grow(&xs, ^more)\n    &xs.push(4)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Mojo",
+          "note": "Signatures say mut or owned; calls are plain. Source: https://docs.modular.com/mojo/manual/values/ownership",
+          "code": "fn grow(mut list: List[Int]): ...\ngrow(xs)"
+        },
+        {
+          "lang": "Rust",
+          "note": "Changed arguments carry &mut, receivers do not. Source: https://doc.rust-lang.org/book/ch04-02-references-and-borrowing.html",
+          "code": "grow(&mut xs);\nxs.push(4);"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "It is one rule, the one you asked for: the signature says what happens, and calls read plainly. Safety is unchanged because every check reads the signature, not the call mark.",
+        "gains": [
+          "One rule for arguments and receivers.",
+          "About 105,000 repeated marks leave the code.",
+          "Calls read like Python or Kotlin."
+        ],
+        "losses": [
+          {
+            "loss": "Plain text does not show which call changes a value.",
+            "mitigation": "Editor hints, an underline, and jet audit writes show every change; a package may require marks by policy."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps the split you called messy and hard to teach."
+          },
+          {
+            "key": "C",
+            "reason": "C repeats the signature at about 105,000 calls, the tedium you named."
+          }
+        ],
+        "tradeoff": "A trades marks in plain text for one rule and plain calls, with hints and a policy for readers who want the marks."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: claude (Main). Adversarial model family: claude. Fresh agent: Main. The pass added the resource-close and error-quoting fixes and kept named write windows marked. It found no case where removing a call mark weakens a check."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should & and ^ appear only in function signatures, so every call is written plainly?",
+        "lesson": "A function's signature already says whether it edits or takes each input. Repeating that mark at every call adds about 105,000 marks to Jet's code. Under A, only signatures carry marks. Calls look like reads, and the editor shows the marks as hints.",
+        "trio": {
+          "current": {
+            "note": "Today edited arguments and receivers carry marks at every call.",
+            "code": "fn run() {\n    xs := [1, 2]\n    grow(&xs, ^more)\n    &xs.push(4)\n}"
+          },
+          "wild": {
+            "lang": "Mojo",
+            "note": "Mojo puts mut in the signature; the call is plain.",
+            "code": "fn grow(mut list: List[Int]): ...\ngrow(xs)\nxs.append(4)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Signatures only",
+            "gist": "Marks live in signatures; calls are plain; the editor shows hints.",
+            "gains": [
+              "One rule for arguments and receivers.",
+              "Calls read like Python."
+            ],
+            "losses": [
+              "Plain text hides which call changes a value."
+            ],
+            "proposed": {
+              "code": "fn grow(list: &[Int], extra: ^[Int]) { … }\nfn run() {\n    xs := [1, 2]\n    grow(xs, more)\n    xs.push(4)\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep today's split",
+            "gist": "Arguments keep &, receivers are plain, some takes keep ^.",
+            "gains": [
+              "Edited arguments stay visible in text."
+            ],
+            "losses": [
+              "Two rules for the same act.",
+              "Four special take cases to learn."
+            ],
+            "proposed": {
+              "code": "grow(&xs, more)\nxs.push(4)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Mark every call",
+            "gist": "Every edited or taken argument and receiver carries a mark.",
+            "gains": [
+              "Every change is visible in plain text."
+            ],
+            "losses": [
+              "About 105,000 repeated marks.",
+              "push and pop need marks."
+            ],
+            "proposed": {
+              "code": "grow(&xs, ^more)\n&xs.push(4)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One rule: the signature says what happens and calls read plainly. Every safety check reads the signature, so nothing becomes unsafe.",
+          "gains": [
+            "One rule to teach.",
+            "About 105,000 marks leave the code."
+          ],
+          "losses": [
+            {
+              "loss": "Plain text hides which call changes a value.",
+              "mitigation": "Editor hints, jet audit writes, and an opt-in policy show the marks."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Keeps the split rule you called messy."
+            },
+            {
+              "key": "C",
+              "reason": "Repeats every signature mark at every call."
+            }
+          ],
+          "tradeoff": "Marks in plain text, for one rule and plain calls."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T02:04:36.305Z"
+    },
+    {
+      "id": "D-MOVE-SIGIL1",
+      "cardId": "c0ofw8u4",
+      "group": "syntax",
+      "title": "&& marks an input a function takes, and ^ becomes free",
+      "situation": "A signature marks an input the function edits with & and one it takes for good with ^. You asked us to study && for taking instead, which would free ^. If marks move to signatures only, the take mark appears about 3,150 times in signatures and in tasks that take a name. Value positions already use x.move(). We recommend &&, because it pairs with &, matches C++'s move parameter, and avoids a dead key.",
+      "gist": "Should a signature mark an input it takes with && instead of ^, freeing ^?",
+      "lesson": "A function can borrow an input to change it, or take it for good. Jet marks the first with &. Marking the second with && makes the pair one family: & changes it, && keeps it. C++ already writes its move parameter as T&&.",
+      "explainer": "",
+      "story": "Ravi reads fn close(file: &&GzFile) and guesses right away that close keeps the file, because && looks like a stronger &. On his German keyboard he no longer types ^ followed by a space.",
+      "inWild": "C++: a move parameter is written T&&, an rvalue reference that std::move hands over. Source: https://en.cppreference.com/w/cpp/language/reference\n\nSwift writes consuming, Mojo owned and Hylo sink for the same idea. Source: https://github.com/swiftlang/swift-evolution/blob/main/proposals/0377-parameter-ownership-modifiers.md",
+      "detail": "WHAT YOU ASKED\n\nOn 2026-11-06 you asked us to investigate & for editing and && for moving as prefix marks, judged on frequency, readability and intuitiveness. The full study is section 5 of Docs/proposals/2026-11-06-memory-marks-in-signatures.md.\n\nFREQUENCY\n\nOn dev b486d6c09a, signatures hold 14,246 & marks and 3,147 ^ marks, so takes are 18% of signature marks. The rarer mark gets the longer symbol, which matches how often each is typed and read.\n\nCLASHES\n\n&& is also logical and, used 23,545 times. Under D-CALLSITE-MARK2=A the take mark appears only in a parameter type, before self, and after the word task. Logical and always sits between two values. No && appears in any type today, so the parser and the reader never meet both meanings in one place.\n\nIf calls keep marks (D-CALLSITE-MARK2 B or C), f(&&x) becomes possible beside a && b. In that case && is a weaker choice, and B or C on this ballot fits better.\n\nREADABILITY AND INTUITION\n\n& reads as this function changes it, and && as more than that: it keeps it. C++ programmers already link && with moving. In Rust &&T is a reference to a reference, but Jet has no reference types, so that reading has nothing to attach to. Hover text says takes the value.\n\nTYPING\n\n^ is a dead key on German, French, Spanish, Portuguese, Swiss and Nordic keyboards: it waits for the next key, so ^self needs an extra space. && is one key pressed twice on every common layout.\n\nFREEING ^\n\nWith && for takes and x.move() in value positions, ^ has no meaning left. Under D-SIGIL-FREED2 a freed symbol stays an error until a new ballot gives it a job.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Two meanings of &&. Kept apart by position, and the editor colours them differently. A take mark can never start an expression, so a b &&c typo still means and.\n\n2. Two keystrokes. Takes are 18% of marks, and ^ already costs two keystrokes on most non-US keyboards.\n\n3. Rust's double reference. Jet has no storable reference type, so there is nothing to confuse it with.\n\nNo loss remains.\n\nEDGE CASES\n\n- task &&job { … } takes job into the task.\n- fn(&&Map) is a function type that takes its input.\n- A foreign function writes file: &&GzFile, as it writes file: ^GzFile today.\n- An early move inside an expression stays x.move().",
+      "options": [
+        {
+          "key": "A",
+          "name": "&& for take",
+          "detail": "A taken input is written &&: fn seal(&&self), file: &&GzFile, task &&job { … }. Value positions use x.move(). ^ has no meaning left and stays free.",
+          "technical": "The lexer already has the && token; the parameter, self and task-capture parsers accept it where they accept ^ today. The syntax registry renames SIGIL_MOVE to &&. jet fix rewrites ^ marks.",
+          "code": "fn seal(&&self) { … }\nfn gzclose(file: &&GzFile) -> Int = \"gzclose\"\ntask &&job { job.run() }"
+        },
+        {
+          "key": "B",
+          "name": "The word move",
+          "detail": "A taken input is written with a word: fn seal(move self), file: move GzFile, task move job { … }. Clearest for a beginner, five letters per use, and one more keyword.",
+          "technical": "A contextual keyword in parameter, self and task-capture position. ^ is freed.",
+          "code": "fn seal(move self) { … }\nfn gzclose(file: move GzFile) -> Int = \"gzclose\""
+        },
+        {
+          "key": "C",
+          "name": "Keep ^",
+          "detail": "Nothing changes: fn seal(^self), file: ^GzFile. ^ stays taken, and stays a dead key on many keyboards.",
+          "technical": "No change.",
+          "code": "fn seal(^self) { … }\nfn gzclose(file: ^GzFile) -> Int = \"gzclose\""
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C++",
+          "note": "A move parameter is T&&. Source: https://en.cppreference.com/w/cpp/language/reference",
+          "code": "void close(File&& file);\nclose(std::move(f));"
+        },
+        {
+          "lang": "Swift",
+          "note": "A taken parameter is marked consuming. Source: SE-0377",
+          "code": "func close(_ file: consuming File)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "& and && read as one family, change and keep. C++ already writes moves as &&, the symbol never meets logical and once calls are plain, and ^ is freed.",
+        "gains": [
+          "One family of marks: & changes, && keeps.",
+          "Frees ^ for a later use.",
+          "No dead key on European keyboards."
+        ],
+        "losses": [
+          {
+            "loss": "&& also means logical and.",
+            "mitigation": "The take mark only appears in signatures and after task, never between two values."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A word is clearest but adds a keyword and five letters to every take."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps ^ taken and keeps the dead key on many keyboards."
+          }
+        ],
+        "tradeoff": "A reuses a symbol that means and elsewhere, kept apart by position, for a short paired mark and a free ^."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: claude (Main). Adversarial model family: claude. Fresh agent: Main. The pass found that && is weak if calls keep marks, so the ballot states that dependency. It confirmed no && appears in any type today."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a signature mark an input it takes with && instead of ^, freeing ^?",
+        "lesson": "A function can borrow an input to change it, or take it for good. Jet marks the first with &. Under A the second is &&, so the pair reads as one family. C++ already writes its move parameter as T&&.",
+        "trio": {
+          "current": {
+            "note": "Today a taken input is marked ^.",
+            "code": "fn seal(^self) { … }\nfn gzclose(file: ^GzFile) -> Int = \"gzclose\""
+          },
+          "wild": {
+            "lang": "C++",
+            "note": "C++ writes its move parameter with &&.",
+            "code": "void close(File&& file);\nclose(std::move(f));"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "&& for take",
+            "gist": "& changes an input, && keeps it; ^ becomes free.",
+            "gains": [
+              "One family of marks.",
+              "Frees ^.",
+              "No dead key on European keyboards."
+            ],
+            "losses": [
+              "&& also means logical and elsewhere."
+            ],
+            "proposed": {
+              "code": "fn seal(&&self) { … }\nfn gzclose(file: &&GzFile) -> Int = \"gzclose\"\ntask &&job { job.run() }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "The word move",
+            "gist": "Write move before a taken input.",
+            "gains": [
+              "Clearest for a beginner."
+            ],
+            "losses": [
+              "A new keyword.",
+              "Five letters on every take."
+            ],
+            "proposed": {
+              "code": "fn seal(move self) { … }\nfn gzclose(file: move GzFile) -> Int = \"gzclose\""
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep ^",
+            "gist": "Nothing changes.",
+            "gains": [
+              "No cutover."
+            ],
+            "losses": [
+              "^ stays taken.",
+              "A dead key on many keyboards."
+            ],
+            "proposed": {
+              "code": "fn seal(^self) { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "& changes and && keeps read as one family, C++ already uses && for moves, and ^ is freed.",
+          "gains": [
+            "One family of marks.",
+            "Frees ^."
+          ],
+          "losses": [
+            {
+              "loss": "&& also means logical and.",
+              "mitigation": "The take mark appears only in signatures and after task."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Adds a keyword and five letters per take."
+            },
+            {
+              "key": "C",
+              "reason": "Keeps ^ taken and the dead key."
+            }
+          ],
+          "tradeoff": "A shared symbol, kept apart by position, for a paired mark and a free ^."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T02:04:37.673Z"
+    },
+    {
+      "id": "D-DECL-COLON1",
+      "cardId": "c0ofw8u4",
+      "group": "syntax",
+      "title": "Every declaration is written name: value",
+      "situation": "Jet writes a constant as limit :: 100, a function as fn area(…), and a type as struct Point { … }. Package files, struct literals, named arguments and fields already write name: value. You asked for name: value everywhere: fewer characters, a feel closer to Python, a natural configuration language like Lua or Nix, and one shape for every declaration. We recommend writing every declaration that way, with := still marking a value you may change.",
+      "gist": "Should every declaration, from constants to functions, types and modules, be written name: value?",
+      "lesson": "Jet already writes name: value in package files, struct literals and named arguments. Source files use :: for constants and keywords first for functions and types. Under A every declaration reads the same: the name, a colon, then what it is. A value you may change still uses :=.",
+      "explainer": "",
+      "story": "Lena opens a Jet file for the first time. limit: 100, area: fn(r: Float) -> Float, Point: struct { x: Int, y: Int }: every line starts with the name she is looking for. Her deploy settings file reads the same, so she never learns a second format.",
+      "inWild": "CUE and Jsonnet write name: value for data and definitions alike. Source: https://cuelang.org/docs/tour/basics/\n\nJavaScript objects and JSON write name: value. Nix and Lua write name = value for settings and functions alike. Source: https://nix.dev/manual/nix/2.24/language/",
+      "detail": "WHAT YOU ASKED\n\nOn 2026-11-06 you asked for name: value instead of name :: value, for constants, functions and modules, with example files and every downside designed away. The full proposal with five complete example files is Docs/proposals/2026-11-06-colon-declarations.md.\n\nTHE RULE UNDER A\n\nEverything that introduces a name is written name: value; a value you may change is name := value. limit: 100. area: fn(r: Float) -> Float { … }. Point: struct { x: Int, y: Int }. Mode: enum { Fast, Safe }. Shape: trait { area: fn(self) -> Float }. math: module { … }. int_cache: cache<Int>(32). use process: core.process. package: { name: \"x\" }.\n\nKind parameters go on the kind word, never on the name: first: fn<T>(xs: [T]) -> T?, Box: struct<T> { value: T }, cache: module<K>(capacity: Int).\n\nInside the braces after struct, trait, enum or a foreign #Import module, name: Type describes what each value holds. Everywhere else, name: thing makes name that thing. The word before the brace always says which.\n\nWHY\n\nPackage files, struct literals, named arguments and fields already write name: value, so source and settings become one language. :: came from Jai's x : Type : value; typed bindings are retired, so the type slot between the colons is gone.\n\nEach of 141,892 :: bindings loses two characters. fn name(…) and name :: fn(…) are two ways to write a function today (891 uses of the second), and A makes them one.\n\nHOW A'S DOWNSIDES ARE DESIGNED AWAY\n\n1. Readers from TypeScript, Python or Rust read x: T as a type. In Jet a declaration has no separate type, so name: thing always declares. Where thing is a type, the familiar reading is right. Where it is a value, limit: 100, a type reading is impossible, so nobody misreads it silently.\n\n2. { a: 1 } as block or record. A brace group whose entries are all name: value is a record. A block that only binds names produces nothing, so no meaningful program changes.\n\n3. x: Int at file level makes an alias, as x :: Int does today. Using it as a number gets a registered error with the fix x: Int{0}.\n\n4. Foreign functions have no body. Inside a foreign module every entry is a signature with its symbol, as today. At file level a bodiless fn(…) is a function type, as on the right of :: today.\n\n5. Searching for a definition. fn area becomes area:, still one search; outlines and go-to-definition read the parser.\n\n6. Headers grow by one character: fn run() is 8, run: fn() is 9. Bindings save two characters each and outnumber headers, and every name starts at the left margin.\n\n7. The cutover. About 225,000 declaration lines change. jet fix rewrites them from the parse tree in one commit, with grammars, registry, spec, examples and snapshots. Meaning does not change, so the run-time tests prove the rewrite.\n\nEDGE CASES\n\n- impl blocks and #Test blocks introduce no name and keep their form.\n- An associated type is Output: type in a trait and Output: T in an impl.\n- A name: fn binding may call itself, at file level and inside a function.\n- String interpolation such as {x:Debug} is unchanged.\n\nWHY NOT B OR C\n\nB changes only constants, so functions and types still read differently and the two function forms stay. C keeps the :: that no longer has a job.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Every declaration",
+          "detail": "Constants, functions, types, modules, aliases, imports and the package header are all name: value. Changeable values use :=. Shape bodies list name: Type. Kind parameters go on the kind word.",
+          "technical": "The parser reads Ident ':' at an item or statement start as a declaration and dispatches on the right side's head (fn, struct, enum, trait, module, or an expression). D-BIND1's :: row retires from the syntax registry. jet fix migrates from the parse tree.",
+          "code": "limit: 100\narea: fn(r: Float) -> Float { 3.14159 * r * r }\nPoint: struct { x: Int, y: Int }\nmath: module {\n    double: fn(n: Int) -> Int { n * 2 }\n}\nrun: fn() {\n    total := 0\n    origin: Point{x: 0, y: 0}\n}"
+        },
+        {
+          "key": "B",
+          "name": "Constants only",
+          "detail": "name :: value becomes name: value, and module aliases follow. fn, struct, enum, trait and module keep their keyword-first form.",
+          "technical": "Only the binding and alias forms change; item parsers stay.",
+          "code": "limit: 100\nfn area(r: Float) -> Float { 3.14159 * r * r }\nstruct Point { x: Int, y: Int }"
+        },
+        {
+          "key": "C",
+          "name": "Keep ::",
+          "detail": "Nothing changes: limit :: 100, fn area(…), struct Point { … }.",
+          "technical": "No change.",
+          "code": "limit :: 100\nfn area(r: Float) -> Float { 3.14159 * r * r }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "CUE",
+          "note": "Data, types and definitions all use name: value. Source: https://cuelang.org/docs/tour/basics/",
+          "code": "limit: 100\nPoint: { x: int, y: int }"
+        },
+        {
+          "lang": "Nix",
+          "note": "Settings and functions are both name = value. Source: https://nix.dev/manual/nix/2.24/language/",
+          "code": "{\n  limit = 100;\n  area = r: 3.14159 * r * r;\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Every declaration reads the same, source and settings files become one language, and the two ways to write a function become one.",
+        "gains": [
+          "One shape for every declaration.",
+          "Source and settings files share one language.",
+          "Two characters saved on every constant."
+        ],
+        "losses": [
+          {
+            "loss": "Readers from typed languages may read x: T as a type.",
+            "mitigation": "Jet declarations have no separate type, so a value on the right cannot be misread."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Functions and types still read differently, and the two function forms stay."
+          },
+          {
+            "key": "C",
+            "reason": "Keeps a :: whose type slot was retired."
+          }
+        ],
+        "tradeoff": "A large one-commit rewrite, for one declaration shape across code and settings."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: claude (Main). Adversarial model family: claude. Fresh agent: Main. The pass added the record-or-block rule, the shape-body rule and the foreign-function case. It found no program whose meaning silently changes."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should every declaration, from constants to functions, types and modules, be written name: value?",
+        "lesson": "Package files, struct literals and named arguments already write name: value. Source files use :: and keyword-first forms instead. Under A every declaration is the name, a colon, then what it is. A value you may change still uses :=.",
+        "trio": {
+          "current": {
+            "note": "Today each kind of declaration has its own form.",
+            "code": "limit :: 100\nfn area(r: Float) -> Float { 3.14159 * r * r }\nstruct Point { x: Int, y: Int }\nmodule math { … }"
+          },
+          "wild": {
+            "lang": "CUE",
+            "note": "CUE writes data and definitions as name: value.",
+            "code": "limit: 100\nPoint: { x: int, y: int }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Every declaration",
+            "gist": "Constants, functions, types and modules are all name: value.",
+            "gains": [
+              "One shape for every declaration.",
+              "Source and settings share one language.",
+              "One way to write a function."
+            ],
+            "losses": [
+              "Function headers grow by one character."
+            ],
+            "proposed": {
+              "code": "limit: 100\narea: fn(r: Float) -> Float { 3.14159 * r * r }\nPoint: struct { x: Int, y: Int }\nmath: module {\n    double: fn(n: Int) -> Int { n * 2 }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Constants only",
+            "gist": "Only :: becomes a colon; functions and types keep keywords first.",
+            "gains": [
+              "Smaller rewrite."
+            ],
+            "losses": [
+              "Functions and types still read differently.",
+              "Two ways to write a function stay."
+            ],
+            "proposed": {
+              "code": "limit: 100\nfn area(r: Float) -> Float { 3.14159 * r * r }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep ::",
+            "gist": "Nothing changes.",
+            "gains": [
+              "No rewrite."
+            ],
+            "losses": [
+              "Two characters more on every constant.",
+              "Settings and code read differently."
+            ],
+            "proposed": {
+              "code": "limit :: 100"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Every declaration reads the same, settings and code share one language, and functions get one form.",
+          "gains": [
+            "One declaration shape.",
+            "Shorter constants."
+          ],
+          "losses": [
+            {
+              "loss": "Typed-language readers may read x: T as a type.",
+              "mitigation": "A value on the right cannot be a type, so nothing is misread."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Functions and types still read differently."
+            },
+            {
+              "key": "C",
+              "reason": "Keeps a :: with no job left."
+            }
+          ],
+          "tradeoff": "A one-commit rewrite for one declaration shape."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-06T02:04:39.043Z"
     }
   ],
   "questions": [
@@ -175866,6 +176512,174 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T02:04:48.098Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0meo2tr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T02:04:39.747Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-DECL-COLON1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T02:04:39.043Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DECL-COLON1",
+      "note": "Every declaration is written name: value"
+    },
+    {
+      "at": "2026-11-06T02:04:38.350Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-MOVE-SIGIL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T02:04:37.673Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-MOVE-SIGIL1",
+      "note": "&& marks an input a function takes, and ^ becomes free"
+    },
+    {
+      "at": "2026-11-06T02:04:37.001Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-CALLSITE-MARK2",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-11-06T02:04:36.305Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CALLSITE-MARK2",
+      "note": "Memory marks live in signatures only; calls carry no & or ^"
+    },
+    {
+      "at": "2026-11-06T02:04:31.692Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c081c9o8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T02:04:25.306Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ofw8u4",
+      "note": "Owner reballot: memory marks in signatures only, && for take, name: value declarations"
+    },
+    {
+      "at": "2026-11-06T02:04:14.227Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c081c9o8",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-06T02:04:13.525Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c081c9o8",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-06T02:03:37.746Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ca4l7i",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-06T02:03:37.048Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hn7w1n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T02:01:08.918Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0max8v8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T01:59:02.974Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uwol3w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T01:56:23.175Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T01:54:39.987Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0max8v8",
+      "note": "#76"
+    },
+    {
+      "at": "2026-11-06T01:42:44.169Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ug03od",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T01:40:47.432Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tc8fct",
+      "note": "#1 Canvas replay tier: a recorded Canvas debug session (run_ses"
+    },
+    {
+      "at": "2026-11-06T01:37:04.722Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c006v2ot",
+      "note": "jet debug: a breakpoint on a loop's next line slides to the following statement, and stepping never stops on a next line"
+    },
+    {
+      "at": "2026-11-06T01:37:03.784Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ca4l7i",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-06T01:34:59.914Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0meo2tr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T01:34:59.223Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0meo2tr",
+      "note": "#14 D-RECEIVER-MARK1=A (supersedes D-CAP-RECEIVER1=D for receive"
+    },
+    {
+      "at": "2026-11-06T01:34:45.205Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqi33c",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-06T01:32:52.764Z",
       "by": "Main",
