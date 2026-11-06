@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6610,
-    "rev": 93375,
+    "rev": 93400,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22069,11 +22069,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nImplement D-CONC-ALLNAMED1=A at runtime. `task.all {first: f(), second: g()}` returns an anonymous record whose fields hold each branch's result. Positional `task.all {…}` keeps its ordering and failure behavior on every tier.\n\n## Current state\n- Criteria 1-4 and 6 are met. That covers Syntax.rs, syntax-decisions, grammars, snapshots, and the mixed-form diagnostic at `Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:14988-14992`.\n- The checker is done: `Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:600-613` types a named tuple of Tasks as `Type.Tuple` of their success types.\n- Codegen routes it: `Compiler/JetCodegen/Source/Codegen/Expressions.jet:4590-4619`. `jet_codegen_task_group_result_tasks` accepts `.Tuple`, and `jet_codegen_lower_task_group_value` emits `jet_std::jet_task_all_result` with one operand. `Compiler/JetEval/Source/Evaluator.jet:7952-8013` validates the same route but only assembles positional lists.\n- Runtime is wrong. `Examples/features/concurrency/task_all.jet:11-12` printed 0/0/0 on 2026-09-15; the golden `Examples/features/expected/concurrency/task_all.out` is `10`/`20`/`30`.\n- The Rust fix commit 39b9ffd41 (\"Support named task.all results across tiers\") is not an ancestor of HEAD. It touches `crates/jet-codegen/src/Codegen/MIREval.rs`, `MIRRust.rs`, `MIRWeb.rs` and `Prelude/Scheduler.rs` (+152/-24).\n\n## Changes\n1. **Jet compiler first.** In `Compiler/JetCodegen/Source/Codegen/Expressions.jet` (`jet_codegen_lower_task_group_value`), when `tasks.ty` is a named tuple, carry the field names and order to the join. The joined value is then built as the record type (`expression.ty`), not a list.\n2. **Both Jet emitters.** In `Compiler/JetCodegen/Source/Emit/*.jet` (Rust text) and `Emit/Web`, assemble the record from the scheduler's joined ids.\n3. **Jet evaluator.** In `Compiler/JetEval/Source/Evaluator.jet` (`jet_eval_task_group_exchange`), build the named record for a tuple operand.\n4. **Retained host and shipped-binary mirror.** Cherry-pick 39b9ffd41. Its `Prelude/Scheduler.rs` join is the retained host piece, and the MIREval/MIRRust/MIRWeb edits are the mirror the shipped binary needs to prove the fix. Resolve any conflicts against current HEAD.\n5. Leave positional behavior untouched.\n\n## Proof\n- `JET_GOLDEN_FILTER=concurrency/task_all cargo test --test golden examples_compile_and_run`: pass.\n- `JET_THREE_WAY_STEM=concurrency/task_all cargo test --test dev_corpus cranelift_three_way_differential_battery`: AOT, default and interpreter match the golden.\n- `JET_GOLDEN_FILTER=concurrency/task_group cargo test --test golden examples_compile_and_run`: positional goldens unchanged.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh`: exit 0.\n- Web: `Tools/agent/jet-env jet build --target=web Examples/features/concurrency/task_all.jet`, run the emitted module under the existing web harness (node), and confirm stdout matches the golden.\n\n## Batch\n`batch-jetc-back`: the change lives in lowering, the emitters and the evaluator.\n\n## Dependencies\nNone.\n",
+      "plan": "## Goal\nImplement D-CONC-ALLNAMED1=A at runtime. `task.all {first: f(), second: g()}` returns an anonymous record whose fields hold each branch's result. Positional `task.all {…}` keeps its ordering and failure behavior on every tier.\n\n## Current state\n- Criteria 1-4 and 6 are met. That covers Syntax.rs, syntax-decisions, grammars, snapshots, and the mixed-form diagnostic at `Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet:14988-14992`.\n- The checker is done: `Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:600-613` types a named tuple of Tasks as `Type.Tuple` of their success types.\n- Codegen routes it: `Compiler/JetCodegen/Source/Codegen/Expressions.jet:4590-4619`. `jet_codegen_task_group_result_tasks` accepts `.Tuple`, and `jet_codegen_lower_task_group_value` emits `jet_std::jet_task_all_result` with one operand. `Compiler/JetEval/Source/Evaluator.jet:7952-8013` validates the same route but only assembles positional lists.\n- Runtime is wrong. `Examples/features/concurrency/task_all.jet:11-12` printed 0/0/0 on 2026-09-15; the golden `Examples/features/expected/concurrency/task_all.out` is `10`/`20`/`30`.\n- The Rust fix commit 39b9ffd41 (\"Support named task.all results across tiers\") is not an ancestor of HEAD. It touches `crates/jet-codegen/src/Codegen/MIREval.rs`, `MIRRust.rs`, `MIRWeb.rs` and `Prelude/Scheduler.rs` (+152/-24).\n\n## Changes\n1. **Jet compiler first.** In `Compiler/JetCodegen/Source/Codegen/Expressions.jet` (`jet_codegen_lower_task_group_value`), when `tasks.ty` is a named tuple, carry the field names and order to the join. The joined value is then built as the record type (`expression.ty`), not a list.\n2. **Both Jet emitters.** In `Compiler/JetCodegen/Source/Emit/*.jet` (Rust text) and `Emit/Web`, assemble the record from the scheduler's joined ids.\n3. **Jet evaluator.** In `Compiler/JetEval/Source/Evaluator.jet` (`jet_eval_task_group_exchange`), build the named record for a tuple operand.\n4. **Retained host and shipped-binary mirror.** Cherry-pick 39b9ffd41. Its `Prelude/Scheduler.rs` join is the retained host piece, and the MIREval/MIRRust/MIRWeb edits are the mirror the shipped binary needs to prove the fix. Resolve any conflicts against current HEAD.\n5. Leave positional behavior untouched.\n\n## Proof\n- `jet test Compiler --profile golden concurrency/task_all`: pass.\n- `JET_THREE_WAY_STEM=concurrency/task_all cargo test --test dev_corpus cranelift_three_way_differential_battery`: AOT, default and interpreter match the golden.\n- `jet test Compiler --profile golden concurrency/task_group`: positional goldens unchanged.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh`: exit 0.\n- Web: `Tools/agent/jet-env jet build --target=web Examples/features/concurrency/task_all.jet`, run the emitted module under the existing web harness (node), and confirm stdout matches the golden.\n\n## Batch\n`batch-jetc-back`: the change lives in lowering, the emitters and the evaluator.\n\n## Dependencies\nNone.\n",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-10-23",
           "by": "agent",
@@ -22191,7 +22196,7 @@
         },
         {
           "n": 7,
-          "text": "Named and positional forms have byte-identical behavior across default, release, interpreter, and web-applicable tiers, with examples and goldens.",
+          "text": "Named and positional forms have byte-identical behavior across O0, O1, O2 and web where applicable, with examples and goldens.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -22238,7 +22243,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-08-28T16:03:40.015Z",
-      "updated": "2026-10-31T14:24:02.514Z",
+      "updated": "2026-11-06T18:37:36.053Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
@@ -22987,14 +22992,14 @@
       "id": "c0hs3czc",
       "num": 2858,
       "title": "Measurement gate: gauntlet matrix, conformance census, compiler-speed dashboard, project-check corpus (sidequest campaign)",
-      "body": "Owner clarification, 2026-09-14: hide all expert columns from the main Gauntlet chart for now. The visible languages are Rust, C, Zig, Go, Python, and JS. Keep recorded expert evidence unchanged; this is not a claim that expert benchmarks passed.\n\nOwner direction, 2026-09-14: compare Jet ahead-of-time (AOT) results with Rust, C, Zig, and Go. Compare both `jet run` and `jet dev` with Python and JavaScript (JS). The owner selected \"Apply the split throughout\" for first-result and edit-to-result latency.\n\nThe main chart has one JavaScript language column and no separate Node language column. Node is a runtime, not another language. Keep the runtime and tool versions as measurement metadata. Migrate current Node language rows into the canonical JS comparison without losing workload coverage or counting JavaScript twice.\n\nKeep Node, Bun, and Vite as separate web-development workflow comparisons against `jet dev`. Use the existing live_reload axis. Its Node workflow currently uses nodemon; disclose that watcher and its version. Vite is a development tool, not a language or a separate JavaScript engine. These web-development comparisons remain required, not advisory.\n\nThe peer groups define required performance comparisons, not just display filters. Apply them to runtime, startup, first-result, edit-to-result, and other applicable execution measurements. Keep cold start, warm start, and steady-state measurements distinct. Comparisons outside these groups remain visible as non-blocking evidence. Competitive JIT performance against AOT remains a long-term goal, not a current closure condition or a claim of physical impossibility.\n\nKeep within-group comparators unchanged: Jet/non-Rust <1.00; Jet/Rust <=1.05 is noise-band parity, not a win or target. Missing, wrong, unavailable, uncovered, mismatched, or inconclusive required evidence still fails. Do not drop workloads or required in-group peers. Keep I9 correctness across every applicable mode, including the interpreter. Performance grouping never excuses wrong output.\n\nSeparate AOT build-speed gates, D-BUILDBENCH1, source/ergonomics thresholds, and the compiled-workload contract on #1414 are unchanged. Source metrics use the same single JS language identity without changing their thresholds. Preserve historical receipts under their recorded policy.\n\nImplementation prerequisite: #3404. This card still owns measurement, not the harness cutover.\n\nOwner instruction 2026-09-03: every open card whose remaining criteria only need a measurement, census, suite, or review run moves those criteria here, so cards whose legwork landed can close on their implementation evidence. This card owns the runs. A failure found by a run is fixed under this card or re-carded as a bug; it does not reopen the source card.\n\nSource cards and moved criteria: #2250 (c5); #2253 (c5); #2254 (c2, c5); #2255 (c2, c5); #2256 (c2, c5); #2261 (c3, c5); #2263 (c5); #2265 (c5, c10, c11); #2268 (c2, c3, c4); #2269 (c5); #2270 (c1, c2, c3, c4); #2272 (c2); #2286 (c2); #2334 (c1); #2345 (c1, c2, c4); #2389 (c3, c6).\n\nRuns this card owns:\n- Full gauntlet matrix under the 2026-09-14 peer grouping in criterion 15, with one JS language column and separate Node/Bun/Vite web-development comparisons: `node gauntlet/harness/run.mjs` full board, then `gauntlet/status.json` regenerated and the Tower gauntlet tab refreshed.\n- Registry-driven Core conformance census, strict three-tier gate: `JET_CORE_CONFORMANCE_CENSUS=1 scripts/agent/jet-env cargo test --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --test-threads=2` (per-domain filters while repairing, one unfiltered run to close).\n- Compiler-speed dashboard production run against the committed baseline: `tools/perf/ci-perf-check.sh` with the v4 schema and matched peer rows.\n- Project-aware `jet check` witness corpus: clean check, then default-tier run and AOT build with no new compiler-side failure; warm incremental cost recorded against the cone law.\n\nEpics #2268 and #2334 stay open and are blocked by this card; they close when this card closes.",
+      "body": "Owner clarification, 2026-09-14: hide all expert columns from the main Gauntlet chart for now. The visible languages are Rust, C, Zig, Go, Python, and JS. Keep recorded expert evidence unchanged; this is not a claim that expert benchmarks passed.\n\nOwner direction, 2026-09-14: compare Jet ahead-of-time (AOT) results with Rust, C, Zig, and Go. Compare both `jet run` and `jet dev` with Python and JavaScript (JS). The owner selected \"Apply the split throughout\" for first-result and edit-to-result latency.\n\nThe main chart has one JavaScript language column and no separate Node language column. Node is a runtime, not another language. Keep the runtime and tool versions as measurement metadata. Migrate current Node language rows into the canonical JS comparison without losing workload coverage or counting JavaScript twice.\n\nKeep Node, Bun, and Vite as separate web-development workflow comparisons against `jet dev`. Use the existing live_reload axis. Its Node workflow currently uses nodemon; disclose that watcher and its version. Vite is a development tool, not a language or a separate JavaScript engine. These web-development comparisons remain required, not advisory.\n\nThe peer groups define required performance comparisons, not just display filters. Apply them to runtime, startup, first-result, edit-to-result, and other applicable execution measurements. Keep cold start, warm start, and steady-state measurements distinct. Comparisons outside these groups remain visible as non-blocking evidence. Competitive O0 performance against O2 remains a long-term goal, not a current closure condition or a claim of physical impossibility.\n\nKeep within-group comparators: Jet/peer <1.00 for every peer, Rust included (no parity band); then Jet/ceiling <=1.00 in cycles and bytes against the cell's Tools/perf/asm-parity reference (AGENTS.md Performance gate). Missing, wrong, unavailable, uncovered, mismatched, or inconclusive required evidence still fails. Do not drop workloads or required in-group peers. Keep I9 correctness across O0, O1, O2 and web where applicable. Performance grouping never excuses wrong output.\n\nSeparate AOT build-speed gates, D-BUILDBENCH1, source/ergonomics thresholds, and the compiled-workload contract on #1414 are unchanged. Source metrics use the same single JS language identity without changing their thresholds. Preserve historical receipts under their recorded policy.\n\nImplementation prerequisite: #3404. This card still owns measurement, not the harness cutover.\n\nOwner instruction 2026-09-03: every open card whose remaining criteria only need a measurement, census, suite, or review run moves those criteria here, so cards whose legwork landed can close on their implementation evidence. This card owns the runs. A failure found by a run is fixed under this card or re-carded as a bug; it does not reopen the source card.\n\nSource cards and moved criteria: #2250 (c5); #2253 (c5); #2254 (c2, c5); #2255 (c2, c5); #2256 (c2, c5); #2261 (c3, c5); #2263 (c5); #2265 (c5, c10, c11); #2268 (c2, c3, c4); #2269 (c5); #2270 (c1, c2, c3, c4); #2272 (c2); #2286 (c2); #2334 (c1); #2345 (c1, c2, c4); #2389 (c3, c6).\n\nRuns this card owns:\n- Full gauntlet matrix under the 2026-09-14 peer grouping in criterion 15, with one JS language column and separate Node/Bun/Vite web-development comparisons: `node gauntlet/harness/run.mjs` full board, then `gauntlet/status.json` regenerated and the Tower gauntlet tab refreshed.\n- Registry-driven Core conformance census, strict three-tier gate: `JET_CORE_CONFORMANCE_CENSUS=1 scripts/agent/jet-env cargo test --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --test-threads=2` (per-domain filters while repairing, one unfiltered run to close).\n- Compiler-speed dashboard production run against the committed baseline: `tools/perf/ci-perf-check.sh` with the v4 schema and matched peer rows.\n- Project-aware `jet check` witness corpus: clean check, then default-tier run and AOT build with no new compiler-side failure; warm incremental cost recorded against the cone law.\n\nEpics #2268 and #2334 stay open and are blocked by this card; they close when this card closes.",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e10",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "## Goal\nOwn four measurement runs and close only on fresh, unfiltered evidence: (1) the full gauntlet matrix, (2) the Core conformance census, (3) the compiler-speed dashboard, (4) the project-check corpus. No product source changes.\n\n## Owner direction (keep verbatim in spirit)\n- 2026-09-14: score AOT against Rust/C/Zig/Go, and `jet run` and `jet dev` independently against Python/JS. The split applies to execution, first-result and edit-to-result latency.\n- There is one JS language column and no Node language column; Node, Bun and Vite stay required web-development comparisons against `jet dev` (live_reload axis, nodemon disclosed). Hide expert columns from the main chart without deleting the evidence.\n- Outside-group comparisons are visible but non-blocking.\n- In-group comparator: Jet/non-Rust < 1.00, Jet/Rust <= 1.05 (noise band, not a target). Missing, wrong, unavailable or inconclusive evidence fails. I9 correctness holds on every mode, including the interpreter.\n- D-BUILDBENCH1, source/ergonomics thresholds and #1414 are unchanged. Historical receipts are immutable.\n\n## Current state\n- Paths moved: `gauntlet/` → `Tools/gauntlet/`, `tools/perf` → `Tools/perf/`, `scripts/agent` → `Tools/agent/`, `plugins/tower` → `Tools/tower/`. `Tools/agent/disk-report.sh` no longer exists.\n- `Tools/gauntlet/harness/run.mjs:212-223` (`--entry`, `--axis live_reload|memory_safety_fuzz`); `:3837` blocks publication of any partial run.\n- The census gate is `tests/dev_parts/corpus_gate.rs:160` `core_conformance_corpus_uses_strict_three_tier_gate` (`JET_CORE_CONFORMANCE_CENSUS=1`, `JET_CORE_CONFORMANCE_FILTER`). Census defects #2816, #2818 and #2846 are done; #2845 is building.\n- `Tools/perf/baseline.json` is still schema version 2, while run 3 needs the v4 peer contract.\n- The last full run (2026-09-03) gave 0 win / 11 loss / 14 unmeasured. Losses were carded as #2860-#2874, of which #2862, #2863, #2865-#2868 and #2870-#2873 are still open. The log from 2026-09-24 says eight perf entries still omit Go.\n\n## Runs (order: run 2 → run 1; runs 3 and 4 are independent)\nPreconditions: a fresh release build, `CARGO_INCREMENTAL=0`, a `JET_STORE_DIR` scratch store per run under `~/.cache/jet-test-scratch`, `Tools/agent/require-clean-tree.sh`, and `free -b; df -B1 ~/.cache` before and after.\n- **Run 2** (criteria 24-25): `JET_CORE_CONFORMANCE_CENSUS=1 JET_STORE_DIR=$HOME/.cache/jet-test-scratch/conf-store Tools/agent/jet-env cargo test --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --test-threads=2`. Use the filter while repairing; one unfiltered run closes the criteria.\n- **Run 1** (criteria 1-23, 31), after #3404: `Tools/agent/jet-env node Tools/gauntlet/harness/run.mjs`, then the same with `--axis live_reload` and `--axis memory_safety_fuzz`, then `node Tools/gauntlet/harness/status.mjs --merge`. Evidence is the `Tools/gauntlet/status.json` row per entry × metric, quoted with the run id.\n- **Run 3** (criteria 26-28): `JET_CI_CANDIDATE_COMMIT=$(git rev-parse HEAD) Tools/perf/ci-perf-check.sh` against a v4 `Tools/perf/baseline.json` from the production generator (#2530 producer). Measure the self-hosted front end, as #2859 does.\n- **Run 4** (criteria 29-30): `Tools/agent/jet-env cargo test --test cli_compile_latency --test cli_compiler_speed`, then run check → run → build over the witness projects. Warm incremental cost is measured against the cone law in a versioned schema.\n- Meet criteria with `node Tools/tower/tower.mjs card criteria '#2858' --meet <n> --evidence ...`, only from the integrated tree. A harness defect goes to #2869; a compiler defect gets a bug card.\n\n## Proof\nAll four commands above, run unfiltered, with every required cell passing the per-cell comparator.\n\n## Batch\nbatch-measure.\n\n## Dependencies\n#3404 (peer split), #2869 (harness), #2845 (census), and the open loss cards (#2862, #2863, #2865-#2868, #2870-#2874).",
+      "plan": "## Goal\nOwn four measurement runs and close only on fresh, unfiltered evidence: (1) the full gauntlet matrix, (2) the Core conformance census, (3) the compiler-speed dashboard, (4) the project-check corpus. No product source changes.\n\n## Owner direction (keep verbatim in spirit)\n- 2026-09-14: score AOT against Rust/C/Zig/Go, and `jet run` and `jet dev` independently against Python/JS. The split applies to execution, first-result and edit-to-result latency.\n- There is one JS language column and no Node language column; Node, Bun and Vite stay required web-development comparisons against `jet dev` (live_reload axis, nodemon disclosed). Hide expert columns from the main chart without deleting the evidence.\n- Outside-group comparisons are visible but non-blocking.\n- In-group comparator: Jet/peer <1.00 for every peer, Rust included (no parity band); then Jet/ceiling <=1.00 in cycles and bytes against the cell's Tools/perf/asm-parity reference. Missing, wrong, unavailable or inconclusive evidence fails. I9 correctness holds on O0, O1, O2 and web where applicable.\n- D-BUILDBENCH1, source/ergonomics thresholds and #1414 are unchanged. Historical receipts are immutable.\n\n## Current state\n- Paths moved: `gauntlet/` → `Tools/gauntlet/`, `tools/perf` → `Tools/perf/`, `scripts/agent` → `Tools/agent/`, `plugins/tower` → `Tools/tower/`. `Tools/agent/disk-report.sh` no longer exists.\n- `Tools/gauntlet/harness/run.mjs:212-223` (`--entry`, `--axis live_reload|memory_safety_fuzz`); `:3837` blocks publication of any partial run.\n- The census gate is `tests/dev_parts/corpus_gate.rs:160` `core_conformance_corpus_uses_strict_three_tier_gate` (`JET_CORE_CONFORMANCE_CENSUS=1`, `JET_CORE_CONFORMANCE_FILTER`). Census defects #2816, #2818 and #2846 are done; #2845 is building.\n- `Tools/perf/baseline.json` is still schema version 2, while run 3 needs the v4 peer contract.\n- The last full run (2026-09-03) gave 0 win / 11 loss / 14 unmeasured. Losses were carded as #2860-#2874, of which #2862, #2863, #2865-#2868 and #2870-#2873 are still open. The log from 2026-09-24 says eight perf entries still omit Go.\n\n## Runs (order: run 2 → run 1; runs 3 and 4 are independent)\nPreconditions: a fresh release build, `CARGO_INCREMENTAL=0`, a `JET_STORE_DIR` scratch store per run under `~/.cache/jet-test-scratch`, `Tools/agent/require-clean-tree.sh`, and `free -b; df -B1 ~/.cache` before and after.\n- **Run 2** (criteria 24-25): `JET_CORE_CONFORMANCE_CENSUS=1 JET_STORE_DIR=$HOME/.cache/jet-test-scratch/conf-store Tools/agent/jet-env cargo test --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --test-threads=2`. Use the filter while repairing; one unfiltered run closes the criteria.\n- **Run 1** (criteria 1-23, 31), after #3404: `Tools/agent/jet-env node Tools/gauntlet/harness/run.mjs`, then the same with `--axis live_reload` and `--axis memory_safety_fuzz`, then `node Tools/gauntlet/harness/status.mjs --merge`. Evidence is the `Tools/gauntlet/status.json` row per entry × metric, quoted with the run id.\n- **Run 3** (criteria 26-28): `JET_CI_CANDIDATE_COMMIT=$(git rev-parse HEAD) Tools/perf/ci-perf-check.sh` against a v4 `Tools/perf/baseline.json` from the production generator (#2530 producer). Measure the self-hosted front end, as #2859 does.\n- **Run 4** (criteria 29-30): `Tools/agent/jet-env cargo test --test cli_compile_latency --test cli_compiler_speed`, then run check → run → build over the witness projects. Warm incremental cost is measured against the cone law in a versioned schema.\n- Meet criteria with `node Tools/tower/tower.mjs card criteria '#2858' --meet <n> --evidence ...`, only from the integrated tree. A harness defect goes to #2869; a compiler defect gets a bug card.\n\n## Proof\nAll four commands above, run unfiltered, with every required cell passing the per-cell comparator.\n\n## Batch\nbatch-measure.\n\n## Dependencies\n#3404 (peer split), #2869 (harness), #2845 (census), and the open loss cards (#2862, #2863, #2865-#2868, #2870-#2874).",
       "checkSteps": null,
       "blockedBy": [
         "c0pr2dsz",
@@ -23002,6 +23007,11 @@
       ],
       "assignee": "Main",
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); the AGENTS.md Performance gate (Jet/peer < 1.00 with no Rust band, then the asm-parity ceiling); D-EXEC2=A (native code generator only; Cranelift and MIREval are retired)."
+        },
         {
           "at": "2026-11-05",
           "by": "Main",
@@ -23116,7 +23126,7 @@
       "criteria": [
         {
           "n": 1,
-          "text": "From #2250 c5: Fresh matched evidence covers every required peer and comparable metric within the execution groups in criterion 15. Jet/non-Rust <1.00 and Jet/Rust <=1.05 at worst. A selective subset of in-group peers cannot pass.",
+          "text": "From #2250 c5: Fresh matched evidence covers every required peer and comparable metric within the execution groups in criterion 15. Jet/peer <1.00 for every peer, Rust included (no parity band), and Jet/ceiling <=1.00 in cycles and bytes against the cell's Tools/perf/asm-parity reference. A selective subset of in-group peers cannot pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23125,7 +23135,7 @@
         },
         {
           "n": 2,
-          "text": "From #2253 c5: Valid binparse AOT measurements independently show Jet/Rust <=1.05 and Jet/C, Jet/Zig, and Jet/Go <1.00 where required. Run/dev comparisons use criterion 15. Rust parity is a noise ceiling, not the optimization target.",
+          "text": "From #2253 c5: Valid binparse O2 measurements independently show Jet/Rust, Jet/C, Jet/Zig and Jet/Go <1.00 where required, and Jet/ceiling <=1.00 against the asm-parity reference. Run/dev comparisons use criterion 15. Beating the peers is the floor; the asm-parity ceiling is the target.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23143,7 +23153,7 @@
         },
         {
           "n": 4,
-          "text": "From #2254 c5: Valid sieve and wordfreq AOT measurements show Jet/Rust <=1.05 and Jet/Zig <1.00. Every other required in-group peer and metric also passes criterion 17. These are rejection limits, not optimization targets.",
+          "text": "From #2254 c5: Valid sieve and wordfreq O2 measurements show Jet/Rust and Jet/Zig <1.00. Every other required in-group peer and metric also passes criterion 17. These peer limits are the floor; the target is the asm-parity ceiling (Jet/ceiling <=1.00 in cycles and bytes).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23197,7 +23207,7 @@
         },
         {
           "n": 10,
-          "text": "From #2261 c5: Fresh matched nbody expert AOT measurements independently show Jet/non-Rust <1.00 and Jet/Rust <=1.05 for required expert peers. Preserve byte-identical output, matched expert implementations, and the same SIMD policy.",
+          "text": "From #2261 c5: Fresh matched nbody expert O2 measurements independently show Jet/peer <1.00 for every required expert peer, Rust included. Preserve byte-identical output, matched expert implementations, and the same SIMD policy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23233,7 +23243,7 @@
         },
         {
           "n": 14,
-          "text": "From #2265 c11: For every declared comparable source/ergonomics metric and peer in every required cell, Jet/non-Rust is < 1.00 and Jet/Rust is <= 1.05 at worst; no median, Python-only subset, aggregate, missing, or unmeasured row passes.",
+          "text": "From #2265 c11: For every declared comparable source/ergonomics metric and peer in every required cell, Jet/peer is < 1.00 for every peer, Rust included (no parity band); no median, Python-only subset, aggregate, missing, or unmeasured row passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23260,7 +23270,7 @@
         },
         {
           "n": 17,
-          "text": "Every required in-group performance cell and metric independently records Jet/non-Rust <1.00 and Jet/Rust <=1.05. Rust parity is measurement noise, not a win or target. No average or missing, wrong, unavailable, uncovered, mismatched, or inconclusive required evidence passes. Outside-group results cannot fail this performance gate.",
+          "text": "Every required in-group performance cell and metric independently records Jet/peer <1.00 for every peer, Rust included (no parity band), and Jet/ceiling <=1.00 in cycles and bytes against the cell's Tools/perf/asm-parity reference; a cell without a reference is uncovered and fails. No average or missing, wrong, unavailable, uncovered, mismatched, or inconclusive required evidence passes. Outside-group results cannot fail this performance gate.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23269,7 +23279,7 @@
         },
         {
           "n": 18,
-          "text": "From #2269 c5: Fresh AOT synthesis consumes strict evidence from #2253 and #2254 only after every required in-group metric passes Jet/non-Rust <1.00 and Jet/Rust <=1.05. Neither a historical weaker limit nor a primary-metric-only result counts.",
+          "text": "From #2269 c5: Fresh O2 synthesis consumes strict evidence from #2253 and #2254 only after every required in-group metric passes Jet/peer <1.00 for every peer, Rust included. Neither a historical weaker limit nor a primary-metric-only result counts.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23287,7 +23297,7 @@
         },
         {
           "n": 20,
-          "text": "From #2270 c2: Tier traces show zero whole-program deopts across the corpus; typed scalars and direct calls stay unboxed where sema facts permit.",
+          "text": "From #2270 c2: Every corpus program runs native code with no fallback path; typed scalars and direct calls stay unboxed where sema facts permit.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23305,7 +23315,7 @@
         },
         {
           "n": 22,
-          "text": "From #2270 c4: Default, AOT, and interpreter outputs remain byte-identical for every changed corpus entry; no `jit_gaps` exclusion is added.",
+          "text": "From #2270 c4: O0, O1 and O2 outputs remain byte-identical for every changed corpus entry; no `jit_gaps` exclusion is added.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23323,7 +23333,7 @@
         },
         {
           "n": 24,
-          "text": "From #2286 c2: All conformance programs byte-identical across AOT/default/forced-interpreter via the existing corpus gate",
+          "text": "From #2286 c2: All conformance programs byte-identical across O0, O1 and O2 via the existing corpus gate",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23359,7 +23369,7 @@
         },
         {
           "n": 28,
-          "text": "From #2345 c4: Complete production compiler-speed evidence includes matched comparable peer rows: every non-Rust peer metric has Jet/peer < 1.00 and every Rust metric has Jet/Rust <= 1.05 at worst. Internal-regression-only rows cannot close this card.",
+          "text": "From #2345 c4: Complete production compiler-speed evidence includes matched comparable peer rows: every peer metric, Rust included, has Jet/peer < 1.00, and Jet/ceiling <=1.00 in cycles and bytes against the cell's Tools/perf/asm-parity reference. Internal-regression-only rows cannot close this card.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23368,7 +23378,7 @@
         },
         {
           "n": 29,
-          "text": "From #2389 c3: A clean project check followed by immediate default-tier run and AOT build produces no new compiler-side failure across the witness corpus; tier proofs come from structured side-effect-free validators, and a coverage miss is never reported clean.",
+          "text": "From #2389 c3: A clean project check followed by immediate `jet run` (O0) and `jet build` (O1, O2) produces no new compiler-side failure across the witness corpus; tier proofs come from structured side-effect-free validators, and a coverage miss is never reported clean.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23413,7 +23423,7 @@
         },
         {
           "n": 34,
-          "text": "(was #2859) From #666 c2: The canonical production run `scripts/agent/jet-env sh tools/perf/dashboard.sh --json` covers every `tools/perf/corpus.tsv` program in all six states: jit-clean, jit-no-change, jit-representative-edit, aot-release-clean, aot-release-no-change, and aot-release-representative-edit. Each row contains latency, peak memory, output/stderr hashes, phases, stage/profile/backend, and machine/tool identities. Apply the AGENTS.md comparator separately to every cell and metric: Rust runtime rows may be at most 1.05x and every non-Rust peer must be below 1.00x. Missing, mismatched, unavailable, or inconclusive evidence fails; no average can pass.",
+          "text": "(was #2859) From #666 c2: The canonical production run `Tools/agent/jet-env sh Tools/perf/dashboard.sh --json` covers every `Tools/perf/corpus.tsv` program in all six states: run-clean, run-no-change and run-representative-edit (O0), and aot-release-clean, aot-release-no-change and aot-release-representative-edit (O2). Each row contains latency, peak memory, output/stderr hashes, phases, stage/profile/backend, and machine/tool identities. Apply the AGENTS.md comparator separately to every cell and metric: every peer, Rust included, must be below 1.00x, and Jet/ceiling <=1.00 in cycles and bytes against the cell's Tools/perf/asm-parity reference. Missing, mismatched, unavailable, or inconclusive evidence fails; no average can pass.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23422,7 +23432,7 @@
         },
         {
           "n": 35,
-          "text": "(was #2859) From #666 c5: Focused production-output checks over the affected golden and diagnostic fixtures compare emitted behavior, output/stderr hashes, docs examples, and audit rows. Run `scripts/agent/jet-env cargo test --test golden --test diagnostic_snapshots` with the dashboard receipt and source/golden hashes; update documentation and audit output only after the command evidence exists. Full-suite proof remains epoch closeout.",
+          "text": "(was #2859) From #666 c5: Focused production-output checks over the affected golden and diagnostic fixtures compare emitted behavior, output/stderr hashes, docs examples, and audit rows. Run `jet test Compiler --profile golden` and `jet test Compiler --profile ui` with the dashboard receipt and source/golden hashes; update documentation and audit output only after the command evidence exists. Full-suite proof remains epoch closeout.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23431,7 +23441,7 @@
         },
         {
           "n": 36,
-          "text": "(was #2859) From #666 c6: The focused `tests/cli_compiler_speed.rs` and `tools/perf/ci-perf-check.sh` checks fail closed when the canonical corpus, package manifest, production phase report, or cross-backend differential receipt is removed or bypassed. The receipt names this card as the sole owner; no sibling evidence substitutes for it.",
+          "text": "(was #2859) From #666 c6: The focused `tests/cases/cli_compiler_speed/` rows and `tools/perf/ci-perf-check.sh` checks fail closed when the canonical corpus, package manifest, production phase report, or cross-backend differential receipt is removed or bypassed. The receipt names this card as the sole owner; no sibling evidence substitutes for it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23440,7 +23450,7 @@
         },
         {
           "n": 37,
-          "text": "(was #2859) From #676 c5: Every passing row runs the same source through the named JIT, dev, and optimized-AOT paths and records profile/backend, output, diagnostics, effects, and tier parity. A profile downgrade, backend substitution, boxing or dynamic-dispatch escape, feature loss, weaker diagnostics, changed effects, or tier divergence makes that row fail instead of producing a speed result.",
+          "text": "(was #2859) From #676 c5: Every passing row runs the same source through the named O0, O1 and O2 paths and records profile/backend, output, diagnostics, effects, and tier parity. A profile downgrade, backend substitution, boxing or dynamic-dispatch escape, feature loss, weaker diagnostics, changed effects, or tier divergence makes that row fail instead of producing a speed result.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23458,7 +23468,7 @@
         },
         {
           "n": 39,
-          "text": "(was #2859) From #1023 c2: The same canonical dashboard run covers all six JIT/AOT clean, no-change, and representative-edit rows for every corpus program, with latency, memory, output parity, variance, stage, profile, backend, and machine identity checked per cell. Apply the standing Rust <=1.05 and non-Rust <1.00 comparators without averaging or substituting rows.",
+          "text": "(was #2859) From #1023 c2: The same canonical dashboard run covers all six O0 and O2 clean, no-change, and representative-edit rows for every corpus program, with latency, memory, output parity, variance, stage, profile, backend, and machine identity checked per cell. Apply Jet/peer <1.00 for every peer, Rust included (no parity band), and Jet/ceiling <=1.00 in cycles and bytes against the cell's Tools/perf/asm-parity reference, without averaging or substituting rows.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23476,7 +23486,7 @@
         },
         {
           "n": 41,
-          "text": "(was #2859) From #1025 c2: The canonical dashboard produces every JIT and optimized-AOT clean, no-change, and representative-edit row for every corpus program, then checks output/stderr parity, workload identity, latency, peak memory, variance, and profile/backend identity per cell. Rust runtime rows may be <=1.05x; non-Rust peers must be <1.00x; missing or inconclusive cells fail.",
+          "text": "(was #2859) From #1025 c2: The canonical dashboard produces every O0 and O2 clean, no-change, and representative-edit row for every corpus program, then checks output/stderr parity, workload identity, latency, peak memory, variance, and profile/backend identity per cell. Jet/peer <1.00 for every peer, Rust included (no parity band); Jet/ceiling <=1.00 in cycles and bytes against the cell's Tools/perf/asm-parity reference; missing or inconclusive cells fail.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23494,7 +23504,7 @@
         },
         {
           "n": 43,
-          "text": "(was #2859) From #1025 c4: `scripts/agent/jet-env cargo test --test cli_compiler_speed` and its production removal/bypass canaries exercise the real compiler path and fail when the relevant implementation, cache route, report, or parity path is removed or bypassed. A fixture-only or documentation-only result cannot close this criterion.",
+          "text": "(was #2859) From #1025 c4: `jet test Compiler --profile cases cli_compiler_speed/` and its production removal/bypass canaries exercise the real compiler path and fail when the relevant implementation, cache route, report, or parity path is removed or bypassed. A fixture-only or documentation-only result cannot close this criterion.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23503,7 +23513,7 @@
         },
         {
           "n": 44,
-          "text": "(was #2859) From #1025 c6: The production cache check in `tests/cli_compiler_speed.rs` exercises reusable standard-library objects and relevant-digest reuse through the compiler path, then fails when either implementation or its cache identity is bypassed. The receipt records cache hit/miss, digest, profile, and phase facts; no docs/plans file is the oracle.",
+          "text": "(was #2859) From #1025 c6: The production cache check in `tests/cases/cli_compiler_speed/` rows exercises reusable standard-library objects and relevant-digest reuse through the compiler path, then fails when either implementation or its cache identity is bypassed. The receipt records cache hit/miss, digest, profile, and phase facts; no docs/plans file is the oracle.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23512,7 +23522,7 @@
         },
         {
           "n": 45,
-          "text": "(was #2859) From #1026 c2: The canonical dashboard covers every required JIT and optimized-AOT clean, no-change, and representative-edit row with pinned stage, profile/backend, machine/tool identities, latency, memory, output parity, and variance. Apply the standing comparator independently to every cell and metric; no missing or inconclusive row passes.",
+          "text": "(was #2859) From #1026 c2: The canonical dashboard covers every required O0, O1 and O2 clean, no-change, and representative-edit row with pinned stage, profile/backend, machine/tool identities, latency, memory, output parity, and variance. Apply the standing comparator independently to every cell and metric; no missing or inconclusive row passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23521,7 +23531,7 @@
         },
         {
           "n": 46,
-          "text": "(was #2859) From #1026 c7: The incremental production check in `tests/cli_compiler_speed.rs` exercises batch semantic analysis and bounded parallel frontend work on the canonical edited corpus, records phase and worker/cache facts, and fails when that route is removed or bypassed. No docs/plans file supplies the evidence.",
+          "text": "(was #2859) From #1026 c7: The incremental production check in `tests/cases/cli_compiler_speed/` rows exercises batch semantic analysis and bounded parallel frontend work on the canonical edited corpus, records phase and worker/cache facts, and fails when that route is removed or bypassed. No docs/plans file supplies the evidence.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23539,7 +23549,7 @@
         },
         {
           "n": 48,
-          "text": "(was #2859) From #1027 c2: The canonical dashboard covers all six JIT/AOT corpus states with pinned stage and machine identity, output/stderr parity, phase timing, latency, peak memory, and variance. Check every cell independently under Rust <=1.05 and non-Rust <1.00; a missing, mismatched, or inconclusive cell leaves the criterion open.",
+          "text": "(was #2859) From #1027 c2: The canonical dashboard covers all six O0 and O2 corpus states with pinned stage and machine identity, output/stderr parity, phase timing, latency, peak memory, and variance. Check every cell independently: Jet/peer <1.00 for every peer, Rust included (no parity band), and Jet/ceiling <=1.00 in cycles and bytes against the cell's Tools/perf/asm-parity reference; a missing, mismatched, or inconclusive cell leaves the criterion open.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23557,7 +23567,7 @@
         },
         {
           "n": 50,
-          "text": "(was #2859) From #1028 c2: The canonical dashboard records and checks clean, no-change, and representative-edit JIT/AOT rows for every corpus program, including latency, memory, variance, output/stderr parity, stage/profile/backend, and pinned machine identity. Apply the comparator per cell and metric; no average, substitute, missing row, or inconclusive interval passes.",
+          "text": "(was #2859) From #1028 c2: The canonical dashboard records and checks clean, no-change, and representative-edit O0, O1 and O2 rows for every corpus program, including latency, memory, variance, output/stderr parity, stage/profile/backend, and pinned machine identity. Apply the comparator per cell and metric; no average, substitute, missing row, or inconclusive interval passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23575,7 +23585,7 @@
         },
         {
           "n": 52,
-          "text": "(was #2859) From #1028 c4: The focused production route and removal/bypass canaries in `tests/cli_compiler_speed.rs` exercise real success and failure paths and fail when the key implementation, backend route, or report is removed or bypassed. Mock-only output and docs-only assertions do not count.",
+          "text": "(was #2859) From #1028 c4: The focused production route and removal/bypass canaries in `tests/cases/cli_compiler_speed/` rows exercise real success and failure paths and fail when the key implementation, backend route, or report is removed or bypassed. Mock-only output and docs-only assertions do not count.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23584,7 +23594,7 @@
         },
         {
           "n": 53,
-          "text": "(was #2859) From #1028 c5: Focused golden/diagnostic production checks compare affected docs examples, emitted output, diagnostics, goldens, and audit rows using `scripts/agent/jet-env cargo test --test golden --test diagnostic_snapshots` plus dashboard hashes. Update the docs and audit only after those receipts; full-suite proof remains epoch closeout.",
+          "text": "(was #2859) From #1028 c5: Focused golden/diagnostic production checks compare affected docs examples, emitted output, diagnostics, goldens, and audit rows using `jet test Compiler --profile golden` and `jet test Compiler --profile ui` plus dashboard hashes. Update the docs and audit only after those receipts; full-suite proof remains epoch closeout.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23593,7 +23603,7 @@
         },
         {
           "n": 54,
-          "text": "(was #2859) From #1028 c6: The debug-AOT/Cranelift route canary in `tests/cli_compiler_speed.rs` records the selected debug-AOT backend and any explicit fallback, then checks output and diagnostics against default run, dev, optimized AOT, and interpreter where applicable. It fails if debug AOT is silently bypassed or falls back without a receipt.",
+          "text": "(was #2859) From #1028 c6: The O1 route canary in the `tests/cases/cli_compiler_speed/` rows (`jet test Compiler --profile cases cli_compiler_speed/`) records the selected backend and any explicit fallback, then checks output and diagnostics against O0, O1 and O2. It fails if O1 is silently bypassed or falls back without a receipt.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23602,7 +23612,7 @@
         },
         {
           "n": 55,
-          "text": "(was #2859) From #2514 c2: After #2530 lands, `tools/perf/build-matrix.sh --check` and `tools/perf/test-build-matrix.sh` cover every real-program profile/state cell against both ordinary Cargo (stable rustc 1.97.1 defaults) and the fastest valid pre-registered expert Cargo configuration. Paired randomized runs require the ratified upper 95% Jet/peer wall-clock ratio to be <1.00 for both peers in every cell; CPU <=1.10x, peak RSS <=1.25x, binary size within 2%, and runtime ceilings are independent. Missing, failed, mismatched, or inconclusive evidence fails; no averaging or unratified per-cell exception is allowed.",
+          "text": "(was #2859) From #2514 c2: After #2530 lands, `tools/perf/build-matrix.sh --check` and `tools/perf/test-build-matrix.sh` cover every real-program profile/state cell against both ordinary Cargo (stable rustc 1.97.1 defaults) and the fastest valid pre-registered expert Cargo configuration. Paired randomized runs require the ratified upper 95% Jet/peer wall-clock ratio to be <1.00 for both peers in every cell; CPU, peak RSS and binary size each give Jet/peer <1.00 with no band, and runtime ceilings are independent (AGENTS.md Performance gate). Missing, failed, mismatched, or inconclusive evidence fails; no averaging or unratified per-cell exception is allowed.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23611,7 +23621,7 @@
         },
         {
           "n": 56,
-          "text": "(was #2859) From #2514 c3: After #2531 lands, `scripts/agent/jet-env cargo test --test hostile_invalidation` runs all 30 proposal-III.3 cases on AOT release, AOT debug, default `jet run`, and `jet run --interpret`, and compares outputs and diagnostics byte-for-byte or by the declared diagnostic identity. Any missing case, tier, output, or diagnostic keeps the gate open.",
+          "text": "(was #2859) From #2514 c3: After #2531 lands, `scripts/agent/jet-env cargo test --test hostile_invalidation` runs all 30 proposal-III.3 cases on O0, O1 and O2, and compares outputs and diagnostics byte-for-byte or by the declared diagnostic identity. Any missing case, tier, output, or diagnostic keeps the gate open.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23728,7 +23738,7 @@
         },
         {
           "n": 69,
-          "text": "(was #3404) Wrong output fails correctness on every applicable execution mode even when its peer performance comparison is non-blocking. No I9 or interpreter exclusion is introduced.",
+          "text": "(was #3404) Wrong output fails correctness on every applicable execution mode even when its peer performance comparison is non-blocking. No I9 or tier exclusion is introduced.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23764,7 +23774,7 @@
         },
         {
           "n": 73,
-          "text": "(was #3404) Focused consumer checks and real AOT/run/dev plus Node/Bun/Vite workflow evidence prove the new comparison boundaries. #2858 remains open until its complete measurement evidence is produced.",
+          "text": "(was #3404) Focused consumer checks and real O0, O1 and O2 plus Node/Bun/Vite workflow evidence prove the new comparison boundaries. #2858 remains open until its complete measurement evidence is produced.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -23980,7 +23990,7 @@
         },
         {
           "n": 97,
-          "text": "(was #4055 c1) [from #2859 c21] From #1028 c6: The debug-AOT/Cranelift route canary in `tests/cli_compiler_speed.rs` records the selected debug-AOT backend and any explicit fallback, then checks output and diagnostics against default run, dev, optimized AOT, and interpreter where applicable. It fails if debug AOT is silently bypassed or falls back without a receipt [precut audit: failing on 9c7ddf1359: C:release_gates/compiled_workload_release_gate_uses_frozen_contract_and_canaries FAIL exit 1; expected 0]",
+          "text": "(was #4055 c1) [from #2859 c21] From #1028 c6: The O1 route canary in the `tests/cases/cli_compiler_speed/` rows (`jet test Compiler --profile cases cli_compiler_speed/`) records the selected backend and any explicit fallback, then checks output and diagnostics against O0, O1 and O2. It fails if O1 is silently bypassed or falls back without a receipt [precut audit: failing on 9c7ddf1359: C:release_gates/compiled_workload_release_gate_uses_frozen_contract_and_canaries FAIL exit 1; expected 0]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24010,10 +24020,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-03T10:47:46.080Z",
-      "updated": "2026-11-05T14:23:23.327Z",
+      "updated": "2026-11-06T18:37:39.130Z",
       "updatedBy": "Main",
       "probe": null,
-      "claimedAt": "2026-11-05T14:23:23.327Z",
+      "claimedAt": "2026-11-06T18:37:39.130Z",
       "visualMedia": [],
       "goals": [
         "G11"
@@ -24030,11 +24040,16 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "## Goal\nRemove the general per-line costs from AOT text pipelines: literal `String` allocation on each use, owned split results that get cloned again, doubled map-key clones, cloned records in group_by/sort, and stack frames on infallible calls. Output bytes, diagnostics and tier behavior stay the same. This is one emitter and ownership path, not a fast path per corpus entry, and it adds no public API.\n\n## Current state\n- Measured AOT losses (gauntlet run 20260902-1649436-mtkr9fvl): logreport 4.0x Rust (109 ms vs 27 ms), 4.2x Python, 7.1x Zig, 6.3x Node, 2.8x Go; text-script 1.23x Rust; datasummary 11.7x Rust; taskfile-cli 1.13x Rust. These are the text.report-cli, text.script, numerics.script, numerics.notebook, cli.app and formats.json-app cells.\n- The Jet Rust printer turns every MIR String constant into an owned String: `Compiler/JetCodegen/Source/Emit/Types.jet:1344` (`.String(value) -> \"{quote}.to_string()\"`) and the const-key path at `:1389`.\n- Split routes through `jet_unicode_split_once` with owned arguments: `Compiler/JetCodegen/Source/Codegen/BuiltinMethods.jet:522`. The Prelude already borrows its inputs: `crates/jet-codegen/src/Prelude/Core/UnicodeString.rs:131` takes `(&str, &str)` and returns owned `(String, String)`.\n- The shipped Rust printer already skips the stack frame for infallible functions in release. `crates/jet-codegen/src/Codegen/MIRRust.rs:12064-12099` wraps `jet_stack_enter` in `#[cfg(not(jet_release))]` unless the function is fallible, unsafe or policy-scoped. The Jet printer (`Compiler/JetCodegen/Source/Emit/Functions.jet:429`) emits only sentry and deadline scopes.\n- The split-literal borrow fix from 2026-09-21 (ebe828003) exists only in the archived MIRRust.rs.\n\n## Changes\n1. Jet lowering (`Compiler/JetCodegen/Source/Codegen/{Expressions,BuiltinMethods,Statements,Functions}.jet`): when the checked ownership and escape facts prove a value does not escape, pass literal arguments, split results, map keys and group_by/sort records as borrowed MIR operands (`MirAccess.Read` place or const). Values that escape stay owned.\n2. Jet printer (`Compiler/JetCodegen/Source/Emit/{Types,Operations,Values}.jet`):\n   - Print a borrowed String constant as a `&str` literal where the Prelude parameter is `&str`.\n   - Stop re-cloning split-result fields.\n   - Print map `get` with one borrowed key.\n   - Port the ebe828003 split-literal rule.\n3. Jet printer (`Emit/Functions.jet`): match the MIRRust.rs:12065 rule. The default profile gets no frame for `MirFailureCarrier.Infallible` functions without unsafe or policy scopes. Debug and hardened profiles keep the frame.\n4. Rust mirror, so the shipped binary proves the change: apply the same borrow rules in `MIRRust.rs`. Change Prelude signatures in `Prelude/CoreLib/Top/Text.rs` and `Prelude/Core/Collections.rs` only where the checked ABI already allows a borrow. Add no second text representation.\n5. Add a witness `line_parsing_witness_borrows_literals_and_split_results` in `tests/tir_collections_and_methods.rs`. It covers literal args, split_once, map lookup, group_by and sort. It asserts on the emitted Rust and calls `assert_tiers_agree`.\n\n## Proof\n- `Tools/agent/jet-env cargo test --test tir_collections_and_methods -- line_parsing_witness`: passes. The loop body has no `\" \".to_string()`, no `.clone()` of split fields, and no `get(&key.clone())`. AOT, run and interpreter output are identical.\n- `JET_GOLDEN_FILTER=text/ Tools/agent/jet-env cargo test --test golden examples_compile_and_run` and `JET_GOLDEN_FILTER=strings/ ...`: no golden changes.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh`: no new errors in the touched JetCodegen files compared with the pre-change receipt.\n- Measurement (batch-measure pass): run `node Tools/gauntlet/harness/run.mjs --entry X` for logreport, text-script, datasummary and taskfile-cli. Jet/Rust must be <= 1.05 and Jet/other peers < 1.00 on every metric. Record each loss separately.\n\n## Batch\nbatch-jetc-back: this is Jet lowering and printer work, with the MIRRust.rs mirror landing in the same build.\n\n## Dependencies\nNone blocking. The ownership facts are already checked by sema.\n",
+      "plan": "## Goal\nRemove the general per-line costs from AOT text pipelines: literal `String` allocation on each use, owned split results that get cloned again, doubled map-key clones, cloned records in group_by/sort, and stack frames on infallible calls. Output bytes, diagnostics and tier behavior stay the same. This is one emitter and ownership path, not a fast path per corpus entry, and it adds no public API.\n\n## Current state\n- Measured AOT losses (gauntlet run 20260902-1649436-mtkr9fvl): logreport 4.0x Rust (109 ms vs 27 ms), 4.2x Python, 7.1x Zig, 6.3x Node, 2.8x Go; text-script 1.23x Rust; datasummary 11.7x Rust; taskfile-cli 1.13x Rust. These are the text.report-cli, text.script, numerics.script, numerics.notebook, cli.app and formats.json-app cells.\n- The Jet Rust printer turns every MIR String constant into an owned String: `Compiler/JetCodegen/Source/Emit/Types.jet:1344` (`.String(value) -> \"{quote}.to_string()\"`) and the const-key path at `:1389`.\n- Split routes through `jet_unicode_split_once` with owned arguments: `Compiler/JetCodegen/Source/Codegen/BuiltinMethods.jet:522`. The Prelude already borrows its inputs: `crates/jet-codegen/src/Prelude/Core/UnicodeString.rs:131` takes `(&str, &str)` and returns owned `(String, String)`.\n- The shipped Rust printer already skips the stack frame for infallible functions in release. `crates/jet-codegen/src/Codegen/MIRRust.rs:12064-12099` wraps `jet_stack_enter` in `#[cfg(not(jet_release))]` unless the function is fallible, unsafe or policy-scoped. The Jet printer (`Compiler/JetCodegen/Source/Emit/Functions.jet:429`) emits only sentry and deadline scopes.\n- The split-literal borrow fix from 2026-09-21 (ebe828003) exists only in the archived MIRRust.rs.\n\n## Changes\n1. Jet lowering (`Compiler/JetCodegen/Source/Codegen/{Expressions,BuiltinMethods,Statements,Functions}.jet`): when the checked ownership and escape facts prove a value does not escape, pass literal arguments, split results, map keys and group_by/sort records as borrowed MIR operands (`MirAccess.Read` place or const). Values that escape stay owned.\n2. Jet printer (`Compiler/JetCodegen/Source/Emit/{Types,Operations,Values}.jet`):\n   - Print a borrowed String constant as a `&str` literal where the Prelude parameter is `&str`.\n   - Stop re-cloning split-result fields.\n   - Print map `get` with one borrowed key.\n   - Port the ebe828003 split-literal rule.\n3. Jet printer (`Emit/Functions.jet`): match the MIRRust.rs:12065 rule. The default profile gets no frame for `MirFailureCarrier.Infallible` functions without unsafe or policy scopes. Debug and hardened profiles keep the frame.\n4. Rust mirror, so the shipped binary proves the change: apply the same borrow rules in `MIRRust.rs`. Change Prelude signatures in `Prelude/CoreLib/Top/Text.rs` and `Prelude/Core/Collections.rs` only where the checked ABI already allows a borrow. Add no second text representation.\n5. Add a witness `line_parsing_witness_borrows_literals_and_split_results` in `tests/tir_collections_and_methods.rs`. It covers literal args, split_once, map lookup, group_by and sort. It asserts on the emitted Rust and calls `assert_tiers_agree`.\n\n## Proof\n- `Tools/agent/jet-env cargo test --test tir_collections_and_methods -- line_parsing_witness`: passes. The loop body has no `\" \".to_string()`, no `.clone()` of split fields, and no `get(&key.clone())`. O0, O1 and O2 output are identical.\n- `jet test Compiler --profile golden text/` and `JET_GOLDEN_FILTER=strings/ ...`: no golden changes.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh`: no new errors in the touched JetCodegen files compared with the pre-change receipt.\n- Measurement (batch-measure pass): run `node Tools/gauntlet/harness/run.mjs --entry X` for logreport, text-script, datasummary and taskfile-cli. Jet/peer must be < 1.00 for every peer, Rust included, on every metric, and Jet/ceiling <= 1.00 against the asm-parity reference. Record each loss separately.\n\n## Batch\nbatch-jetc-back: this is Jet lowering and printer work, with the MIRRust.rs mirror landing in the same build.\n\n## Dependencies\nNone blocking. The ownership facts are already checked by sema.\n",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": "Main",
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); the AGENTS.md Performance gate (Jet/peer < 1.00 with no Rust band, then the asm-parity ceiling)."
+        },
         {
           "at": "2026-11-01",
           "by": "Main",
@@ -24114,7 +24129,7 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The canonical paired AOT cells for logreport, text-script, datasummary, and taskfile-cli record Jet versus the plain implementation and every required peer; Jet/Rust is at most 1.05 and Jet/non-Rust is below 1.00 for every required metric, with losses kept open.",
+          "text": "The canonical paired O2 cells for logreport, text-script, datasummary, and taskfile-cli record Jet versus the plain implementation and every required peer; Jet/peer is below 1.00 for every required peer and metric, Rust included, and Jet/ceiling is at most 1.00 against the asm-parity reference, with losses kept open.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24132,7 +24147,7 @@
         },
         {
           "n": 3,
-          "text": "Every changed shape keeps byte-identical output on AOT, run, dev and --interpret; existing goldens unchanged",
+          "text": "Every changed shape keeps byte-identical output on O0, O1 and O2; existing goldens unchanged",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24159,7 +24174,7 @@
         },
         {
           "n": 6,
-          "text": "[#2866] csvtransform AOT Jet/Rust <= 1.05 and Jet/{Go,Zig,Python,Node} < 1.00. The Decimal parse/add/format micro witness is at least 5x faster with byte-identical output and Decimal goldens unchanged.",
+          "text": "[#2866] csvtransform O2 Jet/{Rust,Go,Zig,Python,Node} < 1.00. The Decimal parse/add/format micro witness is at least 5x faster with byte-identical output and Decimal goldens unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24168,7 +24183,7 @@
         },
         {
           "n": 7,
-          "text": "[#2871] embedded-data and binparse AOT Jet/Rust <= 1.05 and Jet/{C,Zig,Python,Node} < 1.00. The fixed-width take_pattern loop and byte checksum loop are each within 1.05x of Rust.",
+          "text": "[#2871] embedded-data and binparse O2 Jet/{Rust,C,Zig,Python,Node} < 1.00. The fixed-width take_pattern loop and byte checksum loop are each faster than Rust (Jet/Rust < 1.00).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24177,7 +24192,7 @@
         },
         {
           "n": 8,
-          "text": "[#2872] embedded-sensor-ring AOT Jet/Rust <= 1.05 and Jet/{C,Zig} < 1.00. The integer mod/div micro witness is within 1.05x of Rust. Bigint promotion and checked-arithmetic tests are unchanged.",
+          "text": "[#2872] embedded-sensor-ring O2 Jet/{Rust,C,Zig} < 1.00. The integer mod/div micro witness is faster than Rust (Jet/Rust < 1.00). Bigint promotion and checked-arithmetic tests are unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24260,11 +24275,11 @@
       "parentId": "c04ww22r",
       "needsAcceptance": false,
       "created": "2026-09-03T10:52:31.721Z",
-      "updated": "2026-11-01T19:11:20.193Z",
+      "updated": "2026-11-06T18:37:42.301Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
-      "claimedAt": "2026-11-01T19:11:20.193Z",
+      "claimedAt": "2026-11-06T18:37:42.301Z",
       "goals": []
     },
     {
@@ -24278,7 +24293,7 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "**Goal**\nTurn the remaining red HTTP-substrate cells green after #2255, and first fix the run/dev-tier probe hang (I9).\n\n**Measured baseline** (gauntlet run 20260902-1649436-mtkr9fvl, release compiler)\n- http-service (netserv.service) AOT:\n  - p50: Jet/Go 3.19x, Jet/Node 1.90x, Jet/Rust 1.58x, Jet/Python 1.09x.\n  - p99: Jet/Go 92.9x, Jet/Node 1.38x, Jet/Rust 1.24x.\n  - The run and dev tiers fail probe 2 (PUT /kv) with an HTTP probe timeout. AOT passes every probe.\n- concurrency-service AOT:\n  - p50 8.5 ms vs Node 8.05 ms (1.06x). It wins against Go 0.93x, Rust 0.94x and Python 0.90x.\n  - Startup on run/dev is 1.03-1.10x Go and Node.\n- http-client AOT wall: 1.25x Rust. It wins against Go 0.63x, Python 0.04x and Node 0.02x.\n- Targets: Jet/{Go,Node,Python} < 1.00 and Jet/Rust ≤ 1.05 on every listed cell and tier.\n\n**Current state**\n- Server: `crates/jet-codegen/src/Prelude/CoreLib/Top/{HTTPServer.rs,HTTPMessage.rs,HTTPRoute.rs}`. Client: `HTTPClient.rs`, `NetHTTP.rs`. `Core/http/server.jet` delegates to the native provider.\n- JIT marshalling: `crates/jet-jit/src/{net_http_rt.rs,net_http_hosts.rs,Net.rs}`.\n- Tests: `tests/http_i9.rs`, `tests/http_server_lifecycle.rs`, `tests/http.rs`, `tests/services_runtime.rs`.\n- Gauntlet: `Tools/gauntlet/entries/{http-service,concurrency-service,http-client}` (`jet/run.jet`, `entry.json` probes). The harness is `Tools/gauntlet/harness/run.mjs --entry <name>`.\n\n**Changes (in order)**\n1. I9 first:\n   - Reproduce with `Tools/agent/jet-env jet run Tools/gauntlet/entries/http-service/jet/run.jet` plus the entry.json probes. The second probe never answers.\n   - Trace where the JIT-tier server blocks: a blocking accept-loop read, or a task that never yields while a Shared write is pending.\n   - Fix it in marshalling only, so the JIT host hands requests to the same scheduler path AOT uses.\n   - Add `kv_get_put_get_matches_across_tiers` to `tests/http_i9.rs`.\n2. Attribute on the current tree with `perf record` on the AOT binary under harness load: health vs kv, Shared state on/off, prebuilt vs formatted response, accept wakeups, per-request allocations. Record the split on the card.\n3. Server substrate (HTTPServer/HTTPMessage/HTTPRoute): headers prebuilt once per route, no per-request `String` for static parts, one `writev` per response, keep-alive without a wakeup per request, a bounded accept batch.\n4. Client (HTTPClient/NetHTTP): connection reuse and one allocation per response body.\n- Writable paths: the Prelude files above, the jet-jit net files (marshalling only), and `tests/http_i9.rs`.\n- Do not touch: `Tools/gauntlet/entries/` sources, `crates/jet-jit/src/jit/lower_ctx.rs`, `crates/jet-jit/src/ambient_interp.rs`, or `crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs`.\n- Non-goals: HTTP API, authority model, TLS, and scheduler policy in a host.\n\n**Proof**\n- `Tools/agent/jet-env cargo test --test http_i9 --test http_server_lifecycle --test http --test services_runtime` → green.\n- `node Tools/gauntlet/harness/run.mjs --entry http-service`, then `--entry concurrency-service`, then `--entry http-client` → every probe passes on AOT, run and dev with identical responses, and the ratios meet criteria 1-3. Any losing cell stays on the card.\n\n**Batch**\nbatch-host-runtime: Prelude HTTP runtime, JIT host marshalling, and tier parity.\n\n**Dependencies**\nNone.",
+      "plan": "**Goal**\nTurn the remaining red HTTP-substrate cells green after #2255, and first fix the run/dev-tier probe hang (I9).\n\n**Measured baseline** (gauntlet run 20260902-1649436-mtkr9fvl, release compiler)\n- http-service (netserv.service) AOT:\n  - p50: Jet/Go 3.19x, Jet/Node 1.90x, Jet/Rust 1.58x, Jet/Python 1.09x.\n  - p99: Jet/Go 92.9x, Jet/Node 1.38x, Jet/Rust 1.24x.\n  - The run and dev tiers fail probe 2 (PUT /kv) with an HTTP probe timeout. AOT passes every probe.\n- concurrency-service AOT:\n  - p50 8.5 ms vs Node 8.05 ms (1.06x). It wins against Go 0.93x, Rust 0.94x and Python 0.90x.\n  - Startup on run/dev is 1.03-1.10x Go and Node.\n- http-client AOT wall: 1.25x Rust. It wins against Go 0.63x, Python 0.04x and Node 0.02x.\n- Targets: Jet/{Rust,Go,Node,Python} < 1.00 on every listed cell and tier, and Jet/ceiling <= 1.00 against the asm-parity reference.\n\n**Current state**\n- Server: `crates/jet-codegen/src/Prelude/CoreLib/Top/{HTTPServer.rs,HTTPMessage.rs,HTTPRoute.rs}`. Client: `HTTPClient.rs`, `NetHTTP.rs`. `Core/http/server.jet` delegates to the native provider.\n- JIT marshalling: `crates/jet-jit/src/{net_http_rt.rs,net_http_hosts.rs,Net.rs}`.\n- Tests: `tests/http_i9.rs`, `tests/http_server_lifecycle.rs`, `tests/http.rs`, `tests/services_runtime.rs`.\n- Gauntlet: `Tools/gauntlet/entries/{http-service,concurrency-service,http-client}` (`jet/run.jet`, `entry.json` probes). The harness is `Tools/gauntlet/harness/run.mjs --entry <name>`.\n\n**Changes (in order)**\n1. I9 first:\n   - Reproduce with `Tools/agent/jet-env jet run Tools/gauntlet/entries/http-service/jet/run.jet` plus the entry.json probes. The second probe never answers.\n   - Trace where the JIT-tier server blocks: a blocking accept-loop read, or a task that never yields while a Shared write is pending.\n   - Fix it in marshalling only, so the JIT host hands requests to the same scheduler path AOT uses.\n   - Add `kv_get_put_get_matches_across_tiers` to `tests/http_i9.rs`.\n2. Attribute on the current tree with `perf record` on the AOT binary under harness load: health vs kv, Shared state on/off, prebuilt vs formatted response, accept wakeups, per-request allocations. Record the split on the card.\n3. Server substrate (HTTPServer/HTTPMessage/HTTPRoute): headers prebuilt once per route, no per-request `String` for static parts, one `writev` per response, keep-alive without a wakeup per request, a bounded accept batch.\n4. Client (HTTPClient/NetHTTP): connection reuse and one allocation per response body.\n- Writable paths: the Prelude files above, the jet-jit net files (marshalling only), and `tests/http_i9.rs`.\n- Do not touch: `Tools/gauntlet/entries/` sources, `crates/jet-jit/src/jit/lower_ctx.rs`, `crates/jet-jit/src/ambient_interp.rs`, or `crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs`.\n- Non-goals: HTTP API, authority model, TLS, and scheduler policy in a host.\n\n**Proof**\n- `jet test Compiler --profile cases http_i9/ --test http_server_lifecycle --test http --test services_runtime` → green.\n- `node Tools/gauntlet/harness/run.mjs --entry http-service`, then `--entry concurrency-service`, then `--entry http-client` → every probe passes on AOT, run and dev with identical responses, and the ratios meet criteria 1-3. Any losing cell stays on the card.\n\n**Batch**\nbatch-host-runtime: Prelude HTTP runtime, JIT host marshalling, and tier parity.\n\n**Dependencies**\nNone.",
       "checkSteps": null,
       "blockedBy": [],
       "assignee": "Main",
@@ -24342,7 +24357,7 @@
       "criteria": [
         {
           "n": 1,
-          "text": "http-service AOT p50 and p99: Jet/{Go,Node,Python} < 1.00 and Jet/Rust <= 1.05",
+          "text": "http-service O2 p50 and p99: Jet/{Rust,Go,Node,Python} < 1.00",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24351,7 +24366,7 @@
         },
         {
           "n": 2,
-          "text": "concurrency-service p50 and startup: Jet/Node < 1.00 on AOT, run and dev tiers",
+          "text": "concurrency-service p50 and startup: Jet/Node < 1.00 on O0, O1 and O2 tiers",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24360,7 +24375,7 @@
         },
         {
           "n": 3,
-          "text": "http-client AOT wall: Jet/Rust <= 1.05",
+          "text": "http-client O2 wall: Jet/Rust < 1.00",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24378,7 +24393,7 @@
         },
         {
           "n": 5,
-          "text": "[retarget] Jet-side proof (Rust freeze 2026-10-01): the behavior the replaced Rust test checks holds on the Jet compiler or the Jet-hosted tool, shown by an equivalent test against the Jet implementation; no new Rust test and no Rust compiler change. Replaces the Rust-compiler proof: \"Criterion 4 proof: `Tools/agent/jet-env cargo test --test http_i9 -- kv_get_put_get_matches_across_tiers --exact` passes. It runs GET /health, PUT /kv, GET /kv against the AOT binary, default `jet run` and `--interpret`, with byte-identical responses and no probe timeout.\"",
+          "text": "[retarget] Jet-side proof (Rust freeze 2026-10-01): the behavior the replaced Rust test checks holds on the Jet compiler or the Jet-hosted tool, shown by an equivalent test against the Jet implementation; no new Rust test and no Rust compiler change. Replaces the Rust-compiler proof: \"Criterion 4 proof: `Tools/agent/jet-env cargo test --test http_i9 -- kv_get_put_get_matches_across_tiers --exact` passes. It runs GET /health, PUT /kv, GET /kv against O0, O1 and O2, with byte-identical responses and no probe timeout.\"",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24387,7 +24402,7 @@
         },
         {
           "n": 6,
-          "text": "[#2868] procpipe AOT Jet/Rust <= 1.05 and Jet/{Go,Python,Node} < 1.00. Per-process spawn-and-collect overhead is < 0.2 ms. Process goldens are unchanged.",
+          "text": "[#2868] procpipe O2 Jet/{Rust,Go,Python,Node} < 1.00. Per-process spawn-and-collect overhead is < 0.2 ms. Process goldens are unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24396,7 +24411,7 @@
         },
         {
           "n": 7,
-          "text": "[#2870] The hello binary is no larger than Rust -O hello, and its peak RSS is no higher than C hello. Every gauntlet AOT binary_bytes and peak-RSS cell has Jet/Rust <= 1.05 and Jet/{C,Zig,Go} < 1.00, through reachability-driven reduction rather than per-entry trimming. Output, diagnostics and panic text stay byte-identical. Debug and hardened profiles are untouched.",
+          "text": "[#2870] The hello binary is no larger than Rust -O hello, and its peak RSS is no higher than C hello. Every gauntlet O2 binary_bytes and peak-RSS cell has Jet/{Rust,C,Zig,Go} < 1.00, through reachability-driven reduction rather than per-entry trimming. Output, diagnostics and panic text stay byte-identical. Debug and hardened profiles are untouched.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -24432,11 +24447,11 @@
       "parentId": "c0ut93qg",
       "needsAcceptance": false,
       "created": "2026-09-03T10:57:25.181Z",
-      "updated": "2026-10-28T11:53:23.490Z",
+      "updated": "2026-11-06T18:37:45.072Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
-      "claimedAt": "2026-10-28T11:53:23.490Z",
+      "claimedAt": "2026-11-06T18:37:45.072Z",
       "goals": []
     },
     {
@@ -28238,13 +28253,18 @@
       "milestoneId": "e10-m06-adoption-reference-learning",
       "phase": "ready",
       "priority": "P2",
-      "plan": "**Goal**\nMake the selected loop, error and cleanup teaching examples conform to current Syntax and Tower law: legal forms run, intended rejections are shown, and no comment teaches punctuation that does not exist. The card owns teaching-source conformance only. Guard runtime repair belongs to READ-F05 and formatter preservation to READ-F07.\n\n**Current state**\n- The finite manifest (criterion 2) largely exists in `Examples/README.md:114-119`: loop_forms, `tests/ui/list_loop_mutate.jet` (E0507), errors, typed_error_families and scope_guard, each with its normative claim, golden and command. It was added by d94ccde46 (2026-09-21), which also rewrote loop_forms, errors, typed_error_families and scope_guard.\n- `Examples/features/basics/loop_forms.jet:1-16` now teaches `loop` / `loop cond` / `loop x in`, eager value loops and `next`. `Examples/features/concurrency/bounded_workers.jet` (golden `.out`) and `all_failfast.jet` (golden `all_failfast.err.out`) are not in the manifest.\n- The last AOT golden attempt on basics/loop_forms (card log 2026-09-22) failed in generated Rust with E0308 on `jet_list_len` i64. No open card owns that failure (Tower title search).\n\n**Changes**\n1. Add manifest rows for `concurrency/bounded_workers` and `concurrency/all_failfast` to `Examples/README.md:114-119`, naming the decisions each teaches.\n2. Audit comments in those two files and in errors/typed_error_families/scope_guard. Keep unmarked fallible calls, explicit failure return, `??` fallback and scope-guard cleanup visibly distinct. Delete any mention of a propagation token absent from the code, and use only current `E!`/`T?` spelling.\n3. Run the manifest. If loop_forms still hits the AOT E0308, file one codegen card, list it as this card's blocker, and do not work around it in the example.\n4. Leave historical captures and receipts untouched, with no aliases.\n\n**Proof**\nRun `JET_GOLDEN_FILTER=<stem> Tools/agent/jet-env cargo test --test golden examples_compile_and_run` for each of `basics/loop_forms`, `errors/errors`, `errors/typed_error_families`, `io/scope_guard`, `concurrency/bounded_workers` and `concurrency/all_failfast`; all pass (all_failfast via `.err.out`, exit 70/1). Also pass `JET_UI_FILTER=list_loop_mutate Tools/agent/jet-env cargo test --test diagnostic_snapshots`.\n\n**Batch**\n`batch-docs`: teaching comments and a manifest, re-verified by the golden pass.\n\n**Dependencies**\nNone known. It is conditional on the loop_forms E0308 reproducing; see change 3. The work overlaps #3177 on the same files, so one implementer should take both.",
+      "plan": "**Goal**\nMake the selected loop, error and cleanup teaching examples conform to current Syntax and Tower law: legal forms run, intended rejections are shown, and no comment teaches punctuation that does not exist. The card owns teaching-source conformance only. Guard runtime repair belongs to READ-F05 and formatter preservation to READ-F07.\n\n**Current state**\n- The finite manifest (criterion 2) largely exists in `Examples/README.md:114-119`: loop_forms, `tests/ui/list_loop_mutate.jet` (E0507), errors, typed_error_families and scope_guard, each with its normative claim, golden and command. It was added by d94ccde46 (2026-09-21), which also rewrote loop_forms, errors, typed_error_families and scope_guard.\n- `Examples/features/basics/loop_forms.jet:1-16` now teaches `loop` / `loop cond` / `loop x in`, eager value loops and `next`. `Examples/features/concurrency/bounded_workers.jet` (golden `.out`) and `all_failfast.jet` (golden `all_failfast.err.out`) are not in the manifest.\n- The last AOT golden attempt on basics/loop_forms (card log 2026-09-22) failed in generated Rust with E0308 on `jet_list_len` i64. No open card owns that failure (Tower title search).\n\n**Changes**\n1. Add manifest rows for `concurrency/bounded_workers` and `concurrency/all_failfast` to `Examples/README.md:114-119`, naming the decisions each teaches.\n2. Audit comments in those two files and in errors/typed_error_families/scope_guard. Keep unmarked fallible calls, explicit failure return, `??` fallback and scope-guard cleanup visibly distinct. Delete any mention of a propagation token absent from the code, and use only current `E!`/`T?` spelling.\n3. Run the manifest. If loop_forms still hits the AOT E0308, file one codegen card, list it as this card's blocker, and do not work around it in the example.\n4. Leave historical captures and receipts untouched, with no aliases.\n\n**Proof**\nRun `jet test Compiler --profile golden <stem>` for each of `basics/loop_forms`, `errors/errors`, `errors/typed_error_families`, `io/scope_guard`, `concurrency/bounded_workers` and `concurrency/all_failfast`; all pass (all_failfast via `.err.out`, exit 70/1). Also pass `jet test Compiler --profile ui list_loop_mutate`.\n\n**Batch**\n`batch-docs`: teaching comments and a manifest, re-verified by the golden pass.\n\n**Dependencies**\nNone known. It is conditional on the loop_forms E0308 reproducing; see change 3. The work overlaps #3177 on the same files, so one implementer should take both.",
       "checkSteps": "1. Use the corrected complete loop_forms, bounded_workers and all_failfast source capture. Do not classify the original synthetic/condensed excerpts as stale repository files, and do not preserve retired spellings as compatibility aliases.\n2. Make a finite manifest of loop_forms, list-loop mutation, errors, typed_error_families and scope_guard examples and the normative decisions each teaches.\n3. Resolve current syntax from authoritative Syntax/Tower records, never from whichever spelling frozen e841 accepts.\n4. Exercise the current legal form and the intended rejection/repair on one recorded source/binary; update obsolete comments and current examples, not historical receipts.\n5. Separate unmarked fallible calls, explicit failure return, fallback recovery and cleanup behavior so comments do not teach nonexistent punctuation.\n6. Coordinate actual guard runtime repair with READ-F05 and formatter preservation with READ-F07; this card owns teaching-source conformance, not duplicate compiler mechanisms.",
       "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-read-f08. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the owner order that a retired spelling gets no teaching diagnostic, UI snapshot or jet fix rule; the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-11-04",
           "by": "Main",
@@ -28539,7 +28559,7 @@
         },
         {
           "n": 26,
-          "text": "(was #267) Expand syntax_reconciliation to catch retired teaching paths [precut audit: failing on 9c7ddf1359: C:syntax_reconciliation/retired_authority_types_and_markers_keep_exact_teaching_diagnostics FAIL JSON filter selected no values]",
+          "text": "(was #267) Expand syntax_reconciliation so no retired spelling remains in in-repo sources, examples or docs; retired spellings get no teaching diagnostic (owner order) [precut audit: failing on 9c7ddf1359: C:syntax_reconciliation/retired_authority_types_and_markers_keep_exact_teaching_diagnostics FAIL JSON filter selected no values]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -28689,7 +28709,7 @@
       "parentId": "c0h4r83r",
       "needsAcceptance": false,
       "created": "2026-09-12T13:27:30.358Z",
-      "updated": "2026-11-04T23:43:59.842Z",
+      "updated": "2026-11-06T18:37:22.928Z",
       "updatedBy": "Main",
       "workOrder": 277,
       "goals": [
@@ -35430,13 +35450,18 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "## Goal\nLand D-SETTINGS-CTOR2=A (ratified 2026-09-21): package settings declare `name: Type{default}` using Jet's ordinary typed-default form; the old `name: Type = default` is rejected with a registered fix. Profile `settings: { key: value }` and CLI `--set key=value` do not change.\n\n## Current state\n- Examples still use the equals form: `Examples/features/packages/typed_settings/package.jet:5-6` (`tls: Bool = true`, `api_base: String = \"…\"`), `Examples/features/packages/build_contribution/package.jet:5` (`cache_slots: Int = 1`).\n- Jet parser: `Jetpack/PackageModel/Source/Manifest/PackageParse.jet:455-469` `pkg_parse_settings` splits on the first `=` (`split_once(\"=\")`), so a `=` or `,` inside a String default is misread. `SettingDecl{ty, default}` is `Manifest/PackageFacts.jet:398-402`.\n- Fix text naming the old form: `Manifest/Blocks/BuildProfiles.jet:260` (\"declare a typed `settings: {{ key: Type = default }}`\").\n- Shipped host parser (still what `jet run` uses until the Jetpack cutover): `crates/jet-pkg-model/src/Package/mod.rs:3701-3708` `parse_settings`, same `split_once('=')`.\n- PackageModel may use the Compiler front end (`Jetpack/Bootstrap/areas.list:11,13`), so `lex_config` (`Compiler/JetLexer/Source/Lexer/Terminators.jet:554`) is reachable; no second literal scanner is needed.\n\n## Changes\n1. `PackageParse.jet` `pkg_parse_settings`: tokenize each entry value with `lex_config`; accept exactly `TypeName { literal }` where the literal is one Bool/Int (signed)/Char/String (incl. raw/triple) token or a fieldless enum case; keep the existing Tier-0 domain check. Delete the `split_once(\"=\")` path and any quote/depth scanning it used. Reject: missing default, empty or multiple payloads, aggregates, constructor calls, wrong literal kind.\n2. Old spelling: new `PackageParseError.RetiredSettingDefault(key, ty, value)` mapped in `Manifest.jet` `pkg_manifest_parse_diagnostic` to E1206 with fix text `write `{key}: {ty}{{{value}}}``.\n3. `BuildProfiles.jet:260`: fix text says `settings: {{ key: Type{{default}} }}`.\n4. Host mirror (required so the shipped binary proves it): `crates/jet-pkg-model/src/Package/mod.rs` `parse_settings` gets the same grammar, reusing `jet_lexer` tokens, with the same E1206 text.\n5. Migrate both example `package.jet` files, `crates/jet-foundation/src/Syntax.rs` and `Jetpack/Foundation/Source/Syntax.jet` teaching entries, `Docs/spec/syntax-decisions.md` log entry, regenerate grammars with `jet devtools grammars`, and re-bless the affected snapshots, all in one change. Historical ballots stay unchanged.\n\n## Proof\n- `JETPACK_WORKER=settings Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area PackageModel --deps-from-head --tests` → `JETPACK CHECK OK (check, default run, AOT test)`; new PackageFacts claims: Bool/Int(-1)/Char/String containing `,` `=` `//`, fieldless enum; rejections (old form → E1206 fix text, `Bool{}`, `Int{1, 2}`, `Bool{1}`).\n- `cargo test --test package_outputs -- typed_settings_preserves_tier_parity_and_cli_override computed_build_contribution_records_lock_and_matches_explain_golden` → pass (defaults, profile override, `--set tls=false`, provenance unchanged).\n- `JET_GOLDEN_FILTER=packages/typed_settings cargo test --test golden examples_compile_and_run` → pass.\n\n## Batch\nbatch-jetpack-pkgmodel: the parser home is Jetpack/PackageModel; the host mirror rides the same post-build retest.\n\n## Dependencies\nNone open. D-SETTINGS-CTOR2 is ratified (A).",
+      "plan": "## Goal\nLand D-SETTINGS-CTOR2=A (ratified 2026-09-21): package settings declare `name: Type{default}` using Jet's ordinary typed-default form; the old `name: Type = default` is rejected with a registered fix. Profile `settings: { key: value }` and CLI `--set key=value` do not change.\n\n## Current state\n- Examples still use the equals form: `Examples/features/packages/typed_settings/package.jet:5-6` (`tls: Bool = true`, `api_base: String = \"…\"`), `Examples/features/packages/build_contribution/package.jet:5` (`cache_slots: Int = 1`).\n- Jet parser: `Jetpack/PackageModel/Source/Manifest/PackageParse.jet:455-469` `pkg_parse_settings` splits on the first `=` (`split_once(\"=\")`), so a `=` or `,` inside a String default is misread. `SettingDecl{ty, default}` is `Manifest/PackageFacts.jet:398-402`.\n- Fix text naming the old form: `Manifest/Blocks/BuildProfiles.jet:260` (\"declare a typed `settings: {{ key: Type = default }}`\").\n- Shipped host parser (still what `jet run` uses until the Jetpack cutover): `crates/jet-pkg-model/src/Package/mod.rs:3701-3708` `parse_settings`, same `split_once('=')`.\n- PackageModel may use the Compiler front end (`Jetpack/Bootstrap/areas.list:11,13`), so `lex_config` (`Compiler/JetLexer/Source/Lexer/Terminators.jet:554`) is reachable; no second literal scanner is needed.\n\n## Changes\n1. `PackageParse.jet` `pkg_parse_settings`: tokenize each entry value with `lex_config`; accept exactly `TypeName { literal }` where the literal is one Bool/Int (signed)/Char/String (incl. raw/triple) token or a fieldless enum case; keep the existing Tier-0 domain check. Delete the `split_once(\"=\")` path and any quote/depth scanning it used. Reject: missing default, empty or multiple payloads, aggregates, constructor calls, wrong literal kind.\n2. Old spelling: new `PackageParseError.RetiredSettingDefault(key, ty, value)` mapped in `Manifest.jet` `pkg_manifest_parse_diagnostic` to E1206 with fix text `write `{key}: {ty}{{{value}}}``.\n3. `BuildProfiles.jet:260`: fix text says `settings: {{ key: Type{{default}} }}`.\n4. Host mirror (required so the shipped binary proves it): `crates/jet-pkg-model/src/Package/mod.rs` `parse_settings` gets the same grammar, reusing `jet_lexer` tokens, with the same E1206 text.\n5. Migrate both example `package.jet` files, the syntax registry (`Compiler/JetFoundation/Data/Syntax`) and `Jetpack/Foundation/Source/Syntax.jet` entries, `Docs/spec/syntax-decisions.md` log entry, regenerate grammars with `jet devtools grammars`, and re-bless the affected snapshots, all in one change. Historical ballots stay unchanged.\n\n## Proof\n- `JETPACK_WORKER=settings Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area PackageModel --deps-from-head --tests` → `JETPACK CHECK OK (check, default run, AOT test)`; new PackageFacts claims: Bool/Int(-1)/Char/String containing `,` `=` `//`, fieldless enum; rejections (old form → E1206 fix text, `Bool{}`, `Int{1, 2}`, `Bool{1}`).\n- `jet test Compiler --profile cases package_outputs/typed_settings_preserves_tier_parity_and_cli_override computed_build_contribution_records_lock_and_matches_explain_golden` → pass (defaults, profile override, `--set tls=false`, provenance unchanged).\n- `jet test Compiler --profile golden packages/typed_settings` → pass.\n\n## Batch\nbatch-jetpack-pkgmodel: the parser home is Jetpack/PackageModel; the host mirror rides the same post-build retest.\n\n## Dependencies\nNone open. D-SETTINGS-CTOR2 is ratified (A).",
       "checkSteps": "Rebuild: scripts/agent/jet-env cargo build -p jet --bin jet with CARGO_INCREMENTAL=0. Keep scratch at ~/.cache/jet-test-scratch. Existing stale CoreModuleExports.rs is an execution prerequisite, not evidence that any feature passes.\n\nExtend typed_settings_preserves_tier_parity_and_cli_override and package parser/formatter tests. Cover Bool, signed Int, Char braces/quotes, strings containing commas/equals/comment text, canonical raw/triple literals and fieldless enum values. Reject wrong type, empty/multiple/defaultless forms, aggregates, effectful constructors, old declaration spelling and undeclared profile/CLI keys. Require unchanged effective-value provenance and cold/warm runtime results.\n\nFor each planned package witness, use scripts/agent/jet-env jet check, jet run, jet run --interpret, jet dev --watch=off where relevant, and jet build from that package directory; launch its emitted .jet/build/run artifact. Compare the named golden and actual state changes. Use the existing web harness when the feature reaches web. No broad suite outside the composed closeout gate.",
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the owner order that a retired spelling gets no teaching diagnostic, UI snapshot or jet fix rule; the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
         {
           "at": "2026-09-29",
           "by": "Pip",
@@ -35464,7 +35489,7 @@
         },
         {
           "n": 2,
-          "text": "If constructor form wins, tls: Bool{true} and api_base: String{\"https://api.example.com\"} work and old equals declarations are rejected with a registered migration diagnostic.",
+          "text": "If constructor form wins, tls: Bool{true} and api_base: String{\"https://api.example.com\"} work and old equals declarations are not Jet syntax and get no migration diagnostic (owner order).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -35491,7 +35516,7 @@
         },
         {
           "n": 5,
-          "text": "Syntax.rs entry updated",
+          "text": "the syntax registry (Compiler/JetFoundation/Data/Syntax) entry updated",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -35527,7 +35552,7 @@
         },
         {
           "n": 9,
-          "text": "Proof: `JETPACK_WORKER=settings Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area PackageModel --deps-from-head --tests` prints `JETPACK CHECK OK (check, default run, AOT test)` with PackageFacts claims for `tls: Bool{true}`, `api_base: String{\"https://api.example.com\"}` and the E1206 rejection of `tls: Bool = true`; and `cargo test --test package_outputs -- typed_settings_preserves_tier_parity_and_cli_override computed_build_contribution_records_lock_and_matches_explain_golden` passes on the migrated examples.",
+          "text": "Proof: `JETPACK_WORKER=settings Tools/agent/jet-env bash Jetpack/Bootstrap/check.sh --area PackageModel --deps-from-head --tests` prints `JETPACK CHECK OK (check, default run, AOT test)` with PackageFacts claims for `tls: Bool{true}`, `api_base: String{\"https://api.example.com\"}` and the E1206 rejection of `tls: Bool = true`; and `jet test Compiler --profile cases package_outputs/typed_settings_preserves_tier_parity_and_cli_override` and `jet test Compiler --profile cases package_outputs/computed_build_contribution_records_lock_and_matches_explain_golden` pass on the migrated examples.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -35557,7 +35582,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:57:27.055Z",
-      "updated": "2026-10-28T11:31:06.470Z",
+      "updated": "2026-11-06T18:37:25.862Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -78468,6 +78493,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the owner order that a retired spelling gets no teaching diagnostic, UI snapshot or jet fix rule."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "HANDOFF 2026-11-06 (Main restart after the session crash): SyntaxOwner (owner's syntax slot) builds the seven ratified decisions after #6586 lands."
         },
         {
@@ -78508,7 +78538,7 @@
         },
         {
           "n": 2,
-          "text": "Every in-repo lambda is migrated, and the old form gives a registered diagnostic with a jet fix edit",
+          "text": "Every in-repo lambda is migrated, and the old form is not Jet syntax: it gets no diagnostic, snapshot or jet fix rule (owner order)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -78648,7 +78678,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T20:27:37.698Z",
-      "updated": "2026-11-06T18:15:20.304Z",
+      "updated": "2026-11-06T18:37:28.697Z",
       "updatedBy": "Main"
     },
     {
@@ -80964,6 +80994,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the owner order that a retired spelling gets no teaching diagnostic, UI snapshot or jet fix rule."
+        },
+        {
           "at": "2026-10-30",
           "by": "Main",
           "text": "Owner 2026-10-30 on float to int: 'for integer, let's do the swift/rust style. we have advanced APIs with variadics and optionals and defaults and named vs positional etc. but dont think we really use them, but this may be a good place for that.' Direction for the ballot: separate exact conversion (fails unless the value is whole and in range, like Swift Int(exactly:) and Rust TryFrom) from the deliberate lossy forms (truncate, round, saturate), and use Jet's named, defaulted and optional parameters for the lossy choices."
@@ -80995,7 +81030,7 @@
         },
         {
           "n": 3,
-          "text": "After ratification the chosen spelling is the one canonical form: every caller, example, test and doc is migrated in one cutover by jet fix, the old spelling is refused with a registered diagnostic and UI snapshot, and the examples pass on o0/o1/o2.",
+          "text": "After ratification the chosen spelling is the one canonical form: every caller, example, test and doc is migrated in one cutover, the old spelling is not Jet syntax and gets no diagnostic, UI snapshot or jet fix rule (owner order), and the examples pass on o0/o1/o2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -81018,8 +81053,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:14.611Z",
-      "updated": "2026-10-30T18:19:52.229Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-06T18:37:32.198Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0ct4a0i",
@@ -89656,7 +89691,7 @@
       "id": "c00n89mp",
       "num": 6511,
       "title": "FFI v3 gallery: Rust crates (regex, serde_json, a crate with its own threads)",
-      "body": "Three complete programs that call Rust through `use rust.<crate>`. The `rustbind` package (root `rust`) reads the\ncrate's public API from rustdoc JSON with a pinned toolchain, writes a `#[no_mangle]` shim crate for the items the\nprogram uses, and emits Jet types. Rust's own types are facts with the strongest evidence: `&T` is non-null and\nborrowed, `String` and `Box` are owned, `Result` is an error, `Send` and `Sync` are thread facts, `Drop` is\n`Close`. Public crates arrive prebuilt from the store (D-FFI-TOOLS1). Outputs are design targets.\n\n## Simple: regex\n\n```jet\npackage {\n    name: \"emails\"\n    deps: { regex: rust@\"regex@1.11\" }\n}\n\nuse rust.regex as re\n\nfn run() {\n    pattern :: re.Regex.new(\"^[a-z.]+@[a-z]+\\\\.[a-z]{2,}$\")      // Result<Regex, regex::Error> -> Regex !re.Error\n    loop s in [\"ann@example.com\", \"not an email\", \"bo.li@jet.dev\"] {\n        print(\"{s}: {pattern.is_match(s)}\")                        // &str borrows the Jet text: zero copy\n    }\n}\n```\n\n```text\nann@example.com: true\nnot an email: false\nbo.li@jet.dev: true\n```\n\n## Medium: serde_json records\n\nWhat it shows: a Rust generic function instantiated for a Jet `#Codable` struct by deriving the matching serde\nimpls in the shim; Rust errors as Jet errors; an iterator as a Jet loop source.\n\n```jet\npackage {\n    name: \"orders\"\n    deps: { serde_json: rust@\"serde_json@1.0\" }\n}\n\nuse rust.serde_json as sj\nuse core.files as fs\n\n#Codable\nstruct Line {\n    sku: String\n    qty: Int\n}\n\n#Codable\nstruct Order {\n    id: String\n    lines: [Line]\n}\n\nfn run() {\n    text :: fs.read(\"orders.json\")\n    orders :: sj.from_str<[Order]>(text)              // the shim derives Deserialize for Order's layout\n    loop o in orders {\n        total :: o.lines.map((l) -> l.qty).sum()\n        print(\"{o.id}: {total} items\")\n    }\n    print(sj.to_string_pretty(orders[0]))\n    broken :: sj.from_str<Order>(\"{\\\"id\\\": 5}\")         // serde_json::Error -> sj.Error, with line and column\n    print(broken.id)\n}\n```\n\n```text\nA-100: 7 items\nB-200: 2 items\n{\n  \"id\": \"A-100\",\n  ...\n}\nError [sj.Error]: invalid type: integer `5`, expected a string at line 1 column 9\n  in Rust  serde_json-1.0.133/src/de.rs   serde_json::from_str::<Order>\n  -- crossing: rust.serde_json from_str  (binder rustbind 1.2.0, rule emit_generic) --\n  in Jet   orders.jet:28:15  run()\n```\n\n## Complex: a crate that runs its own threads (tokio-backed)\n\nWhat it shows: an async Rust API whose futures become Jet wait points; a `Send + 'static` callback that the crate\ncalls from its own worker threads, delivered on the owning task; `Drop` as `Close`.\n\n```jet\npackage {\n    name: \"feeds\"\n    deps: { feedkit: rust@\"feedkit@0.4\" }       // a tokio-based RSS client\n}\n\nuse rust.feedkit as fk\n\nstruct Counter {\n    seen: Int\n}\n\nfn run() {\n    client :: fk.Client.builder().timeout(5s).build()         // owns a tokio runtime; Drop -> Close at scope end\n    feeds :: [\"https://blog.rust-lang.org/feed.xml\", \"https://jet-lang.dev/feed.xml\"]\n\n    // async fn fetch(&self, url: &str) -> Result<Feed, fk::Error> becomes a wait point.\n    tasks :: feeds.map((u) -> task client.fetch(u))\n    loop t in tasks {\n        feed :: t.join()\n        print(\"{feed.title}: {feed.items.len()} items\")\n    }\n\n    // fn watch(&self, url: &str, f: impl Fn(Item) + Send + 'static) -> WatchHandle\n    // Retention: 'static (until the handle drops). Thread: the crate's workers. Delivery: this task.\n    seen :: shared Counter{seen: 0}\n    _watch :: client.watch(feeds[1], (item) -> {\n        print(\"new: {item.title}\")\n        seen.seen += 1                                         // Shared<Counter>: safe from any thread\n    }, deliver: .Owner)\n    sleep(200ms)\n    print(\"seen {seen.seen}\")\n}                                                              // the watch closes first, then client\n```\n\n```text\nRust Blog: 10 items\nJet: 4 items\nnew: FFI v3 lands\nseen 1\n```\n\n`watch` retains the closure, so its captures must be owned or sendable. A plain mutable local would be refused:\n\n```text\nError [E3233]: `watch` keeps this callback after the call returns, so it cannot borrow `counter`.\n Fix: Make it shared: `counter :: shared Counter{seen: 0}`.\n```\n\n### Best competitor equivalent\n\n```rust\n// The closest cross-language equivalent: exposing the same async crate to Python with PyO3, by hand.\n#[pyfunction]\nfn fetch(py: Python<'_>, url: String) -> PyResult<Bound<'_, PyAny>> {\n    pyo3_asyncio::tokio::future_into_py(py, async move { Ok(client().fetch(&url).await?.title) })\n}\n// The binding author writes this per function; Jet's rustbind writes it from rustdoc JSON.\n```\n",
+      "body": "Three complete programs that call Rust through `use rust.<crate>`. The `rustbind` package (root `rust`) reads the\ncrate's public API from rustdoc JSON with a pinned toolchain, writes a `#[no_mangle]` shim crate for the items the\nprogram uses, and emits Jet types. Rust's own types are facts with the strongest evidence: `&T` is non-null and\nborrowed, `String` and `Box` are owned, `Result` is an error, `Send` and `Sync` are thread facts, `Drop` is\n`Close`. Public crates arrive prebuilt from the store (D-FFI-TOOLS1). Outputs are design targets.\n\n## Simple: regex\n\n```jet\npackage: {\n    name: \"emails\"\n    deps: { regex: rust@\"regex@1.11\" }\n}\n\nuse re: rust.regex\n\nrun: fn() {\n    pattern: re.Regex.new(\"^[a-z.]+@[a-z]+\\\\.[a-z]{2,}$\")      // Result<Regex, regex::Error> -> Regex !re.Error\n    loop s in [\"ann@example.com\", \"not an email\", \"bo.li@jet.dev\"] {\n        print(\"{s}: {pattern.is_match(s)}\")                        // &str borrows the Jet text: zero copy\n    }\n}\n```\n\n```text\nann@example.com: true\nnot an email: false\nbo.li@jet.dev: true\n```\n\n## Medium: serde_json records\n\nWhat it shows: a Rust generic function instantiated for a Jet `#Codable` struct by deriving the matching serde\nimpls in the shim; Rust errors as Jet errors; an iterator as a Jet loop source.\n\n```jet\npackage: {\n    name: \"orders\"\n    deps: { serde_json: rust@\"serde_json@1.0\" }\n}\n\nuse sj: rust.serde_json\nuse fs: core.files\n\n#Codable\nLine: struct {\n    sku: String\n    qty: Int\n}\n\n#Codable\nOrder: struct {\n    id: String\n    lines: [Line]\n}\n\nrun: fn() {\n    text: fs.read(\"orders.json\")\n    orders: sj.from_str<[Order]>(text)              // the shim derives Deserialize for Order's layout\n    loop o in orders {\n        total: o.lines.map((l) -> l.qty).sum()\n        print(\"{o.id}: {total} items\")\n    }\n    print(sj.to_string_pretty(orders[0]))\n    broken: sj.from_str<Order>(\"{\\\"id\\\": 5}\")         // serde_json::Error -> sj.Error, with line and column\n    print(broken.id)\n}\n```\n\n```text\nA-100: 7 items\nB-200: 2 items\n{\n  \"id\": \"A-100\",\n  ...\n}\nError [sj.Error]: invalid type: integer `5`, expected a string at line 1 column 9\n  in Rust  serde_json-1.0.133/src/de.rs   serde_json::from_str::<Order>\n  -- crossing: rust.serde_json from_str  (binder rustbind 1.2.0, rule emit_generic) --\n  in Jet   orders.jet:28:15  run()\n```\n\n## Complex: a crate that runs its own threads (tokio-backed)\n\nWhat it shows: an async Rust API whose futures become Jet wait points; a `Send + 'static` callback that the crate\ncalls from its own worker threads, delivered on the owning task; `Drop` as `Close`.\n\n```jet\npackage: {\n    name: \"feeds\"\n    deps: { feedkit: rust@\"feedkit@0.4\" }       // a tokio-based RSS client\n}\n\nuse fk: rust.feedkit\n\nCounter: struct {\n    seen: Int\n}\n\nrun: fn() {\n    client: fk.Client.builder().timeout(5s).build()         // owns a tokio runtime; Drop -> Close at scope end\n    feeds: [\"https://blog.rust-lang.org/feed.xml\", \"https://jet-lang.dev/feed.xml\"]\n\n    // async fn fetch(&self, url: &str) -> Result<Feed, fk::Error> becomes a wait point.\n    tasks: feeds.map((u) -> task client.fetch(u))\n    loop t in tasks {\n        feed: t.join()\n        print(\"{feed.title}: {feed.items.len()} items\")\n    }\n\n    // fn watch(&self, url: &str, f: impl Fn(Item) + Send + 'static) -> WatchHandle\n    // Retention: 'static (until the handle drops). Thread: the crate's workers. Delivery: this task.\n    seen: shared Counter{seen: 0}\n    _watch: client.watch(feeds[1], (item) -> {\n        print(\"new: {item.title}\")\n        seen.seen += 1                                         // Shared<Counter>: safe from any thread\n    }, deliver: .Owner)\n    sleep(200ms)\n    print(\"seen {seen.seen}\")\n}                                                              // the watch closes first, then client\n```\n\n```text\nRust Blog: 10 items\nJet: 4 items\nnew: FFI v3 lands\nseen 1\n```\n\n`watch` retains the closure, so its captures must be owned or sendable. A plain mutable local would be refused:\n\n```text\nError [E3233]: `watch` keeps this callback after the call returns, so it cannot borrow `counter`.\n Fix: Make it shared: `counter: shared Counter{seen: 0}`.\n```\n\n### Best competitor equivalent\n\n```rust\n// The closest cross-language equivalent: exposing the same async crate to Python with PyO3, by hand.\n#[pyfunction]\nfn fetch(py: Python<'_>, url: String) -> PyResult<Bound<'_, PyAny>> {\n    pyo3_asyncio::tokio::future_into_py(py, async move { Ok(client().fetch(&url).await?.title) })\n}\n// The binding author writes this per function; Jet's rustbind writes it from rustdoc JSON.\n```\n",
       "kind": "task",
       "track": "epoch",
       "epoch": "e14",
@@ -89669,7 +89704,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take)."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [
@@ -89681,14 +89722,14 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:39.421Z",
-      "updated": "2026-11-01T00:50:39.421Z",
+      "updated": "2026-11-06T18:36:56.933Z",
       "updatedBy": "Main"
     },
     {
       "id": "c015lbud",
       "num": 6512,
       "title": "FFI v3 gallery: JavaScript on the web target (date-fns, chart.js, a web component)",
-      "body": "Three complete programs for the `wasm32-web` target that call JavaScript through `use js.<package>`. The `jsbind`\npackage (root `js`) reads the package's `.d.ts` with a pinned TypeScript compiler, emits Jet types and writes the\nJS glue the page loads. TypeScript types are the facts: `string | null` is `?String`, `Promise<T>` is a wait\npoint, a thrown `Error` is a Jet error when the `.d.ts` or a pack declares it. Browser effects follow the spec's\nbrowser rules. Outputs are design targets.\n\n## Simple: date-fns\n\n```jet\npackage {\n    name: \"dates\"\n    deps: { date_fns: js@\"date-fns@4.1\" }\n    targets: [wasm32-web]\n}\n\nuse js.date_fns as dates\n\nfn run() {\n    now :: dates.Date.now()\n    print(dates.format(now, \"yyyy-MM-dd\"))\n    print(dates.format_distance(dates.sub_days(now, 3), now))     // camelCase becomes snake_case\n    print(dates.is_weekend(now))\n}\n```\n\n```text\n2026-10-31\n3 days\ntrue\n```\n\n## Medium: chart.js with fetch\n\nWhat it shows: a canvas element from the page, a JS class constructed from Jet, a Jet record passed as a JS object\nliteral by the `.d.ts` interface, and `fetch` as a wait point.\n\n```jet\npackage {\n    name: \"dashboard\"\n    deps: { chart: js@\"chart.js@4.4\" }\n    targets: [wasm32-web]\n}\n\nuse js.chart_js as chart\nuse core.web as web\n\n#Codable\nstruct Point {\n    day: String\n    visits: Int\n}\n\nfn run() !web.FetchError {\n    points :: web.fetch(\"/api/visits\").json<[Point]>()        // Promise -> wait point\n    canvas :: web.document.query<web.Canvas>(\"#visits\")\n    _c :: chart.Chart.new(canvas, chart.ChartConfiguration{\n        type_: .Line,                                           // the .d.ts field `type`, renamed by jsbind\n        data: chart.ChartData{\n            labels: points.map((p) -> p.day),\n            datasets: [chart.Dataset{label: \"Visits\", data: points.map((p) -> p.visits)}],\n        },\n    })                                                          // destroy() at scope end via Close\n    web.wait_for_unload()\n}\n```\n\nThe page shows a line chart of visits per day.\n\n## Complex: a web component written in Jet, used from JS, using JS\n\nWhat it shows: exporting a Jet type as a custom element (D-FFI-EXPORT3, host `js`), JS events delivered to Jet\ncallbacks, a JS library (`marked`) called from Jet, and a JS caller awaiting a Jet waiting function.\n\n```jet\npackage {\n    name: \"md_editor\"\n    deps: {\n        marked: js@\"marked@14.1\"\n        purify: js@\"dompurify@3.2\"\n    }\n    targets: [wasm32-web]\n}\n\nuse js.marked as md\nuse js.dompurify as purify\nuse core.web as web\n\n#Export(js)\npub struct MarkdownEditor {\n    area: web.TextArea\n    preview: web.Element\n}\n\nfn render_into(preview: web.Element, text: String) {\n    html :: md.parse(text, md.Options{gfm: true})                     // marked returns a string\n    preview.set_inner_html(purify.sanitize(html))                     // never insert unsanitized HTML\n}\n\n#Export(js)\nimpl MarkdownEditor {\n    pub fn mount(root: web.Element) -> MarkdownEditor {\n        area :: web.document.create<web.TextArea>(\"textarea\")\n        preview :: web.document.create<web.Element>(\"div\")\n        root.append(area)\n        root.append(preview)\n        area.on_input((e) -> render_into(preview, e.target.value))     // retained; captures a JS handle, which is sendable\n        MarkdownEditor{area: area, preview: preview}\n    }\n\n    pub fn render(self, text: String) {\n        self.area.set_value(text)                                       // a method on the JS handle\n        render_into(self.preview, text)\n    }\n\n    // A waiting Jet function becomes a Promise for JS callers.\n    pub fn save(self, url: String) -> Int !web.FetchError {\n        web.fetch(url, method: .Post, body: self.area.value).status\n    }\n}\n```\n\n```js\n// index.js, written by hand in the web app\nimport { MarkdownEditor } from \"./md_editor.js\";       // glue written by jsbind's export\nconst ed = MarkdownEditor.mount(document.querySelector(\"#editor\"));\ned.render(\"# Hello\\n\\nFrom **Jet**\");\nconst status = await ed.save(\"/api/doc\");              // Promise<number>; FetchError arrives as a thrown Error\n```\n\n```ts\n// md_editor.d.ts, written by jsbind\nexport class MarkdownEditor {\n    static mount(root: Element): MarkdownEditor;\n    render(text: string): void;\n    save(url: string): Promise<number>;\n    free(): void;                                        // also released by FinalizationRegistry\n}\n```\n\nA closed native binary in `deps` would be refused for this target with E3238, naming the library and offering the\nserver-side form.\n\n### Best competitor equivalent\n\n```rust\n// Rust + wasm-bindgen: attributes on every item, JsValue at untyped edges, closures leaked or stored by hand.\n#[wasm_bindgen]\npub struct MarkdownEditor { source: String, preview: web_sys::Element }\n#[wasm_bindgen]\nimpl MarkdownEditor {\n    pub fn mount(root: &web_sys::Element) -> MarkdownEditor { ... }\n    pub async fn save(&self, url: String) -> Result<u16, JsValue> { ... }\n}\nlet cb = Closure::<dyn FnMut(web_sys::InputEvent)>::new(move |e| { ... });\narea.set_oninput(Some(cb.as_ref().unchecked_ref()));\ncb.forget();                                             // leaked on purpose\n```\n",
+      "body": "Three complete programs for the `wasm32-web` target that call JavaScript through `use js.<package>`. The `jsbind`\npackage (root `js`) reads the package's `.d.ts` with a pinned TypeScript compiler, emits Jet types and writes the\nJS glue the page loads. TypeScript types are the facts: `string | null` is `?String`, `Promise<T>` is a wait\npoint, a thrown `Error` is a Jet error when the `.d.ts` or a pack declares it. Browser effects follow the spec's\nbrowser rules. Outputs are design targets.\n\n## Simple: date-fns\n\n```jet\npackage: {\n    name: \"dates\"\n    deps: { date_fns: js@\"date-fns@4.1\" }\n    targets: [wasm32-web]\n}\n\nuse dates: js.date_fns\n\nrun: fn() {\n    now: dates.Date.now()\n    print(dates.format(now, \"yyyy-MM-dd\"))\n    print(dates.format_distance(dates.sub_days(now, 3), now))     // camelCase becomes snake_case\n    print(dates.is_weekend(now))\n}\n```\n\n```text\n2026-10-31\n3 days\ntrue\n```\n\n## Medium: chart.js with fetch\n\nWhat it shows: a canvas element from the page, a JS class constructed from Jet, a Jet record passed as a JS object\nliteral by the `.d.ts` interface, and `fetch` as a wait point.\n\n```jet\npackage: {\n    name: \"dashboard\"\n    deps: { chart: js@\"chart.js@4.4\" }\n    targets: [wasm32-web]\n}\n\nuse chart: js.chart_js\nuse web: core.web\n\n#Codable\nPoint: struct {\n    day: String\n    visits: Int\n}\n\nrun: fn() !web.FetchError {\n    points: web.fetch(\"/api/visits\").json<[Point]>()        // Promise -> wait point\n    canvas: web.document.query<web.Canvas>(\"#visits\")\n    _c: chart.Chart.new(canvas, chart.ChartConfiguration{\n        type_: .Line,                                           // the .d.ts field `type`, renamed by jsbind\n        data: chart.ChartData{\n            labels: points.map((p) -> p.day),\n            datasets: [chart.Dataset{label: \"Visits\", data: points.map((p) -> p.visits)}],\n        },\n    })                                                          // destroy() at scope end via Close\n    web.wait_for_unload()\n}\n```\n\nThe page shows a line chart of visits per day.\n\n## Complex: a web component written in Jet, used from JS, using JS\n\nWhat it shows: exporting a Jet type as a custom element (D-FFI-EXPORT3, host `js`), JS events delivered to Jet\ncallbacks, a JS library (`marked`) called from Jet, and a JS caller awaiting a Jet waiting function.\n\n```jet\npackage: {\n    name: \"md_editor\"\n    deps: {\n        marked: js@\"marked@14.1\"\n        purify: js@\"dompurify@3.2\"\n    }\n    targets: [wasm32-web]\n}\n\nuse md: js.marked\nuse purify: js.dompurify\nuse web: core.web\n\n#Export(js)\nMarkdownEditor: struct {\n    area: web.TextArea\n    preview: web.Element\n}\n\nrender_into: fn(preview: web.Element, text: String) {\n    html: md.parse(text, md.Options{gfm: true})                     // marked returns a string\n    preview.set_inner_html(purify.sanitize(html))                     // never insert unsanitized HTML\n}\n\n#Export(js)\nimpl MarkdownEditor {\n    mount: fn(root: web.Element) -> MarkdownEditor {\n        area: web.document.create<web.TextArea>(\"textarea\")\n        preview: web.document.create<web.Element>(\"div\")\n        root.append(area)\n        root.append(preview)\n        area.on_input((e) -> render_into(preview, e.target.value))     // retained; captures a JS handle, which is sendable\n        MarkdownEditor{area: area, preview: preview}\n    }\n\n    render: fn(self, text: String) {\n        self.area.set_value(text)                                       // a method on the JS handle\n        render_into(self.preview, text)\n    }\n\n    // A waiting Jet function becomes a Promise for JS callers.\n    save: fn(self, url: String) -> Int !web.FetchError {\n        web.fetch(url, method: .Post, body: self.area.value).status\n    }\n}\n```\n\n```js\n// index.js, written by hand in the web app\nimport { MarkdownEditor } from \"./md_editor.js\";       // glue written by jsbind's export\nconst ed = MarkdownEditor.mount(document.querySelector(\"#editor\"));\ned.render(\"# Hello\\n\\nFrom **Jet**\");\nconst status = await ed.save(\"/api/doc\");              // Promise<number>; FetchError arrives as a thrown Error\n```\n\n```ts\n// md_editor.d.ts, written by jsbind\nexport class MarkdownEditor {\n    static mount(root: Element): MarkdownEditor;\n    render(text: string): void;\n    save(url: string): Promise<number>;\n    free(): void;                                        // also released by FinalizationRegistry\n}\n```\n\nA closed native binary in `deps` would be refused for this target with E3238, naming the library and offering the\nserver-side form.\n\n### Best competitor equivalent\n\n```rust\n// Rust + wasm-bindgen: attributes on every item, JsValue at untyped edges, closures leaked or stored by hand.\n#[wasm_bindgen]\npub struct MarkdownEditor { source: String, preview: web_sys::Element }\n#[wasm_bindgen]\nimpl MarkdownEditor {\n    pub fn mount(root: &web_sys::Element) -> MarkdownEditor { ... }\n    pub async fn save(&self, url: String) -> Result<u16, JsValue> { ... }\n}\nlet cb = Closure::<dyn FnMut(web_sys::InputEvent)>::new(move |e| { ... });\narea.set_oninput(Some(cb.as_ref().unchecked_ref()));\ncb.forget();                                             // leaked on purpose\n```\n",
       "kind": "task",
       "track": "epoch",
       "epoch": "e14",
@@ -89701,7 +89742,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take)."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [
@@ -89715,7 +89762,7 @@
       "parentId": "c0rkebo4",
       "needsAcceptance": false,
       "created": "2026-11-01T00:50:41.628Z",
-      "updated": "2026-11-04T18:10:06.235Z",
+      "updated": "2026-11-06T18:36:59.589Z",
       "updatedBy": "Main"
     },
     {
@@ -90632,6 +90679,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 4 criteria from archived #2045: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -90654,7 +90706,7 @@
         },
         {
           "n": 2,
-          "text": "(was #2045 c1) jet explain @ / :: / #Live / => (every registered user-typeable glyph, sigil, keyword, marker) returns name, meaning, decision ID, and a one-line example from Syntax.rs [precut audit: not proven on 9c7ddf1359: C:explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision has no expected output, so the golden runner cannot judge it (#6538)]",
+          "text": "(was #2045 c1) jet explain @ / : / #Live / => (every registered user-typeable glyph, sigil, keyword, marker) returns name, meaning, decision ID, and a one-line example from the syntax registry (`Compiler/JetFoundation/Data/Syntax`) [precut audit: not proven on 9c7ddf1359: C:explain_syntax/explain_syntax_verbose_names_registry_constant_and_decision has no expected output, so the golden runner cannot judge it (#6538)]",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -90695,7 +90747,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T09:11:08.072Z",
-      "updated": "2026-11-04T23:49:10.890Z",
+      "updated": "2026-11-06T18:37:13.335Z",
       "updatedBy": "Main"
     },
     {
@@ -91067,7 +91119,7 @@
       "id": "c0zy9mhn",
       "num": 6548,
       "title": "Function-value copy: does f.copy() of an escaping closure share its captured state, give an independent copy, or get refused?",
-      "body": "Question (owner/ballot): spec.md:889-905 (\"Captures and escaping lambdas\") says an escaping lambda owns its captures. Copy values are copied at closure creation, clonable values are cloned, and owned non-clonable values move. It never says what a *function value* does when it is copied (`alias :: counter.copy()`) or bound twice.\n\nWitness: tests/cases/run_regressions/shared_and_closure_owner_topology_is_preserved.case, fixture tests/fixtures/shared_owner_topology.jet:82-87.\n  counter :: make_counter(^live)   // returns `(value: Int) -> { &bucket.values.push(value) ... }` over a `:=` Bucket it owns\n  alias :: counter.copy()\n  print(counter(1)); print(alias(2)); print(counter(3))\nThe ORACLE-LITERAL output (run_regressions.rs:174, never re-bless) is 102 / 202 / 302. bucket.values.len() grows 1, 2, 3 across counter and alias, so the alias **shares** the one captured environment, as a refcounted closure would.\n\nToday: sema refuses with E0211 \"`fn(Int) -> Int` can't be copied\" (360e470044).\n\nAlternatives:\n- A: A function value is a cheap handle. `.copy()` (and implicit copy) shares the captured environment, as `Shared<T>` handles do (spec.md:1426-1431). Matches the oracle 102/202/302. Needs closure env refcounting in IR/runtime and a spec sentence.\n- B: `.copy()` deep-clones the captured environment, so each copy has its own state. Requires every capture to be clonable, or E0211. The oracle would become 102/102/202 (re-blessing an ORACLE-LITERAL needs owner sign-off).\n- C: Function values that own mutable captured state are not copyable (today's E0211). The spec gains that sentence, and the case's alias line is removed with owner sign-off (oracle lines 11-12 change).\n\nAcceptance: spec.md \"Captures and escaping lambdas\" states the chosen rule. The fixture then runs on every tier with the decided output, and shared_and_closure_owner_topology_is_preserved passes (or is rewritten per C with a cited spec line).\n\nRelated fixture repairs already staged by CardClose-1 (CC-66 follow-up, not yet landed because this blocks the run):\n- bare-block scopes become helper fns (S6-R, syntax-decisions.md:3949)\n- `fn(Int) Int` becomes `fn(Int) -> Int` (spec.md:857)\n- `String!` becomes `Err!` (E2417)\n- untyped-lambda `return x` becomes the tail value\n- SharedSnapshot `.value` becomes `.value()` (Main ruling, SharedOwner.jet:429)\n- `!= .None` now type-checks (CC-66 sema fix, D-FLOWTYPE1)",
+      "body": "Question (owner/ballot): spec.md:889-905 (\"Captures and escaping lambdas\") says an escaping lambda owns its captures. Copy values are copied at closure creation, clonable values are cloned, and owned non-clonable values move. It never says what a *function value* does when it is copied (`alias: counter.copy()`) or bound twice.\n\nWitness: tests/cases/run_regressions/shared_and_closure_owner_topology_is_preserved.case, fixture tests/fixtures/shared_owner_topology.jet:82-87.\n  counter: make_counter(live)   // returns `(value: Int) -> { bucket.values.push(value) ... }` over a `:=` Bucket it owns\n  alias: counter.copy()\n  print(counter(1)); print(alias(2)); print(counter(3))\nThe ORACLE-LITERAL output (run_regressions.rs:174, never re-bless) is 102 / 202 / 302. bucket.values.len() grows 1, 2, 3 across counter and alias, so the alias **shares** the one captured environment, as a refcounted closure would.\n\nToday: sema refuses with E0211 \"`fn(Int) -> Int` can't be copied\" (360e470044).\n\nAlternatives:\n- A: A function value is a cheap handle. `.copy()` (and implicit copy) shares the captured environment, as `Shared<T>` handles do (spec.md:1426-1431). Matches the oracle 102/202/302. Needs closure env refcounting in IR/runtime and a spec sentence.\n- B: `.copy()` deep-clones the captured environment, so each copy has its own state. Requires every capture to be clonable, or E0211. The oracle would become 102/102/202 (re-blessing an ORACLE-LITERAL needs owner sign-off).\n- C: Function values that own mutable captured state are not copyable (today's E0211). The spec gains that sentence, and the case's alias line is removed with owner sign-off (oracle lines 11-12 change).\n\nAcceptance: spec.md \"Captures and escaping lambdas\" states the chosen rule. The fixture then runs on every tier with the decided output, and shared_and_closure_owner_topology_is_preserved passes (or is rewritten per C with a cited spec line).\n\nRelated fixture repairs already staged by CardClose-1 (CC-66 follow-up, not yet landed because this blocks the run):\n- bare-block scopes become helper fns (S6-R, syntax-decisions.md:3949)\n- `fn(Int) Int` becomes `fn(Int) -> Int` (spec.md:857)\n- `String!` becomes `Err!` (E2417)\n- untyped-lambda `return x` becomes the tail value\n- SharedSnapshot `.value` becomes `.value()` (Main ruling, SharedOwner.jet:429)\n- `!= .None` now type-checks (CC-66 sema fix, D-FLOWTYPE1)",
       "kind": "task",
       "track": "sidequest",
       "epoch": null,
@@ -91080,7 +91132,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -91098,7 +91156,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T21:21:35.427Z",
-      "updated": "2026-11-01T21:21:43.110Z",
+      "updated": "2026-11-06T18:37:15.953Z",
       "updatedBy": "Main"
     },
     {
@@ -92071,6 +92129,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "Main 2026-11-04: C4 retargeted as criterion 6 (jet check DIR checks only the entry, not every file). Prep finding: nested impl Trait {} blocks do not receive the trait's default methods (E0102) while the top-level form does (probe $JET_SCRATCH_ROOT/lanes/Main/prep/nested_parity.jet); the parity step must fix it before any sweep. The lint skips impl heads that already carry an error (E0321, E0003, E0908) as a named rule of the lint; this is covered by the card's own exception rule, so no ballot is needed."
@@ -92138,12 +92201,11 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Main 2026-11-04 paste error: c7 holds a copy of #6066 c11 (D-TASK-WINDOW1), which my script picked up by mistake. That work is owned and tracked by #6066 c11. The intended #6561 criterion is c8.",
-          "at": "2026-11-04T17:31:08.285Z",
-          "closure": "obsolete"
+          "at": "2026-11-04T17:31:08.285Z"
         },
         {
           "n": 8,
-          "text": "An inherent impl that carries its own markers is not flattened into the type body, because its markers would become the type's markers. This covers markers above the impl, and #X :: value lines inside it once #6562 lands. The lint's named exception rule (g) skips such an impl. A trait impl moves as a nested impl Trait { ... } that keeps its own markers where they were written, above it or inside it. A fixture covers both. Today the only marked impls are 18 #Target(OS.*) sites, already covered by exception rule (d); rule (g) applies to future code only. (D-MARKER-INBODY1 A, owner 2026-11-04: markers anywhere in the body.)",
+          "text": "An inherent impl that carries its own markers is not flattened into the type body, because its markers would become the type's markers. This covers markers above the impl, and #X: value lines inside it once #6562 lands. The lint's named exception rule (g) skips such an impl. A trait impl moves as a nested impl Trait { ... } that keeps its own markers where they were written, above it or inside it. A fixture covers both. Today the only marked impls are 18 #Target(OS.*) sites, already covered by exception rule (d); rule (g) applies to future code only. (D-MARKER-INBODY1 A, owner 2026-11-04: markers anywhere in the body.)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -92164,7 +92226,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T11:57:35.608Z",
-      "updated": "2026-11-04T18:09:29.033Z",
+      "updated": "2026-11-06T18:37:19.983Z",
       "updatedBy": "Main"
     },
     {
@@ -182867,6 +182929,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-06T18:37:45.072Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0j1k587",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:37:42.301Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pr2dsz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:37:41.412Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pr2dsz",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:37:39.130Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hs3czc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:37:38.159Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hs3czc",
+      "note": "criteria,body,plan"
+    },
+    {
+      "at": "2026-11-06T18:37:36.053Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0509i8n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:37:35.007Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0509i8n",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:37:32.198Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vhdiiv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:37:30.849Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vhdiiv",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:37:28.697Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqt0kq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:37:27.770Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqt0kq",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:37:25.862Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l5ld15",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:37:24.949Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l5ld15",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:37:22.928Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ytw4eo",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:37:22.110Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ytw4eo",
+      "note": "criteria,plan"
+    },
+    {
+      "at": "2026-11-06T18:37:19.983Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ewbkcj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:37:19.138Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ewbkcj",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:37:15.953Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zy9mhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:37:15.158Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zy9mhn",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-06T18:37:13.336Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zn6gbs",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:37:12.517Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zn6gbs",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T18:36:59.589Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c015lbud",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:36:58.734Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c015lbud",
+      "note": "body"
+    },
+    {
+      "at": "2026-11-06T18:36:56.933Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00n89mp",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T18:36:56.095Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00n89mp",
+      "note": "body"
+    },
+    {
       "at": "2026-11-06T18:36:53.953Z",
       "by": "Main",
       "action": "card.update",
@@ -186246,713 +186483,6 @@
       "action": "card.criteria-meet",
       "ref": "c0rqi33c",
       "note": "#35"
-    },
-    {
-      "at": "2026-11-06T05:49:34.421Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0slmlyv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T05:48:31.909Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-06T05:48:14.183Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T05:46:49.682Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-06T05:42:09.639Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-06T05:41:25.651Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T05:37:11.334Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h06654",
-      "note": "#68"
-    },
-    {
-      "at": "2026-11-06T05:37:10.625Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-06T05:33:22.349Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-06T05:33:07.839Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0g93joj",
-      "note": "First jet cc pack install hashes the 450 MB tree about four times with pure-Jet SHA-256"
-    },
-    {
-      "at": "2026-11-06T05:33:06.653Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T05:30:06.942Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jn1coj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-06T05:30:06.115Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jn1coj",
-      "note": "#2 The Jetpack Engine claim 'store profile receipt copy and pro"
-    },
-    {
-      "at": "2026-11-06T05:30:05.295Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0jn1coj",
-      "note": "#1 A switch on a borrowed optional no-clone handle in a list el"
-    },
-    {
-      "at": "2026-11-06T05:27:53.600Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-06T05:24:39.799Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rqi33c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T05:22:33.489Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T05:14:43.285Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fz569a",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-06T05:14:42.262Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fz569a",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-06T05:14:41.536Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fz569a",
-      "note": "#1 Under D-STDOUT-BUFFER1=A, the foundations/storage example fl"
-    },
-    {
-      "at": "2026-11-06T05:12:49.683Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fz569a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T05:11:43.576Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-06T05:11:01.467Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rqi33c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T05:07:27.559Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T05:07:26.849Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#93"
-    },
-    {
-      "at": "2026-11-06T05:07:26.066Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#39"
-    },
-    {
-      "at": "2026-11-06T05:07:07.070Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0fz569a",
-      "note": "A child's stdout line reaches the parent only after the child exits"
-    },
-    {
-      "at": "2026-11-06T05:07:06.170Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#86"
-    },
-    {
-      "at": "2026-11-06T05:01:28.805Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-06T05:01:28.077Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-06T05:01:27.381Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-06T05:01:26.655Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08s0ppt",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-06T04:59:25.342Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0jn1coj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T04:52:06.104Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0jn1coj",
-      "note": "Compiler segfaults in codegen on &opt_handle == .Val(x)"
-    },
-    {
-      "at": "2026-11-06T04:52:05.183Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T04:43:00.736Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rqi33c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T04:41:49.730Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-06T04:37:04.686Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08cndtc",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-06T04:37:03.065Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08cndtc",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-06T04:37:02.055Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08cndtc",
-      "note": "#1 process.run_all keeps up to jobs children running at once, p"
-    },
-    {
-      "at": "2026-11-06T04:33:47.571Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-06T04:30:26.777Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-06T04:26:18.446Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#66"
-    },
-    {
-      "at": "2026-11-06T04:23:49.204Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#27"
-    },
-    {
-      "at": "2026-11-06T04:22:00.551Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-06T04:21:28.083Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-06T04:03:09.103Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c081c9o8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T03:58:23.068Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c081c9o8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T03:49:24.255Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-06T03:38:34.151Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ca4l7i",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-06T03:37:51.953Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-06T03:31:22.510Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0pgowhn",
-      "note": "#66 jet test settings follow-ups from c65 (4ff44796a5): the resu"
-    },
-    {
-      "at": "2026-11-06T03:31:21.783Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#65"
-    },
-    {
-      "at": "2026-11-06T03:23:11.812Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-06T03:23:10.973Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-06T03:22:41.878Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c081c9o8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T03:22:41.125Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-06T03:21:37.735Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c081c9o8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T03:21:37.021Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-06T03:08:31.700Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#45"
-    },
-    {
-      "at": "2026-11-06T03:08:30.970Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-06T03:05:51.797Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#46"
-    },
-    {
-      "at": "2026-11-06T03:03:24.545Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T03:02:51.022Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c06l2xid",
-      "note": "fn build locals spliced into b.generate templates expand under an empty comptime scope"
-    },
-    {
-      "at": "2026-11-06T03:02:50.197Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#36"
-    },
-    {
-      "at": "2026-11-06T03:02:49.511Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#35"
-    },
-    {
-      "at": "2026-11-06T03:00:14.629Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#26"
-    },
-    {
-      "at": "2026-11-06T02:54:17.809Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-06T02:54:10.448Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c081c9o8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T02:54:09.643Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#42"
-    },
-    {
-      "at": "2026-11-06T02:53:16.393Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T02:47:36.194Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tklwsm",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-06T02:47:34.914Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0tklwsm",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-06T02:47:34.109Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tklwsm",
-      "note": "#1 A BuildError from an implicit-contract fn build reports its "
-    },
-    {
-      "at": "2026-11-06T02:45:43.937Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#49"
-    },
-    {
-      "at": "2026-11-06T02:45:42.896Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#48"
-    },
-    {
-      "at": "2026-11-06T02:45:41.839Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#47"
-    },
-    {
-      "at": "2026-11-06T02:40:41.944Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#31"
-    },
-    {
-      "at": "2026-11-06T02:40:41.057Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-06T02:40:40.114Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-06T02:33:27.897Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c07pwu5t",
-      "note": "An effect row with a unit-fallible signature does not parse"
-    },
-    {
-      "at": "2026-11-06T02:33:27.042Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0tklwsm",
-      "note": "A BuildError from an implicit-contract fn build loses its identity and reports E3502"
-    },
-    {
-      "at": "2026-11-06T02:33:25.953Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#70"
-    },
-    {
-      "at": "2026-11-06T02:30:42.685Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-06T02:30:41.888Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-06T02:30:34.137Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T02:29:50.600Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#71"
-    },
-    {
-      "at": "2026-11-06T02:29:13.957Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-06T02:29:08.293Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c081c9o8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T02:28:57.725Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-06T02:24:27.389Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#193"
-    },
-    {
-      "at": "2026-11-06T02:24:25.948Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#127"
-    },
-    {
-      "at": "2026-11-06T02:22:52.991Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#128"
-    },
-    {
-      "at": "2026-11-06T02:22:51.822Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#47"
-    },
-    {
-      "at": "2026-11-06T02:21:59.402Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ofw8u4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T02:17:51.390Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ug03od",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-06T02:17:50.347Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ug03od",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-06T02:17:49.609Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ug03od",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-06T02:17:48.858Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ug03od",
-      "note": "#2 chain full reaches a fixed point with the fix"
-    },
-    {
-      "at": "2026-11-06T02:17:48.189Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ug03od",
-      "note": "#1 A partial move (close(^outer.owner), lease: ^parts.lease) tr"
-    },
-    {
-      "at": "2026-11-06T02:17:47.455Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#60"
     }
   ],
   "nextNum": 368,
