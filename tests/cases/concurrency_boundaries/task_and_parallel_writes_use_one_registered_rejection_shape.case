@@ -6,11 +6,13 @@ step check1: jet check source-1.jet --json
 exit: nonzero
 json: stdout doc $.reports[?code="E1101"] #>= 1 # original predicate: code membership
 json: stdout doc $.reports[?code="E1101"][0].what ~ "task capture" # original predicate
-capture: task-why stdout doc $.reports[?code="E1101"][0].why
+json: stdout doc $.reports[?code="E1101"][0].why = "The `task capture` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule"
 capture: task-fix stdout doc $.reports[?code="E1101"][0].fix
 step check2: jet check source-2.jet --json
 exit: nonzero
 json: stdout doc $.reports[?code="E1101"] #>= 1 # original predicate: code membership
 json: stdout doc $.reports[?code="E1101"][0].what ~ "parallel worker" # original predicate
-json: stdout doc $.reports[?code="E1101"][0].why = {cap:task-why}
-json: stdout doc $.reports[?code="E1101"][0].fix = {cap:task-fix}
+# The registered E1101 row names the boundary in its Why; the rest of the Why
+# and the whole Fix are one shape for both boundaries.
+json: stdout doc $.reports[?code="E1101"][0].why = "The `parallel worker` boundary can run concurrently with its owner; the write would race with the owner or require a hidden merge rule"
+json: stdout doc $.reports[?code="E1101"][0].fix = "{cap:task-fix}"
