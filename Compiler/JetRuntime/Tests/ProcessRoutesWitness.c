@@ -53,6 +53,10 @@ static void adapters(void){
  Spec *chained=NULL;int64_t second=-2;
  jet_process_spec_with_directory_raw(attached,fd,101,false,&chained,&supported.value,&second,&error);
  assert(chained==attached&&error==0&&second>=101&&chained->directories->len==2);
+ // A slot the spec already passes is refused without a duplicate or a row.
+ Spec *again=NULL;int64_t taken=-2;
+ jet_process_spec_with_directory_raw(chained,fd,100,false,&again,&supported.value,&taken,&error);
+ assert(again==chained&&supported.value&&taken==-1&&error==0&&chained->directories->len==2);
  Spec *clone=jet_rt_handle_clone_process_spec(chained);assert(jet_rt_handle_eq_process_spec(chained,clone));
  jet_rt_handle_drop_process_spec(chained);assert(fcntl((int)assigned,F_GETFD)>=0&&fcntl((int)second,F_GETFD)>=0);
  jet_rt_handle_drop_process_spec(clone);

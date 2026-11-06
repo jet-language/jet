@@ -523,9 +523,11 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
         return Err(IOError.Other(IOContext{operation: .Resolve, resource: Val(directory.path),
             os_code: Val(row.errno), cause: Val(core.sys.__errno_text(row.errno))}))
     }
-    if row.assigned_fd != child_fd {
+    // The parent's duplicate may sit above `child_fd`; the spawn moves it
+    // into the slot. A refused row is a slot `spec` already passes.
+    if row.assigned_fd < 0 {
         return Err(IOError.InvalidInput(IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None,
-            cause: Val("the requested inherited directory descriptor slot is already occupied")}))
+            cause: Val("the requested inherited directory descriptor slot is already passed to this process")}))
     }
     Ok(row.spec)
 }
@@ -545,7 +547,7 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
             .cwd("/missing-lexical-process-directory")
         in_destination: compiler_with_process_directory(initial, destination, 198, true) ?? panic("attach destination")
         with_source: compiler_with_process_directory(in_destination, source, 199, false) ?? panic("attach source")
-        assert(compiler_with_process_directory(process.cmd(["sh", "-c", "exit 0"]), destination, 198, true) == .Err(.InvalidInput(_)))
+        assert(compiler_with_process_directory(compiler_with_process_directory(process.cmd(["sh", "-c", "exit 0"]), destination, 198, true) ?? panic("first slot"), source, 198, false) == .Err(.InvalidInput(_)))
         close(^destination)
         close(^source)
         rename(destination_path, join(root, "moved-destination")) ?? panic("rename destination")

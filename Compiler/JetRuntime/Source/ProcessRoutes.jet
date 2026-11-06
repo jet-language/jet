@@ -67,30 +67,45 @@ process_route_i32: fn(value: I64) -> I64 {
     bits: value.bit_and(I64{4294967295})
     if bits >= (I64{2147483648}) -> bits - I64{4294967296} else -> bits
 }
+// Whether `spec` already passes a held directory at child slot `target`.
+process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
+    directories: encoding_word(wrapping(spec + PROCESS_SPEC_DIRECTORIES))
+    if directories == (I64{0}) -> return false
+    index := I64{0}
+    loop index < encoding_word(directories) {
+        if encoding_word(wrapping(encoding_word(wrapping(directories + I64{16})) + index * I64{24} + I64{8})) == target -> return true
+        index += I64{1}
+    }
+    false
+}
 #Export(c) jet_process_spec_with_directory_raw: fn(value: I64, source_fd: I64, child_fd: I64, as_cwd: Bool, spec_out: I64, supported_out: I64, assigned_out: I64, errno_out: I64) {
     // Duplicate its lent fd, never reopen a pathname. The spec is consumed:
     // its earlier rows move into the returned one, so each passed descriptor
-    // has one owner and closes once.
+    // has one owner and closes once. The duplicate is the parent's carrier at
+    // or above the child slot; the spawn moves it into the slot, so only a
+    // slot this spec already passes is refused (assigned -1, errno 0).
     result: value
     target: process_route_i32(child_fd)
-    duplicated: host_call(I64{72}, process_route_i32(source_fd), I64{1030}, target)
     assigned := I64{-1}
     error := I64{0}
-    if duplicated < (I64{0}) {
-        error = -duplicated
-    } else {
-        assigned = duplicated
-        directory: jet_fd_adopt_unbuffered_raw(duplicated, I64{0})
-        directories := encoding_word(wrapping(result + PROCESS_SPEC_DIRECTORIES))
-        if directories == (I64{0}) {
-            directories = data_sequence_new(I64{1}, I64{24})
-            encoding_store(wrapping(result + PROCESS_SPEC_DIRECTORIES), directories)
+    if !process_spec_directory_slot_taken(result, target) {
+        duplicated: host_call(I64{72}, process_route_i32(source_fd), I64{1030}, target)
+        if duplicated < (I64{0}) {
+            error = -duplicated
+        } else {
+            assigned = duplicated
+            directory: jet_fd_adopt_unbuffered_raw(duplicated, I64{0})
+            directories := encoding_word(wrapping(result + PROCESS_SPEC_DIRECTORIES))
+            if directories == (I64{0}) {
+                directories = data_sequence_new(I64{1}, I64{24})
+                encoding_store(wrapping(result + PROCESS_SPEC_DIRECTORIES), directories)
+            }
+            slot: data_sequence_reserve(directories, I64{24})
+            encoding_store(slot, directory)
+            encoding_store(wrapping(slot + I64{8}), target)
+            encoding_store(wrapping(slot + I64{16}), if as_cwd -> I64{1} else -> I64{0})
+            encoding_store(wrapping(directories + DATA_SEQUENCE_LENGTH), encoding_word(wrapping(directories + DATA_SEQUENCE_LENGTH)) + I64{1})
         }
-        slot: data_sequence_reserve(directories, I64{24})
-        encoding_store(slot, directory)
-        encoding_store(wrapping(slot + I64{8}), target)
-        encoding_store(wrapping(slot + I64{16}), if as_cwd -> I64{1} else -> I64{0})
-        encoding_store(wrapping(directories + DATA_SEQUENCE_LENGTH), encoding_word(wrapping(directories + DATA_SEQUENCE_LENGTH)) + I64{1})
     }
     encoding_store(spec_out, result)
     // bool is exactly one C byte; do not overwrite adjacent caller storage.
