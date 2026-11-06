@@ -23,7 +23,7 @@ use {
         STRING_PART_INTERPOLATION,
         STRING_PART_TEXT,
         TOKEN_BLOCK_COMMENT,
-        TOKEN_COLON_COLON,
+        TOKEN_COLON,
         TOKEN_COLON_EQ,
         TOKEN_COMMA,
         TOKEN_DOT,
@@ -91,7 +91,9 @@ struct ParserFenceBudget {
 struct ParserFenceExpansion {
     tokens: [Token]
     fenced_statements: [FencedStatement]
+    // A fence error stops the parse; a retired spelling (E0397) does not.
     diagnostics: [Diagnostic]
+    retired: [Diagnostic]
     budget: ParserFenceBudget
 }
 
@@ -127,10 +129,22 @@ struct ParserFenceNumberedRange {
     diagnostic: Diagnostic?
 }
 
-// Ordinary source has no fences: keep the lexer's token list untouched, since
-// the parser skips comment trivia itself. A fenced source is expanded over its
+// Colon declaration heads first take the keyword-first order the item parsers
+// read (parser_colon_declarations), which reports each retired spelling's
+// E0397 into `retired`; those never stop the parse.
+fn parser_prepare_tokens(input: ^[Token], tables: &TokenTables) -> ParserFenceExpansion {
+    retired := [Diagnostic]{}
+    declared := parser_colon_declarations(^input, tables, &retired)
+    expansion := parser_prepare_declared(^declared, &tables)
+    expansion.retired = ^retired
+    expansion
+}
+
+// Ordinary source has no fences: keep the token list untouched, since the
+// parser skips comment trivia itself. A fenced source is expanded over its
 // comment-free tokens, so a comment never splits or joins a fence entry.
-fn parser_prepare_tokens(tokens: ^[Token], tables: &TokenTables) -> ParserFenceExpansion {
+fn parser_prepare_declared(input: ^[Token], tables: &TokenTables) -> ParserFenceExpansion {
+    tokens := ^input
     has_fences := false
     loop index in 0..<tokens.len() {
         kind :: tokens[index].kind
@@ -139,7 +153,7 @@ fn parser_prepare_tokens(tokens: ^[Token], tables: &TokenTables) -> ParserFenceE
             break
         }
     }
-    if !has_fences -> return ParserFenceExpansion{tokens: ^tokens, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
+    if !has_fences -> return ParserFenceExpansion{tokens: ^tokens, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, retired: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
     code := [Token]{}
     loop token in tokens {
         if !parser_is_trivia(token.kind) -> &code.push(token)
@@ -211,7 +225,7 @@ fn parser_fence_expanded_cost(segment: [Token], opens: [Int], closes: [Int], fen
 }
 
 fn parser_fence_expand(tokens: [Token], tables: &TokenTables) -> ParserFenceExpansion {
-    expansion := ParserFenceExpansion{tokens: [Token]{}, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
+    expansion := ParserFenceExpansion{tokens: [Token]{}, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, retired: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
     segment := [Token]{}
     brace_depth := 0
     nested_brace_depth := 0
@@ -311,10 +325,19 @@ fn parser_fence_expand_segment(segment: [Token], brace_depth: Int, budget: Parse
     }
     if opens.len() == 0 -> return parser_fence_segment_failure(statement_span, ^diagnostics, used)
 
-    binding_target :: opens[0] == 0 && closes[0] + 1 < segment.len() && (segment[closes[0] + 1].kind == TOKEN_COLON_COLON || segment[closes[0] + 1].kind == TOKEN_COLON_EQ)
-    has_binding_sigil :: loop token in segment {
-        if token.kind == TOKEN_COLON_COLON || token.kind == TOKEN_COLON_EQ || token.kind == TOKEN_EQ -> break true
-    } ?? false
+    binding_target :: opens[0] == 0 && closes[0] + 1 < segment.len() && (segment[closes[0] + 1].kind == TOKEN_COLON || segment[closes[0] + 1].kind == TOKEN_COLON_EQ)
+    // A `:` inside a group is a label or a field, not the binding sigil.
+    has_binding_sigil := false
+    sigil_depth := 0
+    loop token in segment {
+        kind :: token.kind
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> sigil_depth += 1
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE -> sigil_depth -= 1
+        if kind == TOKEN_COLON_EQ || kind == TOKEN_EQ || (kind == TOKEN_COLON && sigil_depth == 0) {
+            has_binding_sigil = true
+            break
+        }
+    }
     expression_statement :: brace_depth > 0 && !has_binding_sigil && !parser_fence_first_is_header_keyword(segment[0].kind)
     if !binding_target && !expression_statement -> &diagnostics.push(parser_fence_rejected_position(statement_span, "fences are allowed only in a binding target or an expression statement"))
 

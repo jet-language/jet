@@ -196,6 +196,12 @@ fn ends_statement(kind: Int) -> Bool Never! {
         K_GT -> true
         K_SHR -> true
         K_FENCE_CLOSE -> true
+        // A bodiless declaration ends its line on its kind word:
+        // `pricing: module`, `Log.Audit: effect`, and `tag` / `effect` read
+        // as member names (`x.effect`) end a line as any name does.
+        K_MODULE -> true
+        K_TAG -> true
+        K_EFFECT -> true
         else -> false
     }
 }
@@ -409,7 +415,7 @@ fn place_mark_starts_at(facts: [Int], index: Int) -> Bool Never! {
     return facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]
 }
 
-// `{ member: local, … } :: tuple` at line start renames tuple members, so
+// `{ member: local, … }: tuple` at line start renames tuple members, so
 // it begins a statement rather than continuing the line above.
 fn tuple_rename_starts_at(facts: [Int], index: Int) -> Bool Never! {
     if kind_at(facts, index + 1) != K_IDENT -> return false
@@ -423,7 +429,7 @@ fn tuple_rename_starts_at(facts: [Int], index: Int) -> Bool Never! {
             depth -= 1
             if depth == 0 {
                 after :: kind_at(facts, at + 1)
-                return after == K_COLON_COLON || after == K_COLON_EQ
+                return after == K_COLON || after == K_COLON_COLON || after == K_COLON_EQ
             }
         }
         at += 1

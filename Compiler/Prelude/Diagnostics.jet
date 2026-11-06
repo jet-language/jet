@@ -12749,6 +12749,24 @@ struct LogicalNotOnNonBool {
     }
 }
 
+struct RetiredDeclarationSpelling {
+    old: String
+    new: String
+
+    impl Diagnostic {
+        code :: "E0397"
+        stage :: [.Parse]
+        meaning :: "A declaration uses a retired spelling; every declaration is written `name: value`"
+        detail :: true
+        edit :: .SourceEdit
+        no_fix :: None
+        fix_safety :: .BehaviorPreserving
+        fn what(self) -> String { "`{self.old}` is a retired declaration spelling; write `{self.new}`." }
+        fn why(self) -> String { "Every declaration is written `name: value`: a binding `limit: 100`, a function `area: fn(r: Float) -> Float`, a type `Point: struct`; `:=` stays the mutable binding." }
+        fn fix(self) -> String { "Write `{self.new}`; `jet fix` applies this fix." }
+    }
+}
+
 struct InvalidChannelCapacity {
     capacity: String
 

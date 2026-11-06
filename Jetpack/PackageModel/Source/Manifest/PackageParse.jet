@@ -496,23 +496,34 @@ fn pkg_parse_string_map(field: String, value: String) -> [String: String] Packag
     Ok(map)
 }
 
-// The file form `name :: Config{ ... }` (also an inline Config in
+// The file form `name: Config{ ... }` (also an inline Config in
 // `package.jet`): its declared name and record body.
 fn pkg_config_wrapper(text: String) -> ManifestEntry? PackageParseError! {
-    at :: pkg_binder_find(text, "::", 0)
-    if at < 0 -> return Ok(None)
-    name :: pkg_binder_slice(text, 0, at).trim()
-    if name == "" -> return Err(PackageParseError.MalformedField(text.trim()))
-    value := pkg_binder_tail(text, at + 2).trim()
+    split :: pkg_split_package_binding(text) ?? return Ok(None)
+    value := split.right.trim()
     if !value.starts_with("Config") -> return Ok(None)
+    name :: split.left.trim()
+    if name == "" -> return Err(PackageParseError.MalformedField(text.trim()))
     value = value.removeprefix("Config").trim_start()
     if !value.starts_with("{{") -> return Err(PackageParseError.MissingRecord("Config"))
     Ok(Val(ManifestEntry{key: name, value: pkg_record_body(value, "Config")}))
 }
 
-// Whether a top-level manifest entry is the package's `fn build`.
+// Whether a top-level manifest entry is the package's build function,
+// `build: fn(…)` (or the retired `fn build(…)`).
 fn pkg_is_build_entry_decl(entry: String) -> Bool Never! {
     rest :: entry.trim_start()
+    if rest.starts_with(BUILD_ENTRY_FN) {
+        after :: rest.removeprefix(BUILD_ENTRY_FN).trim_start()
+        if after.starts_with(":") && !after.starts_with("::") && !after.starts_with(":=") {
+            value :: after.removeprefix(":").trim_start()
+            if value.starts_with("fn") {
+                first :: pkg_bytes_code(value.removeprefix("fn").bytes(), 0)
+                return !(pkg_bytes_is_word(first) || first >= 128)
+            }
+        }
+        return false
+    }
     if !rest.starts_with("fn") -> return false
     after_fn :: rest.removeprefix("fn")
     if pkg_bytes_space_width(after_fn.bytes(), 0) == 0 -> return false

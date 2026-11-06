@@ -828,18 +828,21 @@ fn jet_cli_compiler_optional_span(span: Span?) -> JetCLIStatusValue Never! {
     jet_cli_compiler_span(found.start, found.end)
 }
 
+// A diagnostic with a source edit also lists it as `edit` (`span`, `new_text`).
 fn jet_cli_compiler_diagnostics(diagnostics: [Diagnostic]) -> JetCLIStatusValue Never! {
     values := [JetCLIStatusValue]{}
     loop diagnostic in diagnostics {
         severity :: if diagnostic.severity == DIAGNOSTIC_ERROR -> "error" else -> "lint"
-        &values.push(jet_cli_status_object([JetCLIStatusField]{
+        fields := [JetCLIStatusField]{
             jet_cli_status_field("code", jet_cli_status_text(diagnostic.code)),
             jet_cli_status_field("severity", jet_cli_status_text(severity)),
             jet_cli_status_field("message", jet_cli_status_text(diagnostic.what)),
             jet_cli_status_field("why", jet_cli_status_text(diagnostic.why)),
             jet_cli_status_field("fix", jet_cli_status_text(diagnostic.fix)),
             jet_cli_status_field("span", jet_cli_compiler_optional_span(diagnostic.span)),
-        }))
+        }
+        if diagnostic.edit == .Val(found) -> &fields.push(jet_cli_status_field("edit", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("span", jet_cli_compiler_span(found.span.start, found.span.end)), jet_cli_status_field("new_text", jet_cli_status_text(found.new_text))})))
+        &values.push(jet_cli_status_object(fields))
     }
     jet_cli_status_array(values)
 }
@@ -1092,7 +1095,8 @@ fn jet_cli_compiler_syntax_tree(source: String) -> JetCLIStatusValue Never! {
     diagnostics := lexed.diagnostics
     if carrier.error == .Val(error) -> diagnostics = [Diagnostic]{error}
     if diagnostics.len() == 0 {
-        parsed :: parse_source(masked)
+        parsed := parse_source(masked)
+        if carrier.retired == .Val(retired) -> &parsed.diagnostics.push(retired)
         errors := [Diagnostic]{}
         loop diagnostic in parsed.diagnostics {
             if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(diagnostic)

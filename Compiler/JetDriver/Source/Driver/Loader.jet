@@ -30,6 +30,7 @@ use {
         PolicyDeclaration,
         Program,
         Span,
+        TextEdit,
         ast_program,
         compiler_threads_admit,
         compiler_threads_failure_text,
@@ -86,6 +87,7 @@ use {
     jet_parser.[
         parse_lexed_with_source,
         parse_lexed_with_source_threads,
+        parser_colon_retired_diagnostic,
         parser_line_starts,
     ]
     jet_sema.[
@@ -2865,9 +2867,10 @@ fn jet_driver_check_reserved_import(declaration: ImportDecl, diagnostics: &[Diag
     true
 }
 
-// The one leading `package { … }` carrier of a source
+// The one leading `package: { … }` carrier of a source
 // (Rust `Package::extract_inline_package`). Offsets index the original text;
-// `error` is the E1360/E1361/E1362 structure failure.
+// `error` is the E1360/E1361/E1362 structure failure, `retired` the E0397 of
+// a carrier written `package {`, which the parse reports beside its own.
 struct JetDriverInlinePackage {
     found: Bool
     start: Int
@@ -2875,6 +2878,7 @@ struct JetDriverInlinePackage {
     body_start: Int
     body_end: Int
     error: Diagnostic?
+    retired: Diagnostic?
 }
 
 fn jet_driver_inline_byte(bytes: [U8], at: Int) -> Int Never! {
@@ -2968,7 +2972,8 @@ fn jet_driver_inline_trivia_end(bytes: [U8], from: Int) -> Int Never! {
     }
 }
 
-// The opening brace of a `package {` carrier starting at `at`, or -1.
+// The opening brace of a `package: {` carrier starting at `at`, or -1. The
+// `:` is optional (`package {` is the retired spelling the parser reports).
 fn jet_driver_inline_package_open(bytes: [U8], at: Int) -> Int Never! {
     keyword :: "package".bytes()
     if at < 0 || at + keyword.len() > bytes.len() -> return -1
@@ -2976,7 +2981,8 @@ fn jet_driver_inline_package_open(bytes: [U8], at: Int) -> Int Never! {
         if bytes[at + offset] != expected -> return -1
     }
     if jet_driver_inline_ident_byte(jet_driver_inline_byte(bytes, at - 1)) || jet_driver_inline_ident_byte(jet_driver_inline_byte(bytes, at + keyword.len())) -> return -1
-    open :: jet_driver_inline_trivia_end(bytes, at + keyword.len())
+    open := jet_driver_inline_trivia_end(bytes, at + keyword.len())
+    if jet_driver_inline_byte(bytes, open) == 58 && jet_driver_inline_byte(bytes, open + 1) != 58 && jet_driver_inline_byte(bytes, open + 1) != 61 -> open = jet_driver_inline_trivia_end(bytes, open + 1)
     if jet_driver_inline_byte(bytes, open) == 123 -> open else -> -1
 }
 
@@ -3098,13 +3104,22 @@ fn jet_driver_inline_item_scan(bytes: [U8], from: Int, to: Int) -> JetDriverInli
 }
 
 fn jet_driver_inline_package_failure(code: String, start: Int, end: Int) -> JetDriverInlinePackage {
-    JetDriverInlinePackage{found: false, start: start, end: end, body_start: start, body_end: start, error: Val(jet_driver_row_diagnostic(code, Val(Span{start: start, end: end})))}
+    JetDriverInlinePackage{found: false, start: start, end: end, body_start: start, body_end: start, error: Val(jet_driver_row_diagnostic(code, Val(Span{start: start, end: end}))), retired: None}
+}
+
+// The carrier at `start` whose body opens at `open`; a `package {` without
+// its `:` carries the E0397 report.
+fn jet_driver_inline_package_found(bytes: [U8], start: Int, open: Int, end: Int) -> JetDriverInlinePackage Never! {
+    keyword_end :: start + "package".len()
+    colon :: jet_driver_inline_trivia_end(bytes, keyword_end)
+    retired :: if colon >= 0 -> Diagnostic?{None} else -> Val(parser_colon_retired_diagnostic("package {{", "package: {{", TextEdit{span: Span{start: start, end: keyword_end}, new_text: "package:"}))
+    JetDriverInlinePackage{found: true, start: start, end: end, body_start: open + 1, body_end: end - 1, error: None, retired: retired}
 }
 
 // One thread: this entry spawns nothing, so it stays infallible for its
 // `Never!` callers.
 fn jet_driver_inline_package(source: String) -> JetDriverInlinePackage {
-    none :: JetDriverInlinePackage{found: false, start: 0, end: 0, body_start: 0, body_end: 0, error: None}
+    none :: JetDriverInlinePackage{found: false, start: 0, end: 0, body_start: 0, body_end: 0, error: None, retired: None}
     if !source.contains("package") -> return none
     bytes :: source.bytes()
     first :: jet_driver_inline_trivia_end(bytes, 0)
@@ -3117,7 +3132,7 @@ fn jet_driver_inline_package(source: String) -> JetDriverInlinePackage {
             duplicate_end :: jet_driver_inline_block_end(bytes, jet_driver_inline_package_open(bytes, duplicate))
             return jet_driver_inline_package_failure("E1361", duplicate, if duplicate_end < 0 -> bytes.len() else -> duplicate_end)
         }
-        return JetDriverInlinePackage{found: true, start: first, end: end, body_start: open + 1, body_end: end - 1, error: None}
+        return jet_driver_inline_package_found(bytes, first, open, end)
     }
     stray :: jet_driver_inline_top_level_package(bytes, first)
     if stray < 0 -> return none
@@ -3131,7 +3146,7 @@ fn jet_driver_inline_package(source: String) -> JetDriverInlinePackage {
 // A thread spawn can fail, so this entry is fallible like the threaded
 // parse entries that call it.
 fn jet_driver_inline_package_threads(source: String, bytes: [U8], threads: CompilerThreads) -> JetDriverInlinePackage {
-    none :: JetDriverInlinePackage{found: false, start: 0, end: 0, body_start: 0, body_end: 0, error: None}
+    none :: JetDriverInlinePackage{found: false, start: 0, end: 0, body_start: 0, body_end: 0, error: None, retired: None}
     if !source.contains("package") -> return none
     first :: jet_driver_inline_trivia_end(bytes, 0)
     open :: jet_driver_inline_package_open(bytes, first)
@@ -3143,7 +3158,7 @@ fn jet_driver_inline_package_threads(source: String, bytes: [U8], threads: Compi
             duplicate_end :: jet_driver_inline_block_end(bytes, jet_driver_inline_package_open(bytes, duplicate))
             return jet_driver_inline_package_failure("E1361", duplicate, if duplicate_end < 0 -> bytes.len() else -> duplicate_end)
         }
-        return JetDriverInlinePackage{found: true, start: first, end: end, body_start: open + 1, body_end: end - 1, error: None}
+        return jet_driver_inline_package_found(bytes, first, open, end)
     }
     stray :: jet_driver_inline_top_level_package_threads(bytes, first, threads)
     if stray < 0 -> return none
@@ -3595,7 +3610,8 @@ fn jet_driver_parse_user_unit(text: String, retain_demand: Bool) -> JetDriverPar
     // A lexer error ends the frontend before the parse, so a broken token never
     // cascades into parse errors.
     if jet_driver_has_errors(lexed.diagnostics) -> return JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: lexed.diagnostics}, demand: ^demand, lines: lines, tokens: tokens, line_starts: ^line_starts}
-    parsed :: parse_lexed_with_source(^lexed, source, line_starts)
+    parsed := parse_lexed_with_source(^lexed, source, line_starts)
+    if carrier.retired == .Val(retired) -> &parsed.diagnostics.push(retired)
     JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens, line_starts: ^line_starts}
 }
 
@@ -3621,6 +3637,7 @@ fn jet_driver_parse_user_unit_threads(text: String, retain_demand: Bool, threads
     scanned := jet_driver_collect_core_identifier_demand_threads(^lexed.lexed, lexed.runs, retain_demand, true, threads)
     demand := ^scanned.demand
     parsed := parse_lexed_with_source_threads(^scanned.lexed, source, lexed.line_starts, lexed.runs, threads)
+    if carrier.retired == .Val(retired) -> &parsed.diagnostics.push(retired)
     // A typed `fn run(args: T)` or typed Output entry gets its generated argv entry.
     if !jet_driver_has_errors(parsed.diagnostics) -> sema_cli_entry_expand(&parsed.program)
     words :: jet_driver_unit_words(source, comments, [Item]{}, false, [String]{})
@@ -3721,6 +3738,7 @@ fn jet_driver_parse_core_source(text: String, module_name: String, owned_members
     scanned := jet_driver_collect_core_identifier_demand_threads(^lexed.lexed, lexed.runs, true, runtime_entry, threads)
     demand := ^scanned.demand
     parsed := parse_lexed_with_source_threads(^scanned.lexed, source, lexed.line_starts, lexed.runs, threads)
+    if carrier.retired == .Val(retired) -> &parsed.diagnostics.push(retired)
     kept := [Item]{}
     loop item in parsed.program.items {
         if item == {

@@ -40,7 +40,6 @@ use {
         TOKEN_BLOCK_COMMENT,
         TOKEN_COLON,
         TOKEN_COMMA,
-        TOKEN_COLON_COLON,
         TOKEN_COLON_EQ,
         TOKEN_DOT,
         TOKEN_EOF,
@@ -162,16 +161,25 @@ fn parser_parse_lexed_lines_threads(input: ^Lexed, source: [U8], line_starts: [I
     parser_parse_runs_threads(^tokens, ^tables, ^diagnostics, source_end, line_starts, source, runs, allow_environment_reads, threads)
 }
 
-// The item-run route: the cut scan per run on the threads; a stream with
-// fences takes the one-run route from here.
+// The item-run route: colon declaration heads take the keyword-first order
+// (parser_colon_declarations), then the cut scan runs per run on the threads;
+// a stream with fences takes the one-run route from here. The run bounds
+// index the lexer's tokens, so a stream the pre-pass lengthened (a module
+// instance gains its keyword) is scanned as one run.
 fn parser_parse_runs_threads(input: ^[Token], tables_input: ^TokenTables, lexer_diagnostics: ^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], runs: [Int], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
     tables := ^tables_input
     diagnostics := ^lexer_diagnostics
-    scan := parser_chunk_bounds_runs(^input, tables, source, runs, threads)
+    lexed_count :: input.len()
+    declared := parser_colon_declarations(^input, tables, &diagnostics)
+    run_bounds :: if declared.len() == lexed_count -> runs else -> [Int]{0, declared.len()}
+    scan := parser_chunk_bounds_runs(^declared, tables, source, run_bounds, threads)
     fences :: scan.fences
     bounds := ^scan.bounds
     tokens := ^scan.tokens
-    if fences -> return parser_parse_tokens_threads(^tokens, ^tables, ^diagnostics, source_end, line_starts, source, allow_environment_reads, threads)
+    if fences {
+        prepared := parser_prepare_declared(^tokens, &tables)
+        return parser_parse_expansion_threads(^prepared, ^tables, ^diagnostics, source_end, line_starts, source, allow_environment_reads, threads)
+    }
     parser_parse_bounds_threads(^tokens, bounds, ^tables, ^diagnostics, source_end, line_starts, source, allow_environment_reads)
 }
 
@@ -180,7 +188,7 @@ fn parser_parse_runs_threads(input: ^[Token], tables_input: ^TokenTables, lexer_
 fn parser_parse_bounds_threads(input: ^[Token], bounds: [Int], tables_input: ^TokenTables, lexer_diagnostics: ^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool) -> ParseResult {
     tables := ^tables_input
     diagnostics := ^lexer_diagnostics
-    prepared := ParserFenceExpansion{tokens: ^input, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
+    prepared := ParserFenceExpansion{tokens: ^input, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, retired: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
     if bounds.len() <= 2 -> return parser_parse_prepared(^prepared, diagnostics, source_end, line_starts, source, allow_environment_reads, ^tables)
     parser_parse_chunked(^prepared, bounds, diagnostics, source_end, line_starts, source, allow_environment_reads, ^tables)
 }
@@ -189,8 +197,14 @@ fn parser_parse_bounds_threads(input: ^[Token], bounds: [Int], tables_input: ^To
 // scan on this thread.
 fn parser_parse_tokens_threads(input: ^[Token], tables_input: ^TokenTables, lexer_diagnostics: ^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
     tables := ^tables_input
-    diagnostics := ^lexer_diagnostics
     prepared := parser_prepare_tokens(^input, &tables)
+    parser_parse_expansion_threads(^prepared, ^tables, ^lexer_diagnostics, source_end, line_starts, source, allow_environment_reads, threads)
+}
+
+fn parser_parse_expansion_threads(input: ^ParserFenceExpansion, tables_input: ^TokenTables, lexer_diagnostics: ^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
+    tables := ^tables_input
+    diagnostics := ^lexer_diagnostics
+    prepared := ^input
     bounds :: if prepared.diagnostics.len() > 0 -> [Int]{} else -> parser_chunk_bounds(prepared.tokens, tables, source, threads)
     if bounds.len() <= 2 -> return parser_parse_prepared(^prepared, diagnostics, source_end, line_starts, source, allow_environment_reads, ^tables)
     parser_parse_chunked(^prepared, bounds, diagnostics, source_end, line_starts, source, allow_environment_reads, ^tables)
@@ -219,17 +233,19 @@ fn parse_tokens(tokens: [Token], tables: TokenTables) -> ParseResult {
 
 // Fence expansion runs before parsing. A fence error stops the
 // parse like any token-level rejection: no partially expanded AST is built.
+// The retired spellings (E0397) follow the lexer's diagnostics.
 fn parser_parse_prepared(input: ^ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, tables: ^TokenTables) -> ParseResult {
     prepared := ^input
+    leading := lexer_diagnostics
+    loop diagnostic in prepared.retired -> &leading.push(diagnostic)
     if prepared.diagnostics.len() > 0 {
-        diagnostics := [Diagnostic]{}
-        loop diagnostic in lexer_diagnostics -> &diagnostics.push(diagnostic)
+        diagnostics := ^leading
         loop diagnostic in prepared.diagnostics -> &diagnostics.push(diagnostic)
         return ParseResult{program: ast_program(), diagnostics: diagnostics}
     }
     tokens := ^prepared.tokens
     prepared.tokens = [Token]{}
-    state := JetParserState{tokens: ^tokens, tables: [TokenTables]{^tables}, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, sources: [[U8]]{source}, allow_environment_reads: allow_environment_reads}
+    state := JetParserState{tokens: ^tokens, tables: [TokenTables]{^tables}, position: 0, diagnostics: ^leading, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, sources: [[U8]]{source}, allow_environment_reads: allow_environment_reads}
     program := parser_parse_program(&state)
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms
@@ -550,6 +566,7 @@ fn parser_parse_chunked(input: ^ParserFenceExpansion, bounds: [Int], lexer_diagn
     program := ast_program()
     diagnostics := [Diagnostic]{}
     loop diagnostic in lexer_diagnostics -> &diagnostics.push(diagnostic)
+    loop diagnostic in prepared.retired -> &diagnostics.push(diagnostic)
     block_spans := [Span]{}
     else_arms := [ElseArmSpan]{}
     block_policy_declarations := [PolicyDeclaration]{}
@@ -1002,7 +1019,7 @@ fn parser_marked_module_binding_ahead(state: &JetParserState) -> Bool Never! {
     }
     if parser_kind_at(&state, offset) != TOKEN_IDENT -> return false
     next :: parser_kind_at(&state, offset + 1)
-    if next != TOKEN_COLON_COLON && next != TOKEN_COLON_EQ -> return false
+    if next != TOKEN_COLON && next != TOKEN_COLON_EQ -> return false
     name :: parser_lookahead(&state, offset)
     bytes :: parser_value(state, name).bytes()
     bytes.len() > 0 && ((bytes[0] >= 97 && bytes[0] <= 122) || bytes[0] == 95)
@@ -1299,10 +1316,10 @@ fn parser_report_unknown_fact_root(state: &JetParserState, name: String, span: S
     parser_add_error(&state, span, "`{name}` is not a compiler fact", "`$` marks facts the compiler supplies: the roots `$build`, `$package`, `$phase` and `$program`, and `$` members of a type, function or value such as `T.$layout`", "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
 }
 
-// After `#Static` / `#Inline`, a constant binding `NAME :: …` is a declaration.
+// After `#Static` / `#Inline`, a constant binding `NAME: …` is a declaration.
 fn parser_marked_const_ahead(state: &JetParserState, offset: Int) -> Bool Never! {
     token :: parser_lookahead(&state, offset)
-    if token.kind != TOKEN_IDENT || parser_kind_at(&state, offset + 1) != TOKEN_COLON_COLON -> return false
+    if token.kind != TOKEN_IDENT || parser_kind_at(&state, offset + 1) != TOKEN_COLON -> return false
     parser_constant_name(parser_value(state, token))
 }
 

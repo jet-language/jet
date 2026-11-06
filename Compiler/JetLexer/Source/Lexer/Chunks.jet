@@ -103,16 +103,20 @@ fn lexer_line_starts(source: [U8], from: Int, to: Int, first: Bool) -> [Int] Nev
 LEXER_CHUNK_HEAD_WORDS :: [String]{"fn", "pub", "priv", "struct", "enum", "impl", "trait", "use", "extern", "module", "const", "comptime", "effect", "derive", "tag"}
 
 // Whether `at` starts a top-level item line: the bytes before it are
-// `\n}\n` and it spells `#` or an item word followed by a non-identifier
-// byte. Such a byte is a token boundary of the one-thread lex exactly when
-// the `}` is a token, which the chunk before it proves by ending there.
+// `\n}\n` and it spells `#`, an item word followed by a non-identifier byte,
+// or a declared name followed by `:` (`area: fn(…)`, `Point: struct {`).
+// Such a byte is a token boundary of the one-thread lex exactly when the `}`
+// is a token, which the chunk before it proves by ending there.
 fn lexer_chunk_head_at(source: [U8], at: Int) -> Bool Never! {
     if at < 3 || at >= source.len() -> return false
     if source[at - 1] != (U8{10}) || source[at - 2] != (U8{125}) || source[at - 3] != (U8{10}) -> return false
     first :: Int.from_u8(source[at])
     if first == 35 -> return true
-    if first < 97 || first > 122 -> return false
+    lower :: first >= 97 && first <= 122
+    if !lower && !(first >= 65 && first <= 90) && first != 95 -> return false
     end :: scan_identifier_end(source, at)
+    if end < source.len() && source[end] == (U8{58}) -> return true
+    if !lower -> return false
     loop word in LEXER_CHUNK_HEAD_WORDS {
         bytes :: word.bytes()
         if end - at != bytes.len() -> next

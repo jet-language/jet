@@ -41,7 +41,6 @@ use {
         TOKEN_CARET,
         TOKEN_CHAR,
         TOKEN_COLON,
-        TOKEN_COLON_COLON,
         TOKEN_COLON_EQ,
         TOKEN_COMMA,
         TOKEN_DOLLAR,
@@ -108,12 +107,7 @@ fn parser_statement_is_keyword(state: &JetParserState) -> Bool Never! {
         word :: parser_value(state, token)
         if parser_next_statement_ahead(&state) || word == "defer" -> return true
         next_kind :: parser_kind_at(&state, 1)
-        if next_kind == TOKEN_COLON_COLON {
-            following_kind :: parser_kind_at(&state, 2)
-            if following_kind == TOKEN_KW_LOOP || following_kind == TOKEN_IDENT -> return true
-        }
-        if next_kind == TOKEN_COLON_EQ || next_kind == TOKEN_COLON_COLON -> return true
-        if next_kind == TOKEN_COLON -> return true
+        if next_kind == TOKEN_COLON || next_kind == TOKEN_COLON_EQ -> return true
     }
     false
 }
@@ -439,7 +433,7 @@ fn parser_parse_value_lines(state: &JetParserState, depth: Int, prepared_value: 
         // As in `parser_parse_body_block`: stop under an enclosing abort.
         if parser_aborting(&state) -> return ParsedBlock{span: parser_cover(open.span, parser_current(&state).span), statements: statements, tail: tail}
         before := state.position
-        if prepared_value && parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_prep_verb_ahead(&state, 2, TOKEN_LBRACE) {
+        if prepared_value && parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON && parser_prep_verb_ahead(&state, 2, TOKEN_LBRACE) {
             binding :: parser_current(&state)
             binding_name :: parser_value(state, binding)
             parser_report_unclosed(&state, open, "the binding `{binding_name}`", "prepared value")
@@ -518,17 +512,17 @@ fn parser_parse_statement(state: &JetParserState) -> Stmt {
             if word == "defer" -> return parser_parse_defer_statement(&state)
             if parser_task_group_ahead(&state) -> return parser_parse_task_group(&state)
             if word == "assert" && parser_kind_at(&state, 1) == TOKEN_IDENT -> return parser_parse_assert_names(&state)
-            if parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_kind_at(&state, 2) == TOKEN_KW_LOOP && !parser_named_loop_is_value(&state) -> return parser_parse_labeled_loop(&state)
+            if parser_kind_at(&state, 1) == TOKEN_COLON && parser_kind_at(&state, 2) == TOKEN_KW_LOOP && !parser_named_loop_is_value(&state) -> return parser_parse_labeled_loop(&state)
             binding_kind :: parser_kind_at(&state, 1)
             if {
-                binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON_COLON || binding_kind == TOKEN_COLON -> parser_parse_binding_statement(&state)
+                binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON -> parser_parse_binding_statement(&state)
                 (binding_kind == TOKEN_LBRACE || binding_kind == TOKEN_DOT) && parser_pattern_binding_ahead(&state) -> parser_parse_pattern_binding_statement(&state)
                 else -> parser_parse_assignment_or_expression(&state)
             }
         }
         else -> {
             if (token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN) && parser_pattern_binding_ahead(&state) -> return parser_parse_pattern_binding_statement(&state)
-            // `{ member: local, … } :: tuple` renames tuple members.
+            // `{ member: local, … }: tuple` renames tuple members.
             if token.kind == TOKEN_LBRACE && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_pattern_binding_ahead(&state) -> return parser_parse_pattern_binding_statement(&state)
             parser_parse_assignment_or_expression(&state)
         }
@@ -1021,7 +1015,7 @@ fn parser_parse_loop_effect_body(state: &JetParserState) -> ParsedBlock {
     if parser_at_unified_arrow(&state) {
         arrow :: parser_expect_unified_arrow(&state, "after a loop header")
         nested :: parser_current(&state)
-        if nested.kind == TOKEN_KW_IF || nested.kind == TOKEN_KW_LOOP || (nested.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_kind_at(&state, 2) == TOKEN_KW_LOOP) {
+        if nested.kind == TOKEN_KW_IF || nested.kind == TOKEN_KW_LOOP || (nested.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON && parser_kind_at(&state, 2) == TOKEN_KW_LOOP) {
             parser_add_fatal_code(&state, "E0329", nested.span, "a nested one-line control body needs braces", "an adjacent loop body owns one simple statement", "wrap the nested control statement in `{{ ... }}`")
             return ParsedBlock{span: arrow.span, statements: [Stmt]{}, tail: None}
         }
@@ -1146,10 +1140,10 @@ fn parser_parse_labeled_loop(state: &JetParserState) -> Stmt {
     parser_parse_loop_after_keyword(&state, name.span, Val(label))
 }
 
-// Rust `named_loop_is_value`: `name :: loop …` binds a loop value when an
+// Rust `named_loop_is_value`: `name: loop …` binds a loop value when an
 // item arrow follows the header outside any group, or when a payload `break`
 // leaves this loop (labelled, or bare and not under a nested loop); otherwise
-// `name ::` labels a statement loop.
+// `name:` labels a statement loop.
 fn parser_named_loop_is_value(state: &JetParserState) -> Bool Never! {
     label :: parser_current(&state).decoded
     braces := 0
@@ -1158,7 +1152,7 @@ fn parser_named_loop_is_value(state: &JetParserState) -> Bool Never! {
     saw_body := false
     nested_loop_pending := false
     nested_loop_braces := [Int]{}
-    // Skip the `name`, `::` and `loop` tokens.
+    // Skip the `name`, `:` and `loop` tokens.
     index := parser_next_code_index(state, state.position)
     if index >= 0 -> index = parser_next_code_index(state, index + 1)
     if index >= 0 -> index = parser_next_code_index(state, index + 1)
@@ -1333,7 +1327,7 @@ fn parser_parse_prep_loop(state: &JetParserState) -> Stmt {
 
 // S74 (Rust `looks_like_sigil_binding` destructuring arms): a
 // `[ … ]`, `( … )` or `Type{ … }` target whose matching close is followed by
-// `::` or `:=`. Bounded by the bracket depth.
+// `:` or `:=`. Bounded by the bracket depth.
 fn parser_pattern_binding_ahead(state: &JetParserState) -> Bool Never! {
     offset := 0
     if parser_current_kind(&state) == TOKEN_IDENT {
@@ -1356,7 +1350,7 @@ fn parser_pattern_binding_ahead(state: &JetParserState) -> Bool Never! {
             depth -= 1
             if depth == 0 {
                 after :: parser_kind_at(&state, offset + 1)
-                return after == TOKEN_COLON_COLON || after == TOKEN_COLON_EQ
+                return after == TOKEN_COLON || after == TOKEN_COLON_EQ
             }
         }
         offset += 1
@@ -1462,16 +1456,16 @@ fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
     name :: parser_expect_name(&state, "in a binding")
     sigil :: parser_current(&state)
     mutable :: if {
-        sigil.kind == TOKEN_COLON_EQ || sigil.kind == TOKEN_COLON_COLON -> {
+        sigil.kind == TOKEN_COLON_EQ || sigil.kind == TOKEN_COLON -> {
             parser_bump(&state)
             sigil.kind == TOKEN_COLON_EQ
         }
         else -> {
-            parser_add_error(&state, sigil.span, "expected `:=` or `::` in a binding", "the binding sigil distinguishes a mutable value from an immutable one", "write `:=` for mutable or `::` for immutable")
+            parser_add_error(&state, sigil.span, "expected `:=` or `:` in a binding", "the binding sigil distinguishes a mutable value from an immutable one", "write `:=` for mutable or `:` for immutable")
             false
         }
     }
-    // `name :: comptime { value }` is the prepared-value
+    // `name: comptime { value }` is the prepared-value
     // binding. A block holding only its final expression lowers to the one
     // compile-time binding path; any other block keeps E0391.
     if !mutable && parser_prep_verb_ahead(&state, 0, TOKEN_LBRACE) {
@@ -1943,7 +1937,7 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
         offset := 0
         loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
         binding_kind :: parser_kind_at(&state, offset + 1)
-        if parser_kind_at(&state, offset) == TOKEN_IDENT && (binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON_COLON || binding_kind == TOKEN_COLON) {
+        if parser_kind_at(&state, offset) == TOKEN_IDENT && (binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON) {
             parser_skip_semicolons(&state)
             statement :: parser_parse_binding_statement(&state)
             if statement == .Val(binding) {

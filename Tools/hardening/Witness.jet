@@ -84,6 +84,8 @@ fn mask_inline_package(text: String) -> String Never! {
     }
     open := at + word.len()
     loop open < bytes.len() && (bytes[open] == (U8{32}) || bytes[open] == (U8{9})) -> open += 1
+    if open < bytes.len() && bytes[open] == (U8{58}) -> open += 1
+    loop open < bytes.len() && (bytes[open] == (U8{32}) || bytes[open] == (U8{9})) -> open += 1
     if open >= bytes.len() || bytes[open] != (U8{123}) -> return text.copy()
     depth := 0
     quoted := false

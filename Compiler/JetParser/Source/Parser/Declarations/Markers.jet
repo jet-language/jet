@@ -25,7 +25,6 @@ use {
     jet_lexer.[
         TOKEN_BANG,
         TOKEN_COLON,
-        TOKEN_COLON_COLON,
         TOKEN_COMMA,
         TOKEN_DOT_DOT_DOT,
         TOKEN_EOF,
@@ -98,7 +97,7 @@ fn parser_parse_marker_impl(state: &JetParserState, value: &StructDef) {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
         token :: parser_current(&state)
-        if token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON {
+        if token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON {
             parser_parse_marker_setting(&state, &declaration)
             next
         }

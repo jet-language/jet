@@ -90,12 +90,10 @@ fn env_transition_source_entries(source: String) -> [TransitionSourceEntry] Neve
     entries
 }
 
+// The field an entry assigns: `name` for `name: value`, or `::name` for an
+// inline `name: Config{...}` (also the retired `name :: Config{...}`).
 fn env_transition_source_field(raw: String) -> String? Never! {
     text :: env_transition_trim_semicolons(env_transition_strip_comments(raw).trim()).trim()
-    if text.split_once("::") == .Val(binding) {
-        left :: binding.before.trim()
-        if binding.after.trim_start().starts_with("Config") -> return Val("::{left}")
-    }
     bytes :: text.bytes()
     depth := 0
     quoted := false
@@ -117,12 +115,22 @@ fn env_transition_source_field(raw: String) -> String? Never! {
             123 | 91 | 40 -> depth += 1
             125 | 93 | 41 -> depth -= 1
             58 -> {
-                if depth == 0 -> return Val(pkg_bytes_text(bytes, 0, index).trim())
+                if depth == 0 {
+                    left :: pkg_bytes_text(bytes, 0, index).trim()
+                    value :: env_transition_config_value(pkg_bytes_text(bytes, index + 1, bytes.len()))
+                    if value.starts_with("Config") -> return Val("::{left}")
+                    return Val(left)
+                }
             }
             else -> {}
         }
     }
     None
+}
+
+// The value after a binding's `:`, past the second `:` of a retired `::`.
+fn env_transition_config_value(after: String) -> String Never! {
+    after.removeprefix(":").trim_start()
 }
 
 // The one entry that assigns `field`, and its value.
@@ -182,20 +190,21 @@ fn env_transition_require_output_declaration(entries: [TransitionSourceEntry], n
     loop entry in entries {
         if entry.field != Val(name) -> next
         value :: env_transition_field_value(entry.raw, name) ?? next
-        if value.trim_start().starts_with("Output ::") -> count += 1
+        if env_transition_config_value(value).starts_with("Output.") || value.trim_start().starts_with("Output ::") -> count += 1
     }
     if count != 1 -> return Err(env_transition_error("outputs.{name} must be declared exactly once in {path}"))
 }
 
-// The body of an inline `name :: Config{...}` entry.
+// The body of an inline `name: Config{...}` entry.
 fn env_transition_config_body(raw: String) -> String? Never! {
     clean :: env_transition_mask_comments(raw).bytes()
-    separator :: env_transition_find(clean, "::".bytes(), 0)
+    separator :: env_transition_find(clean, ":".bytes(), 0)
     if separator < 0 -> return None
-    value :: pkg_bytes_text(clean, separator + 2, clean.len()).trim()
+    width :: if separator + 1 < clean.len() && Int.from_u8(clean[separator + 1]) == 58 -> 2 else -> 1
+    value :: pkg_bytes_text(clean, separator + width, clean.len()).trim()
     if !value.starts_with("Config") -> return None
     bytes :: raw.bytes()
-    env_transition_record_body(pkg_bytes_text(bytes, separator + 2, bytes.len()))
+    env_transition_record_body(pkg_bytes_text(bytes, separator + width, bytes.len()))
 }
 
 // The text inside the first balanced `{...}` record of `value`.

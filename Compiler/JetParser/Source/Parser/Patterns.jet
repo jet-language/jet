@@ -25,7 +25,6 @@ use {
         StringPart,
         TOKEN_AND_AND,
         TOKEN_COLON,
-        TOKEN_COLON_COLON,
         TOKEN_COMMA,
         TOKEN_DOT,
         TOKEN_DOT_DOT,
@@ -38,6 +37,7 @@ use {
         TOKEN_LBRACKET,
         TOKEN_LPAREN,
         TOKEN_NULL,
+        TOKEN_OR_OR,
         TOKEN_PIPE,
         TOKEN_QUESTION,
         TOKEN_RAW_STRING,
@@ -427,7 +427,8 @@ fn parser_named_struct_pattern_ahead(state: &JetParserState) -> Bool Never! {
     if first.kind == TOKEN_DOT_DOT -> return true
     if first.kind != TOKEN_IDENT || parser_value(state, first) == "_" -> return false
     second :: parser_kind_at(&state, 3)
-    if second == TOKEN_COLON || second == TOKEN_COMMA -> return true
+    if second == TOKEN_COMMA -> return true
+    if second == TOKEN_COLON -> return parser_named_pattern_closes_into_body(state, true)
     if second != TOKEN_RBRACE -> return false
     after :: parser_kind_at(&state, 4)
     after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW || after == TOKEN_COMMA || after == TOKEN_RPAREN || after == TOKEN_RBRACKET || after == TOKEN_RBRACE || after == TOKEN_AND_AND
@@ -547,9 +548,7 @@ fn parser_parse_pattern_atom(state: &JetParserState, depth: Int, allow_named: Bo
             return ParsedPattern{pattern: Pattern.Variant{variant: "_", bindings: [PatSlot]{}, leading_dot: false, span: start.span}, span: start.span}
         }
     }
-    loop {
-        separator_kind :: parser_current_kind(&state)
-        if separator_kind != TOKEN_DOT && separator_kind != TOKEN_COLON_COLON -> break
+    loop parser_current_kind(&state) == TOKEN_DOT {
         parser_bump(&state)
         member :: parser_expect_name(&state, "after a separator in a variant pattern")
         path = "{path}.{parser_value(state, member)}"
@@ -633,18 +632,46 @@ fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {
 
 // In a condition, where `{` usually opens the body,
 // `.Case{` starts named payload entries only when its first entry reads as
-// one: `..`, `field:`, `field,`, or a lone `field}` directly followed by the
-// body (`{` or `->`). No block starts with those tokens.
+// one: `..`, `field,`, or a lone `field}` directly followed by the body (`{`
+// or `->`). A first `field:` reads as one only when the matching `}` is
+// followed by the body or more of the condition, since a block may start
+// with the binding `name: value`.
 fn parser_named_pattern_brace_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_LBRACE -> return false
     first :: parser_lookahead(&state, 1)
     if first.kind == TOKEN_DOT_DOT -> return true
     if first.kind != TOKEN_IDENT || parser_value(state, first) == "_" -> return false
     second :: parser_kind_at(&state, 2)
-    if second == TOKEN_COLON || second == TOKEN_COMMA -> return true
+    if second == TOKEN_COMMA -> return true
+    if second == TOKEN_COLON -> return parser_named_pattern_closes_into_body(state, false)
     if second != TOKEN_RBRACE -> return false
     after :: parser_kind_at(&state, 3)
     after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW
+}
+
+// Whether the `{` at the cursor closes into the body or the rest of a
+// pattern or condition: `{`, `->`, `|`, `&&`, `||`, `)` or `,` after its
+// matching `}`, and in a nested pattern `}` or `]` as well.
+fn parser_named_pattern_closes_into_body(state: JetParserState, nested: Bool) -> Bool Never! {
+    depth := 0
+    index := state.position
+    loop index < state.tokens.len() {
+        kind :: state.tokens[index].kind
+        index += 1
+        if kind == TOKEN_LBRACE || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET {
+            depth += 1
+        } else if kind == TOKEN_RBRACE || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET {
+            depth -= 1
+            if depth == 0 {
+                after :: parser_lookahead_kind_forward(state, index, 0)
+                if nested && (after == TOKEN_RBRACE || after == TOKEN_RBRACKET) -> return true
+                return after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW || after == TOKEN_PIPE || after == TOKEN_AND_AND || after == TOKEN_OR_OR || after == TOKEN_RPAREN || after == TOKEN_COMMA
+            }
+        } else if kind == TOKEN_EOF {
+            return false
+        }
+    }
+    false
 }
 
 // Line breaks inside a multi-line named-field pattern lex as `;`.

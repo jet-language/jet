@@ -336,6 +336,18 @@ fn matching_open(facts: [Int], index: Int, open_kind: Int, close_kind: Int) -> I
 
 fn has_ffi_marker(source: [U8], facts: [Int], function_index: Int) -> Bool Never! {
     cursor := previous_code_index(facts, function_index)
+    // `add: fn(…)`: the name path and its `:` sit between the markers and `fn`.
+    if kind_at(facts, cursor) == K_COLON {
+        cursor = previous_code_index(facts, cursor)
+        loop cursor >= 0 && kind_at(facts, cursor) == K_IDENT {
+            before :: previous_code_index(facts, cursor)
+            if before < 0 || kind_at(facts, before) != K_DOT {
+                cursor = before
+                break
+            }
+            cursor = previous_code_index(facts, before)
+        }
+    }
     loop cursor >= 0 {
         kind :: kind_at(facts, cursor)
         // Comments, `pub` and `;` between markers and `fn` are skipped, as in
