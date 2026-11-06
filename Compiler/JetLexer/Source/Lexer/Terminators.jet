@@ -437,6 +437,15 @@ tuple_rename_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     false
 }
 
+// The token at `index` ends a statement at a line break. A postfix deref
+// `p.*` ends its line like the name it dereferences; any other trailing `*`
+// is a multiplication continued on the next line.
+ends_statement_at: fn(facts: [Int], index: Int) -> Bool Never! {
+    kind: kind_at(facts, index)
+    if kind == K_STAR -> return index > 0 && kind_at(facts, index - 1) == K_DOT
+    ends_statement(kind)
+}
+
 terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
     events := [Int]{}
     last_code := -1
@@ -453,7 +462,7 @@ terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
                 kind == K_EOF -> {
                     if last_code >= 0 {
                         previous: kind_at(facts, last_code)
-                        if ends_statement(previous) && previous != K_RBRACE {
+                        if ends_statement_at(facts, last_code) && previous != K_RBRACE {
                             events.push(1)
                             events.push(index)
                             events.push(facts[last_code * 4 + 2])
@@ -466,7 +475,7 @@ terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
                         previous: kind_at(facts, last_code)
                         end: facts[last_code * 4 + 2]
                         start: facts[index * 4 + 1]
-                        if newline_between(source, end, start) && ends_statement(previous) {
+                        if newline_between(source, end, start) && ends_statement_at(facts, last_code) {
                             split: if kind == {
                                 K_UNIFIED_ARROW -> true
                                 K_LBRACE -> true
