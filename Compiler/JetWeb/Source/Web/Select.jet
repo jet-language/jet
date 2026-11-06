@@ -514,24 +514,28 @@ fn web_direct_call(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at
         return web_call_result(&e, &st, m, f, at, if target.result >= 0 -> "l" else -> "")
     }
     sig :: st.sigs[callee]
+    // A runtime export the host defines in its place (JetIR IR_HOST_PROVIDER)
+    // is called as the host's C function.
+    replaced :: target.host_symbol != "" && (st.hosts.get(target.host_symbol) ?? false)
+    called :: if replaced -> web_ref(&st, "c", target.host_symbol, sig) else -> callee
     tail :: at + 1 < f.op.len() && f.op[at + 1] == .Return && f.b[at + 1] == IR_TAIL_JUMP
     letters :: web_push_args(&e, m, f, at)
     if letters != web_sig_params(sig) -> return web_fail(&e, &st, f, at, "`{target.name}` takes ({web_sig_params(sig)}), not ({letters})")
     if tail {
         if web_sig_result(sig) == e.result {
             web_epilogue_frame(&e)
-            return web_return_call(&e, callee)
+            return web_return_call(&e, called)
         }
         // The callee's result is not this function's: call, then return
         // this result's zero; the callee's return set the stop global.
-        web_call(&e, callee)
+        web_call(&e, called)
         if web_sig_result(sig) != "" -> web_op(&e, 0x1a)
         web_epilogue_frame(&e)
         zero :: web_result_type(e.result)
         if zero != 0 -> web_zero(&e, zero)
         return web_op(&e, 0x0f)
     }
-    web_call(&e, callee)
+    web_call(&e, called)
     web_call_result(&e, &st, m, f, at, web_sig_result(sig))
 }
 

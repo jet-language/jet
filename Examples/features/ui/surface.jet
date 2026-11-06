@@ -2,7 +2,7 @@ package {
     name: "ui_surface"
     version: "0.1.0"
     authority: {
-        allow: [IO, Mem.Alloc]
+        allow: [IO, Mem.Alloc, Browser]
         needs: [UI.FileDialog, UI.Clipboard, UI.IME, UI.DragDrop, UI.Shortcuts, UI.Accessibility, UI.FontShaping]
     }
 }
@@ -129,30 +129,57 @@ fn run() {
     write_rights :: host.fs_rights_write()
     read_write_rights :: host.fs_rights_read_write()
     grant_result :: host.fs_grant(".", read_write_rights)
-    _capabilities :: host.capabilities()
-    _metadata_result :: host.accessibility("Surface", "Portable UI surface")
-    _clipboard_read :: clipboard.read_text()
-    _clipboard_write :: clipboard.write_text("surface clipboard")
-    _ime_event :: ime.poll()
-    _drop_event :: drag_drop.poll()
+    facts :: host.capabilities()
+    loop fact in facts.facts -> print("capability {fact.capability}: {fact.available}")
+    metadata :: host.accessibility("Surface", "Portable UI surface")
+    if clipboard.read_text() == {
+        .Ok(read) -> print("clipboard read: {read.text}")
+        .Err(error) -> print("clipboard read: {error}")
+    }
+    if clipboard.write_text("surface clipboard") == {
+        .Ok(write) -> print("clipboard write: {write.characters}")
+        .Err(error) -> print("clipboard write: {error}")
+    }
+    if ime.poll() == {
+        .Ok(event) -> print("ime event: {event != None}")
+        .Err(error) -> print("ime: {error}")
+    }
+    if drag_drop.poll() == {
+        .Ok(event) -> print("drop event: {event != None}")
+        .Err(error) -> print("drag/drop: {error}")
+    }
 
     command :: save_command()
     _host_shortcut :: host.shortcut("s", command.modifiers)
     binding :: shortcuts.binding(command, "save")
-    _registered :: shortcuts.register(binding)
-    _dispatched :: shortcuts.dispatch(command)
+    if shortcuts.register(binding) == {
+        .Ok(registered) -> print("shortcut registered: {registered.action}")
+        .Err(error) -> print("shortcut register: {error}")
+    }
+    if shortcuts.dispatch(command) == {
+        .Ok(dispatched) -> print("shortcut dispatch: {dispatched}")
+        .Err(error) -> print("shortcut dispatch: {error}")
+    }
 
     grant :: grant_result
     open_request :: host.open_request(grant.copy())
     save_request :: host.save_request(grant.copy())
-    _open_result :: host.open_file(open_request)
-    _save_result :: host.save_file(save_request)
+    if host.open_file(open_request) == {
+        .Ok(selection) -> print("open: {selection.files.len()} files")
+        .Err(error) -> print("open: {error}")
+    }
+    if host.save_file(save_request) == {
+        .Ok(selection) -> print("save: {selection.files.len()} files")
+        .Err(error) -> print("save: {error}")
+    }
 
-    metadata :: _metadata_result
     accessible :: ui.node_accessibility(tree, metadata.copy())
-    _attached :: accessibility.attach(accessible, metadata)
-    if _ime_event == {
-        .Val(event) -> { _projected :: accessibility.project(accessible, event.target) }
-        .None -> {}
+    if accessibility.attach(accessible.copy(), metadata) == {
+        .Ok(_) -> print("accessibility attached")
+        .Err(error) -> print("accessibility attach: {error}")
+    }
+    if accessibility.project(accessible, UINodeID{value: "surface"}) == {
+        .Ok(projection) -> print("accessibility projected: {projection != None}")
+        .Err(error) -> print("accessibility project: {error}")
     }
 }

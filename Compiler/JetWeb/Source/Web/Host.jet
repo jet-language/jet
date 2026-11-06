@@ -5,6 +5,10 @@
 // library calls the runtime makes (WEB_HOST_C). Under node the file system
 // is the host's; a page has no file system, so those calls fail with ENOSYS.
 
+use {
+    jet_ir.[IR_HOST_PROVIDER]
+}
+
 // The C functions the host provides, each as the runtime's IR calls it.
 WEB_HOST_C :: [String]{
     "__errno_location", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt", "ceil", "cos", "cosh",
@@ -15,9 +19,13 @@ WEB_HOST_C :: [String]{
     "tcsetattr", "times", "trunc", "utime",
 }
 
+// Each host C function: true when it replaces the runtime's own definition,
+// as each leaf of the UI provider seam (IR_HOST_PROVIDER) does: the host
+// forwards it to the page's browser provider.
 fn web_host_functions() -> [String:Bool] Never! {
     hosts := [String:Bool]{}
-    loop name in WEB_HOST_C -> hosts[name.copy()] = true
+    loop name in WEB_HOST_C -> hosts[name.copy()] = false
+    loop name in IR_HOST_PROVIDER -> hosts[name.copy()] = true
     hosts
 }
 
@@ -687,6 +695,16 @@ class Host {
     // The host runs one thread: the first refused thread start says why
     // before the runtime stops with E3001.
     let threadsRefused = false;
+    // The UI provider seam's leaves forward to the page's browser provider,
+    // globalThis.jetUiProvider, and only marshal: Core owns every rule and
+    // error. A text answer is staged here until jet_ui_provider_take copies it.
+    const provider = () => globalThis.jetUiProvider;
+    let staged = null;
+    const stage = (text) => {
+      staged = text == null ? null : encoder.encode(text);
+      return staged === null ? -1n : BigInt(staged.length);
+    };
+    const textAt = (bytes, length) => decoder.decode(host.u8().slice(Number(bytes), Number(bytes) + Number(length)));
     return {
       __errno_location: () => BigInt(ERRNO_WORD),
       acos: Math.acos, acosh: Math.acosh, asin: Math.asin, asinh: Math.asinh, atan: Math.atan, atan2: Math.atan2,
@@ -694,6 +712,16 @@ class Host {
       exp2: (x) => power(2, x), expm1: Math.expm1, floor: Math.floor, fma: fusedMultiplyAdd, fmod: (x, y) => x % y,
       hypot: Math.hypot, log: Math.log, log10: Math.log10, log1p: Math.log1p, log2: Math.log2, pow: power,
       round: roundHalfAway, sin: Math.sin, sinh: Math.sinh, sqrt: Math.sqrt, tan: Math.tan, tanh: Math.tanh, trunc: Math.trunc,
+      jet_ui_provider_capability: (code) => (provider()?.capability(Number(code)) ? 1n : 0n),
+      jet_ui_provider_clipboard_get: () => stage(provider()?.clipboardGet()),
+      jet_ui_provider_clipboard_set: (bytes, length) => (provider()?.clipboardSet(textAt(bytes, length)) ? 0n : -1n),
+      jet_ui_provider_event_pop: (queue) => stage(provider()?.eventPop(Number(queue))),
+      jet_ui_provider_dialog_request: (kind, bytes, length) => BigInt(provider()?.dialogRequest(Number(kind), textAt(bytes, length)) ?? -1),
+      jet_ui_provider_dialog_result: (token) => stage(provider()?.dialogResult(Number(token))),
+      jet_ui_provider_take: (buffer) => {
+        if (staged !== null) host.u8().set(staged, Number(buffer));
+        staged = null;
+      },
       fork: () => fail(E.NOSYS, -1n),
       getaddrinfo: () => fail(E.NOSYS, -11n),
       freeaddrinfo: () => {},

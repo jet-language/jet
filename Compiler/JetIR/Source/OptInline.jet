@@ -69,6 +69,7 @@ fn ir_opt_inline_build(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
     out.inline_always = caller.inline_always
     out.symbol_hash = caller.symbol_hash
     out.cold = caller.cold
+    out.host_symbol = caller.host_symbol.copy()
     loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(&out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
     out.result = caller.result
     loop value in caller.args -> &out.args.push(value)
@@ -85,12 +86,14 @@ fn ir_opt_inline_build(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
 }
 
 // The size of the callee of the Call at `at` when it may be inlined there,
-// else -1. An asm leaf's code is its template, never IR to inline.
+// else -1. An asm leaf's code is its template, never IR to inline; a host
+// provider leaf (IR.jet IR_HOST_PROVIDER) stays a call its host can replace.
 fn ir_opt_inline_size(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, at: Int, recursive: [Bool], limit: Int) -> Int Never! {
     callee_id :: caller.a[at]
     if callee_id < 0 || callee_id >= bodies.len() || recursive[callee_id] || bodies[callee_id].len() == 0 -> return -1
     callee :: bodies[callee_id][0]
     if callee.asm != None -> return -1
+    if callee.host_symbol != "" -> return -1
     // A last-owner routine stays one shared copy (BuildOwn.jet IR_LAST_OWNER).
     if callee.name == IR_LAST_OWNER && callee.source_file == "" -> return -1
     if caller.c[at] != callee.param_count -> return -1

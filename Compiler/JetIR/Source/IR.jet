@@ -236,6 +236,20 @@ struct IRFunction {
     // Code that runs at most once and off the program's work (Opt.jet
     // ir_opt_mark_cold): optimized for size.
     cold: Bool{false}
+    // The C symbol a host defines in this runtime export's place
+    // (IR_HOST_PROVIDER, set by ir_build_library), else empty.
+    host_symbol: String{""}
+}
+
+// The leaves of the UI provider seam (JetRuntime UiHostProvider.jet), by C
+// symbol: the native runtime defines them headless, and a host with its own
+// provider (the web, JetWeb Host.jet web_host_functions) defines them in
+// their place at every call (JetWeb Select.jet web_direct_call). Inlining
+// never takes one (OptInline.jet), so every call stays one the host can
+// replace.
+IR_HOST_PROVIDER :: [String]{
+    "jet_ui_provider_capability", "jet_ui_provider_clipboard_get", "jet_ui_provider_clipboard_set",
+    "jet_ui_provider_dialog_request", "jet_ui_provider_dialog_result", "jet_ui_provider_event_pop", "jet_ui_provider_take",
 }
 
 // One counted loop sema proved (AutoVectorizationFacts, JetSema

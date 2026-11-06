@@ -264,6 +264,7 @@ fn ir_build_library(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDe
             }
         }
         &globals.push(IRLibraryExport{function: roots[index], symbol: row.symbol, init_priority: hook.init_priority, fini_priority: hook.fini_priority, guards: ^guards})
+        if IR_HOST_PROVIDER.contains(row.symbol) -> m.functions[roots[index]].host_symbol = row.symbol.copy()
         &abis.push(ir_export_abi(m, roots[index], row.symbol))
     }
     if guard_problems.len() > 0 -> return ir_library_failed(guard_problems)
