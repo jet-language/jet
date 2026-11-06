@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6592,
-    "rev": 92900,
+    "nextNum": 6594,
+    "rev": 92925,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31483,65 +31483,65 @@
         {
           "n": 2,
           "text": "account malformed skipped/trailing data, borrowed lifetimes and failure timing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T18:38:03.355Z"
+          "evidence": "dev aeeb2c479c (GoldenRoots3): new golden serde/json_selective passes on o0/o1/o2. One 20-field document goes through parse, decode<Small> (1 of 20 fields) and the reader, valid and with a malformed skipped field, trailing garbage, a second root, a duplicate key or bad escape inside a skipped field, and a truncated tail. Parse and projection reject every bad input on the same line; the reader fails at the bad bytes after N events, and a reader stopped after the first key never sees the fault (failure timing). A decoded value owns its text and outlives its source (no borrowed lifetimes; no lazy decode).",
+          "at": "2026-11-06T05:54:45.856Z"
         },
         {
           "n": 3,
           "text": "measure repeated scans/materialization/allocations.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-30T16:32:23.511Z"
+          "evidence": "dev aeeb2c479c (GoldenRoots3): new golden serde/json_selective passes on o0/o1/o2. Measured on a 1.05 MB document, --release, this host: parse 80-123 ms per call, 67 MB peak RSS; decode<Small> 129 ms, 84 MB peak (materializes the full Dyn tree, then projects); full event drain 1.37 s, 30 MB peak; first key only 12 us; parse repeated x20 is 83 ms per call (no caching). The event-drain slowness is filed as a perf card.",
+          "at": "2026-11-06T05:54:48.109Z"
         },
         {
           "n": 4,
           "text": "gate new expert APIs rather than silently weakening ordinary decode.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T18:38:04.047Z"
+          "evidence": "dev aeeb2c479c (GoldenRoots3): new golden serde/json_selective passes on o0/o1/o2. No new expert API was added and ordinary decode is not weakened: projection rejects exactly what full parse rejects, on the same line, for malformed skipped data, trailing data, a second root, duplicate keys and bad escapes.",
+          "at": "2026-11-06T05:54:49.967Z"
         },
         {
           "n": 5,
           "text": "Runnable proof: `JET_GOLDEN_FILTER=serde/json_selective cargo test --test golden examples_compile_and_run` passes; full parse and typed projection fail identically on malformed skipped/trailing data; perf numbers for full vs projected vs event paths are recorded.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-30T16:32:24.425Z"
+          "evidence": "dev aeeb2c479c (GoldenRoots3): new golden serde/json_selective passes on o0/o1/o2, judged under today's tiers (the cargo test command is retired; the Jet testkit golden is the runnable proof). Full parse and typed projection fail identically on malformed skipped and trailing data; perf numbers for full, projected and event paths are recorded on c3.",
+          "at": "2026-11-06T05:54:51.990Z"
         },
         {
           "n": 6,
           "text": "[#3232]  • Exact, quoted, fractional, overflow, nonfinite and nested targets keep decimal/integer information. • Overflow and nonfinite values are typed errors, never string coercion. • Web is included. Golden `serde/json_typed_numbers` (expected `.out` missing).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:27:30.534Z"
+          "evidence": "dev 864c10a4d0 (GoldenRoots3): golden serde/json_typed_numbers and its expected .out are on dev and pass natively (exact, quoted, fractional, overflow, nonfinite and nested targets; overflow and nonfinite are typed errors). The web tier is covered by case encoding_parity/json_typed_numbers_match_their_golden_on_web, which builds the unchanged golden for web, runs it under node, and matches the native .out byte for byte (PASS).",
+          "at": "2026-11-06T05:42:09.639Z"
         },
         {
           "n": 7,
           "text": "[#3234]  • One policy reaches whole-value and incremental readers. Reject reports key and location. Allow uses last-value resolution. • Raw-event occurrences are explicit. Duplicate tracking is bounded. • Golden `serde/json_duplicate_keys`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:27:31.880Z"
+          "evidence": "dev bf5f543c00 (GoldenRoots3): golden serde/json_duplicate_keys passes on o0/o1/o2. One strict policy reaches parse, typed decode and the incremental file reader, each rejecting with key and location (decode: 'invalid JSON (line 1): duplicate object key `count`'); Allow resolves to the last value in parse and the reader yields every occurrence as its own events; tracking is bounded, so under tight limits a 2,000-name object stops the strict reader with a Limit error after 3267 events while the allow reader reads all 4002.",
+          "at": "2026-11-06T05:48:31.908Z"
         },
         {
           "n": 8,
           "text": "[#3274]  • Newline-delimited records are distinct from multi-root JSON. • Per-record line/offset; bounded buffers, cancellation and truncation; disclose eager splitting. • Golden `serde/encoding_jsonl_stream`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:27:33.020Z"
+          "evidence": "dev b3d0d86257 (GoldenRoots3): golden serde/encoding_jsonl_stream passes on o0/o1/o2. Two values on one line are an error, not two records. Each failure names its record ($[n]), line and byte offset and stays sticky. max_item_bytes and max_total_bytes stop the reader with a Limit error, buffer_bytes 4 is refused, an unfinished final record is Truncated, and cancelling the consuming task gives cancelled. Eager splitting is disclosed: jsonl.parse returns no records on failure while the reader yields the good ones first, as the Jsonl.jet docs now state.",
+          "at": "2026-11-06T05:46:49.682Z"
         },
         {
           "n": 9,
@@ -32005,7 +32005,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-09-12T14:31:10.267Z",
-      "updated": "2026-11-04T23:48:39.388Z",
+      "updated": "2026-11-06T05:54:51.990Z",
       "updatedBy": "Main",
       "workOrder": 79,
       "goals": [
@@ -53771,6 +53771,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c20 waits on a WASI backend target (CoreOwnership): jet build --target=wasm32-wasip2 reports jet.InvalidCommandInput 'not built yet'. wasmtime is available locally through nix, so this is build work, not an external block. c21 in progress: D-TESTFAULT1 #Test(faults:) was a silent no-op (TTestFact.faults never reached the harness, so the Core/Files fault tests proved nothing); CoreOwnership is building the harness (runtime jet_rt_test_unit_faults, IR, CLI)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c108 partial, 6bee890a10 (CoreOwnership): v2 Core coverage ratchet (name + signature per module; --check fails an unlisted item with file:line; --write only removes; moved items re-filed) and a reset list of 4837 built from a HEAD archive; node --test 13/13 and --check OK locally; pushed to origin/dev. Remaining: a hosted CI run. .github/workflows/ci.yml runs only on pushes to master and on pull requests, and origin/master is held by owner order, so the hosted run needs the owner (a master push or a PR)."
         },
         {
@@ -54493,11 +54498,11 @@
         {
           "n": 21,
           "text": "(was #3690) (was #3667) [#1000] On deferred platforms, consumer failure propagation (raw, keygen, nonce, salt, UUID) is failure-injection tested and agrees on every level.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:26.171Z"
+          "evidence": "dev 0998acbb54 (CoreOwnership): #Test(faults:) was a silent no-op (the schedule was never armed); TestArtifacts and the runtime jet_rt_test_unit_faults now arm it, and random.bytes takes the Rand checkpoint. Case crypto_entropy/rand_faults_reach_every_consumer_on_every_level: with faults: [Rand], raw bytes, keygen, the seal nonce/salt/key draws, the password salt and UUID v4 each return their typed unavailable failure (5/5 pass) with identical exit, stdout and stderr at --optimize=none, basic and full; a negative control where every consumer leaves the failure unhandled FAILs 5/5 at all three levels, each report naming 'fault injected: Rand call 1'. FS.Read faults also fire (probed).",
+          "at": "2026-11-06T05:37:10.624Z"
         },
         {
           "n": 22,
@@ -54619,11 +54624,11 @@
         {
           "n": 35,
           "text": "(was #5974) (was #4924) Core surface ledger: finish the Jet-native receiver-aware method inventory (replaces the Rust-derived inventory)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:39:51.084Z"
+          "evidence": "dev 59ffda6c23 (CoreOwnership): the Core surface ledger reads receiver methods from the Jet tables (BUILTIN_METHOD_ROWS, COLLECTION_OPERATIONS, BUILTIN_STATIC_ROWS, the numeric sources and Core type declarations) through receivers rows; the remaining methods rows cover only the sema-coded handle families (Cell, Shared, Event, Task and others with no table). --check rejects any name sema does not spell and any repeat of a derived name (negative controls pass); check-core-surface-ledger --check passes; core-conformance output byte-identical to HEAD.",
+          "at": "2026-11-06T05:49:59.750Z"
         },
         {
           "n": 36,
@@ -55296,7 +55301,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-06T10:08:37.412Z",
-      "updated": "2026-11-06T05:11:43.576Z",
+      "updated": "2026-11-06T05:49:59.750Z",
       "updatedBy": "Main",
       "goals": [
         "G14",
@@ -66016,11 +66021,11 @@
         {
           "n": 11,
           "text": "(was #5941) Sema's loop-never-exits verdict can disagree with the lowered CFG and silently drop the code after the loop",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T21:03:41.809Z"
+          "evidence": "dev ce38120fe8 (GoldenRoots3): a break inside a #Shield or other marker block, or a comptime arm, within a loop now counts as exiting it, so sema's never-exits verdict matches the lowered CFG and code after the loop is kept (it used to be dropped and the program hit SIGILL). Case control_and_data/break_inside_marker_block_keeps_code_after_loop passes under jet run and --release and errored with a signal on base. A/B vs 6bee890a10: ui 2378, golden loop/control/switch/match/option/files/resource/own 739, cases core_files/ownership/control_and_data/loop/bind 452, 0 lost.",
+          "at": "2026-11-06T05:27:53.600Z"
         },
         {
           "n": 12,
@@ -66043,11 +66048,11 @@
         {
           "n": 14,
           "text": "(was #6318) The E3010 text for Int to Float names the actual target and problem (no 'into the decimal'), generated from the registry, with its UI snapshot updated from real output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:38:48.397Z"
+          "evidence": "dev afca271c7e (GoldenRoots3): the E3010 text for a checked Int to Float crossing reads 'whole number has no exact Float; approx(x) rounds it to the nearest Float' (the F32 form for an F32 target); the inline lowering and the runtime leaf produce the same text, rendered by the E3010 registry row through {{msg}}. Snapshot Examples golden types/typed_literal_whole_value_lossy.err.out regenerated from real output. Golden numeric_widening, exact_number and math/numeric/approx 229 pass, the 4 failures identical to base; int-widen and numeric C fixtures CHECK OK.",
+          "at": "2026-11-06T05:33:22.349Z"
         },
         {
           "n": 15,
@@ -66301,7 +66306,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-06T05:01:28.804Z",
+      "updated": "2026-11-06T05:33:22.349Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -70958,6 +70963,16 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c3 partial, 5ef6f1d1f5 (Recover3): compiled-workload-runner.mjs/.sh ported to jet Tools/ci/CompiledWorkloads.jet run; --measurement-registry output byte-identical to the node version, fail-closed probes identical, #Tests 11/11, native-trace 27/27, contract passes; lane check CHECK OK on 0998acbb54 + patch; cases A/B with the same s1, 0 LOST (compiled_workload 2/2, release_gates 7/7). Remaining for c3: the other node/shell scripts, the web tier's node driver.mjs, and an end-to-end producer run (6 peer toolchains; host go 1.26.7 vs pinned 1.26.5). core-coverage-census row 208 stays a blocked route: hosted CI runs it with no Jet compiler, and 6bee890a10's ratchet v2 makes the held CoreCoverageCensus.jet port stale."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c21 partial, 8ef1f27504 (Recover3): Net capture and replay works for Core's HTTP client (new case prove_sensitive_net_capture). Still E3625: sockets, TLS streams, WebSockets, servers, and failed hops with no portable error name. Landing tree 0998acbb54 + patch: chain FIXED_POINT 0ae79dafed457ef5, lane check CHECK OK; A/B on dd88a19f08 0 LOST: ui 2406 (2172 PASS both), cases 7302 to 7303 (+1 GAIN), golden 4742 (4627 PASS both)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "c15 partial dev 7c9a5fd1a9 (Recover3): ui A/B on s1 from clean export: impure_net_stub gained (E3412 at a comptime statement site), 0 lost; base 48d7299e3f 2174 PASS/133 FAIL -> 8a6d501edc+patch 2175/132. c3 partial dev b486d6c09a: CompiledWorkloadPeerLauncherCheck.jet:189 personal path replaced by JET_SCRATCH_ROOT / XDG_CACHE_HOME; self-test passed; lane-check CHECK OK"
         },
         {
@@ -71967,7 +71982,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-06T04:26:18.446Z",
+      "updated": "2026-11-06T05:48:14.183Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -73032,6 +73047,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c2 scope (Main): the perf manifest has no matched pair for it yet; nothing under Tools/perf has a go test or test-cache row. The criterion defines the pair, so this is build work, not an owner call: add a Go peer suite under Tools/perf that mirrors a fixed golden subset (same programs, same expected outputs, one Go test per golden), plus a manifest row comparing the warm no-change rerun wall time of jet's golden runner against go test with its build and test caches warm, on the pinned Go toolchain. Then measure c2."
+        },
+        {
           "at": "2026-10-30",
           "by": "Main",
           "text": "D-TEST-READS1 A ratified by the owner 2026-10-30 (foreign code included, no new flag; fresh opts out). C3 added."
@@ -73080,7 +73100,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:55:47.470Z",
-      "updated": "2026-11-06T01:22:52.506Z",
+      "updated": "2026-11-06T05:49:34.420Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -75291,11 +75311,11 @@
         {
           "n": 68,
           "text": "(was #5453) (was #4827) Port crypto provider-failure and IO-fault tests via the ratified D-TESTFAULT1 faults: mechanism (Rand adapter site)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:24:16.336Z"
+          "evidence": "dev 0998acbb54 (CoreOwnership): #Test(faults:) was a silent no-op (the schedule was never armed); TestArtifacts and the runtime jet_rt_test_unit_faults now arm it, and random.bytes takes the Rand checkpoint. Case crypto_entropy/rand_faults_reach_every_consumer_on_every_level: with faults: [Rand], raw bytes, keygen, the seal nonce/salt/key draws, the password salt and UUID v4 each return their typed unavailable failure (5/5 pass) with identical exit, stdout and stderr at --optimize=none, basic and full; a negative control where every consumer leaves the failure unhandled FAILs 5/5 at all three levels, each report naming 'fault injected: Rand call 1'. FS.Read faults also fire (probed).",
+          "at": "2026-11-06T05:37:11.334Z"
         },
         {
           "n": 69,
@@ -75367,7 +75387,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-05T02:00:26.592Z",
+      "updated": "2026-11-06T05:37:11.334Z",
       "updatedBy": "Main"
     },
     {
@@ -91872,6 +91892,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c23 follow-up (Builder5). Pre-fetch: with fresh HOME, env -i and no host compiler, jet env fetch-toolchain fetched and unpacked the pack (clang 21.1.8, musl 1.2.5, glibc 2.42; 289.8 s, rc 0); after the source copy was deleted and JETPACK_DENY_NETWORK=1 set, jet cc --target x86_64-linux-gnu (PIE) and aarch64-linux-musl (static, musl built on first use, run under qemu) both built and ran. CcDriver has no Nix-index route: its ProviderCtx sets nix_index None and allow_local_nix_catalog false, and the cc provider reads only the Hangar, the JETPACK_FIXTURES test double, then the pack. 80e3ee6251 removes two decision citations from comments (I7). Remaining for c23: a real jet release carrying the pack; the seed cut on 864c10a4d0 builds it through release-compiler's cc-pack stage."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "c23 partial, 25c21787a5 + b44941163a (Builder5, continuing Builder4). Reproducible pack (nix-build --check gives the same out path): sha256 7c991b6c41e2ed9b41b34bfe84c0a241df60b25d91f73c58b3ad70494e3ecef3, 111,338,169 bytes, pinned in jet; built by release tooling (cc-pack.nix, release-compiler.mjs, Tools/release). Lane check CHECK OK on 137704d910 + both. End to end with fresh HOME, env -i and no host compiler on PATH: jet cc --target builds and runs hello.c for x86_64-linux-gnu (PIE), x86_64-linux-musl (static), aarch64-linux-gnu (qemu) and aarch64-linux-musl (static); offline JET_CC_PACK_URL=file:// with JETPACK_DENY_NETWORK=1 passes; a one-byte-flipped pack is refused with E1340, deleted, and the Hangar stays empty. CLI cc claims 6/6, Engine cc and Closure claims, testkit help/completions/man/cc cases and guard cc_driver_hosts 3/3 pass. Remaining for c23: publishing the pack on a real jet release (owner release step); confirm jet env fetch-toolchain and the Nix index path leaving CcDriver. Known limits: glibc 2.42 sysroot (binaries need glibc 2.34+), no C++ standard library, 8 case-colliding iptables headers dropped."
+        },
+        {
           "at": "2026-11-05",
           "by": "Main",
           "text": "c6 owner gate (Builder4): goldens and the runtime pack need a C compiler via jet cc, which refuses (E1348) without a Jet-signed nixpkgs index: IndexClient.jet:57-89 needs <JETPACK_ROOT>/trust/nix-index-v1.ed25519.pub and config/nix-index-v1.endpoint. Official https://index.jet-lang.dev and keys.jet-lang.dev (trust-root.md:57) don't resolve. Needs either the offline-ceremony signing key plus a published signed index (Tools/jetpack-nix-index/publish.sh --sign-index/--sign-manifest), or a ruling allowing a dogfood signer as a non-official root. Ballot being drafted."
@@ -92242,7 +92272,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T16:33:50.383Z",
-      "updated": "2026-11-06T01:32:50.687Z",
+      "updated": "2026-11-06T05:51:49.680Z",
       "updatedBy": "Main"
     },
     {
@@ -93441,6 +93471,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Commit A landed (DeclColon): 7bb6b7ee8d makes the parser accept both name: value and the retired :: form, maps each new spelling onto the existing AST nodes, and registers E0397 (registered, not yet reported); 4bfcc132f9 lists ColonDeclarations.jet in sources.list. Proof on an export of 7bb6b7ee8d: chain full FIXED_POINT (s2 == s3, jet 506047775323c6eb); census on HEAD: check, build and selfcheck 0 rows, runtime 0 issues; lane check CHECK OK; both forms parse with no diagnostics and jet fmt still prints the old form (the formatter switch lands with the conversion). The conversion builds with seed C_a (cA s2 + pack2) inside DeclColon's trees only."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Owner 2026-11-06 night: scope is every declaration (D-DECL-COLON1=A ratified): constants, aliases, locals, modules, fns, methods, structs, enums, traits, use and package all name: value; generic params on the kind word (D-DECL-COLON1 is newer than D-DECL-BINDING1=B, which put them on the name and spelled ::). Assigned to DeclColon (brief $JET_STATE_ROOT/scratch/Main/declcolon-brief.md)."
         },
         {
@@ -93522,7 +93557,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T02:04:25.306Z",
-      "updated": "2026-11-06T02:21:59.402Z",
+      "updated": "2026-11-06T06:02:23.894Z",
       "updatedBy": "Main"
     },
     {
@@ -93647,10 +93682,34 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "c2 partial (GoldenRoots3): Engine --tests on 137704d910 sources still null-derefs in both named claims. Claim 83 'store profile receipt copy and proof preserve native io errors': SIGSEGV at 0x0 in compiler_fs_error <- store_reuse_executable_lease_members <- store_snapshot_lease. Claim 69: SIGSEGV at 0x0 in jet_rt_mem_move <- jet_string_bytes <- Files.join_impl <- store_lease_member_path_matches <- executable_index_at. Safe code reaching a null pointer is an I1 defect; it stays on this card. Logs under $JET_SCRATCH_ROOT/lanes/GoldenRoots3/state/jetpack-bootstrap/GoldenRoots3-c75109d407/run-from-{81,4}.log. The AOT tier is still running."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Repro (JetpackEngine): $JET_SCRATCH_ROOT/lanes/JetpackEngine/repro6590/v2.jet, the match form from CacheLease.copy_profile_executable: if &members[index].file == { .Val(input) -> { input.stat() ... } .None -> ... } over [Member{file: FileReader?}] borrowed as &[...]. jet build --optimize=none of it produces a binary that hangs in a futex (fault-handler deadlock, exit 124 under timeout 10). The statement form if &...file == .Val(input) { and the variants with seek/read and an == None precheck pass. The LeaseSnapshot.jet:314 SIGSEGV is not reduced yet; the in-Engine claim reproduces it. So: wrong code from the match-on-borrowed-optional lowering, plus a fault handler that deadlocks instead of reporting."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A switch on a borrowed optional no-clone handle in a list element closes it exactly once and exits, proven by a case on O0/O1/O2 (an I1 safety fix: no double close on freed state)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 137704d910 (GoldenRoots3): root cause was a double close. Sema hoisted the switch subject into a generated Let that moved the no-clone handle out of its List element, and ir_bind_pin's box alias also armed a close, so the second close locked freed FD state and hung in a futex (no signal, one thread). Fix: a hoisted generated Let over a place whose value has a drop and no clone reads the place in place, and an ir_bind_pin box alias never arms a close. Case core_files_opaque_handles/switch_on_listed_optional_reader_closes_it_once passes on O0/O1/O2 and release and times out on base; 16 repro variants that hung now exit 0; A/B vs 6bee890a10 ui, golden and cases 0 lost.",
+          "at": "2026-11-06T05:30:06.942Z"
+        },
+        {
+          "n": 2,
+          "text": "The Jetpack Engine claim 'store profile receipt copy and proof preserve native io errors' (LeaseSnapshot.jet:314 crash) and the Engine AOT test binary run to completion with the fixed compiler",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T05:30:06.115Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -93659,7 +93718,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T04:52:06.103Z",
-      "updated": "2026-11-06T04:59:25.342Z",
+      "updated": "2026-11-06T05:54:29.822Z",
       "updatedBy": "Main"
     },
     {
@@ -93708,6 +93767,66 @@
       "updated": "2026-11-06T05:14:43.285Z",
       "updatedBy": "Main",
       "completedAt": "2026-11-06T05:14:43.285Z"
+    },
+    {
+      "id": "c0g93joj",
+      "num": 6592,
+      "title": "First jet cc pack install hashes the 450 MB tree about four times with pure-Jet SHA-256",
+      "body": "Found by Builder5 on dev b44941163a: the first jet cc toolchain pack install takes about 290 s, about 90% of it in the Store hashing the 450 MB unpacked tree about four times with core_crypto_sha256 (pkg_try_output_hash_of, store_record_realized_mode, publish_object, seal). Hash each tree once and reuse the digest across those steps, and bring core_crypto_sha256 throughput to the machine ceiling (SHA-NI where available) per the performance gate.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G4"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T05:33:07.839Z",
+      "updated": "2026-11-06T05:33:07.839Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0tpf98i",
+      "num": 6593,
+      "title": "JSON event reader drains a document about 10x slower than parse",
+      "body": "Measured by GoldenRoots3 on dev aeeb2c479c (golden serde/json_selective, 1.05 MB document, --release): draining every event from the JSON reader takes 1.37 s against 80-123 ms for parse, and decode<Small> builds the whole Dyn tree before projecting (129 ms, 84 MB peak vs 67 MB for parse). Bring the event path to at least parse speed, let typed projection skip unselected fields without materializing them, and add a paired cell with a ceiling reference per the performance gate.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G4"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T05:54:54.722Z",
+      "updated": "2026-11-06T05:54:54.722Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -176807,6 +176926,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-06T06:02:23.894Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ofw8u4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T05:54:54.723Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0tpf98i",
+      "note": "JSON event reader drains a document about 10x slower than parse"
+    },
+    {
+      "at": "2026-11-06T05:54:51.990Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-06T05:54:49.968Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-06T05:54:48.110Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-06T05:54:45.857Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-06T05:54:29.822Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jn1coj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T05:51:49.680Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T05:49:59.750Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#35"
+    },
+    {
+      "at": "2026-11-06T05:49:34.421Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0slmlyv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T05:48:31.909Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-06T05:48:14.183Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T05:46:49.682Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-06T05:42:09.639Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0t54oz7",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-06T05:41:25.651Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T05:37:11.334Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#68"
+    },
+    {
+      "at": "2026-11-06T05:37:10.625Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#21"
+    },
+    {
+      "at": "2026-11-06T05:33:22.349Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-06T05:33:07.839Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0g93joj",
+      "note": "First jet cc pack install hashes the 450 MB tree about four times with pure-Jet SHA-256"
+    },
+    {
+      "at": "2026-11-06T05:33:06.653Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rdxo6y",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T05:30:06.942Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jn1coj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-06T05:30:06.115Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0jn1coj",
+      "note": "#2 The Jetpack Engine claim 'store profile receipt copy and pro"
+    },
+    {
+      "at": "2026-11-06T05:30:05.295Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0jn1coj",
+      "note": "#1 A switch on a borrowed optional no-clone handle in a list el"
+    },
+    {
+      "at": "2026-11-06T05:27:53.600Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-06T05:24:39.799Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqi33c",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-06T05:22:33.489Z",
       "by": "Main",
       "action": "card.update",
@@ -180263,713 +180557,6 @@
       "action": "card.criteria-add",
       "ref": "c0j6lwuh",
       "note": "#9 The games area has a machine-ceiling reference built from Je"
-    },
-    {
-      "at": "2026-11-05T14:23:22.032Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0i891tv",
-      "note": "#53 On the Doom renderer kernels (R_DrawColumn, R_DrawSpan, Fixe"
-    },
-    {
-      "at": "2026-11-05T14:23:21.359Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0r02x8n",
-      "note": "#15 Definite initialization accepts a fixed array `[T#N]{ uninit"
-    },
-    {
-      "at": "2026-11-05T14:23:20.496Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tgtjtu",
-      "note": "#6 Taking the raw address of a list element inside #Unsafe (`*l"
-    },
-    {
-      "at": "2026-11-05T14:23:19.838Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0776o2m",
-      "note": "#21 A Doom-style program on the static Linux target opens a wind"
-    },
-    {
-      "at": "2026-11-05T14:23:19.189Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0rdxo6y",
-      "note": "#22 The admitted compiler is reachable from a fresh clone: Tools"
-    },
-    {
-      "at": "2026-11-05T14:13:39.545Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xuffg1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T14:13:38.901Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xuffg1",
-      "note": "priority"
-    },
-    {
-      "at": "2026-11-05T14:13:37.940Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T14:13:37.290Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T14:08:05.788Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#4 A new seed release is cut from a dev commit that passes veri"
-    },
-    {
-      "at": "2026-11-05T14:08:05.114Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#3 Every open G14 and G15 criterion is one observable, testable"
-    },
-    {
-      "at": "2026-11-05T14:08:04.448Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#2 Every diagnostic renders through its registry row: a check f"
-    },
-    {
-      "at": "2026-11-05T14:08:03.789Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0xuffg1",
-      "note": "#1 Each diagnostic fact has one hand-written home (its Prelude "
-    },
-    {
-      "at": "2026-11-05T14:08:03.130Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0xuffg1",
-      "note": "Close rate: one source of truth per fact, structural checks, criteria sized to close"
-    },
-    {
-      "at": "2026-11-05T14:06:03.132Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0q4s6en",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T14:02:37.378Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T13:57:35.551Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T13:50:40.247Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T13:50:39.503Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0q4s6en",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T13:50:27.025Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-05T13:50:26.292Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fo37ov",
-      "note": "#56 (moved from #6035 c11) Root found by Prep 2026-11-04 for c7 "
-    },
-    {
-      "at": "2026-11-05T13:50:25.534Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-05T13:50:24.875Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fo37ov",
-      "note": "#55 (moved from #6035 c10) Root found by Prep 2026-11-04 for c7 "
-    },
-    {
-      "at": "2026-11-05T13:50:24.107Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-05T13:50:23.359Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fo37ov",
-      "note": "#54 (moved from #6035 c7) (Owner 2026-11-04: tests should take s"
-    },
-    {
-      "at": "2026-11-05T13:50:22.565Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-05T13:50:21.771Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0q4s6en",
-      "note": "#6 (moved from #6035 c8) Root found by Prep 2026-11-04 for c7 ("
-    },
-    {
-      "at": "2026-11-05T13:49:18.755Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T13:44:01.618Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T13:41:58.142Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T13:35:53.680Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T13:22:29.621Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0q4s6en",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-05T13:22:15.500Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T13:14:17.878Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0q4s6en",
-      "note": "#5 AGENTS.md I1 states that safe Jet cannot leak memory (only #"
-    },
-    {
-      "at": "2026-11-05T13:14:17.202Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0q4s6en",
-      "note": "#4 An audit, committed under Docs/audits, lists every construct"
-    },
-    {
-      "at": "2026-11-05T13:14:16.513Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0q4s6en",
-      "note": "#3 Every leak the verifier or the leak gate finds is fixed at i"
-    },
-    {
-      "at": "2026-11-05T13:14:15.813Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0q4s6en",
-      "note": "#2 The golden and cases suites run their programs with the chec"
-    },
-    {
-      "at": "2026-11-05T13:14:15.148Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0q4s6en",
-      "note": "#1 After IR lowering, a verifier checks that every owned value,"
-    },
-    {
-      "at": "2026-11-05T13:14:14.496Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0q4s6en",
-      "note": "Leak freedom is structural: safe Jet cannot leak"
-    },
-    {
-      "at": "2026-11-05T13:10:22.655Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T13:06:09.145Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-05T13:06:08.399Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-05T12:52:34.111Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T12:33:11.133Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#59"
-    },
-    {
-      "at": "2026-11-05T12:32:59.851Z",
-      "by": "agent",
-      "action": "card.update",
-      "ref": "c0heplig",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T12:32:59.110Z",
-      "by": "agent",
-      "action": "card.update",
-      "ref": "c01oyhqk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T12:18:05.196Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T11:53:58.871Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T11:41:08.751Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T11:41:01.888Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T11:40:53.445Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T11:29:13.540Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T11:28:53.752Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-05T11:21:00.495Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-EFFTYPE-MODVALUE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-05T11:14:13.452Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T11:11:51.456Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-EFFTYPE-MODVALUE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-05T11:04:33.250Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T11:04:18.220Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-TEST-SUITE2",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-05T10:57:40.833Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:46:57.444Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:46:07.233Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:38:10.086Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:35:28.257Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:29:17.876Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:29:17.222Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0awiifz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:29:16.573Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0n8pmxe",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-05T10:28:59.782Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:22:47.855Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00rqc09",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:21:37.018Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00rqc09",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:09:12.376Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00rqc09",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:05:49.944Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:01:23.159Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T10:00:28.976Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T09:34:13.095Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00rqc09",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T09:34:12.444Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#83"
-    },
-    {
-      "at": "2026-11-05T09:34:11.770Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#82"
-    },
-    {
-      "at": "2026-11-05T09:34:10.938Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#81"
-    },
-    {
-      "at": "2026-11-05T09:34:09.765Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#80"
-    },
-    {
-      "at": "2026-11-05T09:34:09.086Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#78"
-    },
-    {
-      "at": "2026-11-05T09:34:08.404Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#76"
-    },
-    {
-      "at": "2026-11-05T09:34:07.715Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#65"
-    },
-    {
-      "at": "2026-11-05T09:34:06.973Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#63"
-    },
-    {
-      "at": "2026-11-05T09:34:06.174Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#62"
-    },
-    {
-      "at": "2026-11-05T09:25:04.296Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T09:20:34.027Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rdxo6y",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T09:18:59.037Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T09:11:37.361Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T09:00:40.646Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mj3ijb",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-05T09:00:39.791Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mj3ijb",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-05T09:00:39.021Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#62"
-    },
-    {
-      "at": "2026-11-05T08:46:47.687Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-05T08:38:13.607Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rdxo6y",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-05T08:37:44.245Z",
-      "by": "Main",
-      "action": "board.redact",
-      "ref": null,
-      "note": "personal-info/v2: 501 spans redacted (tower.json cards 97, tower.json decisions (ratified) 55, tower.json questions 8, tower.json briefings 11, history.json decisions (ratified) 12, history.json cards 316, history.json events 2)"
-    },
-    {
-      "at": "2026-11-05T08:32:02.690Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-TEST-SUITE2",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-05T08:32:01.885Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-TEST-SUITE2",
-      "note": "How are the ui and cases corpus suites named, and how does a code suite report its rows?"
-    },
-    {
-      "at": "2026-11-05T08:29:07.304Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T08:20:22.929Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T08:08:30.150Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T07:49:40.120Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#46"
-    },
-    {
-      "at": "2026-11-05T07:35:03.586Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T07:22:38.901Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#14"
     }
   ],
   "nextNum": 368,
