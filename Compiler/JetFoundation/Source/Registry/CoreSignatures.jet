@@ -290,32 +290,6 @@ core_sig_math_fixed: fn(module_name: String, member: String) -> CoreTypedCallSig
         if member == "decimal" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_named("Decimal"))))
         if member == "fraction" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Option{inner: core_sig_named("Fraction")})))
     }
-    if module_name == "core.math.combinatorics" {
-        list_list_int: Type.List{element: list_int}
-        if core_sig_one_of(member, [String]{"permutations", "combinations", "combinations_with_replacement", "product", "batched", "tee", "windows"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(integer, read)}, Val(list_list_int)))
-        }
-        if member == "cartesian" || member == "zip_longest" {
-            parameters := [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(list_int, read)}
-            if member == "zip_longest" -> parameters.push(core_sig_positional(integer, read))
-            return Val(core_sig(module_name, member, parameters, Val(list_list_int)))
-        }
-        if core_sig_one_of(member, [String]{"pairwise", "groupby", "powerset"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read)}, Val(list_list_int)))
-        if core_sig_one_of(member, [String]{"flatten", "starmap"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_list_int, read)}, Val(list_int)))
-        if member == "chain" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(list_int, read)}, Val(list_int)))
-        if member == "compress" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(Type.List{element: Type.Bool}, read)}, Val(list_int)))
-        if core_sig_one_of(member, [String]{"drop", "cycle"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(integer, read)}, Val(list_int)))
-        if core_sig_one_of(member, [String]{"takewhile", "dropwhile", "filterfalse"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(Type.Bool, read)}, Val(list_int)))
-        if member == "islice" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read), core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(list_int)))
-        if core_sig_one_of(member, [String]{"unique", "accumulate", "reverse"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read)}, Val(list_int)))
-        if member == "repeat" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(list_int)))
-        if core_sig_one_of(member, [String]{"count_from", "count"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(list_int)))
-        if core_sig_one_of(member, [String]{"factorial", "multinomial"}) {
-            params: if member == "factorial" -> [CoreCallTypedParameter]{core_sig_positional(integer, read)} else -> [CoreCallTypedParameter]{core_sig_positional(list_int, read)}
-            return Val(core_sig(module_name, member, params, Val(Type.Option{inner: integer})))
-        }
-        if core_sig_one_of(member, [String]{"binomial", "permutations_count", "combinations_count", "npr", "ncr", "falling_factorial", "rising_factorial"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Option{inner: integer})))
-    }
     if module_name == "core.math.stats" {
         if core_sig_one_of(member, [String]{"sum", "prod"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read)}, Val(float)))
         if member == "count" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_float, read)}, Val(integer)))

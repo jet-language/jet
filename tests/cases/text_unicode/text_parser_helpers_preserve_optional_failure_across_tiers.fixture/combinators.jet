@@ -46,20 +46,20 @@ tag: fn(src: Input, lit: String) -> Took? Never! {
     Val(got)
 }
 
-take_while: fn(src: Input, predicate: String) -> Took Never! {
+take_while: fn(src: Input, predicate: fn(String) -> Bool Never!) -> Took Never! {
     raw: src.text.bytes()
     i := src.pos
     loop i < raw.len() {
         width: utf8_width(raw, i)
         scalar: String.from_bytes(slice_range(raw, i, i + width)) ?? break
-        if !pred_scalar(predicate, scalar) -> break
+        if !predicate(scalar) -> break
         i = i + width
     }
     chunk: String.from_bytes(slice_range(raw, src.pos, i)) ?? ""
     {next: Input{text: src.text, pos: i}, chunk: chunk}
 }
 
-skip_ws: fn(src: Input) -> Input Never! { take_while(src, "space").next }
+skip_ws: fn(src: Input) -> Input Never! { take_while(src, (scalar: String) -> unicode.is_whitespace(scalar)).next }
 
 digit: fn(src: Input) -> Digit? Never! {
     b: peek(src) ?? return None
@@ -87,14 +87,6 @@ int_dec: fn(src: Input) -> Digit? Never! {
     }
     if !saw -> return None
     return Val(Digit{next: cur, n: acc * sign})
-}
-
-pred_scalar: fn(kind: String, scalar: String) -> Bool Never! {
-    if kind == "space" -> return unicode.is_whitespace(scalar)
-    if kind == "digit" -> return unicode.is_numeric(scalar)
-    if kind == "alpha" -> return unicode.is_alphabetic(scalar)
-    if kind == "alnum" -> return unicode.is_alphabetic(scalar) || unicode.is_numeric(scalar)
-    false
 }
 
 utf8_width: fn(raw: [U8], at: Int) -> Int {

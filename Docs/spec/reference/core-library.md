@@ -2396,6 +2396,44 @@ The seeded integer kernel takes and returns native signed words. Exact Jet
 integers are range-checked once when entering that boundary and widened once
 on return; a native word is never reinterpreted as a numeric handle.
 
+### `core.math.combinatorics` — generation and counts
+
+`core.math.combinatorics` builds full collections over any element type. Each
+result is a fresh list that holds copies of the input items. The counts here
+are the ones `core.math` does not already own. Factorials, choose counts and
+arrangement counts live only in `core.math` (`math.factorial`,
+`math.binomial`, `math.perm`). Sequence work that a list already does stays
+a list method (`take_while`, `skip_while`, `filter`, `windows`, `chunks`,
+`chunk_while`, `scan`, `map`, `skip`, `take`, `step_by`, `flatten`, `cycle`,
+`repeat`, `reverse`).
+
+| Function | Returns | Description |
+| --- | --- | --- |
+| `permutations(items: [T], k)` | `[[T]]` | Every ordered pick of `k` distinct positions; `k` outside `0..=len` gives an empty list. |
+| `combinations(items: [T], k)` | `[[T]]` | Every unordered pick of `k` distinct positions, in input order. |
+| `combinations_with_replacement(items: [T], k)` | `[[T]]` | Unordered picks that may reuse a position; a negative `k` gives an empty list. |
+| `product(items: [T], repeat)` | `[[T]]` | The cartesian power; `repeat <= 0` gives one empty row. |
+| `cartesian(left: [T], right: [T])` | `[[T]]` | Every `[a, b]` pair, left-major. |
+| `powerset(items: [T])` | `[[T]]` | Every subset, starting with the empty one. |
+| `chain(left: [T], right: [T])` | `[T]` | `left` followed by `right`. |
+| `compress(items: [T], mask: [Bool])` | `[T]` | The items whose mask entry is `true`; a short mask drops the tail. |
+| `unique(items: [T])` | `[T]` | The first occurrence of each equal item, in order; `T` is `Equatable`. |
+| `tee(items: [T], copies)` | `[[T]]` | `copies` independent copies; a nonpositive count gives an empty list. |
+| `zip_longest(left: [T], right: [T], fill: T)` | `[[T]]` | Pairs to the longer length, padding the shorter side with `fill`. |
+| `count_from(start, step, n)` | `[Int]` | `n` values from `start` by `step`. |
+| `multinomial(parts: [Int])` | `?Int` | The multinomial coefficient; a negative part returns `None`. |
+| `rising_factorial(n, k)` | `?Int` | `n * (n + 1) * … * (n + k - 1)`; a negative `k` returns `None`. |
+
+```jet
+use combo: core.math.combinatorics
+
+run: fn() {
+    print(combo.permutations([String]{"a", "b", "c"}, 2))
+    print(combo.cartesian([String]{"a", "b"}, [String]{"x", "y"}))
+    print(combo.zip_longest([String]{"a", "b", "c"}, [String]{"x"}, "-"))
+}
+```
+
 ### `core.compute.solve` — dense linear solves
 
 `core.compute.solve` contains checked CPU linear solvers over

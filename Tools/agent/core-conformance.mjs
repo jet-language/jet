@@ -1332,7 +1332,6 @@ const GENERATED_SIGNATURE_OVERRIDES = new Map([
   ["core.files.lstat", "path: String"],
   ["core.files.mkdtemp", "prefix: String"],
   ["core.files.mktemp", "prefix: String"],
-  ["core.math.combinatorics.take", "items: [Int], n: Int"],
   ["core.net.gethostname", ""],
   ["core.units.byte_unit", ""],
   ["core.units.centi", ""],
