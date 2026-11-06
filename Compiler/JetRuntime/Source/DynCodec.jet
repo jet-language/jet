@@ -123,6 +123,65 @@ codec_text_cells_key := I64{0}
 
 fn codec_text_cells() -> Bool { jet_rt_tls_get(codec_text_cells_key) != I64{0} }
 
+// The thread-local ETF string scope core.encoding.eetf decodes inside. A
+// String target reads strict UTF-8 from a Bytes leaf in mode 1 (StringEncoding
+// UTF8Binary) or from a list of byte Ints in mode 2 (UTF8ByteList); 0 is
+// outside the scope, where a String reads only Text.
+codec_etf_strings_key := I64{0}
+
+// runtime-init: 3 when codec_etf_strings_key
+#Export(c) fn jet_rt_codec_etf_strings_init() {
+    if (codec_etf_strings_key == I64{0}) {
+        #Unsafe("runtime-init runs before any other thread exists") {
+            codec_etf_strings_key = jet_rt_tls_key_new(I64{0})
+        }
+    }
+}
+
+// Enter returns the previous mode, which leave restores.
+#Export(c) fn jet_rt_codec_etf_strings_enter(mode: I64) -> I64 {
+    previous :: jet_rt_tls_get(codec_etf_strings_key)
+    jet_rt_tls_set(codec_etf_strings_key, mode)
+    previous
+}
+#Export(c) fn jet_rt_codec_etf_strings_leave(previous: I64) { jet_rt_tls_set(codec_etf_strings_key, previous) }
+
+// The ETF scope's String from a Bytes leaf (mode 1) or a list of byte Ints
+// (mode 2): -1 when `tree` is not that leaf, else the codec status.
+fn codec_etf_string(tree: I64, mode: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    kind :: data_tree_word(wrapping(tree + DATA_TREE_TAG))
+    bytes :: mode == I64{1} && kind == DATA_TREE_BYTE_LIST
+    if !bytes && !(mode == I64{2} && kind == DATA_TREE_ARRAY) -> return I64{-1}
+    sequence :: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
+    length :: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+    data :: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
+    text := I64{0}
+    if bytes {
+        text = rt_text_copy(data, length)
+    } else {
+        target :: jet_rt_string_builder_new()
+        at := I64{0}
+        loop at < length {
+            item :: data_tree_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES))
+            if (data_tree_word(wrapping(item + DATA_TREE_TAG)) != DATA_TREE_INT || !codec_fixed_fits(data_tree_word(wrapping(item + DATA_TREE_PAYLOAD)), I64{4})) {
+                jet_rt_string_drop(jet_rt_string_builder_finish(target))
+                return codec_fail(jet_rt_string_clone(rt_static_text("expected Text, found a list that is not bytes")), err, err_len)
+            }
+            rt_text_push_word(target, int_word(data_tree_word(wrapping(item + DATA_TREE_PAYLOAD))), I64{1})
+            at += I64{1}
+        }
+        text = jet_rt_string_builder_finish(target)
+    }
+    message :: text_bytes_utf8_error(rt_text_data(text), rt_text_len(text))
+    if (message != I64{0}) {
+        jet_rt_string_drop(message)
+        jet_rt_string_drop(text)
+        return codec_fail(jet_rt_string_clone(rt_static_text("expected Text, found bytes that are not UTF-8")), err, err_len)
+    }
+    data_tree_store(ok, text)
+    I64{1}
+}
+
 // `text.trim() == literal` (Unicode White_Space trim, as str::trim).
 fn codec_trimmed_is(text: I64, literal: I64) -> Bool {
     start :: numeric_trim_start(text)
@@ -479,7 +538,14 @@ fn codec_finite(bits: I64) -> Bool { ((bits >> I64{52}).bit_and(I64{2047})) != I
 }
 
 #Export(c) fn jet_rt_codec_decode_string(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
-    if (data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_TEXT) -> return codec_fail(codec_found(rt_static_text("expected Text, found "), tree, true), err, err_len)
+    if (data_tree_word(wrapping(tree + DATA_TREE_TAG)) != DATA_TREE_TEXT) {
+        mode :: jet_rt_tls_get(codec_etf_strings_key)
+        if (mode != I64{0}) {
+            status :: codec_etf_string(tree, mode, ok, err, err_len)
+            if (status >= I64{0}) -> return status
+        }
+        return codec_fail(codec_found(rt_static_text("expected Text, found "), tree, true), err, err_len)
+    }
     data_tree_store(ok, jet_rt_string_clone(data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))))
     I64{1}
 }

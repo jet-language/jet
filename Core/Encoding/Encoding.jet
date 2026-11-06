@@ -12,8 +12,8 @@ package {
 //
 // Every format in this package speaks the same two verbs: `parse` (text or
 // bytes → `Dyn`) and `to_string` / `to_bytes` (value → wire). JSON, JSONL
-// CSV, TOML, YAML, XML, and CBOR are nested modules so a program pays only for
-// the format it imports. Hex, Base32, and Base64 are byte alphabets, not
+// CSV, TOML, YAML, XML, CBOR and ETF are nested modules so a program pays only
+// for the format it imports. Hex, Base32, and Base64 are byte alphabets, not
 // Dyn adapters; they live beside the formats because they are the usual
 // way to carry those bytes through text.
 //
@@ -51,6 +51,8 @@ module xml
 
 module cbor
 
+module eetf
+
 module binary
 
 module ini
@@ -82,6 +84,7 @@ enum EncodingFormat {
     YAML
     XML
     CBOR
+    ETF
 }
 impl EncodingFormat {
     fn as_str(self) -> String Never! {
@@ -93,6 +96,7 @@ impl EncodingFormat {
             .YAML -> "YAML"
             .XML -> "XML"
             .CBOR -> "CBOR"
+            .ETF -> "ETF"
         }
     }
 }
