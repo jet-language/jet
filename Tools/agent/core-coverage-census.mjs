@@ -6,8 +6,11 @@
 // dynamic receivers remain uncovered rather than crediting same-named methods.
 //
 // node Tools/agent/core-coverage-census.mjs [--check|--write] [--json]
-// --check gates only increases in the total uncovered count, not report drift.
-// --write initializes or lowers the committed ceiling; it never raises it.
+// The ratchet (version 2, D-CORE-COVERAGE-RATCHET1) lists each module's
+// untested public functions by name and signature. --check fails on any
+// untested function the list does not name: new code needs a test, an example
+// or a doc example. --write initializes the list, then only removes names; a
+// function that moves to another module keeps its entry there.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -145,6 +148,11 @@ export function publicFunctions(path, source) {
       if (tokens[at]?.value === ")") depth--;
       at++;
     } while (at < tokens.length && depth > 0);
+    // The ratchet's signature: generics and parameters as written, comments
+    // and layout removed, then the declared result type.
+    const close = tokens[at - 1];
+    const parameters = source.slice(tokens[i + 2].offset, close.offset + close.value.length)
+      .replace(/\/\/[^\n]*/g, "").replace(/\s+/g, " ").replace(/([(<]) /g, "$1").replace(/,? ([)>])/g, "$1");
     let result = null;
     if (tokens[at]?.value === "->") result = resultType(source, tokens, at + 1, module, localTypes);
     else if (tokens[at]?.value === "-" && tokens[at + 1]?.value === "[") {
@@ -157,6 +165,7 @@ export function publicFunctions(path, source) {
     if (seen.has(id)) continue;
     seen.add(id);
     rows.push({ module, name: owner ? `${owner}.${name}` : name, id,
+      signature: result ? `${parameters} -> ${result}` : parameters,
       file: path, line: lineAt(source, tokens[i].offset), returnType: result,
       doctests: [], examples: [], tests: [] });
   }
@@ -352,17 +361,59 @@ export function census(root = ROOT) {
   return { modules, total: { public: functions.length, uncovered: modules.reduce((sum, row) => sum + row.uncovered, 0) }, functions };
 }
 
-export function ratchetDecision(uncovered, previous) {
-  if (!Number.isSafeInteger(uncovered) || uncovered < 0) throw new Error("invalid uncovered count");
-  if (previous !== null && (previous.version !== 1 || !Number.isSafeInteger(previous.uncovered) || previous.uncovered < 0)) throw new Error("invalid Core coverage ratchet");
-  return { passes: previous !== null && uncovered <= previous.uncovered,
-    next: { version: 1, uncovered: Math.min(uncovered, previous?.uncovered ?? uncovered) } };
+// Each untested public function: its module, name and signature.
+export function untested(report) {
+  return report.functions.filter((row) => !row.doctests.length && !row.examples.length && !row.tests.length)
+    .map((row) => ({ module: row.module, name: row.name, signature: row.signature, file: row.file, line: row.line }));
+}
+
+// The version 2 ratchet against the untested rows. A row is listed by an entry
+// of its own module, else (a move) by an unused entry of the same name and
+// signature in another module, which `next` re-files under the row's module.
+// `next` keeps only listed rows, so writing it only removes names.
+export function ratchetDecision(rows, previous) {
+  const valid = (entry) => entry && typeof entry.name === "string" && typeof entry.signature === "string";
+  if (previous !== null && (previous.version !== 2 || !previous.modules || typeof previous.modules !== "object"
+    || Object.values(previous.modules).some((entries) => !Array.isArray(entries) || !entries.every(valid)))) throw new Error("invalid Core coverage ratchet");
+  const key = (entry) => `${entry.name}\t${entry.signature}`;
+  const unused = new Map();
+  for (const [module, entries] of Object.entries(previous?.modules ?? {})) {
+    for (const entry of entries) unused.set(`${module}\t${key(entry)}`, { module, key: key(entry) });
+  }
+  const kept = new Map();
+  const pending = [];
+  for (const row of rows) {
+    const own = `${row.module}\t${key(row)}`;
+    if (unused.delete(own)) kept.set(own, row);
+    else pending.push(row);
+  }
+  const unlisted = [];
+  for (const row of pending) {
+    const moved = [...unused].find(([, entry]) => entry.key === key(row));
+    if (moved) {
+      unused.delete(moved[0]);
+      kept.set(`${row.module}\t${key(row)}`, row);
+    } else unlisted.push(row);
+  }
+  const listed = previous === null ? rows : [...kept.values()];
+  const modules = {};
+  for (const row of [...listed].sort((a, b) => a.module.localeCompare(b.module) || a.name.localeCompare(b.name) || a.signature.localeCompare(b.signature))) {
+    (modules[row.module] ??= []).push({ name: row.name, signature: row.signature });
+  }
+  return { passes: previous !== null && unlisted.length === 0, unlisted, removable: unused.size, next: { version: 2, modules } };
+}
+
+// One entry per line, so a removal is a one-line diff.
+export function ratchetText(ratchet) {
+  const modules = Object.entries(ratchet.modules).map(([module, entries]) =>
+    `    ${JSON.stringify(module)}: [\n${entries.map((entry) => `      ${JSON.stringify({ name: entry.name, signature: entry.signature })}`).join(",\n")}\n    ]`);
+  return `{\n  "version": 2,\n  "modules": {\n${modules.join(",\n")}${modules.length ? "\n" : ""}  }\n}\n`;
 }
 
 export function main(argv = process.argv.slice(2), root = ROOT) {
   try {
     if (argv.includes("--help") || argv.includes("-h")) {
-      console.log("usage: node Tools/agent/core-coverage-census.mjs [--check|--write] [--json]\n--check: reject an uncovered-count regression\n--write: initialize or lower the ratchet\n--json: include each declaration and its source evidence");
+      console.log("usage: node Tools/agent/core-coverage-census.mjs [--check|--write] [--json]\n--check: reject an untested public function the ratchet does not list\n--write: initialize the ratchet, then only remove names\n--json: include each declaration and its source evidence");
       return 0;
     }
     if (argv.some((arg) => !["--check", "--write", "--json"].includes(arg)) || (argv.includes("--check") && argv.includes("--write"))) throw new Error("choose --check or --write, optionally --json");
@@ -376,17 +427,22 @@ export function main(argv = process.argv.slice(2), root = ROOT) {
     if (!argv.includes("--check") && !argv.includes("--write")) return 0;
     const path = resolve(root, RATCHET);
     const previous = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null;
-    const decision = ratchetDecision(report.total.uncovered, previous);
+    const decision = ratchetDecision(untested(report), previous);
     if (argv.includes("--write") && (previous === null || decision.passes)) {
-      writeFileSync(path, `${JSON.stringify(decision.next, null, 2)}\n`);
-      console.error(`Core coverage ratchet: ${decision.next.uncovered} uncovered`);
+      writeFileSync(path, ratchetText(decision.next));
+      console.error(`Core coverage ratchet: ${report.total.uncovered} untested functions listed`);
       return 0;
     }
     if (!decision.passes) {
-      console.error(previous === null ? "Core coverage ratchet missing; initialize with --write" : `Core coverage regressed: ${report.total.uncovered} uncovered > ceiling ${previous.uncovered}; add call-site coverage (the ratchet cannot be raised with --write)`);
+      if (previous === null) console.error("Core coverage ratchet missing; initialize with --write");
+      else {
+        for (const row of decision.unlisted) console.error(`untested: ${row.module} ${row.name}${row.signature.startsWith("<") ? "" : " "}${row.signature} (${row.file}:${row.line})`);
+        console.error(`Core coverage: ${decision.unlisted.length} untested public function(s) the ratchet does not list; give each a test, an example or a doc example (--write never adds names)`);
+      }
       return 1;
     }
-    console.error(`Core coverage ratchet OK: ${report.total.uncovered} <= ${previous.uncovered} uncovered`);
+    const stale = decision.removable ? `; ${decision.removable} listed name(s) are now tested or gone, remove them with --write` : "";
+    console.error(`Core coverage ratchet OK: every untested function is listed${stale}`);
     return 0;
   } catch (error) {
     console.error(`Core coverage census: ${error instanceof Error ? error.message : String(error)}`);

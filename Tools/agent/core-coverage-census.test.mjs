@@ -160,15 +160,48 @@ test("census joins doctests, examples and embedded tests once per declaration", 
   assert.ok(report.functions.find((row) => row.name === "test_only").tests[0].startsWith("tests/demo.rs#program-1:"));
 });
 
-test("ratchet passes equal and lower counts, rejects increases, and cannot rise", () => {
-  assert.deepEqual(ratchetDecision(5, null), { passes: false, next: { version: 1, uncovered: 5 } });
-  assert.equal(ratchetDecision(5, { version: 1, uncovered: 5 }).passes, true);
-  assert.deepEqual(ratchetDecision(3, { version: 1, uncovered: 5 }), { passes: true, next: { version: 1, uncovered: 3 } });
-  assert.deepEqual(ratchetDecision(6, { version: 1, uncovered: 5 }), { passes: false, next: { version: 1, uncovered: 5 } });
-  for (const previous of [{ version: 2, uncovered: 1 }, { version: 1, uncovered: -1 }, { version: 1, uncovered: "1" }]) assert.throws(() => ratchetDecision(1, previous));
+test("signatures keep generics, parameters and the result type, without comments or layout", () => {
+  const found = publicFunctions("Core/Demo/Demo.jet", `fn plain() {}
+    fn pick<T: [Encode, Decode]>(
+        items: [T], // the source
+        at: Int,
+    ) -> T? Never! { None }
+    struct Box { fn put(&self, value: fn(Int) -> Int) -[FS]> Bool Never! { true } }
+  `);
+  assert.deepEqual(found.map((row) => row.signature),
+    ["()", "<T: [Encode, Decode]>(items: [T], at: Int) -> T?", "(&self, value: fn(Int) -> Int) -> Bool"]);
 });
 
-test("CLI initializes, checks without rewriting, lowers, and refuses regressions", (t) => {
+const row = (module, name, signature = "()") => ({ module, name, signature, file: "Core/x.jet", line: 1 });
+const listed = (modules) => ({ version: 2, modules });
+
+test("ratchet lists names by module and signature, re-files moves, and only removes", () => {
+  const first = ratchetDecision([row("core.a", "f"), row("core.a", "g", "(x: Int)")], null);
+  assert.equal(first.passes, false);
+  assert.deepEqual(first.next, listed({ "core.a": [{ name: "f", signature: "()" }, { name: "g", signature: "(x: Int)" }] }));
+  assert.deepEqual(ratchetDecision([row("core.a", "f"), row("core.a", "g", "(x: Int)")], first.next), { passes: true, unlisted: [], removable: 0, next: first.next });
+  // g gained a test: --write drops it; a listed name is never re-added.
+  const tested = ratchetDecision([row("core.a", "f")], first.next);
+  assert.equal(tested.passes, true);
+  assert.equal(tested.removable, 1);
+  assert.deepEqual(tested.next, listed({ "core.a": [{ name: "f", signature: "()" }] }));
+  // A new untested function, or a changed signature, is unlisted.
+  const added = ratchetDecision([row("core.a", "f"), row("core.a", "h")], tested.next);
+  assert.equal(added.passes, false);
+  assert.deepEqual(added.unlisted.map((entry) => entry.name), ["h"]);
+  assert.equal(ratchetDecision([row("core.a", "f", "(x: Int)")], tested.next).passes, false);
+  // A move keeps its entry, re-filed under the new module.
+  const moved = ratchetDecision([row("core.b", "f")], tested.next);
+  assert.equal(moved.passes, true);
+  assert.deepEqual(moved.next, listed({ "core.b": [{ name: "f", signature: "()" }] }));
+  // One entry lists one function: a copy in a second module is new code.
+  assert.equal(ratchetDecision([row("core.a", "f"), row("core.b", "f")], tested.next).passes, false);
+  for (const previous of [{ version: 1, uncovered: 1 }, { version: 2 }, listed({ "core.a": [{ name: "f" }] }), listed({ "core.a": {} })]) {
+    assert.throws(() => ratchetDecision([], previous));
+  }
+});
+
+test("CLI initializes, checks without rewriting, only removes, and refuses unlisted functions", (t) => {
   const { root, put } = fixture(t);
   const log = console.log;
   const error = console.error;
@@ -180,18 +213,19 @@ test("CLI initializes, checks without rewriting, lowers, and refuses regressions
     assert.equal(main(["--check"], root), 1);
     assert.equal(main(["--write"], root), 0);
     const baseline = readFileSync(path, "utf8");
-    assert.equal(JSON.parse(baseline).uncovered, 1);
+    assert.deepEqual(JSON.parse(baseline), listed({ "core.demo": [{ name: "unused", signature: "()" }] }));
+    assert.equal(baseline.split("\n")[4].trim(), '{"name":"unused","signature":"()"}');
     assert.equal(main(["--check"], root), 0);
     assert.equal(readFileSync(path, "utf8"), baseline);
     put("tests/extra.jet", "fn run() { core.demo.unused() }");
     assert.equal(main(["--check"], root), 0);
     assert.equal(readFileSync(path, "utf8"), baseline);
     assert.equal(main(["--write"], root), 0);
-    assert.equal(JSON.parse(readFileSync(path, "utf8")).uncovered, 0);
+    assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), listed({}));
     put("tests/extra.jet", "fn run() {}");
     assert.equal(main(["--check"], root), 1);
     assert.equal(main(["--write"], root), 1);
-    assert.equal(JSON.parse(readFileSync(path, "utf8")).uncovered, 0);
+    assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), listed({}));
     assert.equal(main(["--check", "--write"], root), 1);
     assert.equal(main(["--typo"], root), 1);
   } finally {
