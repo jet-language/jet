@@ -307,6 +307,7 @@ fn sema_type_obligations_nested(required: Type, offered: Type) -> Bool Never! {
                     loop (index, required_param) in required_params {
                         if !sema_type_obligations_nested(required_param, offered_params[index]) -> return false
                     }
+                    if sema_fn_return_is_never(offered_ret) -> return true
                     return if required_ret == {
                         .Val(required_value) -> if offered_ret == {
                             .Val(offered_value) -> sema_type_obligations_nested(required_value, offered_value)
@@ -420,7 +421,10 @@ fn sema_function_types_compatible(required: Type, offered: Type) -> Bool Never! 
                     loop (index, required_param) in required_params {
                         if !sema_type_carrier_compatible(required_param, offered_params[index]) -> return false
                     }
-                    return_compatible :: if required_ret == {
+                    // A callable that never returns (`-> Never`: it panics,
+                    // exits or loops) fits any return slot; no caller ever
+                    // reads its result.
+                    return_compatible :: if sema_fn_return_is_never(offered_ret) -> true else -> if required_ret == {
                         .Val(required_value) -> if offered_ret == {
                             .Val(offered_value) -> sema_type_carrier_compatible(required_value, offered_value) || sema_never_failing_return_fits(required_value, offered_value)
                             .None -> type_is_unit_callable_return(required_value)
@@ -437,6 +441,11 @@ fn sema_function_types_compatible(required: Type, offered: Type) -> Bool Never! 
         }
         else -> {}
     }
+    false
+}
+
+fn sema_fn_return_is_never(ret: Type?) -> Bool Never! {
+    if ret == .Val(value) -> return value == (Type.Named{name: "Never"})
     false
 }
 

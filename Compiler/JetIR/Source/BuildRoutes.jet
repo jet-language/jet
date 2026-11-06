@@ -3375,13 +3375,15 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
     if name == "jet_ordering_then" || name == "jet_ordering_reverse" -> return Val(ir_ordering_method(&m, p, &b, name, inputs, span))
     if name == "jet_std::JetShared::new" || name == "jet_std::JetCell::new" -> return Val(ir_shared_new(&m, p, &b, inputs, result, span))
     if name == "jet_std::JetPool::new" -> return Val(ir_pool_new(&m, p, &b, result, span))
-    // `os.atexit(handler)`: the runtime's exit queue takes the handler's
-    // closure box over (Task.jet jet_rt_native_atexit; it runs invoke at 8,
-    // then the release at 16, as a scope guard does).
-    if name == "jet_std_os_atexit" {
-        if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "atexit with {inputs.len()} arguments"))
+    // `os.atexit(handler)` / `os.on_interrupt(handler)`: the runtime's exit
+    // queue (Task.jet jet_rt_native_atexit) or interrupt list
+    // (ProcessSignal.jet jet_rt_native_interrupt) takes the handler's closure
+    // box over; it runs invoke at 8, then the release at 16, as a scope guard
+    // does.
+    if name == "jet_std_os_atexit" || name == "jet_std_os_interrupt" {
+        if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "{name} with {inputs.len()} arguments"))
         handler :: ir_own(&m, p, &b, inputs[0])
-        _ :: ir_runtime(&m, &b, "jet_rt_native_atexit", [Int]{handler}, -1)
+        _ :: ir_runtime(&m, &b, if name == "jet_std_os_atexit" -> "jet_rt_native_atexit" else -> "jet_rt_native_interrupt", [Int]{handler}, -1)
         b.fresh[handler] = false
         return Val(-1)
     }
@@ -4351,7 +4353,7 @@ fn ir_route_symbol(symbol: String) -> String Never! {
 IR_ROUTES_INLINE :: comptime { [String]{
     "std::collections::BinaryHeap::new", "std::collections::HashSet::new", "std::collections::BTreeSet::new", "std::collections::VecDeque::new", "std::collections::HashMap::new", "jet_deque_from", "JetCache::new",
     "jet_eq", "jet_map_from_keys_kernel", "jet_map_from_keys_int", "jet_map_from_keys_composite",
-    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_rt_callback", "jet_devtools_publish_payload",
+    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_std_os_interrupt", "jet_rt_callback", "jet_devtools_publish_payload",
     "jet_unicode_split_once", "jet_unicode_cut_last",
     "jet_list_get_opt", "jet_list_first", "jet_list_last", "jet_list_slice", "jet_list_index_of", "jet_list_sum",
     "jet_list_sum_fixed_f64", "jet_list_product", "jet_list_contains", "jet_list_equal", "jet_list_replace",

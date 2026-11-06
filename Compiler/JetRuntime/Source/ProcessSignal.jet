@@ -1,27 +1,35 @@
 // The one process-signal mechanism behind core.process.on_signal
-// (jet_process_signal_arm_raw). Mask bits INT=1, HUP=2, TERM=4. The handler only
+// (jet_process_signal_arm_raw) and core.sys.on_interrupt
+// (jet_rt_native_interrupt). Mask bits INT=1, HUP=2, TERM=4. The handler only
 // updates preallocated words (async-signal-safe); a dispatcher thread polls
-// every 10 ms and cancels the process root task control once per delivered
-// signal (Scheduler.jet scheduler_root_task_control).
+// every 10 ms, cancels the process root task control once per delivered
+// signal (Scheduler.jet scheduler_root_task_control) and runs the interrupt
+// handlers once per counted SIGINT.
 #Import(c) fn process_signal_install(signal: I64, handler: I64) -> I64 = "signal"
 
 // Checked FunctionAddress intrinsics in the canonical RuntimeLibrary table.
 fn rt_process_signal_mark_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
 fn rt_process_signal_dispatcher_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+fn rt_process_signal_interrupts_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
 
-// State80: pendingInterrupts0 pendingSignals8 installed16 installMutex24
+// State88: pendingInterrupts0 pendingSignals8 installed16 installMutex24
 // dispatchMutex32 handlersMutex40 handlers48/56/64 (INT, HUP, TERM: 1 when a
 // callback is registered) dispatcher72 (0 unstarted, 1 running, else an owned
-// start-failure text). Allocated once under the scheduler root mutex before
-// any handler can observe it, and never freed.
+// start-failure text) interruptHandlers80 (0, or the words list of the
+// on_interrupt closure boxes, under handlersMutex). Allocated once under the
+// scheduler root mutex before any handler can observe it, and never freed.
 process_signal_state := I64{0}
+
+// The interrupt runner's code word: installed by the first on_interrupt, so a
+// program that never registers a handler links no runner.
+process_signal_interrupt_code := I64{0}
 
 fn process_signal_state_ensure() -> I64 {
     if (process_signal_state != I64{0}) -> return process_signal_state
     sync_mutex_lock(scheduler_root)
     if (process_signal_state == I64{0}) {
-        state :: jet_rt_alloc(I64{80}, I64{8})
-        thread_zero(state, I64{80})
+        state :: jet_rt_alloc(I64{88}, I64{8})
+        thread_zero(state, I64{88})
         #Unsafe("written under the scheduler root mutex") {
             process_signal_state = state
         }
@@ -143,8 +151,11 @@ fn process_signal_dispatch(state: I64) {
     sync_mutex_unlock(wrapping(state + I64{32}))
 }
 
-// The "jet-process-signal" thread: sleep 10 ms, dispatch, forever.
+// The "jet-process-signal" thread: sleep 10 ms, dispatch, forever. Its own
+// control is the parent of every interrupt handler's root, so a handler root
+// never replaces the process root task control.
 #Export(c) fn jet_rt_process_signal_dispatcher(state: I64) -> I64 {
+    sync_store(wrapping(thread_base() + I64{16}), scheduler_control_new())
     interval :: jet_rt_alloc(I64{16}, I64{8})
     loop {
         trap_store(interval, I64{0})
@@ -154,7 +165,95 @@ fn process_signal_dispatch(state: I64) {
             if (slept != I64{-4}) -> break
         }
         process_signal_dispatch(state)
+        interrupts :: process_signal_interrupt_code
+        if (interrupts != I64{0}) -> _ := coll_call1(interrupts, state)
     }
+}
+
+// One on_interrupt handler under its own root, as jet_rt_main runs the entry
+// (Main.jet): a stop in the handler (a panic, a deadline) is published there
+// and its rendered report is written to stderr; a stop without a report
+// (process.exit, os.stop) ends the process. Returns the stop's exit code, or 0
+// when the handler returned.
+fn process_signal_interrupt_run(closure: I64) -> I64 {
+    save :: jet_rt_alloc(I64{40}, I64{8})
+    root :: jet_rt_root_begin(save)
+    coll_call1_unit(sync_load(wrapping(closure + I64{8})), closure)
+    record :: jet_rt_root_take_stop(root, wrapping(save + I64{32}))
+    jet_rt_root_leave(root, save)
+    code := I64{0}
+    if (record != I64{0}) {
+        code = trap_word(wrapping(save + I64{32}))
+        report :: scheduler_stop_take_message(record)
+        scheduler_stop_drop(record)
+        if (report == I64{0}) {
+            jet_rt_free(save, I64{40}, I64{8})
+            jet_rt_process_exit(code)
+        }
+        trap_write_handle(report)
+        jet_rt_string_drop(report)
+    }
+    jet_rt_free(save, I64{40}, I64{8})
+    code
+}
+
+// Every counted SIGINT runs every registered handler in registration order;
+// a stopped handler does not skip the later ones. After the last one, the
+// first stopped handler's code ends the process, as that stop would on the
+// main root.
+#Export(c) fn jet_rt_process_signal_interrupts(state: I64) -> I64 {
+    loop sync_load(state) != (I64{0}) {
+        _ := sync_add(state, I64{-1})
+        failed := I64{0}
+        at := I64{0}
+        loop {
+            sync_mutex_lock(wrapping(state + I64{40}))
+            handlers :: sync_load(wrapping(state + I64{80}))
+            closure :: if (at < sync_load(handlers)) -> sync_load(wrapping(sync_load(wrapping(handlers + I64{16})) + at * I64{8})) else -> I64{0}
+            sync_mutex_unlock(wrapping(state + I64{40}))
+            if (closure == I64{0}) -> break
+            code :: process_signal_interrupt_run(closure)
+            if (failed == I64{0}) -> failed = code
+            at += I64{1}
+        }
+        if (failed != I64{0}) -> jet_rt_process_exit(failed)
+    }
+    I64{0}
+}
+
+// core.sys.on_interrupt(handler): the IR hands the handler's closure box over
+// (BuildRoutes.jet jet_std_os_interrupt). The first registration drops any
+// SIGINT counted before it, installs the SIGINT mark and starts the
+// dispatcher; the boxes live for the process. A scope already stopping drops
+// the box, as atexit does.
+#Export(c) fn jet_rt_native_interrupt(closure: I64) {
+    if (scheduler_control_status(scheduler_control_current()) != I64{0}) {
+        scheduler_cleanup_closure_drop(closure)
+        return
+    }
+    state :: process_signal_state_ensure()
+    sync_mutex_lock(wrapping(state + I64{40}))
+    handlers := sync_load(wrapping(state + I64{80}))
+    if (handlers == I64{0}) {
+        handlers = jet_rt_alloc(I64{24}, I64{8})
+        thread_zero(handlers, I64{24})
+        sync_store(wrapping(state + I64{80}), handlers)
+        sync_store(state, I64{0})
+    }
+    scheduler_words_push(handlers, closure)
+    sync_mutex_unlock(wrapping(state + I64{40}))
+    #Unsafe("an idempotent install: every writer stores the same code address") {
+        process_signal_interrupt_code = rt_process_signal_interrupts_address()
+    }
+    error :: jet_rt_alloc(I64{8}, I64{8})
+    if (process_signal_arm_mask(state, I64{1}, error) == I64{0} || process_signal_dispatcher_start(state, error) == I64{0}) {
+        text :: rt_text_word(error)
+        jet_rt_free(error, I64{8}, I64{8})
+        jet_rt_panic_message(rt_text_data(text), rt_text_len(text))
+        jet_rt_string_drop(text)
+        return
+    }
+    jet_rt_free(error, I64{8}, I64{8})
 }
 
 // jet_process_signal_arm_raw: look up (or replace) the root task control, then

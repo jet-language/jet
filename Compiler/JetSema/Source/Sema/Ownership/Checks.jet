@@ -3094,9 +3094,10 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
         // `note_move_if_direct_ident`: an unmarked owning position moves a
         // binding without an access convention only; a read or write
         // parameter or a write window keeps its value (the binding and return
-        // audits report E0120 where it would have to copy).
+        // audits report E0120 where it would have to copy). A function item
+        // names immutable code, so naming it as a value moves nothing.
         root_ty :: info.symbol.ty ?? Type.Named{name: "Unit"}
-        if sema_ownership_type_is_copy(root_ty) || info.string_view || (unmarked && sema_ownership_binding_lends(info)) || (unmarked && !sema_ownership_unmarked_moves_name(expr)) {
+        if sema_ownership_type_is_copy(root_ty) || info.symbol.kind == SymbolKind.Function || info.string_view || (unmarked && sema_ownership_binding_lends(info)) || (unmarked && !sema_ownership_unmarked_moves_name(expr)) {
             loop place in places -> sema_ownership_note_place_reference(&state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Move)
             return true
         }
