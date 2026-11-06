@@ -2785,7 +2785,8 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, caller
             loop implementation_index in 0..<graph.modules[owner_index].impls.len() {
                 if graph.modules[owner_index].impls[implementation_index].target_type_name != receiver_name -> next
                 loop function_index in 0..<graph.modules[owner_index].impls[implementation_index].methods.len() {
-                    if graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name != method || graph.modules[owner_index].impls[implementation_index].methods[function_index].parameters.len() == 0 -> next
+                    // A static method (no `self`) is named through the type, never a value.
+                    if graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name != method || graph.modules[owner_index].impls[implementation_index].methods[function_index].parameters.len() == 0 || graph.modules[owner_index].impls[implementation_index].methods[function_index].parameters[0].symbol.name != "self" -> next
                     method_ref :: TMethodRef{symbol: graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.id, name: graph.modules[owner_index].impls[implementation_index].methods[function_index].symbol.name, mangled: true, trait_owner: None, operator_identity: None}
                     // The impl's signature names types as its owning module
                     // sees them (Rust `owner_type_for_reader`).
@@ -2828,7 +2829,7 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, caller
         owner_type := sema_inference_substitute_type_bindings(owner_declared, owner_inference.substitutions)
         written_before :: candidates.len()
         loop function in nominal.methods {
-            if function.symbol.name != method || function.parameters.len() == 0 -> next
+            if function.symbol.name != method || function.parameters.len() == 0 || function.parameters[0].symbol.name != "self" -> next
             // Resolve the declared signature in the owner's module, with the
             // owner's and the method's type parameters kept, before the
             // receiver's arguments are substituted (Rust

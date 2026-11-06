@@ -210,6 +210,19 @@ fn sema_call_static_owner_resolution(owner_params: [SemaInferenceTypeParam], own
         return None
     }
     if !result.complete -> return None
+    // Arguments that settle one owner parameter to two types (`Same.new(1,
+    // "two")`) leave no single receiver type: that is the uninferable
+    // receiver, not a mismatch at the later argument. A mismatch at a
+    // parameter that names no owner parameter stays the argument's error.
+    if !result.compatible {
+        loop index in 0..<facts.parameter_types.len() {
+            if index >= facts.argument_types.len() || index >= result.parameters.len() -> break
+            owned :: loop parameter in owner_params {
+                if sema_inference_type_mentions_param(facts.parameter_types[index], parameter.name) -> break true
+            } ?? false
+            if owned && !sema_inference_assignable(program.registration_graph, inference_context, result.parameters[index], facts.argument_types[index]) -> return None
+        }
+    }
     Val(result)
 }
 

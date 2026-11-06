@@ -1392,10 +1392,34 @@ fn sema_type_bound_satisfied_resolved(graph: SemaRegistrationGraph, actual_resol
         }
         else -> {}
     }
-    nominal_row :: sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) ?? return None
+    nominal_row :: sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) ?? return sema_type_bound_satisfied_builtin_target(graph, actual_resolved, bound_name, caller)
     trait_symbol :: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None
     // The nominal row is passed in place: binding it copied the declaration.
     sema_type_bound_satisfied_nominal(graph, graph.modules[nominal_row.module_index].nominals[nominal_row.row], trait_symbol, bound_name)
+}
+
+// A built-in type (`Int`, `[Int]`) has no nominal row: it meets a trait
+// outside the builtin family only through an impl written for it (`impl
+// Int.Named`), so without one the bound is unmet, not unknown. A builtin
+// family bound keeps its own rules, and any other type without a row stays
+// unknown.
+fn sema_type_bound_satisfied_builtin_target(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int) -> Bool? {
+    builtin :: if actual_resolved == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .List(_) | .Map(_, _, _) | .FixedList(_, _) | .Option(_) | .Tuple(_) -> true
+        else -> false
+    }
+    if !builtin || sema_type_builtin_trait_symbol(bound_name) != None -> return None
+    trait_symbol :: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None
+    target :: type_name(actual_resolved)
+    loop module_index in 0..<graph.modules.len() {
+        loop impl_index in 0..<graph.modules[module_index].impls.len() {
+            if graph.modules[module_index].impls[impl_index].target_type_name != target -> next
+            trait_matches :: sema_type_graph_impl_matches_trait(graph, graph.modules[module_index].impls[impl_index], trait_symbol) ?? return None
+            if trait_matches -> return Val(true)
+        }
+    }
+    if !graph.complete -> return None
+    Val(false)
 }
 
 // Impl rows are read by index through the read graph: element loops over
