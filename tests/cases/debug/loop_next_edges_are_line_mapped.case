@@ -1,8 +1,8 @@
 # #6576: stepping across a loop's `next` edge on the native O0 image stays on
 # Jet lines. From the loop body, `n` lands on the next iteration's first
-# statement with the loop variable advanced. Taking the `next` edge skips the
-# rest of the body, and the program's own result is unchanged under the
-# debugger.
+# statement with the loop variable advanced. Taking the `next` edge stops on
+# the `next` line (#6585), then skips the rest of the body, and the program's
+# own result is unchanged under the debugger.
 requires: tool:lldb
 fixture: loop_next_edges_are_line_mapped.fixture
 env: NO_COLOR=1
@@ -11,7 +11,8 @@ stdin: loop_next_edges_are_line_mapped.stdin
 exit: 0
 stdout: ~ "breakpoint hit  prog.jet:7  in run()\n7 |         hits += i        <- here" # the body breakpoint stops on its Jet line
 stdout: ~ "(jet) n\n4 |         if i == 1 {        <- here" # `n` crosses the loop edge onto the next iteration's first line
-stdout: ~ "(jet) p i\ni = 1\n(jet) n\n4 |         if i == 1 {        <- here" # the loop variable advanced; the `next` edge goes straight to the following iteration
+stdout: ~ "(jet) p i\ni = 1\n(jet) n\n5 |             next        <- here" # the loop variable advanced; n steps onto the next line
+stdout: ~ "(jet) n\n4 |         if i == 1 {        <- here\nlocals:  hits = 0   i = 2" # the next edge goes straight to the following iteration
 stdout: ~ "(jet) p i\ni = 2\n(jet) c\nbreakpoint hit  prog.jet:7" # skipping the body on i == 1 never stopped on line 7
 stdout: ~ "2,3,0\nprogram finished\n" # the program's own result, then the end of the session
 stdout: !~ ".rs:" # no generated Rust anywhere
