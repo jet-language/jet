@@ -984,6 +984,8 @@ fn sema_call_core_direct_checked(call: Call, expected: Type?, environment: SemaS
     if guard.handled -> return guard
     mount := sema_call_try_ui_mount(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if mount.handled -> return mount
+    decode := sema_call_try_args_decode(module_name, member, alias, call.name_span, call.args, call.type_args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if decode.handled -> return decode
     live := sema_call_try_live(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if live.handled -> return live
     // `reactive.derived/computed/autorun` are retained-closure calls with no
