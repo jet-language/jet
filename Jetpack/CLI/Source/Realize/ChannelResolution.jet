@@ -149,6 +149,10 @@ cli_rewrite_channel_manifest: fn(project_dir: String, source: ChannelSource, exa
     if source.raw == "" -> return Err(ChannelManifestError{message: "source `{source.name}` has no manifest spelling"})
     resolved: cli_manifest_channel_ref(exact, source.policy)
     if source.raw == resolved -> return
+    // A pin the source-ref grammar can't spell (`#` inside the target, an
+    // `@nixpkgs` provider) stays in `.jet/lock` only: env.jet is left as is
+    // rather than rewritten into a ref the next run rejects (E0968).
+    if ProviderRef.classify(resolved) == .Err(_) -> return
     next: current.replace(source.raw, resolved)
     if next == current -> return Err(ChannelManifestError{message: "source `{source.name}` was not found in `{path}`"})
     files.write(path, next) ?? return Err(ChannelManifestError{message: "could not write `{path}`: {err}"})
