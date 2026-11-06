@@ -71,10 +71,9 @@ run: fn() {
     xml_loose.limits.max_depth = 8
     xml_loose.limits.max_entity_depth = 8
     input4: files.open("probe.xml") ?? panic("open4")
-    reader: xml.reader(input4, enc_tight, xml_loose) ?? panic("fused reader")
+    reader := xml.reader(input4, enc_tight, xml_loose) ?? panic("fused reader")
     loop true {
-        result: reader.next()
-        if result == {
+        if reader.next() == {
             .Ok(maybe) -> {
                 if maybe == {
                     Val(_) -> {}
@@ -98,10 +97,9 @@ run: fn() {
     xml_tight.limits.max_depth = 1
     xml_tight.limits.max_entity_depth = 1
     deep_input: files.open("probe.xml") ?? panic("open deep")
-    deep_reader: xml.reader(deep_input, enc_loose, xml_tight) ?? panic("xml-tight reader")
+    deep_reader := xml.reader(deep_input, enc_loose, xml_tight) ?? panic("xml-tight reader")
     loop true {
-        result: deep_reader.next()
-        if result == {
+        if deep_reader.next() == {
             .Ok(maybe) -> {
                 if maybe == {
                     Val(_) -> {}
