@@ -4022,7 +4022,9 @@ already tracks, so no new syntax exists.
 
 Link resolution: declared `<lib>: c@system` / `c@"vendor/path"` in `package.jet`
 `deps:` → pkg-config fallback → E3201. C deps are link deps, never packages.
-`jet inspect bind` uses a native std-only C-prototype parser (`Source/CBind.rs`);
+`jet inspect bind` uses a native std-only C-prototype parser (Jetpack
+`PackageModel/Source/Foreign/C/HeaderBinder.jet`, the same code the compiler
+runs to refresh a missing or stale cache);
 binds scalars and `char*`↔String; `#define` constants only. Old
 `@extern`/`#extern` spellings E0060. `#Bindgen`/`#Extern` PascalCase.
 

@@ -9,13 +9,16 @@ use {
 // The generator stays inside Jet: no bindgen, no libclang. The focused parser
 // (HeaderParser.jet) binds scalar values, strings, uncounted object pointers,
 // typed pointer/count slices, and complete C-layout records, while the
-// opaque-handle seam (OpaqueHandleBinder.jet) records owned nominal types plus
+// opaque-handle seam (OpaqueHandleBinder.jet) records owned handle facts plus
 // explicit close/thread/link facts. A declaration it cannot map is skipped and
 // reported, never faked. Anything beyond this subset is an
 // `#Import c.<lib>: module` overlay, which still wins on merge.
 //
 // Output is a `#Bindgen c.<lib>.__bindgen__: module` cache; each binding is
-// `name: fn(p: T, ...) -> R = "c_symbol"`.
+// `name: fn(p: T, ...) -> R = "c_symbol"`. The cache declares no handle
+// types: each handle is a row of the `<lib>.metadata` sidecar
+// (pkg_cbind_bind_files), which the compiler turns into its foreign handle
+// type, so a handle crosses the C ABI as the native pointer it is.
 
 // Why a C header could not produce a binding cache.
 #Error
@@ -77,6 +80,83 @@ pkg_cbind_read_stored_hash: fn(cache_path: String) -[FS]> String? {
 // Write the hash sidecar next to `cache_path`.
 pkg_cbind_write_bind_hash: fn(cache_path: String, header_src: String, cflags: String) IOError! -[FS]> {
     cbind_core_files.write(pkg_cbind_hash_sidecar_path(cache_path), pkg_cbind_compute_bind_hash(header_src, cflags))
+}
+
+// What one header bind writes beside its `<lib>.jet` cache.
+CBindFiles: struct {
+    // The `#Bindgen` cache text.
+    cache: String
+    // The `<lib>.metadata` handle and link facts; None when the binding
+    // records no handle and no link beyond the library itself.
+    metadata: String?
+    // The `<lib>.hash` text: the bind hash of the header bytes.
+    hash: String
+    // Function names bound, and prototypes skipped with their reason.
+    bound: [String]
+    skipped: [(name: String, reason: String)]
+}
+
+// The one C header bind: `jet inspect bind <header.h>` and the compiler's
+// refresh of a missing or stale cache both write exactly these files.
+pkg_cbind_bind_files: fn(header_src: String, lib: String, overlay: HandleOverlay) -> CBindFiles CBindError! {
+    result: pkg_cbind_generate_with_overlay(header_src, lib, overlay)
+    facts := [FFIHandleFact]{}
+    loop handle in result.handles -> facts.push(pkg_cffi_canonical_handle_fact(handle))
+    metadata: if facts.len() == 0 && result.link_closure.transitive.len() == 0 -> None else -> Val(pkg_cffi_render_binding_metadata(result.link_closure.primary, facts, pkg_cffi_canonical_link_closure(result.link_closure)))
+    Ok(CBindFiles{cache: result.source, metadata: metadata, hash: pkg_cbind_compute_bind_hash(header_src, ""), bound: result.bound, skipped: result.skipped})
+}
+
+C_BINDING_METADATA_SCHEMA: "jet-c-binding-metadata-v1"
+
+// Facts sorted by their stable key, exact duplicates removed.
+pkg_cffi_sorted_facts: fn(facts: [FFIHandleFact]) -> [FFIHandleFact] Never! {
+    sorted := facts
+    &sorted.sort_by(fact -> fact.stable_key())
+    unique := [FFIHandleFact]{}
+    loop fact in sorted {
+        if unique.len() > 0 && unique[unique.len() - 1] == fact -> next
+        &unique.push(fact)
+    }
+    unique
+}
+
+// The binder's handle fact as the canonical bundle fact.
+pkg_cffi_canonical_handle_fact: fn(fact: HandleFact) -> FFIHandleFact Never! {
+    FFIHandleFact{lib: fact.link_closure.primary, typedef_name: fact.typedef_name, jet_name: fact.jet_name, close: fact.close, close_source: fact.close_source, thread_safety: fact.thread_safety}
+}
+
+pkg_cffi_canonical_link_closure: fn(closure: LinkClosure) -> FFILinkClosure Never! {
+    FFILinkClosure.new([String]{closure.primary}, closure.transitive)
+}
+
+// Percent-escape every byte outside `[A-Za-z0-9._/-]` as `%XX`.
+pkg_cffi_metadata_escape: fn(value: String) -> String Never! {
+    digits: "0123456789ABCDEF".bytes()
+    out := [U8]{}
+    loop byte in value.bytes() {
+        code: Int.from_u8(byte)
+        plain: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 46 || code == 95 || code == 45 || code == 47
+        if plain {
+            &out.push(byte)
+            next
+        }
+        &out.push(U8{37})
+        &out.push(digits[code >> 4])
+        &out.push(digits[(code).bit_and(15)])
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// The `.metadata` sidecar text: schema, library, link closure, then one
+// `handle=lib|typedef|JetName|close|close-source|thread-safety` row per fact.
+pkg_cffi_render_binding_metadata: fn(lib: String, handle_facts: [FFIHandleFact], link_closure: FFILinkClosure) -> String Never! {
+    out := "schema={C_BINDING_METADATA_SCHEMA}\nlibrary={pkg_cffi_metadata_escape(lib)}\n"
+    loop direct in link_closure.direct -> out = "{out}closure.direct={pkg_cffi_metadata_escape(direct)}\n"
+    loop transitive in link_closure.transitive -> out = "{out}closure.transitive={pkg_cffi_metadata_escape(transitive)}\n"
+    loop fact in pkg_cffi_sorted_facts(handle_facts) {
+        out = "{out}handle={pkg_cffi_metadata_escape(fact.lib)}|{pkg_cffi_metadata_escape(fact.typedef_name)}|{pkg_cffi_metadata_escape(fact.jet_name)}|{pkg_cffi_metadata_escape(fact.close)}|{pkg_ffi_close_source_name(fact.close_source)}|{pkg_ffi_thread_safety_name(fact.thread_safety)}\n"
+    }
+    out
 }
 
 // Translate C header source into a `#Bindgen` cache for library `lib`. The
@@ -148,12 +228,13 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
         if pkg_cbind_render_binding(proto, &used_names, contract, discovery, catalog) == {
             .Ok(line) -> {
                 &bound.push(proto.name)
-                &lines.push("    {line}\n")
+                // A `#Close(...)` marker line comes first; each line is indented.
+                loop part in line.split("\n") -> &lines.push("    {part}\n")
                 if pkg_cbind_managed_callback_param_index(proto, catalog) != None {
                     &lines.push("    {proto.name}: fn(callback: fn(FfiCallbackEvent<I64>)) -> FfiCallbackRegistration = {pkg_cbind_quote(proto.name)}\n")
                 }
                 if proto.name == "unsubscribe" && pkg_cbind_native_void_pointer_proto(proto) {
-                    &lines.push("    unsubscribe: fn(subscription: ^FfiCallbackRegistration) -> Task<!String> = \"__jet_ffi_callback_unsubscribe\"\n")
+                    &lines.push("    unsubscribe: fn(subscription: &&FfiCallbackRegistration) -> Task<!String> = \"__jet_ffi_callback_unsubscribe\"\n")
                 }
                 if proto.name == "emit_async" {
                     &lines.push("    emit_async: fn(value: I64) -> Task<I64 ! String> = \"__jet_ffi_emit_async\"\n")
@@ -195,7 +276,7 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
     loop entry in discovery.unresolved -> &assumptions.push("{entry.typedef_name}: {entry.reason}")
     boundary.assumptions = assumptions
     boundary_stamp: boundary.stamp()
-    type_declarations: "{discovery.render_type_declarations()}{catalog.render_type_declarations()}"
+    type_declarations: catalog.render_type_declarations()
     source: "// jet-ffi-descriptor={descriptor_stamp}\n// jet-ffi-boundary={boundary_stamp}\n{type_declarations}#Bindgen c.{module_lib}.__bindgen__: module {{\n{lines.join("")}}}\n"
     Ok(CBindResult{
         source: source,

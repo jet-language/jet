@@ -262,14 +262,6 @@ OpaqueHandleDiscovery: struct {
         handle: self.handle_for_type(c_type) ?? return false
         handle.close == function
     }
-
-    // One empty nominal struct per handle, then a blank line.
-    render_type_declarations: fn(self) -> String Never! {
-        lines := [String]{}
-        loop handle in self.handles -> &lines.push("{handle.jet_name}: struct {{}}\n")
-        if lines.len() == 0 -> return ""
-        "{lines.join("")}\n"
-    }
 }
 
 pkg_opaque_sorted_keys: fn(keys: [String]) -> [String] Never! {

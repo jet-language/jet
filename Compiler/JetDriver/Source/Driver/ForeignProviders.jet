@@ -46,6 +46,9 @@ use {
         SemaSourceOrigin,
         SemaSourceSegment,
     ]
+    jet_pkg_model.[
+        pkg_cbind_c_descriptor,
+    ]
 }
 
 JetDriverForeignRequest: struct {
@@ -466,7 +469,11 @@ jet_driver_foreign_surface: fn(snapshot: JetDriverAuthorizedSourceSnapshot, requ
     metadata_file := JetDriverAuthorizedSourceFile?{None}
     provenance_file := JetDriverAuthorizedSourceFile?{None}
     if found.cache == .Val(cache) {
-        cache_program = jet_driver_foreign_parse_cache(cache, &diagnostics)
+        // A generated C cache whose descriptor stamp is not the C binder's own
+        // was written under other FFI rules: it is refused before it loads.
+        stale: if request.language == "c" -> jet_driver_foreign_stale_descriptor(cache.source) else -> None
+        if stale == .Val(reason) -> jet_driver_foreign_cache_error(cache.path, reason, &diagnostics)
+        cache_program = if stale == None -> jet_driver_foreign_parse_cache(cache, &diagnostics) else -> None
         metadata_file = found.metadata
         provenance_file = found.provenance
         if cache_program != None {
@@ -511,6 +518,23 @@ jet_driver_foreign_surface: fn(snapshot: JetDriverAuthorizedSourceSnapshot, requ
         }
     }
     JetDriverForeignSurface{library: request.library, language: request.language, module_library: module_library, root_index: request.root_index, cache: found.cache, metadata: metadata_file, provenance: provenance_file, cache_program: cache_program, cache_span: cache_span, overlay_functions: overlay_functions, overlay_function_paths: overlay_function_paths, overlay_span: overlay_span, overlay_path: overlay_path, parsed_metadata: parsed_metadata, parsed_provenance: parsed_provenance, valid: valid}
+}
+
+// Why the `#Bindgen` cache `source` is stale: its `// jet-ffi-descriptor=`
+// stamp is not the C binder's descriptor. None when it matches, when the
+// cache records no stamp, or for a hand-written cache.
+jet_driver_foreign_stale_descriptor: fn(source: String) -> String? Never! {
+    if !source.contains("#Bindgen") -> return None
+    descriptor: pkg_cbind_c_descriptor() ?? return None
+    expected: descriptor.stamp()
+    prefix: "// jet-ffi-descriptor="
+    loop line in source.split("\n") {
+        if !line.starts_with(prefix) -> next
+        actual: line.removeprefix(prefix)
+        if actual == expected -> return None
+        return Val("the generated cache descriptor is stale (expected `{expected}`, found `{actual}`)")
+    }
+    None
 }
 
 jet_driver_foreign_hex_digit: fn(value: Int) -> Int Never! {
@@ -829,9 +853,15 @@ jet_driver_foreign_find_generated_module: fn(program: Program, language: String,
     (functions: functions, module_library: module_library, span: span)
 }
 
+// The close adapter over a raw close `raw_function` that returns a status:
+// it takes the handle into the raw close and discards the status, so the
+// handle's `#Close` contract is a function returning nothing.
+jet_driver_foreign_close_adapter_text: fn(handle: String, raw_function: String) -> String Never! {
+    "__jet_ffi_close_{handle}: fn(handle: &&{handle}) {{\n    {raw_function}(handle).drop(\"a native close status is not a Jet failure\")\n}}\n"
+}
+
 jet_driver_foreign_make_adapter_function: fn(handle: String, raw_function: String, origin_path: String, diagnostics: &[Diagnostic]) -> Func? {
-    adapter_name: "__jet_ffi_close_{handle}"
-    source: "{adapter_name}: fn(handle: &&{handle}) {{\n    {raw_function}(handle.copy())\n}}\n"
+    source: jet_driver_foreign_close_adapter_text(handle, raw_function)
     lexed: lex_generated(source.bytes())
     // copy: `lexed` still feeds jet_driver_has_errors and parse_lexed below, so it keeps its
     // diagnostics. The caller's diagnostics list gets a copy of each, re-pathed to the adapter
@@ -965,7 +995,7 @@ jet_driver_foreign_adapter_path: fn(surface: JetDriverForeignSurface, index: Int
 }
 
 jet_driver_foreign_adapter_source: fn(adapter: SemaForeignCloseAdapterInput) -> String Never! {
-    "__jet_ffi_close_{adapter.handle_type}: fn(handle: &&{adapter.handle_type}) {{\n    {adapter.raw_function}(handle.copy())\n}}\n"
+    jet_driver_foreign_close_adapter_text(adapter.handle_type, adapter.raw_function)
 }
 
 jet_driver_foreign_source_for_path: fn(load: JetDriverLoadResult, path: String) -> String Never! {
