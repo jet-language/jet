@@ -5166,13 +5166,15 @@ fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: Type?, envir
     effect_name := sema_copy_effect_name(facts)
     if effect_name != None -> &context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
     if !facts.accepted {
-        diagnostic := sema_copy_diagnostic(facts, span)
-        if diagnostic == .Val(report) {
-            &diagnostics.push(report)
-        } else {
+        // Rust `Expr::Copy` reports E0211 and keeps the copy's type, so the
+        // binding it initializes still opens its views (E0212).
+        report :: sema_copy_diagnostic(facts, span) ?? {
             sema_check_unsupported(&context, "the copy of `{type_name(checked.ty)}` at offset {span.start} has incomplete copy facts")
+            return None
         }
-        return None
+        &diagnostics.push(report)
+        ty :: checked.ty
+        return sema_expr_expected_owned(sema_tree_expr(ty, TExprKind.ExplicitCopy{value: checked}, span), expected, environment, program, &diagnostics)
     }
     if sema_copy_memory_operation(facts) != None && effect_name == None -> &context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
     result_kind := if share -> TExprKind.Clone{value: checked, fact: CopyFact.Share} else -> TExprKind.ExplicitCopy{value: checked}

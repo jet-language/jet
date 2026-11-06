@@ -36,6 +36,7 @@ use {
         Type,
         TypeTupleField,
         UnOp,
+        expr_source_span,
         expr_span,
         symbol_id,
         checked_symbol_local,
@@ -793,14 +794,24 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
         .Lambda(_) -> { sema_function_reactive_note_task_lambda(&context, lambda) }
         else -> {}
     }
-    sema_taskgroup_check_lambda_captures(lambda, args[0].span, environment, program, scopes, &state, &context, &diagnostics)
-    // Rust infer_task_spawn reports the result crossing at `expr` of
-    // `task expr`, which the parser wraps in a zero-parameter expression
-    // lambda (parser_task_spawn); a call's span is its name.
+    // Rust infer_task_spawn reports the capture and result crossings at
+    // `expr` of `task expr`, which the parser wraps in a zero-parameter
+    // expression lambda (parser_task_spawn); a call's span is its name.
+    capture_span := args[0].span
     spawned_span := expr_span(args[0].expr)
     if args[0].expr == .Lambda(spawn_lambda, _) {
-        if spawn_lambda.params.len() == 0 && spawn_lambda.body == .Expr(spawned) -> spawned_span = expr_span(spawned)
+        if spawn_lambda.params.len() == 0 && spawn_lambda.body == .Expr(spawned) {
+            spawned_span = expr_span(spawned)
+            // Only a bare call body is spelled at its name; a braced body
+            // `task { … }` and other expressions keep the whole span.
+            call :: if spawned == {
+                .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) -> true
+                else -> false
+            }
+            if call && expr_source_span(spawned).start == spawn_lambda.span.start -> capture_span = spawned_span
+        }
     }
+    sema_taskgroup_check_lambda_captures(lambda, capture_span, environment, program, scopes, &state, &context, &diagnostics)
     task_result_ty := body_ty
     problem := sema_ownership_crossing_problem(task_result_ty, SemaSendCrossing.TaskResult, false, environment, program, scopes, context)
     if problem == .Val(value) {

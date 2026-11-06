@@ -1867,6 +1867,27 @@ fn sema_expression_pattern_slot_sources(slot: TPatternBinding, ty: Type, source:
     }
 }
 
+// E0120: a payload binding that is a `ViewMut` out of a read parameter's
+// subject would hand out write access the parameter never lent; the subject
+// is not owned here, so that part cannot be taken apart. One report per
+// subject, however many arms bind such a payload.
+fn sema_expression_reject_read_write_view_payload(state: &SemaOwnershipState, subject: Expr, subject_ty: Type, payload_ty: Type, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if sema_pattern_unwrap_tags(payload_ty) == .Apply(view_name, _) {
+        if view_name != "ViewMut" -> return
+    } else {
+        return
+    }
+    root :: sema_ownership_binding_for_expr(&state, subject, scopes) ?? return
+    if root.symbol.kind != SymbolKind.Parameter || root.access != AccessConvention.Read -> return
+    span :: expr_span(subject)
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E0120" && diagnostic.span == .Val(reported) && sema_ownership_span_same(reported, span) -> return
+    }
+    name :: root.symbol.name
+    shown :: type_name(subject_ty)
+    &diagnostics.push(sema_error("E0120", span, "`{name}` was not moved here, so its contents cannot be taken apart", "`{name}` grants read-only access to `{shown}`, so its non-copyable parts cannot be taken apart with the move marker `^`", "Change the parameter to `{name}: ^{shown}` with the move marker `^`, or inspect it without binding its contents"))
+}
+
 // One pattern test condition, with payload aliases for the success branch.
 fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaConditionCheck {
     // An `.Ok`/`.Err` pattern consumes the subject's
@@ -1891,6 +1912,7 @@ fn sema_expression_check_pattern_condition(subject: Expr, pattern: Pattern, span
             symbol :: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_name: environment.module_identity, owner: Val(owner), span: fact.span, ty: Val(fact.ty), visibility: 0}
             sources := [Expr]{}
             sema_expression_pattern_binding_sources(checked.pattern.shape, checked_subject.ty, source ?? subject, fact.name, environment, program, &sources, &diagnostics)
+            if !window && !sema_expression_subject_moved(subject) -> sema_expression_reject_read_write_view_payload(&state, subject, checked_subject.ty, fact.ty, scopes, &diagnostics)
             // An explicit `^name` takes this payload out of its subject
             // (sema_ownership_move_pattern_payload) when the subject stays
             // live. A `^subject` moves into the match, so its bindings own

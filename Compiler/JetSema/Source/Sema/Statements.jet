@@ -2940,6 +2940,16 @@ fn sema_stmt_has_struct_view_source(expr: Expr) -> Bool Never! {
     }
 }
 
+// The operand of `value.copy()` (or `~value`), whose views the copy holds.
+fn sema_stmt_copy_operand(expr: Expr) -> Expr? Never! {
+    if expr == {
+        .Copy(value, _, _) -> Val(value)
+        .MethodCall(receiver, method, _, _, type_args, args, _) -> if method == "copy" && args.len() == 0 && type_args.len() == 0 -> Val(receiver) else -> None
+        .Paren(value, _, _) -> sema_stmt_copy_operand(value)
+        else -> None
+    }
+}
+
 fn sema_stmt_record_return_views(expr: Expr, ty: Type, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     call_facts := sema_stmt_call_return_views_for_expr(expr, context)
     if sema_stmt_has_struct_view_source(expr) {
@@ -3073,11 +3083,14 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
         if arena == .Ident(_, _, _) -> return sema_ownership_record_fresh_view_fact(&state, binding.name, binding.name_span, arena, [String]{}, AccessConvention.Write, scopes, binding.name_span)
     }
     call_facts := sema_stmt_call_return_views_for_expr(binding.init, context)
-    if sema_stmt_has_struct_view_source(binding.init) {
+    // A copy of a value holding views carries the same views into the
+    // binding (Rust `Expr::Copy` keeps its operand's view sources).
+    copied :: sema_stmt_copy_operand(binding.init)
+    if sema_stmt_has_struct_view_source(binding.init) || copied != None {
         // A struct that stores a view is a new carrier of its places: it
         // conflicts with another live view of them as a window would. A
         // carrier whose open is rejected holds no loan.
-        loop fact in sema_stmt_local_view_facts_for_expr(binding.init, scopes, &state, context) {
+        loop fact in sema_stmt_local_view_facts_for_expr(copied ?? binding.init, scopes, &state, context) {
             if fact.places.len() > 0 && !sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, binding.init, fact.places, fact.access, scopes, &diagnostics) -> return true
             &call_facts.push(fact)
         }
@@ -4773,9 +4786,22 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     // A bound lambda that takes a capture runs once; one that writes a
     // capture changes it at each call.
     if binding.init == .Lambda(bound_lambda, _) -> sema_ownership_bind_once_lambda(&state, bound_lambda.span, symbol.id.key)
-    if init.kind == .Lambda(checked_lambda) && checked_lambda.capture_facts.mutable.len() > 0 -> sema_ownership_bind_closure_writes(&state, symbol.id.key, checked_lambda.capture_facts.mutable)
+    if init.kind == .Lambda(checked_lambda) && checked_lambda.capture_facts.mutable.len() > 0 {
+        sema_ownership_bind_closure_writes(&state, symbol.id.key, checked_lambda.capture_facts.mutable)
+        if checked_lambda.capture_facts.escapes -> sema_ownership_bind_lambda_write_borrows(&state, checked_lambda.capture_facts.mutable)
+    }
     if binding.init == .Lambda(captured_lambda, _) {
         if init.kind == .Lambda(viewing_lambda) -> sema_ownership_bind_closure_captures(&state, symbol.id.key, captured_lambda.span, viewing_lambda.captures, viewing_lambda.capture_facts, scopes)
+        // Rust `check_binding`: an escaping lambda moves the owned
+        // non-cloneable captures it did not take with `^` when it is built,
+        // so a later use of one here is E0121.
+        if init.kind == .Lambda(moving_lambda) && moving_lambda.capture_facts.escapes {
+            taken_names :: loop capture in captured_lambda.take_names -> capture.name
+            loop name in moving_lambda.capture_facts.moved {
+                if taken_names.contains(name) -> next
+                _ := sema_ownership_mark_move(&state, Expr.Ident{name: name, span: captured_lambda.span, id: AST_NODE_GENERATED}, scopes, "an escaping lambda", &diagnostics)
+            }
+        }
     }
     sema_single_use_note_binding(&state, symbol, environment, program)
     if binding.name == "_" {
@@ -5176,6 +5202,9 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     if sema_ownership_uninit_take(&state, binding.symbol.id.key) != None && op != None {
         &diagnostics.push(sema_error("E0420", name_span, "`{name}` may be read before it is given a value", "`{name}+=` reads `{name}` first, but it was declared with `Type{{ uninit }}` and has no value yet", "give `{name}` a value with `{name} = …` before updating it"))
     }
+    // An escaping lambda bound in an open scope still holds `name`'s write
+    // access (Rust `lambda_mut_borrow_active`).
+    if sema_ownership_lambda_write_borrow_active(state, name) -> &diagnostics.push(sema_ownership_diag_alias(name, true, name_span))
     tree_op := TBinaryOp?{None}
     if op != None {
         operator :: op
@@ -6966,7 +6995,19 @@ fn sema_stmt_returns_module_call(value: Expr, environment: SemaScopeEnvironment,
 // A returned value (a `return` or a value tail) with its ownership and view
 // obligations: the value moves out and its views must outlive the call.
 fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_ownership_report_lending_view_escape(value, "be returned", scopes, context, &diagnostics) -> return None
+    if sema_ownership_report_lending_view_escape(value, "be returned", scopes, context, &diagnostics) {
+        // Rust `check_return` still runs the view-return check on the lent
+        // view, whose loan names no stable owner (E2305).
+        if sema_stmt_return_success_is_view(return_type) {
+            declared :: return_type ?? return None
+            success :: if declared == .Result(ok, _) -> ok else -> declared
+            access :: sema_stmt_view_access(success) ?? AccessConvention.Read
+            provenance := context.return_view_provenance ?? ViewProvenanceMap{entries: [ViewProvenanceEntry]{}}
+            _ := sema_ownership_record_view_returns(&state, [SemaOwnershipPlace]{}, access, [String]{}, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, &provenance, expr_span(value), &diagnostics)
+            context.return_view_provenance = Val(provenance)
+        }
+        return None
+    }
     // D-ALLOC2 (Rust `check_return`): a returned arena view would outlive the
     // arena, which drops at scope end.
     if sema_ownership_report_arena_view_escape(&state, value, "be returned", scopes, &diagnostics) -> return None
@@ -8721,6 +8762,7 @@ fn sema_stmt_check_scoped_statement(statement: Stmt, return_type: Type?, environ
             }
         }
         .Reactive(body, span) -> {
+            &state.reactive_bodies.push(span)
             checked := sema_stmt_check_reactive(body, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if checked == {
                 .Val(value) -> &output.push(TStmt.Reactive{executable: value, span: span})

@@ -988,7 +988,9 @@ fn sema_expression_lambda_collect_reference_keys(state: &SemaOwnershipState, fir
         reference :: state.references[index]
         if sema_expression_lambda_outer_binding_key(reference.def_key, frame, &scopes) != None {
             sema_expression_lambda_add_capture_key(&keys, reference.def_key)
-            if reference.kind == SemaOwnershipReferenceKind.Write {
+            // Rust `block_collect_captures`: a `#Reactive` body writes its
+            // registration's clone, so the lambda only reads the root.
+            if reference.kind == SemaOwnershipReferenceKind.Write && !sema_ownership_in_reactive_body(state, reference.use_span) {
                 sema_expression_lambda_add_capture_key(&mutable_keys, reference.def_key)
             }
         }
@@ -1327,8 +1329,11 @@ fn sema_expression_lambda_block_value_type(statements: [TStmt], fallback: Type) 
     fallback.copy()
 }
 
-fn sema_expression_lambda_capture_diagnostic(name: String, ty: Type, span: Span) -> Diagnostic {
-    sema_error("E0120", span, "`{name}` was not moved here, so it cannot be captured by a stored lambda", "this lambda would retain a borrowed value after the current access window ends", "make the parameter owned with the move marker `^`, or capture an owned copy")
+// Rust `infer_lambda`: a borrowed non-cloneable parameter captured by a
+// lambda that outlives the access, reported at the lambda.
+fn sema_expression_lambda_capture_diagnostic(name: String, ty: Type, task_body: Bool, span: Span) -> Diagnostic {
+    destination :: if task_body -> "a spawned task" else -> "a stored lambda"
+    sema_error("E0120", span, "`{name}` was not moved here, so it cannot be captured by {destination}", "this function can access the parameter, but it does not own the value; capture requires the move marker `^`", "make the parameter owned with the move marker `^`: `{name}: ^{type_name(ty)}`")
 }
 
 fn sema_expression_lambda_view_diagnostic(name: String, span: Span) -> Diagnostic {
@@ -1768,6 +1773,9 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     lambda_parent_state := sema_ownership_state_snapshot(state)
     lambda_state := sema_ownership_state_snapshot(state)
     lambda_context := sema_check_context_snapshot(context)
+    // Rust `iter_borrowed` (E0507) stays active in a lambda body: a body that
+    // changes the collection an enclosing loop reads is refused there too.
+    lambda_context.iter_borrowed = context.iter_borrowed.copy()
     // (Rust `check_lambda`): this lambda is a `task` body when
     // the spawn named it and no callable is expected of it. The fact and the
     // propagation it harvests belong to this body alone, never a nested one.
@@ -2182,6 +2190,9 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                 }
                 // The task's crossing prover refuses a captured Cell guard.
                 task_body && sema_cell_guard_contained(capture_ty) -> {}
+                // ... and a view it cannot materialize (E1102, at the task's
+                // use of it): a moved or write view here, an uncopyable one below.
+                task_body && is_view && (explicit_move || binding.mutable) -> {}
                 !escapes -> {
                     if explicit_move -> sema_expression_lambda_append_name(&lambda_work.meta.moved_captures, binding.symbol.name) else -> sema_expression_lambda_append_name(&lambda_work.meta.frozen_captures, binding.symbol.name)
                 }
@@ -2195,13 +2206,14 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                         sema_check_unsupported(&context, "the copy of captured `{binding.symbol.name}` (`{type_name(capture_ty)}`) has no complete classification")
                         return None
                     }
-                    if !facts.accepted || !facts.materializes_view {
+                    if facts.accepted && facts.materializes_view {
+                        sema_expression_lambda_append_name(&lambda_work.meta.materialized_captures, binding.symbol.name)
+                        sema_expression_lambda_append_name(&lambda_work.meta.cloned_captures, binding.symbol.name)
+                        &lambda_context.copy_events.push(SemaCopyEvent{span: binding.symbol.span, facts: facts})
+                    } else if !task_body {
                         &diagnostics.push(sema_expression_lambda_view_diagnostic(binding.symbol.name, binding.symbol.span))
                         return None
                     }
-                    sema_expression_lambda_append_name(&lambda_work.meta.materialized_captures, binding.symbol.name)
-                    sema_expression_lambda_append_name(&lambda_work.meta.cloned_captures, binding.symbol.name)
-                    &lambda_context.copy_events.push(SemaCopyEvent{span: binding.symbol.span, facts: facts})
                 }
                 explicit_move -> {
                     sema_expression_lambda_append_name(&lambda_work.meta.moved_captures, binding.symbol.name)
@@ -2218,8 +2230,10 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                             &lambda_context.copy_events.push(SemaCopyEvent{span: binding.symbol.span, facts: facts})
                         }
                         borrowed -> {
-                            &diagnostics.push(sema_expression_lambda_capture_diagnostic(binding.symbol.name, capture_ty, binding.symbol.span))
-                            return None
+                            &diagnostics.push(sema_expression_lambda_capture_diagnostic(binding.symbol.name, capture_ty, task_body, lambda.span))
+                            // A task still proves its result and detach
+                            // crossings (E1102, E1103), as Rust continues.
+                            if !task_body -> return None
                         }
                         else -> {
                             sema_expression_lambda_append_name(&lambda_work.meta.moved_captures, binding.symbol.name)
@@ -2285,6 +2299,25 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     }
     ret_slot := Type?{None}
     if ret_ty != (Type.Named{name: "Unit"}) -> ret_slot = Val(ret_ty)
+    // Rust `infer_lambda` (`check_aggregate_view_return`): an expression body
+    // whose result carries a view proves its owners as a `return` does, so a
+    // view into a local the enclosing function owns is E2305. The enclosing
+    // function's receiver and parameters stay stable sources; the check only
+    // reports, and leaves the lambda's recorded provenance as it was.
+    if lambda.body == .Expr(view_body) && program.registration_graph == .Val(view_graph) {
+        view_seen := [String:Bool]{}
+        if sema_check_type_contains_view(view_graph, environment.module_identity, ret_ty, &view_seen) {
+            saved_view_provenance := lambda_context.return_view_provenance.copy()
+            saved_view_receiver := lambda_context.return_view_receiver_key.copy()
+            saved_view_keys := lambda_context.return_view_parameter_keys.copy()
+            if lambda_context.return_view_receiver_key == "" -> lambda_context.return_view_receiver_key = context.return_view_receiver_key.copy()
+            loop key in context.return_view_parameter_keys -> &lambda_context.return_view_parameter_keys.push(key)
+            _ := sema_stmt_record_return_views(view_body, ret_ty, lambda_scopes, &lambda_state, &lambda_context, &diagnostics)
+            lambda_context.return_view_provenance = saved_view_provenance
+            lambda_context.return_view_receiver_key = saved_view_receiver
+            lambda_context.return_view_parameter_keys = saved_view_keys
+        }
+    }
     lambda_return_provenance := lambda_context.return_view_provenance
     lambda_work.meta.return_view_provenance = lambda_return_provenance
     // A lambda whose body adds no effect publishes the empty bound, so it

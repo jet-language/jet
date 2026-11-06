@@ -171,6 +171,13 @@ struct SemaOwnershipClosureCaptures {
     places: [SemaOwnershipPlace]
 }
 
+// A captured name an escaping lambda binding writes, held until the scope
+// that bound the lambda (`scope_depth`) closes.
+struct SemaOwnershipLambdaWriteBorrow {
+    name: String
+    scope_depth: Int
+}
+
 // An unmarked move site that a later use reached. The
 // function check re-runs with the site known, and the site then checks as
 // the authored copy `name.copy()`.
@@ -281,6 +288,11 @@ struct SemaOwnershipState {
     direct_call_lambdas: [Span]{[Span]{}}
     // Lambda bindings whose calls read their captures, by binding key.
     closure_captures: [SemaOwnershipClosureCaptures]{[SemaOwnershipClosureCaptures]{}}
+    // Names an escaping lambda bound in an open scope writes.
+    lambda_write_borrows: [SemaOwnershipLambdaWriteBorrow]{[SemaOwnershipLambdaWriteBorrow]{}}
+    // `#Reactive` bodies checked so far: their writes land on the
+    // registration's clones, not on the enclosing lambda's captures.
+    reactive_bodies: [Span]{[Span]{}}
     // `function#parameter` keys of list write parameters
     // proven length-preserving (sema_fixed_length_write_params).
     fixed_length_write_params: [String]
@@ -989,6 +1001,12 @@ fn sema_ownership_leave_scope(state: &SemaOwnershipState) Never! {
         if view.active && view.scope_depth < depth -> &remaining_views.push(view)
     }
     state.views = remaining_views
+
+    remaining_lambda_writes := [SemaOwnershipLambdaWriteBorrow]{}
+    loop borrow in state.lambda_write_borrows {
+        if borrow.scope_depth < depth -> &remaining_lambda_writes.push(borrow)
+    }
+    state.lambda_write_borrows = remaining_lambda_writes
     state.scope_depth = depth - 1
 }
 
@@ -2286,6 +2304,16 @@ fn sema_ownership_place_moved(state: &SemaOwnershipState, place: SemaOwnershipPl
     None
 }
 
+// Whether `expr`'s place was moved at a site before `expr`: an earlier
+// argument of its call, not a later one whose nested move typing recorded.
+fn sema_ownership_moved_before(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
+    start :: expr_span(expr).start
+    loop place in sema_ownership_places_from_expr_in_state(expr, scopes, &state) {
+        if sema_ownership_place_moved(&state, place) == .Val(moved) && moved.origin.span.start < start -> return true
+    }
+    false
+}
+
 // The deferred `close` that takes `place` when its scope exits.
 fn sema_ownership_place_deferred(state: &SemaOwnershipState, place: SemaOwnershipPlace) -> SemaOwnershipMovedPlace? {
     loop moved in state.moved {
@@ -2612,9 +2640,12 @@ fn sema_ownership_check_use(state: &SemaOwnershipState, expr: Expr, scopes: Sema
             sema_ownership_report_moved(&state, origin, place, expr_span(expr), &diagnostics)
             return false
         }
+        // Rust `check_place_read` reports E0220 and lets the read go on, so
+        // the access that follows still runs its own checks (a write
+        // receiver's E0212).
         if sema_ownership_conflicting_view_for_expr(&state, place, AccessConvention.Read, expr, scopes) == .Val(fact) {
             &diagnostics.push(sema_ownership_diag_owner_read(fact, place, expr_span(expr), scopes))
-            return false
+            next
         }
         conflict :: sema_ownership_active_loan_conflict_for_expr(&state, place, AccessConvention.Read, expr, scopes)
         if conflict == .Val(loan) {
@@ -3489,6 +3520,10 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 // argument's root on write capability; `&` toward a parameter
                 // that does not edit runs the change checks alone.
                 checked :: if {
+                    // An earlier argument's lambda moved its captures when it
+                    // was built; Rust infers each argument after the previous
+                    // one's captures, so a write to a moved place is E0121.
+                    arg.convention == AccessConvention.Write && sema_ownership_moved_before(&state, arg.expr, scopes) && !sema_ownership_check_moved_place_use(&state, arg.expr, scopes, &diagnostics) -> false
                     arg.convention == AccessConvention.Write && param.convention == AccessConvention.Write -> sema_ownership_check_write_argument(&state, arg.expr, callee, scopes, &diagnostics)
                     arg.convention == AccessConvention.Write -> sema_ownership_check_write_change(&state, arg.expr, "be passed with write access", scopes, &diagnostics)
                     // Exact-place inference has already checked and consumed
@@ -3704,6 +3739,29 @@ fn sema_ownership_closure_writes(state: &SemaOwnershipState, callee: Expr, scope
         if writes.key == binding.symbol.id.key -> return writes.names.copy()
     }
     [String]{}
+}
+
+// An escaping lambda bound in this scope writes the captured `names`: it
+// holds their write access while the scope lasts, so assigning one of them
+// directly is E0204 (Rust `lambda_mut_borrow_stack`).
+fn sema_ownership_bind_lambda_write_borrows(state: &SemaOwnershipState, names: [String]) Never! {
+    loop name in names -> &state.lambda_write_borrows.push(SemaOwnershipLambdaWriteBorrow{name: name, scope_depth: state.scope_depth})
+}
+
+// Rust `lambda_mut_borrow_active`.
+fn sema_ownership_lambda_write_borrow_active(state: SemaOwnershipState, name: String) -> Bool Never! {
+    loop borrow in state.lambda_write_borrows {
+        if borrow.name == name -> return true
+    }
+    false
+}
+
+// True when `span` lies inside a checked `#Reactive` body.
+fn sema_ownership_in_reactive_body(state: SemaOwnershipState, span: Span) -> Bool Never! {
+    loop body in state.reactive_bodies {
+        if span.start >= body.start && span.end <= body.end -> return true
+    }
+    false
 }
 
 // The lambda at `site` is bound to a local that only direct calls reach.
@@ -4273,6 +4331,12 @@ fn sema_ownership_note_lambda(state: &SemaOwnershipState, body: SemaOwnershipSta
     loop (key, value) in body.lambda_facts -> state.lambda_facts[key] = value.copy()
     loop (key, value) in body.receiver_accesses -> state.receiver_accesses[key] = value.copy()
     loop (key, value) in body.place_types -> state.place_types[key] = value.copy()
+    sema_ownership_note_lambda_facts(&state, span, facts)
+}
+
+// The capture facts a call checks a lambda argument's construction against,
+// keyed by the lambda's span.
+fn sema_ownership_note_lambda_facts(state: &SemaOwnershipState, span: Span, facts: TCaptureFacts) Never! {
     // copy: the capture name lists stay with `facts`, the checked lambda's own checked-tree facts.
     state.lambda_facts[sema_ownership_span_key(span)] = SemaOwnershipLambdaFacts{escapes: facts.escapes, needs_fn_mut: facts.needs_fn_mut, cloned: facts.cloned.copy(), moved: facts.moved.copy()}
 }
@@ -5212,14 +5276,17 @@ fn sema_ownership_check_argument_captures(state: &SemaOwnershipState, accesses: 
     sema_ownership_collect_evaluated_expr_accesses(&state, arg.expr, SemaOwnershipAccessWalk.ConstructCaptures, [String]{}, true, scopes, &events, &checks)
     accepted := sema_ownership_check_nested_accesses(accesses, checks, known, &diagnostics)
     loop event in events {
-        if sema_ownership_call_access_conflict(accesses, event.place, event.access, false, event.access == AccessConvention.Move || event.through_call || event.moves_owner) == .Val(active) {
+        // Every construction capture holds against a reserved `&` argument
+        // (Rust `check_call_place_access`): even a cloned one reads the place
+        // while the write is lent, as in a lambda nested in a struct field.
+        if sema_ownership_call_access_conflict(accesses, event.place, event.access, false, true) == .Val(active) {
             accepted = false
             &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(event.place), active == AccessConvention.Write, sema_ownership_capture_site_span(event.site)))
         }
         if event.through_call {
             &accesses.push(SemaOwnershipCallAccess{place: sema_ownership_place_snapshot(event.place), access: event.access, span: expr_span(event.site), reserved: false, retained: true})
         } else if event.moves_owner {
-            sema_ownership_mark_capture_move(&state, event.place, event.capture_ty, expr_span(event.site))
+            sema_ownership_mark_capture_move(&state, event.place, event.capture_ty, sema_ownership_capture_site_span(event.site))
         }
     }
     if !sema_ownership_record_call_result_views(state, &accesses, arg.expr, &diagnostics) -> accepted = false
