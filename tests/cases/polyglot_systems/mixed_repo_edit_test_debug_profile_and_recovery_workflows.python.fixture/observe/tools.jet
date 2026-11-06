@@ -6,13 +6,15 @@ use {
     json: core.encoding.json
     parse: core.text.parse
 }
+#Error
+MissingTool: struct { name: String }
 quoted: fn(text: String) -> String { json.to_string(text) ?? panic("JSON text quoting failed") }
-run: fn() {
+run: fn() MissingTool! {
     names: [String]{"cc", "ar", "clang", "strip", "nm", "javac", "node", "python3"}
     fields := [String]{}
     javac := ""
     loop name in names {
-        path: process.which(name) ?? panic("mixed-repo production matrix requires {name}")
+        path: process.which(name) ?? return Err(MissingTool{name: name})
         if name == "javac" -> javac = path
         fields.push("{quoted(name)}:{quoted(path)}")
     }
