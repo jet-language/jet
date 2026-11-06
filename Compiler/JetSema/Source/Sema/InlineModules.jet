@@ -1580,6 +1580,7 @@ sema_inline_rewrite_item: fn(rewrite: &SemaInlineRewrite, item: Item) -> Item Ne
             updated := definition
             saved: rewrite.locals.len()
             updated.params = sema_inline_rewrite_params(&rewrite, definition.params)
+            updated.pre = sema_inline_rewrite_clauses(rewrite, definition.pre)
             updated.body = sema_inline_rewrite_stmts(&rewrite, definition.body)
             sema_inline_restore_locals(&rewrite, saved)
             Item.Test{value: updated}

@@ -269,9 +269,10 @@ ir_test_message_word: fn(m: &IRModule, b: &IRBuilder, text: Int) -> Int Never! {
 }
 
 // The call of property body `body` on parameters generated from the property
-// context `ctx`. The rendered inputs (`name = value, …`) go to the context
-// first, so a failing case reports them. The result is owned by the caller,
-// -1 for Unit.
+// context `ctx`. A case whose values fail one of the property's `#Pre`
+// clauses is rejected (ir_test_property_reject) before anything else. The
+// rendered inputs (`name = value, …`) go to the context first, so a failing
+// case reports them. The result is owned by the caller, -1 for Unit.
 ir_test_property_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: Int, ctx: Int, span: Span) -> Int Never! {
     row: ir_function_row(p, m.functions[body].key) ?? return ir_fail_slot(&b, span, "a property test outside the checked program")
     params: p.functions[row].params
@@ -281,6 +282,8 @@ ir_test_property_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: Int, 
         if ir_failed(b) -> return -1
         &values.push(value)
     }
+    ir_test_property_reject(m, p, b, row, ctx, values)
+    if ir_failed(b) -> return -1
     pointer_row: ir_pointer_row(&m)
     string_row: ir_string_row(&m)
     builder: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer_row)
@@ -297,6 +300,45 @@ ir_test_property_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: Int, 
     result: ir_call_row_values(&m, p, &b, row, values, span)
     if result >= 0 -> b.fresh[result] = false
     result
+}
+
+// The property `row`'s `#Pre` clauses over its generated parameter `values`
+// (borrowed): when one fails, the case is rejected
+// (jet_rt_test_property_reject) and test.invoke returns without calling the
+// body. The clauses read the property's own tree, so they build with its row
+// and its parameters bound to the values.
+ir_test_property_reject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, ctx: Int, values: [Int]) Never! {
+    pre: p.functions[row].pre
+    if pre.len() == 0 -> return
+    outer_row: b.row
+    outer_bounds: b.bounds
+    b.row = row
+    b.bounds = ir_bounds_mode(p, row)
+    mark: b.bindings.len()
+    loop (index, param) in p.functions[row].params {
+        symbol: if param.local.symbol_id == .Val(id) -> id.key else -> ""
+        b.bindings.push(IRBinding{name: param.local.name, slot: values[index], owned: false, symbol: symbol})
+    }
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    pointer_row: ir_pointer_row(m)
+    loop clause in pre {
+        condition: ir_expr(m, p, b, clause.condition)
+        if ir_failed(b) || condition < 0 -> break
+        rejected: ir_temp(m, b, bool_row)
+        ir_emit(b.f, IROp.Not, rejected, condition, -1, -1, b.line)
+        ir_open_if(b.f, rejected, b.line)
+        _: ir_runtime(m, b, "jet_rt_test_property_reject", [Int]{ctx}, -1)
+        loop value in values {
+            if b.fresh[value] -> ir_test_drop(m, b, value)
+        }
+        null: ir_temp(m, b, pointer_row)
+        ir_emit(b.f, IROp.Const, null, 0, -1, -1, b.line)
+        ir_emit(b.f, IROp.Return, -1, null, -1, -1, b.line)
+        ir_end(b.f, b.line)
+    }
+    ir_truncate_bindings(b, mark)
+    b.row = outer_row
+    b.bounds = outer_bounds
 }
 
 // A value of the property parameter type `ty` drawn from the context `ctx`

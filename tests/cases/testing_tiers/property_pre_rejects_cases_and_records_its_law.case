@@ -1,0 +1,30 @@
+# #6015 c5: a property test's `#Pre` markers are its precondition. A generated case that fails one is rejected without running the body and never counts as a case that ran; the failure report names the rejections, and a property whose rejections reach ten times its budget fails with the fix. The run's evidence record keeps the law: precondition, generated partitions, observable sink, shrink rule, surfaces, seed, relation and the rejected count, next to a count of only the cases that ran.
+fixture: property_pre_rejects_cases_and_records_its_law.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+
+step holds: jet test --grade=generated --iterations=100 --seed=7 --json holds.jet
+exit: 0 # every case that meets the precondition passes
+stderr: ~ "halving_shrinks_a_positive_number: pass" # the cases the `#Pre` rejects never run the body
+stdout: ~ "\"count\":100," # the record counts the 100 cases that ran, not the rejected ones
+stdout: ~ "{\"name\":\"rejected\",\"value\":\"94\"}" # and keeps the cases the precondition rejected apart
+stdout: ~ "{\"name\":\"precondition\",\"value\":\"#Pre(n > 0, \\\"a positive number\\\")\"}" # the law's precondition is the `#Pre` marker
+stdout: ~ "{\"name\":\"partitions\",\"value\":\"n: Int\"}" # its partitions are the generated parameters
+stdout: ~ "{\"name\":\"relation\",\"value\":\"assert(half(n) < n)\"}" # its relation is the body's assertion
+stdout: ~ "{\"name\":\"surfaces\",\"value\":\"half\"}" # its surfaces are the functions the body calls
+stdout: ~ "{\"name\":\"sink\",\"value\":\"runtime stop of the body (a failed assertion or any other stop)\"}" # its sink is what a case observes
+stdout: ~ "{\"name\":\"shrink_rule\",\"value\":\"delete spans of recorded choices, then lower each choice toward zero; at most 2000 replays" # its shrink rule is the runtime's
+stdout: ~ "{\"name\":\"seed\",\"value\":\"7\"}" # and the run's seed
+
+step breaks: jet test --grade=generated --iterations=100 --seed=7 breaks.jet
+exit: nonzero # the planted bug fails the property
+stdout: ~ "halving_stays_small: FAIL" # the property is the failing claim
+stderr: ~ "property failed on case 1 of 100 (seed 7; replay with JET_PROP_SEED=7; " # the report keeps its seed
+stderr: ~ " rejected by `#Pre`)" # and names the generated cases its precondition rejected
+stderr: ~ "minimized_inputs: n = 100" # the shrinker lowers the input to the smallest failing value
+
+step starved: jet test --grade=generated --iterations=5 --seed=7 starved.jet
+exit: nonzero # a precondition the generators can't reach fails the property instead of passing vacuously
+stdout: ~ "only_one_value: FAIL" # the starved property is the failing claim
+stderr: ~ "property's `#Pre` rejected 50 generated cases before 5 met it (0 did; seed 7; replay with JET_PROP_SEED=7)" # ten times the budget in rejections stops the run
+stderr: ~ "fix: weaken the `#Pre`, or narrow the parameter types" # and the report names the fix

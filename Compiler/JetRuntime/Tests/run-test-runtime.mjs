@@ -2,8 +2,9 @@
 // T1 admission on fresh same-tree inputs. Independent checks keep going;
 // caller owns candidate/host/pack construction and gate-2 machine admission.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
+import { faultReportObject } from '../../../Tools/packaging/fault-report-object.mjs';
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -31,9 +32,12 @@ if (nm.status === 0) {
   if (unexpected.length) results.push({ name: "unexpected-imports", status: 1, symbols: unexpected });
 }
 const fixture = join(out, "test-unit-runtime");
+// The runtime imports jet_rt_fault_report, which Jet's linker writes into each
+// image; this platform link takes it from the shared report source.
+const faultReport = faultReportObject(mkdtempSync(join(out, "fault-report-")));
 const build = step("fixture-build", nativeCCompiler, [
   "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror",
-  join(repo, "Compiler/JetRuntime/Tests/test-unit-runtime.c"), resolve(jetObject),
+  join(repo, "Compiler/JetRuntime/Tests/test-unit-runtime.c"), resolve(jetObject), faultReport,
   "-ldl", "-lpthread", "-lm", "-lrt", "-lutil", "-o", fixture,
 ]);
 if (build.status === 0) step("unit-outcomes", process.execPath, [join(repo, "Compiler/JetRuntime/Tests/test-unit-runtime.mjs"), fixture]);

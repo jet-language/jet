@@ -1,7 +1,9 @@
 use {
     jet_foundation.[
+        ContractClause,
         Expr,
         Item,
+        Marker,
         Param,
         Span,
         TestDef,
@@ -39,8 +41,10 @@ parser_test_name_of: fn(value: Expr?, fallback: Span) -> (name: String?, span: S
 
 // Rust `test_def`: `#Test(name, faults, expected_fail)` binds its arguments
 // by the registered parameter order or by label. A name that is not one plain
-// literal stays in `name_expr` for compile-time evaluation.
-parser_parse_test: fn(state: &JetParserState) -> Item {
+// literal stays in `name_expr` for compile-time evaluation. A property test's
+// `#Pre(cond, msg)` markers (`markers`, the ones written above it) are its
+// precondition: a generated case that fails one is rejected, not run.
+parser_parse_test: fn(state: &JetParserState, markers: [Marker]) -> Item {
     marker: parser_parse_marker(&state)
     bound: parser_bind_marker_arguments(&state, marker, [String]{"name", "faults", "expected_fail"}, 0)
     values := [Expr?]{None, None, None}
@@ -48,11 +52,15 @@ parser_parse_test: fn(state: &JetParserState) -> Item {
     faults: values[1]
     expected_fail: values[2]
     if parser_current_kind(&state) == TOKEN_KW_FN {
+        pre := [ContractClause]{}
+        loop written in markers {
+            if written.name == "Pre" && parser_contract_clause(state, written) == .Val(clause) -> pre.push(clause)
+        }
         start: parser_bump(&state)
         name: parser_expect_name(&state, "after `fn` in a property test")
         params: parser_parse_param_list(&state)
         body: parser_parse_block(&state)
-        value: TestDef{span: parser_cover(marker.span, body.span), name: Val(parser_value(state, name)), name_expr: None, faults_expr: faults, faults: [String]{}, expected_fail_expr: expected_fail, expected_fail: false, marker_name_span: marker.span, name_prefix: None, name_span: name.span, params: ^params, fn_keyword_span: Val(start.span), body: body.statements}
+        value: TestDef{span: parser_cover(marker.span, body.span), name: Val(parser_value(state, name)), name_expr: None, faults_expr: faults, faults: [String]{}, expected_fail_expr: expected_fail, expected_fail: false, marker_name_span: marker.span, name_prefix: None, name_span: name.span, params: ^params, fn_keyword_span: Val(start.span), body: body.statements, pre: pre}
         return Item.Test{value: value}
     }
     first: values[0]

@@ -3772,6 +3772,16 @@ report; only that case's output is
 captured. Outside the generated grade a seed is fresh entropy unless
 `JET_PROP_SEED` (an integer from 0 to 2^63-1) names one; rerunning with the
 printed seed reproduces the run.
+A `#Pre(condition, "reason")` marker on a property test is its precondition: a
+generated case that fails it is rejected before the body runs, never counts
+toward the case budget, and is never a shrink target; a failure report names
+how many cases the precondition rejected, and a property whose rejections reach ten
+times its budget fails with a fix instead of passing on too few cases. Each
+property's evidence record counts only the cases that ran and attaches its
+law: `precondition`, `partitions` (each parameter as `name: Type`),
+`relation` (the body's assertions), `surfaces` (the functions and methods the
+body calls), `sink` (a runtime stop of the body), `shrink_rule`, `seed` and
+`rejected`.
 (D-TEST1)
 
 For an explicit file, `jet test <file.jet>` builds one generated AOT harness for

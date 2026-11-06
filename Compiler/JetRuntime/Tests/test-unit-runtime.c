@@ -7,10 +7,12 @@
 #include <stdlib.h>
 #include <pthread.h>
 
+// A text owner holds the address of its block's [data, len, cap] words
+// (JetRuntime Text.jet); the runtime allocates and releases the block.
 typedef struct { unsigned char *ptr; int64_t len, cap; } Text;
 extern void jet_rt_alloc_init(void);
-extern void *jet_rt_alloc(int64_t, int64_t);
-extern void jet_rt_free(void *, int64_t, int64_t);
+extern Text *jet_rt_string_from_static(const char *, int64_t);
+extern void jet_rt_string_drop(Text *);
 extern void *jet_rt_test_unit_outcome(Text *, bool, bool, Text *, Text *);
 extern Text *jet_rt_test_outcome_wire(void *);
 extern void jet_rt_test_outcome_drop(void *);
@@ -41,17 +43,8 @@ extern void jet_rt_testing_record_failure(Text *, Text *);
 extern bool jet_rt_testing_take_failure(Text **);
 extern void jet_rt_testing_clear_failure(void);
 
-static Text *text(const char *s, int64_t n) {
-    Text *value = jet_rt_alloc(24, 8);
-    value->ptr = n ? jet_rt_alloc(n, 1) : (unsigned char *)1;
-    value->len = value->cap = n;
-    if (n) memcpy(value->ptr, s, (size_t)n);
-    return value;
-}
-static void drop_text(Text *value) {
-    if (value->cap) jet_rt_free(value->ptr, value->cap, 1);
-    jet_rt_free(value, 24, 8);
-}
+static Text *text(const char *s, int64_t n) { return jet_rt_string_from_static(s, n); }
+static void drop_text(Text *value) { jet_rt_string_drop(value); }
 static Text *outcome(const char *name, bool expected, bool skip, const char *out, const char *err) {
     Text *borrowed = text(name, (int64_t)strlen(name));
     void *value = jet_rt_test_unit_outcome(borrowed, expected, skip,
@@ -248,8 +241,17 @@ static void *scope_thread(void *unused) {
     jet_rt_thread_detach();
     return NULL;
 }
+extern void jet_rt_host_arguments(int64_t, char **, char **);
+extern char **environ;
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
+    // The runtime reads env from its startup capture (HostStartup.jet), so the
+    // invalid JET_TEST_JSON value is set before it.
+    if (argc == 2 && strcmp(argv[1], "nonunicode-json") == 0) {
+        const char invalid[] = {(char)0xff, 0};
+        assert(setenv("JET_TEST_JSON", invalid, 1) == 0);
+    }
+    jet_rt_host_arguments(argc, argv, environ);
     jet_rt_thread_init();
     jet_rt_test_capture_init();
     if (argc == 2 && strcmp(argv[1], "capture") == 0) {
@@ -287,13 +289,18 @@ int main(int argc, char **argv) {
         return ok ? 0 : 1;
     }
     if (argc == 2 && strcmp(argv[1], "cases") == 0) {
-        Text *wire = text("1 1 0 0 200\na", 13);
+        Text *wire = text("1 1 0 0 200/3/7\na", 17);
         bool ok = jet_rt_test_finish_wire(wire);
         drop_text(wire);
         return ok ? 0 : 1;
     }
     if (argc == 2 && strcmp(argv[1], "property") == 0) {
         Text *wire = text("1 1 0 0 x\na", 11);
+        jet_rt_test_finish_wire(wire);
+        return 99;
+    }
+    if (argc == 2 && strcmp(argv[1], "cases-bare") == 0) {
+        Text *wire = text("1 1 0 0 200\na", 13);
         jet_rt_test_finish_wire(wire);
         return 99;
     }
@@ -317,19 +324,16 @@ int main(int argc, char **argv) {
     };
     int64_t length = 0;
     for (size_t i = 0; i < sizeof rows / sizeof rows[0]; i++) length += rows[i]->len;
-    Text *wire = text("", 0);
-    wire->ptr = jet_rt_alloc(length, 1);
-    wire->len = wire->cap = length;
+    char *bytes = malloc((size_t)length);
+    assert(bytes);
     int64_t at = 0;
     for (size_t i = 0; i < sizeof rows / sizeof rows[0]; i++) {
-        memcpy(wire->ptr + at, rows[i]->ptr, (size_t)rows[i]->len);
+        memcpy(bytes + at, rows[i]->ptr, (size_t)rows[i]->len);
         at += rows[i]->len;
         drop_text(rows[i]);
     }
-    if (argc == 2 && strcmp(argv[1], "nonunicode-json") == 0) {
-        const char invalid[] = {(char)0xff, 0};
-        assert(setenv("JET_TEST_JSON", invalid, 1) == 0);
-    }
+    Text *wire = text(bytes, length);
+    free(bytes);
     bool ok = jet_rt_test_finish_wire(wire);
     drop_text(wire); // finish only borrows the payload, matching the host protocol.
     return ok ? 0 : 1;

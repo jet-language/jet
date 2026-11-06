@@ -285,7 +285,7 @@ parser_marker_body: fn(state: &JetParserState) -> [DeriveBodyItem] {
                 modifiers: ParsedItemModifiers{is_pub: false, is_package_pub: false, is_comptime: false, markers: [Marker]{}, start_span: parser_current(&state).span}
                 &body.push(DeriveBodyItem.Item{value: parser_marker_body_item(&state, modifiers)})
             }
-            parser_test_ahead(&state) -> &body.push(DeriveBodyItem.Item{value: parser_parse_test(&state)})
+            parser_test_ahead(&state) -> &body.push(DeriveBodyItem.Item{value: parser_parse_test(state, [Marker]{})})
             else -> &body.push(DeriveBodyItem.Stmt{value: parser_parse_statement(&state)})
         }
     }

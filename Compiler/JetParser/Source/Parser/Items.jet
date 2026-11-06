@@ -215,7 +215,7 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_test_ahead(&state) -> {
-            value: parser_parse_test(&state)
+            value: parser_parse_test(state, modifiers.markers)
             return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_unit_family_ahead(&state) -> {
@@ -1855,17 +1855,23 @@ parser_function_web_partition: fn(state: &JetParserState, marker: Marker) -> Web
 }
 
 parser_project_contract_marker: fn(state: &JetParserState, func: &Func, marker: Marker, pre: Bool) {
+    clause: parser_contract_clause(state, marker) ?? return
+    if pre {
+        func.pre.push(clause)
+    } else {
+        func.post.push(clause)
+    }
+}
+
+// The clause of `#Pre(cond, msg)` or `#Post(cond, msg)`; both arguments are
+// required, so another shape is its marker shape error.
+parser_contract_clause: fn(state: &JetParserState, marker: Marker) -> ContractClause? {
     values: parser_marker_bindings(marker, [String]{"condition", "message"}) ?? [Expr?]{}
     if values.len() == 2 && values[0] == .Val(condition) && values[1] == .Val(message) {
-        clause: ContractClause{cond: condition, message_expr: message, message_span: expr_span(message), span: marker.span}
-        if pre {
-            &func.pre.push(clause)
-        } else {
-            &func.post.push(clause)
-        }
-        return
+        return Val(ContractClause{cond: condition, message_expr: message, message_span: expr_span(message), span: marker.span})
     }
-    parser_marker_shape_error(&state, marker)
+    parser_marker_shape_error(state, marker)
+    None
 }
 
 parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> StructDef {

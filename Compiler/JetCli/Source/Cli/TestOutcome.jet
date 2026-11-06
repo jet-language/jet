@@ -14,7 +14,7 @@ use {
         EvidenceProducerKind, EvidenceRecord, EvidenceReport,
         EvidenceRevision, EvidenceSource, EVIDENCE_BUILD_REVISION_ENV, EVIDENCE_PROFILE_ENV,
         EVIDENCE_REPORT_ENV, EVIDENCE_REPORT_ID_ENV, EVIDENCE_REVISION_ENV, EVIDENCE_SOURCE_REVISION_ENV,
-        EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV, TTestFact, TTestKind, build_options_key,
+        EVIDENCE_TARGET_ENV, EVIDENCE_TOOLCHAIN_ENV, TTestFact, TTestKind, TTestLawFact, build_options_key,
         evidence_expectation_error_text, evidence_identity_for_record, evidence_merge_error_text, evidence_record_checked_derivation,
         evidence_record_from_test_codes, evidence_record_new, evidence_record_set_expectation, evidence_report_add_record_with_derivation,
         evidence_report_encode, evidence_report_json, evidence_report_new, evidence_report_write, evidence_stable_token, diagnostic_from_registry, diagnostic_stop_parse,
@@ -33,13 +33,14 @@ JetCLITestStop: struct {
 
 // What the run knows of one test beyond its wire: its evidence kind code (0
 // unit, 3 property, 4 doctest), the file and line a doctest is written at
-// (a unit or property test is recorded against the tested file), and the first
-// claimed value a doctest's output contradicted (E2901).
+// (a unit or property test is recorded against the tested file), the first
+// claimed value a doctest's output contradicted (E2901), and a property's law.
 JetCLITestClaim: struct {
     kind: Int
     file: String
     line: U32
     mismatch: JetCLITestStop?
+    law: TTestLawFact?{None}
 }
 
 // A failed property's report head (TestProperty.jet `property_report`): the
@@ -141,8 +142,38 @@ jet_cli_test_claim: fn(test: JetNativeTestCase, facts: [TTestFact], doctests: [J
         return JetCLITestClaim{kind: 4, file: doctest_file.shown.copy(), line: U32.from_int(doctest.line) ?? U32{0}, mismatch: None}
     }
     index: Int.from_u64(test.id) - 1
-    kind: if index >= 0 && index < facts.len() && facts[index].kind == TTestKind.Property -> 3 else -> 0
-    JetCLITestClaim{kind: kind, file: file.copy(), line: U32{0}, mismatch: None}
+    if index >= 0 && index < facts.len() && facts[index].kind == TTestKind.Property {
+        return JetCLITestClaim{kind: 3, file: file.copy(), line: U32{0}, mismatch: None, law: facts[index].law.copy()}
+    }
+    JetCLITestClaim{kind: 0, file: file.copy(), line: U32{0}, mismatch: None}
+}
+
+// A property record's law (#6015 c5), as attachments of its one evidence
+// record: the `#Pre` precondition, the generated parameters (`partitions`),
+// what the run observes (`sink`), how a failure shrinks (`shrink_rule`), the
+// functions the body calls (`surfaces`), the relations it asserts, and the
+// run's seed and the generated cases its precondition rejected. The record's
+// count is the cases that ran, so rejected cases never inflate it.
+jet_cli_test_law_attachments: fn(record: &EvidenceRecord, law: TTestLawFact?, run: JetNativeTestProperty?) Never! {
+    if law == .Val(found) {
+        record.attachments.push(EvidenceAttachment{name: "precondition", value: jet_cli_test_law_text(found.precondition, " && ")})
+        record.attachments.push(EvidenceAttachment{name: "partitions", value: jet_cli_test_law_text(found.partitions, ", ")})
+        record.attachments.push(EvidenceAttachment{name: "relation", value: jet_cli_test_law_text(found.relation, "; ")})
+        record.attachments.push(EvidenceAttachment{name: "surfaces", value: jet_cli_test_law_text(found.surfaces, ", ")})
+    }
+    // JetRuntime TestProperty.jet: a case fails at any runtime stop of its
+    // body, and the first failure's choice sequence shrinks under
+    // PROPERTY_SHRINK_RUNS replays.
+    record.attachments.push(EvidenceAttachment{name: "sink", value: "runtime stop of the body (a failed assertion or any other stop)"})
+    record.attachments.push(EvidenceAttachment{name: "shrink_rule", value: "delete spans of recorded choices, then lower each choice toward zero; at most 2000 replays, keeping the shorter or lexicographically smaller failing sequence"})
+    if run == .Val(found) {
+        record.attachments.push(EvidenceAttachment{name: "seed", value: "{found.seed}"})
+        record.attachments.push(EvidenceAttachment{name: "rejected", value: "{found.rejected}"})
+    }
+}
+
+jet_cli_test_law_text: fn(parts: [String], separator: String) -> String Never! {
+    if parts.len() == 0 -> "none" else -> parts.join(separator)
 }
 
 // The tested root's `policy.claims.min` floor (D-GRADE-POLICY1=A). Like
@@ -280,14 +311,16 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
             ran_failed -> 1
             else -> 0
         }
-        // A property's record counts its generated cases where others have a line.
-        line: if claim.kind == 3 -> U32.from_int(parts.cases ?? 0) ?? U32{0} else -> claim.line
+        // A property's record counts the generated cases that ran where
+        // others have a line; the cases its `#Pre` rejected never count.
+        line: if claim.kind == 3 -> U32.from_int(parts.property.map((run) -> run.cases) ?? 0) ?? U32{0} else -> claim.line
         record := evidence_record_from_test_codes(claim.kind, state, parts.name, message, claim.file, line, report_id, build, revision) ?? return Err(err.message)
         if mismatch == .Val(found) -> record.diagnostics = [EvidenceDiagnostic]{EvidenceDiagnostic{code: found.code.copy(), message: found.message.copy(), source: Val(EvidenceSource{path: found.file.copy(), line: found.line, column: U32{1}})}}
+        if claim.kind == 3 -> jet_cli_test_law_attachments(record, claim.law, parts.property)
         if claim.kind == 3 && state == 1 && jet_cli_test_property_failure(parts.stderr) == .Val(failure) {
-            &record.attachments.push(EvidenceAttachment{name: "case", value: "{failure.case_number}"})
-            &record.attachments.push(EvidenceAttachment{name: "seed", value: failure.seed.copy()})
-            if failure.minimized != "" -> &record.attachments.push(EvidenceAttachment{name: "minimized_inputs", value: failure.minimized.copy()})
+            record.attachments.push(EvidenceAttachment{name: "case", value: "{failure.case_number}"})
+            if parts.property == None -> record.attachments.push(EvidenceAttachment{name: "seed", value: failure.seed.copy()})
+            if failure.minimized != "" -> record.attachments.push(EvidenceAttachment{name: "minimized_inputs", value: failure.minimized.copy()})
         }
         if expected_failure && !skipped {
             evidence_record_set_expectation(&record, EvidenceExpectation.ExpectedFailure) ?? return Err(evidence_expectation_error_text(err))

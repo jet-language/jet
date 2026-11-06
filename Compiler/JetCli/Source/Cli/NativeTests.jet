@@ -31,9 +31,12 @@ JetNativeTestContract: struct { held: Bool, site: String, test_id: U64?, test: S
 JetNativeTestOutcomes: struct { wires: [String], outputs: [String], errors: [String], contracts: [JetNativeTestContract] }
 // One outcome wire's fields: `flags` as the runtime sets them (ok=1,
 // expected_failure=2, skipped=4, runtime_stop=8: the test ended at an
-// uncaught runtime stop, not a failed assertion); `cases` the generated cases
-// a property test ran (the header's fifth field), None for any other test.
-JetNativeTestWire: struct { flags: Int, name: String, stdout: String, stderr: String, cases: Int?{None} }
+// uncaught runtime stop, not a failed assertion); `property` a property
+// test's run (the header's fifth field), None for any other test.
+JetNativeTestWire: struct { flags: Int, name: String, stdout: String, stderr: String, property: JetNativeTestProperty?{None} }
+// A property test's run: the generated cases that ran, the cases its `#Pre`
+// rejected (which didn't run), and its seed.
+JetNativeTestProperty: struct { cases: Int, rejected: Int, seed: Int }
 
 jet_native_test_line: fn(cursor: &JetNativeTestCursor) -> String? Never! {
     start: cursor.at
@@ -53,15 +56,20 @@ jet_native_test_byte_count: fn(text: String) -> Int Err! {
     Ok(count)
 }
 
-// The header's fifth field: `-`, or the generated cases a property test ran.
-jet_native_test_cases: fn(field: String) -> Int? Err! {
+// The header's fifth field: `-`, or a property test's `cases/rejected/seed`.
+jet_native_test_cases: fn(field: String) -> JetNativeTestProperty? Err! {
     if field == "-" -> return Ok(None)
-    if field.len() == 0 -> return Err("native test outcome header has an unknown fifth field")
-    loop byte in field.bytes() {
-        if byte < (U8{48}) || byte > (U8{57}) -> return Err("native test outcome header has an unknown fifth field")
+    numbers: field.split("/").to_list()
+    if numbers.len() != 3 -> return Err("native test outcome header has an unknown fifth field")
+    values := [Int]{}
+    loop number in numbers {
+        if number.len() == 0 -> return Err("native test outcome header has an unknown fifth field")
+        loop byte in number.bytes() {
+            if byte < (U8{48}) || byte > (U8{57}) -> return Err("native test outcome header has an unknown fifth field")
+        }
+        values.push(Int.parse(number) ?? return Err("native test outcome case count is invalid"))
     }
-    count: Int.parse(field) ?? return Err("native test outcome case count is invalid")
-    Ok(Val(count))
+    Ok(Val(JetNativeTestProperty{cases: values[0], rejected: values[1], seed: values[2]}))
 }
 
 // A killed writer can leave one incomplete final record. It contributes no
@@ -488,8 +496,8 @@ jet_cli_native_test_report: fn(spec: ProcessSpec, outcomes: JetNativeTestOutcome
 }
 
 // The fields of one well-formed outcome wire (jet_cli_native_test_records
-// validated it): `flags nlen olen elen cases\n` then the three byte runs,
-// where `cases` is `-` or a property test's case count.
+// validated it): `flags nlen olen elen property\n` then the three byte runs,
+// where `property` is `-` or a property test's `cases/rejected/seed`.
 jet_cli_native_test_wire_parts: fn(wire: String) -> JetNativeTestWire Err! {
     bytes: wire.bytes()
     header_end := 0
@@ -507,13 +515,13 @@ jet_cli_native_test_wire_parts: fn(wire: String) -> JetNativeTestWire Err! {
         name: String.from_bytes(bytes.slice(header_end + 1, name_end)) ?? return Err("native test name is not UTF-8"),
         stdout: String.from_bytes(bytes.slice(name_end, stdout_end)) ?? return Err("native test stdout is not UTF-8"),
         stderr: String.from_bytes(bytes.slice(stdout_end, stderr_end)) ?? return Err("native test stderr is not UTF-8"),
-        cases: jet_native_test_cases(fields[4]),
+        property: jet_native_test_cases(fields[4]),
     })
 }
 
 jet_cli_native_test_wire: fn(parts: JetNativeTestWire) -> String Never! {
-    cases: if parts.cases == .Val(count) -> "{count}" else -> "-"
-    "{parts.flags} {parts.name.bytes().len()} {parts.stdout.bytes().len()} {parts.stderr.bytes().len()} {cases}\n{parts.name}{parts.stdout}{parts.stderr}"
+    property: if parts.property == .Val(run) -> "{run.cases}/{run.rejected}/{run.seed}" else -> "-"
+    "{parts.flags} {parts.name.bytes().len()} {parts.stdout.bytes().len()} {parts.stderr.bytes().len()} {property}\n{parts.name}{parts.stdout}{parts.stderr}"
 }
 
 #Test("native test records preserve UTF-8 and embedded newlines") {
@@ -533,16 +541,22 @@ jet_cli_native_test_wire: fn(parts: JetNativeTestWire) -> String Never! {
     assert_eq(jet_cli_native_test_wire(parts), "1 2 2 1 -\néx\ny")
 }
 
-#Test("native test wires carry a property's case count") {
-    parts: jet_cli_native_test_wire_parts("1 1 0 0 200\na") ?? panic("a property wire parses")
-    assert_eq(parts.cases, Val(200))
-    assert_eq(jet_cli_native_test_wire(parts), "1 1 0 0 200\na")
+#Test("native test wires carry a property's cases, rejected cases and seed") {
+    parts: jet_cli_native_test_wire_parts("1 1 0 0 200/3/7\na") ?? panic("a property wire parses")
+    run: parts.property ?? panic("a property wire carries its run")
+    assert_eq(run.cases, 200)
+    assert_eq(run.rejected, 3)
+    assert_eq(run.seed, 7)
+    assert_eq(jet_cli_native_test_wire(parts), "1 1 0 0 200/3/7\na")
     contracts := [JetNativeTestContract]{}
-    records: jet_cli_native_test_records("JET_NATIVE_TEST 7\n1 1 0 0 200\na\n", false, &contracts) ?? panic("a property record parses")
+    records: jet_cli_native_test_records("JET_NATIVE_TEST 7\n1 1 0 0 200/3/7\na\n", false, contracts) ?? panic("a property record parses")
     assert_eq(records.len(), 1)
     signed := ""
-    if jet_cli_native_test_records("JET_NATIVE_TEST 7\n1 1 0 0 +2\na\n", false, &contracts) == .Err(problem) -> signed = problem.message
+    if jet_cli_native_test_records("JET_NATIVE_TEST 7\n1 1 0 0 +2/0/0\na\n", false, contracts) == .Err(problem) -> signed = problem.message
     assert_eq(signed, "native test outcome header has an unknown fifth field")
+    bare := ""
+    if jet_cli_native_test_wire_parts("1 1 0 0 200\na") == .Err(problem) -> bare = problem.message
+    assert_eq(bare, "native test outcome header has an unknown fifth field")
     unknown := ""
     if jet_cli_native_test_wire_parts("1 1 0 0 x\na") == .Err(problem) -> unknown = problem.message
     assert_eq(unknown, "native test outcome header has an unknown fifth field")
