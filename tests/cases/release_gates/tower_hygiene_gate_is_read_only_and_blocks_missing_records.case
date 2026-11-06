@@ -1,4 +1,19 @@
-# Port of tests/release_gates.rs::tower_hygiene_gate_is_read_only_and_blocks_missing_records; all original predicates, runtime UNRUN.
+# Port of tests/release_gates.rs::tower_hygiene_gate_is_read_only_and_blocks_missing_records; all original predicates.
+# The gate names its candidate from the checkout holding the tool, so the case
+# builds its own one-commit repository; Tower itself is linked from the kit root.
+requires: tool:git
+mkdir: repo/Tools/ci
+copy: {root}/Tools/ci/TowerHygiene.jet repo/Tools/ci/TowerHygiene.jet
+symlink: {root}/Tools/tower repo/Tools/tower
+step: git init --quiet
+cwd: repo
+exit: 0
+step: git add .
+cwd: repo
+exit: 0
+step: git -c user.email=test@jet.test -c user.name=Jet -c commit.gpgsign=false commit --quiet -m candidate
+cwd: repo
+exit: 0
 mkdir: Docs/spec
 mkdir: tower
 write: tower/tower.json = "{\n  \"meta\": {\"version\": 4, \"project\": \"fixture\", \"currentEpoch\": null, \"nextNum\": 1, \"rev\": 0, \"ui\": {\"toggled\": []}},\n  \"epochs\": [{\"id\": \"e1\", \"name\": \"Epoch 1\", \"goal\": \"\", \"status\": \"active\"}],\n  \"milestones\": [],\n  \"cards\": [],\n  \"decisions\": [{\"id\": \"D-OK1\", \"status\": \"ratified\", \"outcome\": \"A\"}],\n  \"questions\": [],\n  \"ideas\": [],\n  \"papercuts\": [],\n  \"events\": []\n}\n"
@@ -8,7 +23,7 @@ write: Docs/spec/ok.md = "D-OK1\n"
 copy: tower/tower.json tower-before
 copy: tower/history.json history-before
 copy: tower/read-only-marker.txt marker-before
-step success: jet {root}/Tools/ci/TowerHygiene.jet
+step success: jet {work}/repo/Tools/ci/TowerHygiene.jet
 env: TOWER_DATA={work}/tower
 env: JET_TOWER_LINT_SCOPE={work}/Docs
 env: JET_TOWER_HYGIENE_REPORT={work}/success.txt
@@ -28,7 +43,7 @@ file: tower/tower.json == tower-before
 file: tower/history.json == history-before
 file: tower/read-only-marker.txt == marker-before
 write: Docs/spec/bad.md = "D-MISSING1\n"
-step failure: jet {root}/Tools/ci/TowerHygiene.jet
+step failure: jet {work}/repo/Tools/ci/TowerHygiene.jet
 env: TOWER_DATA={work}/tower
 env: JET_TOWER_LINT_SCOPE={work}/Docs
 env: JET_TOWER_HYGIENE_REPORT={work}/failure.txt
@@ -43,7 +58,7 @@ file: tower/tower.json == tower-before
 file: tower/history.json == history-before
 file: tower/read-only-marker.txt == marker-before
 mkdir: outside
-step traversal: jet {root}/Tools/ci/TowerHygiene.jet
+step traversal: jet {work}/repo/Tools/ci/TowerHygiene.jet
 env: TOWER_DATA={work}/tower
 env: JET_TOWER_LINT_SCOPE={work}/Docs
 env: JET_TOWER_HYGIENE_REPORT={work}/outside/../tower/traversal.txt
@@ -52,7 +67,7 @@ exit: nonzero
 file: tower/traversal.txt absent
 mkdir: tower/tower.json.lock
 write: tower/tower.json.lock/info.json = "{\"pid\": 1, \"at\": 0}\n"
-step locked: jet {root}/Tools/ci/TowerHygiene.jet
+step locked: jet {work}/repo/Tools/ci/TowerHygiene.jet
 env: TOWER_DATA={work}/tower
 env: JET_TOWER_LINT_SCOPE={work}/Docs
 env: JET_TOWER_HYGIENE_REPORT={work}/locked.txt
