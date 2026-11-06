@@ -4424,6 +4424,15 @@ after a rollback that undid one. A write to another table leaves it current.
 No WebSocket transport carries these results yet (core.net.ws, #4957), so
 `live_stats()` keeps reporting `ws_pushes=0`.
 
+`DBPool.acquire(deadline:)` admits waiters first come, first served. A waiter
+leaves the queue when it gets a lease, when its deadline passes, when the pool
+starts draining, or when its task is cancelled at the wait, so a cancelled
+acquire never blocks the waiters behind it. `DBLease.close()` returns the
+connection once; a second close does nothing. While the pool drains it refuses
+new leases (`database pool is draining`) but still takes back the ones out.
+Statements themselves have no cancel operation; that and any engine other
+than SQLite are separate owner choices.
+
 Rows are inspectable `[String: DBValue]` maps. The closed value carrier has
 `Null`, `Int`, `Float`, `Text`, `Bool`, and `Blob([U8])` variants; SQLite Boolean
 affinity returns integer `0`/`1`, which the Boolean reader accepts. Blob reads

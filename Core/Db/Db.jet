@@ -1130,6 +1130,20 @@ impl __LeaseState.Close {
     }
 }
 
+// A queued acquire's place in line. Closing it leaves the queue, so an acquire
+// that ends early (its task cancelled at the wait) never blocks later waiters.
+struct __PoolWaiter {
+    pool: Shared<__PoolState>
+    ticket: Int
+}
+impl __PoolWaiter.Close {
+    fn close(^self) {
+        if self.ticket < 0 -> return
+        guard := self.pool.guard_edit()
+        __pool_remove_waiter(&guard.value, self.ticket)
+    }
+}
+
 struct DBLease { state: Shared<__LeaseState> }
 impl DBLease {
     fn close(self) DBError! -[DB]> {
@@ -1326,15 +1340,16 @@ fn pool(url: String, *, max: Int) -[DB]> DBPool DBError! {
 impl DBPool {
     fn acquire(self, *, deadline: Duration{30000ms}) -[DB, Time.Wait]> DBLease DBError! {
         deadline_ns :: __pool_deadline(deadline)
-        ticket := -1
+        waiter := __PoolWaiter{pool: self.state.copy(), ticket: -1}
+        defer close(^waiter)
         loop {
-            claim := __pool_claim(self.state, ticket, deadline_ns)
+            claim := __pool_claim(self.state, waiter.ticket, deadline_ns)
             if claim.failure == .Val(failure) -> return Err(__db_error(failure.message))
             if claim.drivers.len() > 0 {
                 driver :: &claim.drivers.remove(0, .Slot) ?? panic("database pool lost a claimed connection")
                 return Ok(DBLease{state: shared __LeaseState{pool: self.state.copy(), drivers: [__Driver]{^driver}}})
             }
-            ticket = claim.ticket
+            waiter.ticket = claim.ticket
             if !claim.retry -> time.sleep(1ms)
         }
     }
