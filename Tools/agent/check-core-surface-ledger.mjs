@@ -1332,8 +1332,9 @@ function coreCallEffectFor(moduleName, member) {
   if (moduleName === "core.log" && member === "__metric_publish") return null;
   if (moduleName === "core.devtools" && member === "__publish_payload") return null;
   if (moduleName === "core.web" && coreCallOneOf(member, ["__openapi_inputs", "__openapi_render", "__contract_stop"])) return null;
-  // The live-binding registry is in-process state (Core/Web/Web.jet), not a browser API.
-  if (moduleName === "core.web" && coreCallOneOf(member, ["__live_load", "__live_replace", "live_stats"])) return null;
+  // The live-binding registry is in-process state (Core/Web/Web.jet), not a browser API; its
+  // publish only writes to connections a server already upgraded under Net.
+  if (moduleName === "core.web" && coreCallOneOf(member, ["__live_load", "__live_replace", "__live_publish", "live_stats"])) return null;
   if (moduleName === "core.web.store" && member === "__facts_snapshot") return null;
   if (moduleName === "core.mod" && coreCallOneOf(member, ["__supported", "__os",
     "__parse_context", "__check_context", "__context_name", "__context_digest", "__exports_count", "__export_info", "__finish_context"])) return null;
