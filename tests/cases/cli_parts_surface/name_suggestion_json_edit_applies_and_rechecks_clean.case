@@ -10,8 +10,8 @@ json: stdout doc $.reports[0].code = "E0107"
 json: stdout doc $.reports[0].fix_edits : array # original pattern
 json: stdout doc $.reports[0].fix_edits #= 1
 json: stdout doc $.reports[0].fix_edits[0].file = "name.jet"
-json: stdout doc $.reports[0].fix_edits[0].span.start = 37 # ORACLE-DERIVED source byte position of print(scor), rs1198/1237
-json: stdout doc $.reports[0].fix_edits[0].span.end = 41 # ORACLE-DERIVED source byte position of print(scor), rs1198/1237
+json: stdout doc $.reports[0].fix_edits[0].span.start = 36 # byte position of `scor` in print(scor) of fixtures/name_fix/name.jet
+json: stdout doc $.reports[0].fix_edits[0].span.end = 40 # byte position of `scor` in print(scor) of fixtures/name_fix/name.jet
 json: stdout doc $.reports[0].fix_edits[0].new_text = "score"
 step: jet fix {work}/name.jet
 env: NO_COLOR=1
@@ -20,5 +20,6 @@ file: name.jet = name-fixed.bytes
 step: jet check {work}/name.jet --json
 env: NO_COLOR=1
 exit: 0
-stdout: empty
+json: stdout doc $.ok = true # a clean --json check still prints its jet.status/v1 envelope
+json: stdout doc $.reports #= 0
 stderr: empty

@@ -310,7 +310,7 @@ JetCLITestOptions: struct {
 
 // Commands that validate their own flags.
 JET_CLI_OWNS_FLAGS: [String]{
-    "env", "cc", "c++", "remote", "shared-store", "dev", "devtools", "push", "trust", "bridge",
+    "env", "cc", "c++", "remote", "dev", "devtools", "push", "trust", "bridge",
     "services", "image", "new", "flash", "os", "add", "remove", "bind", "lsp", "config", "update",
     "outdated", "search", "info", "import", "explain", "logs", "clean", "fetch", "publish", "yank",
     "keygen", "key", "vendor", "audit", "sbom", "repl", "notebook", "schema", "db", "semindex",
@@ -1277,7 +1277,9 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
         resolved: jet_cli_resolve_bare_entry("build", directory, jet_cli_option_value(jet_argv, "-p"), !jet_argv.contains("--show-default"), color, &notices)
         if resolved == {
             .Entry(found) -> {
-                if (found.callable ?? "") == "build" -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notices.join("")}
+                // A package that declares `build: fn(b: Build)`, in the entry or
+                // in another source file, builds through it.
+                if (found.callable ?? "") == "build" || jet_cli_package_declares_build_entry(found.path) -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notices.join("")}
                 if (passthrough ?? [String]{}).len() > 0 -> return jet_cli_build_args_refused(found.path, color)
                 planned: jet_cli_read_entry(found.path, "build", color, quiet, threads, false, notices.join(""), json, false)
                 if planned == .Check(file, source, _, _, _, _, notice, _, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json, sbom: jet_argv.contains("--sbom"), quiet: quiet}

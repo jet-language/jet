@@ -14,6 +14,7 @@ use {
         X64Executable,
         X64Launch,
         x64_bind_runtime_image,
+        x64_executable_add_section,
         x64_executable_bytes,
         x64_executable_complete,
         x64_executable_load,
@@ -72,6 +73,7 @@ use {
         jet_eval_native_run,
     ]
     jet_foundation.[
+        ELF_SECTION,
         BuildOptionChoice,
         BuildOptionLayer,
         BuildOptions,
@@ -685,7 +687,7 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^JetDriver
         if trace_sink == .Val(sink) -> sink.end("native.link", 2)
         if bound.errors.len() == 0 {
             if trace_sink == .Val(sink) -> sink.progress("counters.native.link.bytes", bound.executable.tail_at + bound.executable.tail.len(), -1)
-            return JetCLINativeLinked.Image{executable: ^bound.executable}
+            return JetCLINativeLinked.Image{executable: jet_cli_native_with_command(bound.executable, result.command_record)}
         }
         // The image moved into the bind; the full link reads the pack.
         runtime_path = "{runtime_dir}/{runtime_key ?? ""}/{JET_CLI_RUNTIME_PACK_FILE}"
@@ -724,7 +726,16 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: ^JetDriver
         loop error in errors -> jet_driver_ice_record(&census, "-", "native.link", "link", error)
         return JetCLINativeLinked.Failed{failure: JetCLINativeFailure.Faulted}
     }
-    JetCLINativeLinked.Image{executable: ^executable}
+    JetCLINativeLinked.Image{executable: jet_cli_native_with_command(executable, result.command_record)}
+}
+
+// `executable` carrying the program's JetCommandSchema record in its
+// `.jet_command` section (spec.md:4675), which `jet self completions --for`
+// reads without running the program; a compile with no record adds none.
+jet_cli_native_with_command: fn(executable: &&X64Executable, record: [U8]) -> X64Executable Never! {
+    exe := executable.move()
+    if record.len() > 0 -> x64_executable_add_section(exe, ELF_SECTION, record)
+    exe
 }
 
 // Write the linked executable `executable` as the file `path`, and a split
@@ -1300,12 +1311,17 @@ jet_cli_build_dir: fn(build_dir: String, color: Bool) -[FS]> JetDriverVerbOutput
 // leaves undecided a right the program requires (Authority.jet). A script
 // answers with the `-A` rows (`jet_cli_source_invocation`). `json` reports
 // it as `jet run --json` reports its problems (jet_cli_run_problems).
-// Traced as `cli.authority`.
 jet_cli_authority_check: fn(file: String, source: String, color: Bool, json: Bool, command: String, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult) -[FS, Env]> JetDriverVerbOutput? Never! {
+    jet_cli_authority_report(file, source, color, json, command, jet_cli_traced_authority(source, invocation, result))
+}
+
+// The application authority of a checked compile (jet_cli_application_authority),
+// traced as `cli.authority`.
+jet_cli_traced_authority: fn(source: String, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult) -[FS, Env]> JetCLIAuthority Never! {
     if result.trace_sink == .Val(sink) -> sink.begin("cli.authority", "", -1, -1)
     authority: jet_cli_application_authority(result, jet_cli_source_invocation(source, invocation))
     if result.trace_sink == .Val(sink) -> sink.end("cli.authority", authority.required.len())
-    jet_cli_authority_report(file, source, color, json, command, authority)
+    authority
 }
 
 // The E1803 report of `authority`, or None when it allows the program. A
@@ -1337,7 +1353,9 @@ jet_cli_present_shown: fn(result: JetDriverCompileResult, snapshot: JetDriverAut
 // (under `json`, one failed `diagnostics` status on stderr), check the
 // application authority, then write the executable, or under `os: web` the
 // web build (jet_cli_build_web). `sbom` (`--sbom`) also writes the SPDX
-// document next to the executable (jet_cli_build_sbom).
+// document next to the executable (jet_cli_build_sbom). Every build ends with
+// the one-line effect summary on stderr (D-EFFBUDGET1), which `quiet` and the
+// `json` channel leave out.
 jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool, options: BuildOptions, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, quiet: Bool, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     // Only the errors are presented (jet_cli_present_shown).
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
@@ -1347,15 +1365,22 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
         if json -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_base(file), file, source, errors), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    if jet_cli_authority_check(file, source, color, false, "build", invocation, result) == .Val(refusal) -> return refusal
-    if build_options_value(options, "os") == "web" -> return jet_cli_build_web(file, color, options, result, ^inputs, snapshot)
-    if jet_cli_build_binary(file, name, "build", color, options, result, ^inputs, snapshot) == {
-        .Failed(failure) -> return failure
-        .Image(_, path) -> {
-            if sbom -> return jet_cli_build_sbom(file, name, source, path, color, quiet)
+    authority: jet_cli_traced_authority(source, invocation, result)
+    if jet_cli_authority_report(file, source, color, false, "build", authority) == .Val(refusal) -> return refusal
+    summary: if json || quiet -> "" else -> "{jet_cli_effect_projection_line(authority)}\n"
+    built := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if build_options_value(options, "os") == "web" {
+        built = jet_cli_build_web(file, color, options, result, inputs, snapshot)
+    } else {
+        if jet_cli_build_binary(file, name, "build", color, options, result, inputs, snapshot) == {
+            .Failed(failure) -> return failure
+            .Image(_, path) -> {
+                if sbom -> built = jet_cli_build_sbom(file, name, source, path, color, quiet)
+            }
         }
     }
-    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if built.exit_code == JET_DRIVER_EXIT_OK -> built.stderr = "{summary}{built.stderr}"
+    built
 }
 
 // `jet build --sbom` (D-SUPPLY1): the SPDX 2.3 document of the build's

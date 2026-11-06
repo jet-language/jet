@@ -654,33 +654,65 @@ x64_link_runtime_image: fn(name: String, pack: ^[U8]) -> X64ExecutableResult Nev
     X64ExecutableResult{bytes: image, errors: [String]{}}
 }
 
-// Add section `name` holding `payload` to `image`, an executable whose
-// section name table and then section headers end it (link_write_sections).
+// Add section `name` holding `payload` to the whole executable `image`
+// (link_image_add_section_at).
 link_image_add_section: fn(image: &[U8], name: String, payload: [U8]) Never! {
-    shoff: link_image_i64(image, 40)
-    shnum: link_image_u16(image, 60)
-    names_header: shoff + 64 * link_image_u16(image, 62)
-    names_at: link_image_i64(image, names_header + 24)
+    elf := [U8]{}
+    elf.extend(image[0..<LINK_EHDR_SIZE])
+    link_image_add_section_at(elf, image, 0, name, payload)
+    loop k in 0..<LINK_EHDR_SIZE -> image[k] = elf[k]
+}
+
+// Add section `name` holding `payload` to the executable whose ELF header is
+// `elf` and whose bytes from file offset `origin` on are `tail`, which holds
+// its section name table and section headers. The payload, the extended
+// name table and the headers go at the end of the file; when the name table
+// and then the headers already end it (link_write_section_headers), they
+// are rewritten in place, else the old copies stay as unreferenced bytes,
+// since a loaded segment may follow them (link_write_sections).
+link_image_add_section_at: fn(elf: &[U8], tail: &[U8], origin: Int, name: String, payload: [U8]) Never! {
+    shoff: link_image_i64(elf, 40) - origin
+    shnum: link_image_u16(elf, 60)
+    names_header: shoff + 64 * link_image_u16(elf, 62)
+    names_at: link_image_i64(tail, names_header + 24) - origin
+    names_size: link_image_i64(tail, names_header + 32)
     names := [U8]{}
-    &names.extend(image[names_at..<names_at + link_image_i64(image, names_header + 32)])
+    names.extend(tail[names_at..<names_at + names_size])
     headers := [U8]{}
-    &headers.extend(image[shoff..<shoff + 64 * shnum])
+    headers.extend(tail[shoff..<shoff + 64 * shnum])
     name_at: elf64_string(&names, name)
-    loop image.len() > names_at { _: &image.pop() }
-    elf64_pad(&image, 8)
-    payload_at: image.len()
-    &image.extend(payload)
-    new_names_at: image.len()
-    &image.extend(names)
-    elf64_pad(&image, 8)
-    new_shoff: image.len()
-    &image.extend(headers)
-    link_put64(&image, new_shoff + names_header - shoff + 24, new_names_at)
-    link_put64(&image, new_shoff + names_header - shoff + 32, names.len())
-    elf64_section_header(&image, name_at, LINK_SHT_PROGBITS, 0, payload_at, payload.len(), 0, 0, 8, 8)
-    link_put64(&image, 40, new_shoff)
-    image[60] = U8{(shnum + 1).bit_and(255)}
-    image[61] = U8{((shnum + 1) >> 8).bit_and(255)}
+    if shoff + 64 * shnum == tail.len() && names_at + names_size <= shoff {
+        loop tail.len() > names_at { _: tail.pop() }
+    }
+    elf64_pad(tail, 8)
+    payload_at: origin + tail.len()
+    tail.extend(payload)
+    new_names_at: origin + tail.len()
+    tail.extend(names)
+    elf64_pad(tail, 8)
+    new_shoff: tail.len()
+    tail.extend(headers)
+    link_put64(tail, new_shoff + names_header - shoff + 24, new_names_at)
+    link_put64(tail, new_shoff + names_header - shoff + 32, names.len())
+    elf64_section_header(tail, name_at, LINK_SHT_PROGBITS, 0, payload_at, payload.len(), 0, 0, 8, 8)
+    link_put64(elf, 40, origin + new_shoff)
+    elf[60] = U8{(shnum + 1).bit_and(255)}
+    elf[61] = U8{((shnum + 1) >> 8).bit_and(255)}
+}
+
+// Add section `name` holding `payload` to the linked executable `exe`: a
+// whole one is all `tail`; a bound one's ELF header is its patch at file
+// offset 0 and its section headers end its `tail` (link_bind_sections).
+x64_executable_add_section: fn(exe: &X64Executable, name: String, payload: [U8]) Never! {
+    if exe.image_end == 0 -> return link_image_add_section(exe.tail, name, payload)
+    loop k in 0..<exe.patch_at.len() {
+        if exe.patch_at[k] != 0 -> next
+        elf := exe.patch_bytes[k].copy()
+        link_image_add_section_at(elf, exe.tail, exe.tail_at, name, payload)
+        exe.patch_bytes[k] = elf
+        return
+    }
+    panic("x64_executable_add_section: the bound executable has no ELF header patch")
 }
 
 // FNV-1a, 32 bits, of a symbol name: the `.jet.exports` hash.

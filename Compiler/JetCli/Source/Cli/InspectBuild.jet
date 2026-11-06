@@ -1,7 +1,7 @@
 // Checked graph queries share the Driver invocation; no CLI graph reconstruction.
 use {
     jet_driver.[
-        JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
         JetDriverAuthorityPolicy, JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
         JetDriverFailure, JetDriverGeneratedModule, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_entry_package_has_build,
         jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
@@ -77,11 +77,34 @@ jet_cli_build_query_failure: fn(request: JetDriverCompileRequest, query: JetDriv
 // `build_args` (the words after `--`) are what its `b.args()` returns. Under
 // `write_generated: on` each generated source is first written to its
 // `.jet/generated/` path under the package root.
-// A workspace index first builds its members (jet_cli_build_workspace_members).
+// A workspace index first builds its members (jet_cli_build_workspace_members),
+// then its own package from that package's entry (jet_cli_workspace_package_entry).
 jet_cli_build_package: fn(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     members: jet_cli_build_workspace_members(file, color, options, threads, trace_sink)
     if members.exit_code != JET_DRIVER_EXIT_OK -> return members
-    jet_cli_build_package_as(file, color, options, build_args, threads, invocation, None, trace_sink)
+    jet_cli_build_package_as(jet_cli_workspace_package_entry(file, color), color, options, build_args, threads, invocation, None, trace_sink)
+}
+
+// The file a workspace index's own package builds from: the index when it
+// declares `build: fn(b: Build)` itself, else the package's stock run entry,
+// else the package source that declares the build entry. The build query
+// reads a package's build entry through its own sources, and the index is
+// the workspace's, so from the index alone it finds none. `file` itself when
+// it is no workspace index.
+jet_cli_workspace_package_entry: fn(file: String, color: Bool) -[FS, Env]> String Never! {
+    index: jet_cli_workspace_index_of(file, color) ?? return file.copy()
+    if jet_cli_declares_build_entry(build_files.read(file) ?? "") -> return file.copy()
+    loop relative in JET_CLI_STOCK_ENTRIES {
+        path: jet_cli_checked_file(index.root, relative) ?? next
+        return path
+    }
+    sources := [JetDriverAuthorizedSourceFile]{}
+    if jet_cli_package_sources(index.root, sources) == None {
+        loop source_file in sources {
+            if source_file.path != file && jet_cli_declares_build_entry(source_file.source) -> return source_file.path.copy()
+        }
+    }
+    file.copy()
 }
 
 // `jet_cli_build_package` of one package; `member` names the workspace member

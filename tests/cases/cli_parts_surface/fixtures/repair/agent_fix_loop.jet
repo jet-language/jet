@@ -172,9 +172,12 @@ s1_repair_loop: fn(initial: [S1RepairFile], max_rounds: Int, dir: String, jet: S
 #Test("agent fix loop corpus converges without report regression") {
     dir: sys.current_dir() ?? panic("cwd")
     jet: sys.get("JET_BIN") ?? panic("JET_BIN")
+    // Reports name a file under the folder jet ran in relative to it
+    // (D-REPORT-PATH1, Docs/spec/diagnostics.md:161), so the state keys are
+    // the paths `jet check` runs in `dir` report.
     initial: [S1RepairFile]{
-        S1RepairFile{path: "{dir}/helper.jet", source: files.read("helper.source") ?? panic("helper fixture")},
-        S1RepairFile{path: "{dir}/run.jet", source: files.read("run.source") ?? panic("run fixture")},
+        S1RepairFile{path: "helper.jet", source: files.read("helper.source") ?? panic("helper fixture")},
+        S1RepairFile{path: "run.jet", source: files.read("run.source") ?? panic("run fixture")},
     }
     reports: s1_repair_check(dir, jet, initial)
     counts := [Int]{0, 0}

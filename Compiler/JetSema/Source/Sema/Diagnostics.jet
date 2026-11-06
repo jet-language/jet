@@ -6,11 +6,13 @@ use jet_foundation.[
     InternalTag,
     Span,
     TagMarker,
+    TextEdit,
     Type,
     core_module_for_alias,
     diagnostic_caused_by,
     diagnostic_from_registry,
     diagnostic_registry_row,
+    diagnostic_with_edit,
     diagnostic_with_source_mapping,
     dimension_display_name,
     measure_expression,
@@ -291,15 +293,14 @@ sema_unknown_name: fn(name: String, span: Span) -> Diagnostic {
 }
 
 // E0107 with the most useful fix: the Core import a module-style name
-// misses, a near visible name, or declaring it.
+// misses, a near visible name (with the rename as its edit, as E0102's near
+// function name carries one), or declaring it.
 sema_unknown_name_in: fn(name: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
-    fix := "declare it first: `{name}: ...`"
-    if core_module_for_alias(name) == .Val(owner) {
-        fix = "add `use {name}: {owner}`"
-    } else if sema_scope_closest_visible_name(scopes, name) == .Val(near) {
-        fix = "did you mean `{near}`?"
-    }
-    sema_error("E0107", span, "nothing named `{name}` exists here", "a name must be declared before it's used", fix)
+    what: "nothing named `{name}` exists here"
+    why: "a name must be declared before it's used"
+    if core_module_for_alias(name) == .Val(owner) -> return sema_error("E0107", span, what, why, "add `use {name}: {owner}`")
+    if sema_scope_closest_visible_name(scopes, name) == .Val(near) -> return diagnostic_with_edit(sema_error("E0107", span, what, why, "did you mean `{near}`?"), TextEdit{span: span, new_text: near})
+    sema_error("E0107", span, what, why, "declare it first: `{name}: ...`")
 }
 
 sema_type_mismatch: fn(required: Type, offered: Type, span: Span) -> Diagnostic {

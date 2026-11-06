@@ -16,7 +16,7 @@ use {
         jet_driver_entry_root_path,
         jet_driver_ice_record,
     ]
-    jet_foundation.[BuildOptions]
+    jet_foundation.[BuildOptions, cli_schema_embed_wasm_record]
     jet_web.[web_app_js, web_dom_runtime_js, web_program]
 }
 
@@ -52,7 +52,13 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
     if census.len() > 0 -> return jet_cli_ice_census(file, census)
     build_dir: jet_cli_output_dir_path(snapshot, options)
     if jet_cli_build_dir(build_dir, color) == .Val(refused) -> return refused
-    if jet_cli_web_write(file, color, "{build_dir}/app.wasm", web.bytes) == .Val(failure) -> return failure
+    // The program's JetCommandSchema record rides in its `jet.command`
+    // custom section (spec.md:4675); the module addresses 32 bits.
+    app := web.bytes.copy()
+    if result.command_record.len() > 0 {
+        cli_schema_embed_wasm_record(app, result.command_record, U64{4294967295}) ?? return jet_cli_ice("the web program module of `{file}` is not a well-framed Wasm module: {err.display()}")
+    }
+    if jet_cli_web_write(file, color, "{build_dir}/app.wasm", app) == .Val(failure) -> return failure
     if jet_cli_web_write(file, color, "{build_dir}/rt.wasm", partition) == .Val(failure) -> return failure
     if jet_cli_web_write_text(file, color, "{build_dir}/web.manifest.json", web.manifest) == .Val(failure) -> return failure
     if jet_cli_web_write_text(file, color, "{build_dir}/app.js", web_app_js()) == .Val(failure) -> return failure

@@ -8,10 +8,27 @@ use {
 }
 
 // `errors`: the file's errors, each `CODE: what` (jet_cli_fix_checked
-// compares an edited file's against them).
+// compares an edited file's against them). `repairs`: the fixes of those
+// errors, a subset of `fixes` (jet_cli_fix_round).
 JetCLIFixQuery: enum {
-    Fixes(fixes: [JetCLIFix], errors: [String])
+    Fixes(fixes: [JetCLIFix], errors: [String], repairs: [JetCLIFix])
     Refused(output: JetDriverVerbOutput)
+}
+
+// The fixes one `jet fix` round applies: the error repairs alone while the
+// file has any, so the other fixes are read again from the repaired file (an
+// unused-binding fix read beside an unknown name may rename the binding the
+// name's repair points at). `held` when fixes wait for the next round.
+JetCLIFixRound: struct {
+    fixes: [JetCLIFix]
+    held: Bool
+}
+
+jet_cli_fix_round: fn(fixes: [JetCLIFix], repairs: [JetCLIFix], all: Bool) -> JetCLIFixRound Never! {
+    usable: if all -> fixes else -> jet_cli_safe_fixes(fixes)
+    usable_repairs: if all -> repairs else -> jet_cli_safe_fixes(repairs)
+    if usable_repairs.len() == 0 || usable_repairs.len() == usable.len() -> return JetCLIFixRound{fixes: usable, held: false}
+    JetCLIFixRound{fixes: usable_repairs, held: true}
 }
 
 jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQuery {
@@ -34,10 +51,15 @@ jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQue
     }
     fixes: jet_cli_collect_fixes_from_diagnostics(diagnostics, source)
     errors := [String]{}
+    failed := [Diagnostic]{}
     loop diagnostic in diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push("{diagnostic.code}: {diagnostic.what}")
+        if diagnostic.severity == DIAGNOSTIC_ERROR {
+            errors.push("{diagnostic.code}: {diagnostic.what}")
+            failed.push(diagnostic)
+        }
     }
-    JetCLIFixQuery.Fixes{fixes: if all -> fixes else -> jet_cli_safe_fixes(fixes), errors: ^errors}
+    repairs: jet_cli_collect_fixes_from_diagnostics(failed, source)
+    JetCLIFixQuery.Fixes{fixes: if all -> fixes else -> jet_cli_safe_fixes(fixes), errors: errors.move(), repairs: if all -> repairs else -> jet_cli_safe_fixes(repairs)}
 }
 
 // The E1803 refusal of a script with no package block whose authority is
@@ -76,7 +98,7 @@ jet_cli_fix_inline_insertion: fn(source: String) -> Int Never! {
 // file the compiler refuses is one error.
 jet_cli_fix_errors: fn(file: String, source: String) -> [String] {
     if jet_cli_fix_collect(file, source, false) == {
-        .Fixes(_, errors) -> errors
+        .Fixes(_, errors, _) -> errors
         .Refused(_) -> [String]{"the compiler refused the edited file"}
     }
 }
@@ -145,16 +167,17 @@ jet_cli_fix_markers: fn(before: String, inside: Bool) -> JetCLIFixApply {
 jet_cli_fix_run: fn(file: String, dry_run: Bool, all: Bool, markers: String, color: Bool, quiet: Bool, json: Bool) -> JetDriverVerbOutput {
     before: cli_files.read(file) ?? return jet_cli_report_output("", "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     all_fixes := [JetCLIFix]{}
+    all_repairs := [JetCLIFix]{}
     baseline := [String]{}
     if jet_cli_fix_collect(file, before, true) == {
-        .Fixes(found, errors) -> {
+        .Fixes(found, errors, repairs) -> {
             all_fixes = found
             baseline = errors
+            all_repairs = repairs
         }
         .Refused(output) -> { return output }
     }
-    fixes: if all -> all_fixes else -> jet_cli_safe_fixes(all_fixes)
-    skipped: if markers != "" -> 0 else -> all_fixes.len() - fixes.len()
+    skipped: if markers != "" -> 0 else -> all_fixes.len() - jet_cli_safe_fixes(all_fixes).len()
     skips := [JetCLIFixSkip]{}
     if !all && markers == "" {
         loop fix in all_fixes {
@@ -172,18 +195,27 @@ jet_cli_fix_run: fn(file: String, dry_run: Bool, all: Bool, markers: String, col
             return jet_cli_report_output("", "E2105", "moving the markers {markers} would make `{file}` fail to check", jet_cli_why("E2105"), "fix the file's errors first, then run `jet fix --markers {markers}` again", color, JET_DRIVER_EXIT_USER_ERROR)
         }
     } else {
-        applied = jet_cli_fix_checked(file, before, fixes, baseline, &rejected)
+        first: jet_cli_fix_round(all_fixes, all_repairs, all)
+        held := first.held
+        applied = jet_cli_fix_checked(file, before, first.fixes, baseline, rejected)
         count = applied.applied
+        // Repairs that change nothing release the held fixes next round.
+        stalled := first.held && applied.source == before
         round := 1
-        loop applied.deferred > 0 && round < 16 {
-            next_fixes: if jet_cli_fix_collect(file, applied.source, all) == {
-                .Fixes(found, _) -> found
+        loop round < 16 && (applied.deferred > 0 || held) {
+            next: if jet_cli_fix_collect(file, applied.source, all) == {
+                .Fixes(found, _, repairs) -> jet_cli_fix_round(found, if stalled -> [JetCLIFix]{} else -> repairs, true)
                 .Refused(output) -> { return output }
             }
-            next_applied: jet_cli_fix_checked(file, applied.source, next_fixes, baseline, &rejected)
-            if next_applied.source == applied.source -> break
-            count += next_applied.applied
-            applied = next_applied
+            held = next.held
+            next_applied: jet_cli_fix_checked(file, applied.source, next.fixes, baseline, rejected)
+            if next_applied.source == applied.source {
+                if !held -> break
+                stalled = true
+            } else {
+                count += next_applied.applied
+                applied = next_applied
+            }
             round += 1
         }
     }

@@ -1,0 +1,187 @@
+// The JetCommandSchema of a compiled program (spec.md:4675-4691,
+// cli.md:126-143): the inputs, commands and jobs its artifact carries, so
+// external completion reads them without running the program. A typed entry
+// `run: fn(args: T)` over a `#CLI` struct `T` records `T`'s inputs and
+// commands, read from the same checked declarations and named by the same
+// field, flag and default rules as the parser CliEntry.jet generates for it;
+// any other program records an empty command surface. Every program records
+// the entry module's jobs. The driver embeds the encoded record in the
+// artifact before it is cached, packaged or signed.
+use {
+    unicode: core.text
+    jet_foundation.[
+        CLICommandSchema,
+        CLIDefault,
+        CLIInputSchema,
+        CLIInputShape,
+        CLISubcommandSchema,
+        CLIValueKind,
+        Field,
+        Item,
+        JobFact,
+        JobRegistry,
+        Param,
+        StructDef,
+        Type,
+        encode_record,
+    ]
+}
+
+// The encoded record of the program whose registered modules are `graph`.
+sema_cli_command_record: fn(graph: SemaRegistrationGraph) -> [U8] {
+    encode_record(sema_cli_command_schema(graph))
+}
+
+sema_cli_command_schema: fn(graph: SemaRegistrationGraph) -> CLICommandSchema {
+    schema := CLICommandSchema{entry_type: "", description: None, inputs: [CLIInputSchema]{}, commands: [CLISubcommandSchema]{}, jobs: [JobFact]{}, standard: false, version: None}
+    loop module_row in graph.modules {
+        if module_row.module_identity != graph.entry_module_identity -> next
+        items: module_row.declarations
+        schema.jobs = JobRegistry.from_items(items).jobs
+        ty: sema_cli_entry_param(items, "run") ?? return schema
+        type_name: sema_registration_cli_named_leaf(ty) ?? return schema
+        definition: sema_cli_schema_struct(graph, items, type_name) ?? return schema
+        commands: sema_cli_schema_commands(definition, items) ?? return schema
+        schema.entry_type = definition.name.copy()
+        schema.description = sema_cli_entry_doc(definition.type_markers)
+        schema.inputs = sema_cli_schema_fields(definition)
+        schema.commands = commands
+        schema.standard = sema_registration_cli_standard(definition.type_markers)
+        // `#CLI(Standard)` answers `--version` with the package version.
+        if schema.standard -> schema.version = Val(graph.build_facts.package_version.copy())
+        return schema
+    }
+    schema
+}
+
+// The `#CLI` struct `type_name`: the entry module's own, else the one an
+// imported module declares (CliEntry.jet sema_cli_entry_expand_imported).
+sema_cli_schema_struct: fn(graph: SemaRegistrationGraph, entry_items: [Item], type_name: String) -> StructDef? {
+    if sema_cli_entry_struct(entry_items, type_name) == .Val(definition) -> return Val(definition)
+    loop module_row in graph.modules {
+        if sema_cli_entry_struct(module_row.declarations, type_name) == .Val(definition) -> return Val(definition)
+    }
+    None
+}
+
+// The inputs of `definition`'s stored fields (CliEntry.jet
+// sema_cli_entry_spec): a required value fills the next position unless
+// `#Flag` keeps it a flag.
+sema_cli_schema_fields: fn(definition: StructDef) -> [CLIInputSchema] {
+    inputs := [CLIInputSchema]{}
+    positional := 0
+    loop field in definition.fields {
+        if field.computed != None -> next
+        kind: sema_registration_cli_field_kind(field) ?? next
+        flag: sema_checked_field_shape_names(definition, field).args
+        flag_only: sema_registration_cli_marker(field.serde_markers, "Flag") != None
+        at := U16?{None}
+        shape: if kind == {
+            .Flag -> CLIInputShape.Flag
+            .OptionalOption -> CLIInputShape.Value{kind: sema_cli_schema_kind(if field.ty == .Option(inner) -> inner else -> field.ty), optional: true, default: None}
+            .DefaultedOption -> CLIInputShape.Value{kind: sema_cli_schema_kind(field.ty), optional: false, default: Val(sema_cli_schema_field_default(field))}
+            .RequiredOption -> {
+                if !flag_only {
+                    at = Val(U16{positional})
+                    positional += 1
+                }
+                CLIInputShape.Value{kind: sema_cli_schema_kind(field.ty), optional: false, default: None}
+            }
+        }
+        inputs.push(CLIInputSchema{
+            field: field.name.copy(),
+            flag: flag.copy(),
+            short: sema_cli_entry_marker_text(field.serde_markers, "Short"),
+            env: sema_cli_entry_marker_text(field.serde_markers, "Env"),
+            help: sema_cli_entry_doc(field.serde_markers) ?? "value for --{flag}",
+            metavar: if field.ty == .Bool -> None else -> Val(unicode.upper(flag.replace("-", "_"))),
+            shape: shape,
+            positional: at,
+        })
+    }
+    inputs
+}
+
+// A defaulted field's recorded default: its literal's text, or the type
+// default when the default is not a literal.
+sema_cli_schema_field_default: fn(field: Field) -> CLIDefault {
+    if field.default == .Val(expr) {
+        if sema_cli_entry_default(expr) == .Val(text) -> return CLIDefault.Recorded{value: text}
+    }
+    CLIDefault.TypeDefault
+}
+
+// The commands of `definition`: its methods, then its bound functions among
+// `items` (CliEntry.jet sema_cli_entry_spec). None when one has no
+// command shape, as the generated parser has none.
+sema_cli_schema_commands: fn(definition: StructDef, items: [Item]) -> [CLISubcommandSchema]? {
+    computed := [String]{}
+    loop field in definition.fields {
+        if field.computed != None -> computed.push(sema_computed_field_getter(field.name))
+    }
+    commands := [CLISubcommandSchema]{}
+    loop function in definition.methods {
+        if computed.contains(function.name) -> next
+        inputs: sema_cli_schema_params(function.params, "") ?? return None
+        commands.push(CLISubcommandSchema{name: unicode.lower(function.name), description: sema_cli_entry_doc(function.markers), inputs: inputs})
+    }
+    loop binding in definition.cli_bindings {
+        target: sema_registration_cli_binding_target(items, binding.target) ?? return None
+        inputs: sema_cli_schema_params(target.params, definition.name) ?? return None
+        commands.push(CLISubcommandSchema{name: unicode.lower(binding.name), description: sema_cli_entry_doc(binding.markers), inputs: inputs})
+    }
+    Val(commands)
+}
+
+// The inputs of one command's parameters (CliEntry.jet
+// sema_cli_entry_command): a bound function's first parameter of the program
+// type `shared_type` takes the shared program value, not an input.
+sema_cli_schema_params: fn(params: [Param], shared_type: String) -> [CLIInputSchema]? {
+    inputs := [CLIInputSchema]{}
+    positional := 0
+    loop (index, param) in params {
+        if param.name == "self" -> next
+        leaf: sema_registration_cli_named_leaf(param.ty) ?? ""
+        if shared_type.bytes().len() > 0 && index == 0 && leaf == shared_type -> next
+        label := param.name
+        if param.public_label == .Val(public) && public.name != "_" -> label = public.name
+        flag: label.replace("_", "-")
+        at := U16?{None}
+        shape := CLIInputShape.Flag
+        if param.ty == .Option(inner) {
+            shape = CLIInputShape.Value{kind: sema_cli_schema_kind(inner), optional: true, default: None}
+        } else if param.ty != .Bool {
+            default := CLIDefault?{None}
+            if param.default == .Val(expr) {
+                text: sema_cli_entry_default(expr) ?? return None
+                default = Val(CLIDefault.Recorded{value: text})
+            } else {
+                at = Val(U16{positional})
+                positional += 1
+            }
+            shape = CLIInputShape.Value{kind: sema_cli_schema_kind(param.ty), optional: false, default: default}
+        }
+        inputs.push(CLIInputSchema{
+            field: param.name.copy(),
+            flag: flag.copy(),
+            short: None,
+            env: None,
+            help: "value for --{flag}",
+            metavar: if param.ty == .Bool -> None else -> Val(unicode.upper(flag.replace("-", "_"))),
+            shape: shape,
+            positional: at,
+        })
+    }
+    Val(inputs)
+}
+
+// The record kind of a CLI scalar type.
+sema_cli_schema_kind: fn(ty: Type) -> CLIValueKind Never! {
+    if ty == {
+        .Bool -> CLIValueKind.Bool
+        .Int | .InlineRange(_, _, _) -> CLIValueKind.Int
+        .Float -> CLIValueKind.Float
+        .Named(name) -> if name == "Path" -> CLIValueKind.Path else -> CLIValueKind.String
+        else -> CLIValueKind.String
+    }
+}

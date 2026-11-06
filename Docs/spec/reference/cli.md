@@ -266,7 +266,6 @@ jet find [--effect <effect>] [--example <input -> output>] [<query>] [<file.jet|
 jet remove [args]                    Remove a dependency
 jet fill <file.jet[:line]>           Propose checked code for typed goals
 jet generate <GeneratorJob> [--apply|--dry-run] [--entry <file.jet>] [--json] Run an explicit source generator with authority and a receipt
-jet shared-store <command>           Manage the optional shared package broker
 jet try <plan.json>                  Speculatively apply a plan and re-check its claims
 jet fold [args]                      Reverse a recorded Package source transition
 jet crash < <report.txt>             Name the functions and lines of a release crash report
@@ -466,8 +465,8 @@ The generated help groups subcommands as follows:
 - **Project:** `parts`.
 - **Self:** `toolchain`, `update`, `doctor`, `completions`, `man`, `devtools`,
   `lsp`, and authority-bound `exec`.
-- **Environment and stores:** `env test|hook|sync|info`, `shared-store
-  install|enroll|status|broker`, and `cache status|prune|limit`.
+- **Environment and stores:** `env test|hook|sync|info` and
+  `cache status|prune|limit`.
 - **Jetos and performance:** `os push|bridge|services|config`, `gc report`,
   and `perf run|test|attach|view|compare|export`.
 
