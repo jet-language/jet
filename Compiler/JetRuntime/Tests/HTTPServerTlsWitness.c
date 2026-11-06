@@ -26,7 +26,9 @@ static void observe_free(void *p,int64_t n,int64_t a) {
 static void watch(void *p,int64_t n,int64_t a) {
     assert(p && count<28); watched[count].p=p; watched[count].n=n; watched[count].a=a; watched[count++].freed=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
 static void watch_tls(Tls *t) { watch(t,16,8); watch_text(t->cert); watch_text(t->key); }
 static void all_freed(void) { for(size_t i=0;i<count;i++) assert(watched[i].freed==1); count=0; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
@@ -34,10 +36,13 @@ static void text_is(Text *t,const char *s) { assert(t->length==(int64_t)strlen(s
 static void run(const char *cert,const char *key) {
     Text *c=text(cert),*k=text(key); Tls *a=jet_rt_record_new_jet_http_server_tls(c,k),*b=jet_rt_handle_clone_jet_http_server_tls(a);
     Text *cg=jet_rt_record_get_jet_http_server_tls_cert_pem(a),*kg=jet_rt_record_get_jet_http_server_tls_key_pem(a),*cg2=jet_rt_record_get_jet_http_server_tls_cert_pem(a);
-    assert(a!=b && c!=a->cert && k!=a->key && a->cert!=b->cert && a->key!=b->key && cg!=a->cert && kg!=a->key && cg2!=cg);
+    // Records are reallocated; constructor, clone and getters share each text by owner count.
+    assert(a!=b && c==a->cert && k==a->key && a->cert==b->cert && a->key==b->key && cg==a->cert && kg==a->key && cg2==cg);
+    assert(owners(c)==5 && owners(k)==4);
     text_is(c,cert); text_is(k,key); text_is(a->cert,cert); text_is(a->key,key); text_is(b->cert,cert); text_is(b->key,key);
     watch_text(c); watch_text(k); watch_tls(a); watch_tls(b); watch_text(cg); watch_text(kg); watch_text(cg2);
     jet_rt_string_drop(c); jet_rt_string_drop(k); jet_rt_handle_drop_jet_http_server_tls(a);
+    assert(owners(b->cert)==3 && owners(b->key)==2);
     text_is(b->cert,cert); text_is(b->key,key); text_is(cg,cert); text_is(kg,key); text_is(cg2,cert);
     jet_rt_handle_drop_jet_http_server_tls(b); jet_rt_string_drop(cg); jet_rt_string_drop(kg); jet_rt_string_drop(cg2); all_freed();
 }

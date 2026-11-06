@@ -844,7 +844,7 @@ fn scheduler_parse_threads(text: I64, out: I64) -> Bool {
         // (u64::MAX / 10) fits signed; any larger accumulator overflows next.
         if (number < I64{0} || number > I64{1844674407370955161}) -> return false
         if (number == I64{1844674407370955161} && digit > I64{5}) -> return false
-        number = wrapping(number * I64{10} + digit)
+        number = wrapping(wrapping(number * I64{10}) + digit)
         at += I64{1}
     }
     sync_store(out, if (number == I64{0}) -> I64{1} else -> number)

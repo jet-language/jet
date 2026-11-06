@@ -72,16 +72,23 @@ static void observe_free(void *pointer, int64_t size, int64_t align) {
         assert(++watched[i].frees == 1);
     }
 }
+// A block watched again before it is freed is another owner of the same
+// refcounted text: it stays one entry that must be freed exactly once.
 static void watch(void *pointer, int64_t size, int64_t align) {
     assert(watched_count < sizeof(watched) / sizeof(watched[0]));
-    for (size_t i = 0; i < watched_count; ++i) assert(watched[i].pointer != pointer);
+    for (size_t i = 0; i < watched_count; ++i) if (watched[i].pointer == pointer) {
+        assert(!watched[i].frees && size == watched[i].size && align == watched[i].align);
+        return;
+    }
     watched[watched_count].pointer = pointer;
     watched[watched_count].size = size;
     watched[watched_count].align = align;
     watched[watched_count++].frees = 0;
 }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *text) { return *(int64_t *)((char *)text - 8) & INT64_C(0x3fffffffffffffff); }
 static void watch_text(Text *text) {
-    watch((char *)(text)-8,32,8);
+    watch((char *)(text)-8,40,8);
     if (text->capacity) watch(text->data, text->capacity, 1);
 }
 static void watch_tree(Tree *tree) {
@@ -152,11 +159,17 @@ static void scalar_cases(void) {
 static void text_cases(void) {
     Text *input = text("\"\\\b\t\n\f\r\001\037 snow \xc3\xa9");
     Tree *a = jet_rt_record_new_dyn_text(input), *b = jet_rt_handle_clone_dyn(a);
-    assert(a->payload != (uintptr_t)input && b->payload != a->payload);
+    // Trees are reallocated; the text payload is shared by owner count.
+    assert(a != b && a->payload == (uintptr_t)input && b->payload == a->payload && owners(input) == 3);
     jet_rt_string_drop(input);
     expect(jet_rt_handle_show_dyn(a), "\"\\\b\t\n\f\r\001\037 snow \xc3\xa9");
-    Text *got = jet_rt_record_get_dyn_text(b); assert((uintptr_t)got != b->payload); jet_rt_string_drop(got);
-    ((Text *)b->payload)->data[0] = 'x'; assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
+    Text *got = jet_rt_record_get_dyn_text(b); assert((uintptr_t)got == b->payload && owners(got) == 3);
+    jet_rt_string_drop(got); assert(owners(input) == 2);
+    Text *changed = text("x\\\b\t\n\f\r\001\037 snow \xc3\xa9");
+    Tree *c = jet_rt_record_new_dyn_text(changed), *d = jet_rt_handle_clone_dyn(c);
+    jet_rt_string_drop(changed);
+    assert(jet_rt_handle_eq_dyn(a,b) && !jet_rt_handle_eq_dyn(a,c) && jet_rt_handle_eq_dyn(c,d));
+    drop_pair(a,b); drop_pair(c,d);
     input = text("1.2300e+09"); a = jet_rt_record_new_dyn_number(input); b = jet_rt_record_new_dyn_text(input);
     jet_rt_string_drop(input);
     expect(jet_rt_record_get_dyn_number(a), "1.2300e+09");
@@ -176,9 +189,11 @@ static void sequence_cases(void) {
     assert(jet_rt_handle_eq_dyn(a,b)); expect(jet_rt_handle_show_dyn(a), "{\"z\":1,\"a\":2}");
     Sequence *seq = jet_rt_record_get_dyn_object(b); assert(jet_rt_record_seq_entries_rec_dyn_len(seq) == 2);
     Text *key = NULL; Tree *child = jet_rt_record_seq_entries_rec_dyn_get(seq,0,&key);
-    assert(child == ((Entry *)seq->data)[0].value && key != ((Entry *)seq->data)[0].key);
-    expect(key,"z"); ((Entry *)seq->data)[0].key->data[0] = 'q';
-    assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
+    assert(child == ((Entry *)seq->data)[0].value && key == ((Entry *)seq->data)[0].key);
+    // The clone's entry, the source's entry and the getter's owner share one key.
+    assert(((Entry *)((Sequence *)a->payload)->data)[0].key == key && owners(key) == 3);
+    expect(key,"z"); assert(owners(((Entry *)seq->data)[0].key) == 2);
+    assert(jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
     a = object("x", "x"); b = object("x", "y");
     expect(jet_rt_handle_show_dyn(a), "{\"x\":1,\"x\":2}"); assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
     a = object("z", "a"); b = object("a", "z"); assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);

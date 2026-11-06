@@ -36,7 +36,9 @@ static void observe_free(void *p,int64_t n,int64_t a) {
 static void watch(void *p,int64_t n,int64_t a) {
     assert(p && count<20); watched[count].p=p; watched[count].n=n; watched[count].a=a; watched[count++].freed=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
 static void watch_error(Error *e) { watch(e,16,8); if(e->tag>=9 && e->tag<=19) watch_text((Text *)(uintptr_t)e->payload); }
 static void all_freed(void) { for(size_t i=0;i<count;i++) assert(watched[i].freed==1); count=0; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
@@ -63,7 +65,7 @@ static void ownership(void) {
         Error *a=error(i,i==8?1048576:0,"payload"),*b=jet_rt_handle_clone_jet_http_error(a),*different=error(i,i==8?7:1,"different");
         assert(a!=b && jet_rt_handle_eq_jet_http_error(a,b) && jet_rt_handle_eq_jet_http_error(b,a));
         assert(jet_rt_handle_eq_jet_http_error(a,different)==(i<8));
-        if(i>=9 && i<=19) assert(a->payload!=b->payload);
+        if(i>=9 && i<=19) assert(a->payload==b->payload && owners((Text *)(uintptr_t)a->payload)==2); // the clone shares the text
         Error other={i==20?0:i+1,0}; assert(!jet_rt_handle_eq_jet_http_error(a,&other));
         renders(a,goldens[i]); renders(b,goldens[i]); watch_error(a); watch_error(b); watch_error(different);
         jet_rt_handle_drop_jet_http_error(a);

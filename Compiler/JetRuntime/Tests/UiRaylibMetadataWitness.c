@@ -45,14 +45,17 @@ static void observe_free(H address,H bytes,H align) {
 static void balanced(void){assert(allocations==frees);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live);allocations=frees=0;}
 static Text *text(const char *s){return jet_rt_string_from_static(s,(H)strlen(s));}
 static void text_is(Text *t,const char *s){assert(t->len==strlen(s)&&!memcmp(t->data,s,t->len));}
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t){return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff);}
 static void exact_is(H value,H expected){assert(jet_int_owned_to_i64(value)==expected);jet_rt_int_drop(value);}
 static void window(uint8_t native) {
     H min=jet_int_owned_from_i64(INT64_MIN),max=jet_int_owned_from_i64(INT64_MAX);Text *title=text("win\xc3\xa9");
     H a=jet_rt_record_new_raylib_window(min,max,title,native);jet_rt_int_drop(min);jet_rt_int_drop(max);jet_rt_string_drop(title);
     Window *x=(Window *)(uintptr_t)a,*y=(Window *)(uintptr_t)jet_rt_handle_clone_raylib_window(a);H b=(H)(uintptr_t)y;
-    assert(x!=y&&x->title!=y->title&&x->title->data!=y->title->data);assert(x->width==INT64_MIN&&x->height==INT64_MAX);
+    /* Records are reallocated; constructor and clone share the title by owner count. */
+    assert(x!=y&&x->title==y->title&&owners(x->title)==2);assert(x->width==INT64_MIN&&x->height==INT64_MAX);
     exact_is(jet_rt_record_get_raylib_window_width(a),INT64_MIN);exact_is(jet_rt_record_get_raylib_window_height(a),INT64_MAX);
-    assert(jet_rt_record_get_raylib_window_native(a)==(native!=0));Text *copy=jet_rt_record_get_raylib_window_title(a);assert(copy!=x->title);text_is(copy,"win\xc3\xa9");jet_rt_string_drop(copy);
+    assert(jet_rt_record_get_raylib_window_native(a)==(native!=0));Text *copy=jet_rt_record_get_raylib_window_title(a);assert(copy==x->title&&owners(copy)==3);text_is(copy,"win\xc3\xa9");jet_rt_string_drop(copy);assert(owners(x->title)==2);
     x->native=(H)UINT64_C(0xdeadbeef00000000)|(native!=0);assert(jet_rt_record_get_raylib_window_native(a)==(native!=0));
     jet_rt_handle_drop_raylib_window(a);text_is(y->title,"win\xc3\xa9");jet_rt_handle_drop_raylib_window(b);balanced();
 }
@@ -62,12 +65,12 @@ static void atlas(bool path,bool texture,size_t n) {
     for(size_t i=0;i<n;++i){r->data[i].name=text(i%2?"duplicate":"first");for(size_t j=0;j<4;++j)r->data[i].fields[j]=i%2?INT64_MIN+(H)j:INT64_MAX-(H)j;}
     a->present=(H)UINT64_C(0xdeadbeef00000000)|texture;for(size_t i=0;i<5;++i)a->texture[i]=(int32_t)(UINT32_C(0x80000000)+(uint32_t)i);a->padding=UINT32_MAX;
     H ah=(H)(uintptr_t)a;Atlas *b=(Atlas *)(uintptr_t)jet_rt_handle_clone_raylib_texture_atlas(ah);H bh=(H)(uintptr_t)b;
-    assert(a!=b&&a->path!=b->path&&a->name!=b->name&&r!=b->regions&&b->regions->len==n&&b->regions->cap==n);assert((b->texture_path!=NULL)==path&&b->present==texture&&b->padding==0);
-    if(path)assert(a->texture_path!=b->texture_path);
+    assert(a!=b&&a->path==b->path&&owners(a->path)==2&&a->name==b->name&&owners(a->name)==2&&r!=b->regions&&b->regions->len==n&&b->regions->cap==n);assert((b->texture_path!=NULL)==path&&b->present==texture&&b->padding==0);
+    if(path)assert(a->texture_path==b->texture_path&&owners(a->texture_path)==2);
     if(texture)assert(!memcmp(a->texture,b->texture,sizeof a->texture));
     Text view={0};size_t before=allocations;jet_rt_handle_field_raylib_texture_atlas_name(ah,&view);assert(view.data==a->name->data&&view.len==a->name->len&&view.cap==a->name->cap&&allocations==before);jet_rt_handle_field_raylib_texture_atlas_path(ah,&view);assert(view.data==a->path->data&&allocations==before);
     Text *show=jet_rt_handle_show_raylib_texture_atlas(ah),*debug=jet_rt_handle_debug_raylib_texture_atlas(ah);text_is(show,"RaylibTextureAtlas(A\"\n\xc3\xa9)");text_is(debug,"RaylibTextureAtlas(A\"\n\xc3\xa9)");jet_rt_string_drop(show);jet_rt_string_drop(debug);
-    for(size_t i=0;i<n;++i){assert(r->data[i].name!=b->regions->data[i].name&&!memcmp(r->data[i].fields,b->regions->data[i].fields,sizeof r->data[i].fields));text_is(b->regions->data[i].name,i%2?"duplicate":"first");}
+    for(size_t i=0;i<n;++i){assert(r->data[i].name==b->regions->data[i].name&&owners(r->data[i].name)==2&&!memcmp(r->data[i].fields,b->regions->data[i].fields,sizeof r->data[i].fields));text_is(b->regions->data[i].name,i%2?"duplicate":"first");}
     jet_rt_handle_drop_raylib_texture_atlas(ah);text_is(b->name,"A\"\n\xc3\xa9");jet_rt_handle_drop_raylib_texture_atlas(bh);balanced();
 }
 static void cursor(const char *s,uint64_t pos) {

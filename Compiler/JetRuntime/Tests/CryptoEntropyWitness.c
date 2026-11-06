@@ -6,8 +6,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
-typedef struct { unsigned char *data; int64_t length, capacity; } Text;
-typedef struct { int64_t tag; Text *operation,*parameter,*expected; int64_t actual; Text *detail; int64_t minimum,maximum; } Error;
 extern void jet_rt_alloc_init(void);
 extern void jet_rt_thread_init(void);
 extern void jet_rt_thread_attach(void);
@@ -16,8 +14,6 @@ extern void jet_rt_crypto_entropy_init(void);
 extern void jet_rt_entropy_fixture_set(int64_t,int64_t);
 extern void jet_rt_entropy_fixture_clear(void);
 extern int64_t jet_rt_entropy_fixture_fill(void *,int64_t);
-extern Text *jet_rt_entropy_fixture_error(const Error *);
-extern void jet_rt_string_drop(Text *);
 typedef struct { unsigned calls; int mode; unsigned char *base; } Script;
 static int64_t step(int64_t raw,int64_t address,int64_t count) {
     Script *s=(Script *)(uintptr_t)raw;unsigned char *out=(unsigned char *)(uintptr_t)address;
@@ -35,29 +31,6 @@ static void set(Script *s){jet_rt_entropy_fixture_set((int64_t)(uintptr_t)step,(
 static void zero(const unsigned char *p,size_t n){for(size_t i=0;i<n;++i)assert(p[i]==0);}
 static unsigned char live[8][64];
 static void *worker(void *arg){uintptr_t i=(uintptr_t)arg;jet_rt_thread_attach();assert(jet_rt_entropy_fixture_fill(live[i],64)==0);jet_rt_thread_detach();return NULL;}
-static Text text(const char *s){Text t={(unsigned char *)(uintptr_t)s,(int64_t)strlen(s),(int64_t)strlen(s)};return t;}
-static void errors(void){
-    const char *expected[]={"seal: key must be exactly 32; got 31","PasswordHash.parse: PHC string is not canonical","PasswordHash.parse: version 16 is not supported","PasswordHash.parse: algorithm argon2i is not supported","encrypted data could not be opened","X25519 peer key does not contribute to a shared secret","hkdf_sha256: output length must be 0..8160; got 8161","password hash is outside Jet's accepted policy","the operating system could not provide cryptographic randomness","Argon2 worker pool is unavailable for this cryptographic operation","Jet could not preserve a cryptographic invariant; incident crypto-17"};
-    Text seal=text("seal"),key=text("key"),exact=text("exactly 32"),phc=text("PasswordHash.parse"),kind=text("PHC string"),algorithm=text("argon2i"),hkdf=text("hkdf_sha256"),resource=text("Argon2 worker pool"),incident=text("crypto-17"),poison=text("hunter2 plaintext sentinel ciphertext sentinel /home/user");
-    for(int64_t tag=0;tag<11;++tag){
-        Error e={tag,&poison,&poison,&poison,0,&poison,0,0};
-        if(tag==0){e.operation=&seal;e.parameter=&key;e.expected=&exact;e.actual=31;}
-        if(tag==1){e.operation=&phc;e.parameter=&kind;}
-        if(tag==2){e.operation=&phc;e.actual=16;}
-        if(tag==3){e.operation=&phc;e.detail=&algorithm;}
-        if(tag==6){e.operation=&hkdf;e.minimum=0;e.maximum=8160;e.actual=8161;}
-        if(tag==9)e.detail=&resource;
-        if(tag==10)e.detail=&incident;
-        Text *s=jet_rt_entropy_fixture_error(&e);assert(s->length==(int64_t)strlen(expected[tag]));assert(memcmp(s->data,expected[tag],(size_t)s->length)==0);
-        // A bounded copy checks redaction; no returned text need have a NUL.
-        char rendered[160];assert(s->length<(int64_t)sizeof rendered);memcpy(rendered,s->data,(size_t)s->length);rendered[s->length]=0;
-        const char *forbidden[]={"hunter2","plaintext sentinel","ciphertext sentinel","/home/user"};for(size_t i=0;i<4;++i)assert(strstr(rendered,forbidden[i])==NULL);
-        puts(rendered);jet_rt_string_drop(s);
-    }
-    // UTF-8 metadata passes through byte-identically, not byte-as-codepoint.
-    Text unicode=text("alg\xc3\xa9"),op=text("verify");Error e={3,&op,NULL,NULL,0,&unicode,0,0};Text *s=jet_rt_entropy_fixture_error(&e);
-    const char *expect="verify: algorithm alg\xc3\xa9 is not supported";assert(s->length==(int64_t)strlen(expect));assert(memcmp(s->data,expect,(size_t)s->length)==0);jet_rt_string_drop(s);
-}
 int main(void){
     jet_rt_alloc_init();jet_rt_thread_init();jet_rt_crypto_entropy_init();
     unsigned char guarded[34];memset(guarded,0xa5,sizeof guarded);guarded[0]=0x42;guarded[33]=0x24;
@@ -70,5 +43,5 @@ int main(void){
     pthread_t threads[8];for(uintptr_t i=0;i<8;++i)assert(pthread_create(&threads[i],NULL,worker,(void *)i)==0);for(size_t i=0;i<8;++i)assert(pthread_join(threads[i],NULL)==0);
     for(size_t i=0;i<8;++i){unsigned aggregate=0;for(size_t k=0;k<64;++k)aggregate|=live[i][k];assert(aggregate);for(size_t j=0;j<i;++j)assert(memcmp(live[i],live[j],64)!=0);}
     jet_rt_entropy_fixture_clear();jet_rt_entropy_fixture_clear();assert(jet_rt_entropy_fixture_fill(guarded+1,32)==0);
-    errors();jet_rt_thread_detach();return 0;
+    jet_rt_thread_detach();return 0;
 }

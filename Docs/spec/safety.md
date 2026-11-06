@@ -209,9 +209,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1127,
+  "total": 1126,
   "counts": {
-    "Compiler": 529,
+    "Compiler": 528,
     "Core": 157,
     "Examples": 39,
     "Jetpack": 10,
@@ -2871,13 +2871,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 192,
       "column": 13,
       "reason": "bytes lends used initialized bytes; data owns used native U8 elements"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/HyperLogLog.jet",
-      "line": 332,
-      "column": 9,
-      "reason": "one native HLL mutex protects this packed register byte"
     },
     {
       "package": "Compiler",
@@ -8116,13 +8109,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 529 |
+| Compiler | 528 |
 | Core | 157 |
 | Examples | 39 |
 | Jetpack | 10 |
 | Tools | 8 |
 | tests | 384 |
-| **total** | **1127** |
+| **total** | **1126** |
 
 ### Regions
 
@@ -8507,7 +8500,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostTime.jet | 148:5 | "path lends length bytes; std file open rejects embedded NUL" |
 | Compiler | Compiler/JetRuntime/Source/HostTime.jet | 156:5 | "name owns its trailing NUL byte" |
 | Compiler | Compiler/JetRuntime/Source/HostTime.jet | 192:13 | "bytes lends used initialized bytes; data owns used native U8 elements" |
-| Compiler | Compiler/JetRuntime/Source/HyperLogLog.jet | 332:9 | "one native HLL mutex protects this packed register byte" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 10:5 | "borrow an initialized word in a live exact-Int carrier" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 16:5 | "write an initialized word in a uniquely owned exact-Int workspace" |
 | Compiler | Compiler/JetRuntime/Source/Int.jet | 22:5 | "borrow four initialized bytes in a live limb buffer; no adjacent limb is read" |

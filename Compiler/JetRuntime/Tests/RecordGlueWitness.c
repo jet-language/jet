@@ -52,12 +52,24 @@ static void observe_free(void *p,int64_t size,int64_t align) {
         assert(++watched[i].frees==1);
     }
 }
+// A block watched again before it is freed is another owner of the same
+// refcounted text: it stays one entry that must be freed exactly once.
 static void watch(void *p,int64_t size,int64_t align) {
     assert(count<32);
-    for(size_t i=0;i<count;++i) assert(watched[i].p!=p);
+    for(size_t i=0;i<count;++i) if(watched[i].p==p) { assert(!watched[i].frees && size==watched[i].size && align==watched[i].align); return; }
     watched[count].p=p; watched[count].size=size; watched[count].align=align; watched[count++].frees=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
+static bool text_block(Text *t,void *p) { return p==(char *)t-8 || (t->capacity && p==t->data); }
+// An owned copy of t whose first byte differs: clones share t's bytes, so a
+// differing field is a different text, never a write through a shared one.
+static Text *flipped(Text *t) {
+    char bytes[64]; assert(t->length>0 && t->length<=64);
+    memcpy(bytes,t->data,(size_t)t->length); bytes[0]^=1;
+    return jet_rt_string_from_static(bytes,t->length);
+}
 static void freed(unsigned before) {
     assert(intercepted>before);
     for(size_t i=0;i<count;++i) assert(watched[i].frees==1);
@@ -72,15 +84,16 @@ static void memo_cases(void) {
     int64_t hi=jet_int_owned_from_i64(INT64_MAX),lo=jet_int_owned_from_i64(INT64_MIN);
     Text *bound=text("unbounded");
     Memo *a=jet_rt_record_new_jet_memo_stats(hi,lo,7,bound),*b=jet_rt_handle_clone_jet_memo_stats(a);
-    assert(a!=b && a->bound!=bound && b->bound!=a->bound && b->bound->data!=a->bound->data);
+    // Records are reallocated; constructor and clone share the text by owner count.
+    assert(a!=b && a->bound==bound && b->bound==bound && owners(bound)==3);
     jet_rt_int_drop(hi); jet_rt_int_drop(lo); jet_rt_string_drop(bound);
     assert(a->hits==INT64_MAX && a->misses==INT64_MIN && a->size==7);
     int64_t x=jet_rt_record_get_jet_memo_stats_hits(a),y=jet_rt_record_get_jet_memo_stats_hits(a);
     assert(x!=y); integer(x,INT64_MAX); integer(y,INT64_MAX);
     integer(jet_rt_record_get_jet_memo_stats_misses(a),INT64_MIN); integer(jet_rt_record_get_jet_memo_stats_size(a),7);
     Text *getter=jet_rt_record_get_jet_memo_stats_bound(a);
-    assert(getter!=a->bound && getter->data!=a->bound->data);
-    a->bound->data[0]='X'; expect(getter,"unbounded"); expect(jet_rt_record_get_jet_memo_stats_bound(b),"unbounded");
+    assert(getter==a->bound && owners(getter)==3);
+    expect(getter,"unbounded"); expect(jet_rt_record_get_jet_memo_stats_bound(b),"unbounded"); assert(owners(a->bound)==2);
     watch(a,32,8);watch(b,32,8);watch_text(a->bound);watch_text(b->bound);
     unsigned before=intercepted;jet_rt_handle_drop_jet_memo_stats(a);jet_rt_handle_drop_jet_memo_stats(b);freed(before);
     jet_rt_handle_drop_jet_memo_stats(NULL);
@@ -92,25 +105,28 @@ static void event_cases(void) {
         int64_t hi=jet_int_owned_from_i64(INT64_MAX),lo=jet_int_owned_from_i64(INT64_MIN);
         Event *a=jet_rt_record_new_watch_event(d,k,path,detail,hi,lo),*b=jet_rt_handle_clone_watch_event(a);
         jet_rt_int_drop(hi);jet_rt_int_drop(lo);jet_rt_string_drop(path);jet_rt_string_drop(detail);
-        assert(a!=b && a->path!=b->path && a->detail!=b->detail && a->path->data!=b->path->data && a->detail->data!=b->detail->data);
+        assert(a!=b && a->path==b->path && a->detail==b->detail && owners(a->path)==2 && owners(a->detail)==2);
         assert(a->pid==INT64_MAX && a->port==INT64_MIN);
         assert(jet_rt_record_get_watch_event_domain(a)==d && jet_rt_record_get_watch_event_kind(a)==k);
         integer(jet_rt_record_get_watch_event_pid(a),INT64_MAX);integer(jet_rt_record_get_watch_event_port(a),INT64_MIN);
         Text *p=jet_rt_record_get_watch_event_path(a),*t=jet_rt_record_get_watch_event_detail(a);
-        assert(p!=a->path && p->data!=a->path->data && t!=a->detail && t->data!=a->detail->data);
+        assert(p==a->path && owners(p)==3 && t==a->detail && owners(t)==3);
         expect(p,"a\"\n");expect(t,"detail\\raw");
         char golden[160];snprintf(golden,sizeof(golden),"WatchEvent { domain: %s, kind: %s, path: a\"\n, detail: detail\\raw }",domains[d],kinds[k]);
         // Unquoted raw text, no pid/port.
         expect(jet_rt_handle_show_watch_event(a),golden);assert(jet_rt_handle_eq_watch_event(a,a) && jet_rt_handle_eq_watch_event(a,b));
         b->domain=(d+1)%3;assert(!jet_rt_handle_eq_watch_event(a,b));b->domain=d;
         b->kind=(k+1)%6;assert(!jet_rt_handle_eq_watch_event(a,b));b->kind=k;
-        b->path->data[0]='X';assert(!jet_rt_handle_eq_watch_event(a,b));b->path->data[0]='a';
-        b->detail->data[0]='X';assert(!jet_rt_handle_eq_watch_event(a,b));b->detail->data[0]='d';
+        Text *kept=b->path,*other=flipped(kept);b->path=other;assert(!jet_rt_handle_eq_watch_event(a,b));b->path=kept;jet_rt_string_drop(other);
+        kept=b->detail;other=flipped(kept);b->detail=other;assert(!jet_rt_handle_eq_watch_event(a,b));b->detail=kept;jet_rt_string_drop(other);
         b->pid=0;assert(!jet_rt_handle_eq_watch_event(a,b));b->pid=INT64_MAX;
         b->port=0;assert(!jet_rt_handle_eq_watch_event(a,b));b->port=INT64_MIN;
-        Text *survivor=jet_rt_record_get_watch_event_path(a);
-        watch(a,48,8);watch(b,48,8);watch_text(a->path);watch_text(a->detail);watch_text(b->path);watch_text(b->detail);
-        unsigned before=intercepted;jet_rt_handle_drop_watch_event(a);jet_rt_handle_drop_watch_event(b);freed(before);expect(survivor,"a\"\n");
+        Text *survivor=jet_rt_record_get_watch_event_path(a);assert(survivor==a->path && owners(survivor)==3);
+        watch(a,48,8);watch(b,48,8);watch_text(a->path);watch_text(a->detail);
+        unsigned before=intercepted;jet_rt_handle_drop_watch_event(a);jet_rt_handle_drop_watch_event(b);
+        // The getter's owner keeps the shared path alive past both records.
+        assert(owners(survivor)==1);for(size_t j=0;j<count;++j) assert(watched[j].frees==(text_block(survivor,watched[j].p)?0u:1u));
+        expect(survivor,"a\"\n");freed(before);
     }
     jet_rt_handle_drop_watch_event(NULL);
     for(int64_t k=0;k<6;++k) {

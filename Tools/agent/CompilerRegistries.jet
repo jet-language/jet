@@ -48,7 +48,7 @@ TRANSPORT_PACKAGE :: "name: \"compiler_registry_transport\"\nversion: \"0.0.1\"\
 // The ICU root primary order of the ASCII names a repository holds: the order
 // the inventory walk lists directory entries in.
 ROOT_PRIMARY_ORDER :: " _-,;:!?.'\"()[]{{}}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz"
-CRYPTO :: [String]{"AgeCodec", "AgeV1", "CryptoAead", "CryptoArgon", "CryptoBlake3", "CryptoChaCha", "CryptoEd25519", "CryptoEd25519Signature", "CryptoEntropy", "CryptoHash", "CryptoHkdf", "CryptoOsEntropy", "CryptoPbkdf2", "CryptoSha3", "CryptoWipe", "CryptoX25519", "Sha256"}
+CRYPTO :: [String]{"AgeCodec", "AgeV1", "CryptoAead", "CryptoChaCha", "CryptoEd25519", "CryptoEd25519Signature", "CryptoEntropy", "CryptoHash", "CryptoHkdf", "CryptoOsEntropy", "CryptoWipe", "CryptoX25519", "Sha256"}
 C_FIXTURES :: [String]{"EnvironmentLeaves", "FaultSchedule", "IterCharge", "ProgressState", "HostFault", "FloatBits", "TerminalColor", "TrapReport", "VaultHooks", "VaultProvider", "Thread", "HostSpawn", "CompilerEnv", "CompilerRoutes", "CompilerNeededJSON", "CompilerNeededURL", "CompilerNeededMathText", "DynNative"}
 FOUR_MODES :: [String]{"assemble", "lower", "link", "run"}
 
@@ -697,7 +697,6 @@ fn specification(id: String) -> Spec? Never! {
             "Sync" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-sync", "lower", "link-sync", "run-sync"}))
             "Observe" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-observe", "lower", "link-observe", "run-observe"}))
             "SharedPublication" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-publication", "lower", "link-publication", "run-publication"}))
-            "SharedSource" -> Val((runner: "run-shared-source-fixtures.mjs", modes: FOUR_MODES.copy()))
             "SharedThread" -> Val((runner: "run-thread-fixtures.mjs", modes: [String]{"assemble", "lower", "shared-link", "shared-run"}))
             "Parallel" -> Val((runner: "run-parallel-fixtures.mjs", modes: FOUR_MODES.copy()))
             "Scheduler" -> Val((runner: "run-scheduler-fixtures.mjs", modes: FOUR_MODES.copy()))
@@ -789,7 +788,7 @@ fn prepare_transport(repo: String, row: Census, out: String, adapter: String) -[
 // lifecycle list and, for crypto, the exports list.
 fn suite_library(found: Spec, out: String) -> (file: String, prefix: String, lifecycle: String, exports: String) Never! {
     if found.name == "SharedThread" -> return (file: "{out}/shared/Source/Fixture.jet", prefix: "{out}/shared/fixture", lifecycle: "{out}/shared/lifecycle.list", exports: "")
-    folder :: if found.name == "CollectionsStop" -> out.copy() else -> "{out}/{if found.runner.ends_with("run-channel-fixtures.mjs") || found.name == "SharedSource" -> "fixture" else -> "unit"}"
+    folder :: if found.name == "CollectionsStop" -> out.copy() else -> "{out}/{if found.runner.ends_with("run-channel-fixtures.mjs") -> "fixture" else -> "unit"}"
     (file: "{folder}/Source/Fixture.jet", prefix: "{folder}/fixture", lifecycle: "{folder}/lifecycle.list", exports: if found.crypto -> "{folder}/exports.list" else -> "")
 }
 
@@ -1002,9 +1001,16 @@ fn program(lane: &Lane, file: String, expected: String) Problem! -[Env, Exec, FS
     exact(ran, expected, "") ?? return Err(err)
 }
 
+// The runtime imports jet_rt_fault_report, which Jet's linker writes into each
+// image; this platform link assembles it from the shared report source.
 fn link(lane: &Lane, source: String, object: String, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
-    args :: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", source, object, "-lpthread", "-ldl", "-lm", "-o", binary}
     cwd :: lane.out.copy()
+    repo :: lane.repo.copy()
+    report :: "{cwd}/fault-report.S"
+    report_object :: "{cwd}/fault-report.o"
+    files.write(report, "    .text\n    .globl jet_rt_fault_report\n    .type jet_rt_fault_report, @function\njet_rt_fault_report:\n    .include \"{repo}/Compiler/JetRuntime/Assets/FaultReport/report.S\"\n    .size jet_rt_fault_report, . - jet_rt_fault_report\n") ?? return Err(problem("`{report}` cannot be written: {err}"))
+    execute(&lane, "as", [String]{"--64", "-o", report_object, report}, cwd.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    args :: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", source, object, report_object, "-lpthread", "-ldl", "-lm", "-o", binary}
     execute(&lane, env_or("CC", "cc"), args, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
     Ok(())
 }

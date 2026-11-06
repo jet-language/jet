@@ -38,11 +38,24 @@ static void observe_free(void *p,int64_t size,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].pointer==p) { assert(size==watched[i].size && align==watched[i].align);assert(++watched[i].frees==1); }
 }
+// A block watched again before it is freed is another owner of the same
+// refcounted text: it stays one entry that must be freed exactly once.
 static void watch(void *p,int64_t size,int64_t align) {
-    assert(count<64);for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
+    assert(count<64);
+    for(size_t i=0;i<count;++i) if(watched[i].pointer==p) { assert(!watched[i].frees && size==watched[i].size && align==watched[i].align); return; }
     watched[count].pointer=p;watched[count].size=size;watched[count].align=align;watched[count++].frees=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
+static bool text_block(Text *t,void *p) { return p==(char *)t-8 || (t->capacity && p==t->data); }
+// An owned copy of t whose first byte differs: clones share t's bytes, so a
+// differing field is a different text, never a write through a shared one.
+static Text *flipped(Text *t) {
+    char bytes[64]; assert(t->length>0 && t->length<=64);
+    memcpy(bytes,t->data,(size_t)t->length); bytes[0]^=1;
+    return jet_rt_string_from_static(bytes,t->length);
+}
 static void watch_error(Error *e) {
     watch(e,24,8);Fault *f=e->fault;watch(f,24,8);watch_text(f->export_name);watch_text(f->message);
     Frames *s=f->frames;watch(s,24,8);if(s->capacity) watch(s->data,s->capacity*24,8);
@@ -71,33 +84,39 @@ int main(void) {
         Error *a=error(plugin_goldens[i].tag,plugin_goldens[i].limit,plugin_goldens[i].frames);
         if(a->tag!=2) a->limit=99; // Inactive word must never affect equality/debug.
         Error *b=jet_rt_handle_clone_plugin_error(a);
-        assert(a!=b && a->fault!=b->fault && a->fault->export_name!=b->fault->export_name && a->fault->message!=b->fault->message);
-        assert(a->fault->export_name->data!=b->fault->export_name->data && a->fault->message->data!=b->fault->message->data && a->fault->frames!=b->fault->frames);
+        // Records and frame lists are reallocated; every text is shared by owner count.
+        assert(a!=b && a->fault!=b->fault && a->fault->export_name==b->fault->export_name && a->fault->message==b->fault->message);
+        assert(owners(a->fault->export_name)==2 && owners(a->fault->message)==2 && a->fault->frames!=b->fault->frames);
         assert(b->limit==(a->tag==2?a->limit:0));
         if(a->fault->frames->length) {
             assert(a->fault->frames->data!=b->fault->frames->data);
             for(int64_t j=0;j<a->fault->frames->length;++j) {
-                assert(a->fault->frames->data[j].function!=b->fault->frames->data[j].function && a->fault->frames->data[j].component!=b->fault->frames->data[j].component);
-                assert(a->fault->frames->data[j].function->data!=b->fault->frames->data[j].function->data && a->fault->frames->data[j].component->data!=b->fault->frames->data[j].component->data);
+                assert(a->fault->frames->data[j].function==b->fault->frames->data[j].function && a->fault->frames->data[j].component==b->fault->frames->data[j].component);
+                assert(owners(a->fault->frames->data[j].function)==2 && owners(a->fault->frames->data[j].component)==2);
             }
         }
         // All 4 variants, all 5 budget limits, empty/two-frame vectors: actual
         // pinned rustc derives and Display(:65-68).
         expect(jet_rt_handle_debug_plugin_error(a),plugin_goldens[i].debug,plugin_goldens[i].debug_length);
         Text *show=jet_rt_handle_show_plugin_error(a),*display=jet_rt_handle_display_plugin_error(a);
-        assert(show!=a->fault->message && display!=a->fault->message && show!=display);
-        assert(show->data!=a->fault->message->data && display->data!=a->fault->message->data);
+        // Show and Display lend the stored message as one more owner each.
+        assert(show==a->fault->message && display==a->fault->message && owners(a->fault->message)==4);
         expect(show,plugin_goldens[i].display,plugin_goldens[i].display_length);expect(display,plugin_goldens[i].display,plugin_goldens[i].display_length);
+        assert(owners(a->fault->message)==2);
         assert(jet_rt_handle_eq_plugin_error(a,a) && jet_rt_handle_eq_plugin_error(a,b));
         b->tag=(a->tag+1)%4;assert(!jet_rt_handle_eq_plugin_error(a,b));b->tag=a->tag;
         b->limit=(a->limit+1)%5;assert(jet_rt_handle_eq_plugin_error(a,b)==(a->tag!=2));b->limit=a->tag==2?a->limit:0;
-        b->fault->message->data[0]='X';assert(!jet_rt_handle_eq_plugin_error(a,b));b->fault->message->data[0]='g';
-        b->fault->export_name->data[0]='X';assert(!jet_rt_handle_eq_plugin_error(a,b));b->fault->export_name->data[0]=0xcc;
+        Text *kept=b->fault->message,*other=flipped(kept);b->fault->message=other;assert(!jet_rt_handle_eq_plugin_error(a,b));b->fault->message=kept;jet_rt_string_drop(other);
+        kept=b->fault->export_name;other=flipped(kept);b->fault->export_name=other;assert(!jet_rt_handle_eq_plugin_error(a,b));b->fault->export_name=kept;jet_rt_string_drop(other);
         if(b->fault->frames->length) { b->fault->frames->data[0].offset=0;assert(!jet_rt_handle_eq_plugin_error(a,b));b->fault->frames->data[0].offset=INT64_MIN; }
         Text *survivor=jet_rt_handle_display_plugin_error(a);
+        assert(survivor==a->fault->message && owners(survivor)==3);
         watch_error(a);watch_error(b);unsigned before=intercepted;jet_rt_handle_drop_plugin_error(a);jet_rt_handle_drop_plugin_error(b);
-        assert(intercepted>before);for(size_t j=0;j<count;++j) assert(watched[j].frees==1);count=0;
+        // Every block is freed once except the message the survivor still owns.
+        assert(intercepted>before && owners(survivor)==1);
+        for(size_t j=0;j<count;++j) assert(watched[j].frees==(text_block(survivor,watched[j].pointer)?0u:1u));
         expect(survivor,plugin_goldens[i].display,plugin_goldens[i].display_length);
+        for(size_t j=0;j<count;++j) assert(watched[j].frees==1);count=0;
     }
     jet_rt_handle_drop_plugin_error(NULL);puts("plugin-error witness OK (16 pinned Rust vectors)");return 0;
 }

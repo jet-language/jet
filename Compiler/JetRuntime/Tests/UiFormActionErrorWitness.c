@@ -6,11 +6,11 @@
 #include <stdio.h>
 #include <string.h>
 typedef int64_t H;
-typedef struct { unsigned char *data; uint64_t len,cap; } Text;
+typedef struct { unsigned char *data; uint64_t len,cap,cache; } Text;
 typedef struct { uint64_t len,cap; void *data; } List;
 typedef struct { Text *key; List messages; } Entry;
 typedef struct { List fields,form; } Error;
-_Static_assert(sizeof(Text)==24&&sizeof(List)==24&&sizeof(Entry)==32&&sizeof(Error)==48,"shared native layout inventory");
+_Static_assert(sizeof(Text)==32&&sizeof(List)==24&&sizeof(Entry)==32&&sizeof(Error)==48,"shared native layout inventory");
 extern void jet_rt_alloc_init(void);
 extern H jet_rt_alloc(H,H);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
@@ -18,6 +18,8 @@ extern H jet_web_forms_action_error(void),jet_web_forms_action_field_error(H,H,H
 extern H jet_rt_handle_clone_jet_web_form_action_error(H);
 extern void jet_rt_handle_drop_jet_web_form_action_error(H);
 extern bool jet_rt_handle_eq_jet_web_form_action_error(H,H);
+extern Text *jet_rt_string_from_static(const void *,H);
+extern void jet_rt_string_drop(Text *);
 static struct { H address,bytes,align; bool live; } ledger[8192];
 static size_t allocations,frees;
 static bool tracking;
@@ -25,7 +27,16 @@ static void observe_alloc(H a, H bytes, H align) {if(tracking){assert(a&&bytes>0
 static void observe_free(H a,H bytes,H align){if(tracking){for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==a&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;return;}assert(!"untracked/static/double free");}}
 static H h(const void *p){return (H)(uintptr_t)p;}
 static void balanced(void){assert(allocations==frees);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live);allocations=frees=0;}
-static H owned(const void *bytes,size_t n){Text *t=(Text *)(uintptr_t)jet_rt_alloc(24,8);t->len=t->cap=n;t->data=n?(unsigned char *)(uintptr_t)jet_rt_alloc((H)n,1):(unsigned char *)(uintptr_t)1;if(n)memcpy(t->data,bytes,n);return h(t);}
+/* Producers consume heap texts: one counted block at t-8 plus the byte buffer. */
+static H owned(const void *bytes,size_t n){return h(jet_rt_string_from_static(bytes,(H)n));}
+/* Heap text is [count][data,len,cap,cache]; the owner count is the word before. */
+static int64_t owners(Text *t){return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff);}
+/* A runtime static text (cap 0, data not the empty sentinel 1) is immortal: shared, never counted. */
+static bool counted(Text *t){return t->cap||t->data==(unsigned char *)(uintptr_t)1;}
+/* An owned copy of t whose first byte differs: clones share t's bytes, so a
+ * differing field is a different text, never a write through a shared one. */
+static Text *flipped(Text *t){char raw[64];assert(t->len>0&&t->len<=64);memcpy(raw,t->data,(size_t)t->len);raw[0]^=1;return jet_rt_string_from_static(raw,(H)t->len);}
+static void differs(Error *a,Error *b,Text **slot){Text *kept=*slot;*slot=flipped(kept);assert(!jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));jet_rt_string_drop(*slot);*slot=kept;}
 static H string(const char *s){return owned(s,strlen(s));}
 static Error *fresh(void){Error *e=(Error *)(uintptr_t)jet_web_forms_action_error();assert(e->fields.len==0&&e->fields.cap==0&&e->form.len==0&&e->form.cap==0);return e;}
 static Text *message(List *list,size_t i){assert(i<list->len);return ((Text **)list->data)[i];}
@@ -36,8 +47,9 @@ static void clone_and_drop(Error *a){
     Error *b=(Error *)(uintptr_t)jet_rt_handle_clone_jet_web_form_action_error(h(a));
     assert(a!=b&&jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));
     assert(b->fields.cap==b->fields.len&&b->form.cap==b->form.len);
-    if(a->fields.len){assert(a->fields.data!=b->fields.data);Entry *x=a->fields.data,*y=b->fields.data;for(size_t i=0;i<a->fields.len;++i){assert(x[i].key!=y[i].key&&x[i].key->data!=y[i].key->data);assert(y[i].messages.cap==y[i].messages.len);if(x[i].messages.len)assert(x[i].messages.data!=y[i].messages.data);for(size_t j=0;j<x[i].messages.len;++j){Text *u=message(&x[i].messages,j),*v=message(&y[i].messages,j);assert(u!=v);if(u->len)assert(u->data!=v->data);}}}
-    if(a->form.len)assert(a->form.data!=b->form.data);
+    /* Lists are reallocated; keys and messages are shared by owner count. */
+    if(a->fields.len){assert(a->fields.data!=b->fields.data);Entry *x=a->fields.data,*y=b->fields.data;for(size_t i=0;i<a->fields.len;++i){assert(x[i].key==y[i].key&&owners(x[i].key)==2);assert(y[i].messages.cap==y[i].messages.len);if(x[i].messages.len)assert(x[i].messages.data!=y[i].messages.data);for(size_t j=0;j<x[i].messages.len;++j){Text *u=message(&x[i].messages,j),*v=message(&y[i].messages,j);assert(u==v&&owners(u)==2);}}}
+    if(a->form.len){assert(a->form.data!=b->form.data);for(size_t j=0;j<a->form.len;++j){Text *u=message(&a->form,j);assert(u==message(&b->form,j)&&(!counted(u)||owners(u)==2));}}
     jet_rt_handle_drop_jet_web_form_action_error(h(a));assert(jet_rt_handle_eq_jet_web_form_action_error(h(b),h(b)));jet_rt_handle_drop_jet_web_form_action_error(h(b));balanced();
 }
 static void ordered_case(void){
@@ -45,14 +57,14 @@ static void ordered_case(void){
     const char *keys[]={"_","a","aa","b","m","z"};Entry *entries=a->fields.data;assert(a->fields.len==6&&a->fields.cap>6);
     for(size_t i=0;i<6;++i){text_eq(entries[i].key,keys[i],strlen(keys[i]));}assert(entries[1].messages.len==2);text_eq(message(&entries[1].messages,0),"a0",2);text_eq(message(&entries[1].messages,1),"a1",2);
     Error *b=(Error *)(uintptr_t)jet_rt_handle_clone_jet_web_form_action_error(h(a));assert(jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));
-    Entry *peers=b->fields.data;peers[1].key->data[0]^=1;assert(!jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));peers[1].key->data[0]^=1;
-    message(&peers[1].messages,1)->data[0]^=1;assert(!jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));message(&peers[1].messages,1)->data[0]^=1;
-    message(&b->form,1)->data[0]^=1;assert(!jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));message(&b->form,1)->data[0]^=1;
+    Entry *peers=b->fields.data;differs(a,b,&peers[1].key);
+    differs(a,b,&((Text **)peers[1].messages.data)[1]);
+    differs(a,b,&((Text **)b->form.data)[1]);
     Text *saved=message(&peers[1].messages,0);((Text **)peers[1].messages.data)[0]=message(&peers[1].messages,1);((Text **)peers[1].messages.data)[1]=saved;assert(!jet_rt_handle_eq_jet_web_form_action_error(h(a),h(b)));((Text **)peers[1].messages.data)[1]=((Text **)peers[1].messages.data)[0];((Text **)peers[1].messages.data)[0]=saved;
     jet_rt_handle_drop_jet_web_form_action_error(h(b));clone_and_drop(a);
 }
 static bool letter(unsigned byte){return (byte>='a'&&byte<='z')||(byte>='A'&&byte<='Z')||byte=='_';}
-static void name_case(const unsigned char *name,size_t n,bool valid){Error *e=fresh();assert(jet_web_forms_action_field_error(h(e),owned(name,n),string("input"))==h(e));assert(e->fields.len==(valid?1u:0u)&&e->form.len==(valid?0u:1u));if(valid){Entry *entry=e->fields.data;text_eq(entry->key,name,n);text_eq(message(&entry->messages,0),"input",5);}else{text_eq(message(&e->form,0),"action returned an invalid field error",37);}clone_and_drop(e);}
+static void name_case(const unsigned char *name,size_t n,bool valid){Error *e=fresh();assert(jet_web_forms_action_field_error(h(e),owned(name,n),string("input"))==h(e));assert(e->fields.len==(valid?1u:0u)&&e->form.len==(valid?0u:1u));if(valid){Entry *entry=e->fields.data;text_eq(entry->key,name,n);text_eq(message(&entry->messages,0),"input",5);}else{static const char invalid[]="action returned an invalid field error";text_eq(message(&e->form,0),invalid,sizeof invalid-1);}clone_and_drop(e);}
 static void names(void){for(unsigned byte=0;byte<256;++byte){unsigned char name[2]={'a',(unsigned char)byte};name_case(name+1,1,letter(byte));name_case(name,2,letter(byte)||(byte>='0'&&byte<='9'));}unsigned char name[257];memset(name,'a',sizeof name);name_case(name,256,true);name_case(name,257,false);name_case(name,0,false);const unsigned char utf8[]={0xc3,0xa9};name_case(utf8,sizeof utf8,false);}
 static void bound_case(size_t start,const unsigned char *scalar,size_t width,bool as_field){
     unsigned char bytes[4105];memset(bytes,'a',sizeof bytes);memcpy(bytes+start,scalar,width);size_t n=start+width+2;size_t expected=n<=4096?n:(start<4096&&start+width>4096?start+width:4096);

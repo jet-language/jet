@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-typedef struct { unsigned char *data; int64_t length,capacity; } Text;
+typedef struct { unsigned char *data; int64_t length,capacity,cache; } Text;
 typedef struct { int64_t fields[3]; } Triple;
 typedef struct { int64_t hour,minute,second; uint32_t nanos,padding; } Local;
 typedef struct { int64_t ns; } Duration;
@@ -33,7 +33,7 @@ extern int64_t jet_rt_record_get_##name##_##c(Triple *); \
 extern Text *jet_rt_handle_show_##name(Triple *); \
 extern Text *jet_rt_handle_display_##name(Triple *); \
 extern Text *jet_rt_handle_debug_##name(Triple *)
-TRIPLE_API(JetDate,year,month,day); TRIPLE_API(JetPeriod,years,months,days);
+TRIPLE_API(jet_date,year,month,day); TRIPLE_API(jet_period,years,months,days);
 extern Local *jet_rt_handle_clone_jet_local_time(Local *);
 extern void jet_rt_handle_drop_jet_local_time(Local *);
 extern bool jet_rt_handle_eq_jet_local_time(Local *,Local *);
@@ -66,7 +66,8 @@ static void watch(void *p,int64_t bytes,int64_t align) {
     assert(p && count<16); for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
     watched[count].pointer=p; watched[count].bytes=bytes; watched[count].align=align; watched[count++].frees=0;
 }
-static void watch_text(Text *t) { watch(t,24,8); if(t->capacity) watch(t->data,t->capacity,1); }
+// A text is one 40-byte block: its owner word, then the 32-byte body the pointer names.
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void done(void) { assert(intercepted>0); for(size_t i=0;i<count;++i) assert(watched[i].frees==1); count=0; }
 static void text_is(Text *t,const char *s) { assert(t->length==(int64_t)strlen(s)); assert(memcmp(t->data,s,(size_t)t->length)==0); }
 static void golden(Text *a,Text *b,Text *c,const char *s) {
@@ -150,7 +151,7 @@ int main(int argc,char **argv) {
         else return 2;
         assert(!"overflow mode returned"); return 1;
     }
-    TripleAPI date=API(JetDate,year,month,day),period=API(JetPeriod,years,months,days);
+    TripleAPI date=API(jet_date,year,month,day),period=API(jet_period,years,months,days);
     triples(date,"-9223372036854775807-9223372036854775807--9223372036854775808","-0001-02-03");
     triples(period,"P-9223372036854775808Y9223372036854775807M-9223372036854775808D","P-1Y2M3D");
     locals(); durations(); puts("TimeGlue ownership/equality/render OK"); return 0;

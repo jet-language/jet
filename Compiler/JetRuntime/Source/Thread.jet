@@ -43,11 +43,18 @@
 // to the registry for key lifetime. No inherited GS pointer is dereferenced.
 thread_tls_registry := I64{0}
 
+// Zero `bytes` bytes at a word-aligned address. A byte list's capacity need
+// not be a word multiple, so whole words go first and the tail goes bytewise:
+// no store passes `bytes`.
 fn thread_zero(address: I64, bytes: I64) {
     at := I64{0}
-    loop at < bytes {
+    loop bytes - at >= (I64{8}) {
         sync_store(wrapping(address + at), I64{0})
         at += I64{8}
+    }
+    loop at < bytes {
+        rt_text_put(wrapping(address + at), I64{0})
+        at += I64{1}
     }
 }
 

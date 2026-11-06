@@ -275,11 +275,16 @@ static void stream_read_fixtures(void) {
     pid_t parent = getpid(), child = fork();
     assert(child >= 0);
     if (child == 0) {
-        const struct timespec pause = {0, 50000000};
+        const struct timespec pause = {0, 50000000}, retry = {0, 1000000};
         for (unsigned i = 0; i < 4; ++i) {
             assert(nanosleep(&pause, NULL) == 0 && kill(parent, SIGUSR1) == 0);
         }
-        int writer = open(identity, O_WRONLY | O_NONBLOCK);
+        // The interrupted open restarts after the last signal; ENXIO means the
+        // parent is between two opens and has no reader on the FIFO yet.
+        int writer;
+        while ((writer = open(identity, O_WRONLY | O_NONBLOCK)) < 0 && errno == ENXIO) {
+            assert(nanosleep(&retry, NULL) == 0);
+        }
         assert(writer >= 0);
         input_write_all(writer, expected.data, (size_t)expected.length);
         assert(close(writer) == 0);

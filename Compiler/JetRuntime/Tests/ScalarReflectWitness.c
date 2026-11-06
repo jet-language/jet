@@ -74,11 +74,17 @@ static void observe_free(void *p,int64_t bytes,int64_t align) {
         assert(bytes==watched[i].bytes && align==watched[i].align); assert(++watched[i].frees==1);
     }
 }
+// A block watched again before it is freed is another owner of the same
+// refcounted allocation: it stays one entry that must be freed exactly once.
 static void watch(void *p,int64_t bytes,int64_t align) {
-    assert(p && count<256); for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
+    assert(p && count<256);
+    for(size_t i=0;i<count;++i) if(watched[i].pointer==p) { assert(!watched[i].frees && bytes==watched[i].bytes && align==watched[i].align); return; }
     watched[count].pointer=p; watched[count].bytes=bytes; watched[count].align=align; watched[count++].frees=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
+static unsigned frees_of(Text *t) { for(size_t i=0;i<count;++i) if(watched[i].pointer==(char *)t-8) return watched[i].frees; assert(!"text not watched"); return 0; }
 static void done(void) { assert(intercepted>0); for(size_t i=0;i<count;++i) assert(watched[i].frees==1); count=0; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
 static void text_is(Text *t,const char *s) { assert(t->length==(int64_t)strlen(s)); assert(memcmp(t->data,s,(size_t)t->length)==0); }
@@ -116,12 +122,14 @@ static void solvers(void) {
 static Value *value(const char *type,const char *path,const char *display,List *list) {
     Text *t=text(type), *p=text(path), *d=text(display);
     Value *v=jet_rt_record_new_jet_reflect_value(t,p,d,list);
-    assert(v->type_name!=t && v->path!=p && v->display!=d && v->fields==list);
-    jet_rt_string_drop(t); jet_rt_string_drop(p); jet_rt_string_drop(d); return v;
+    assert(v->type_name==t && v->path==p && v->display==d && v->fields==list);
+    assert(owners(t)==2 && owners(p)==2 && owners(d)==2);
+    jet_rt_string_drop(t); jet_rt_string_drop(p); jet_rt_string_drop(d);
+    assert(owners(v->type_name)==1 && owners(v->path)==1 && owners(v->display)==1); return v;
 }
 static Field *field(const char *name,Value *v) {
     Text *n=text(name); Field *f=jet_rt_record_new_jet_reflect_field(n,v);
-    assert(f->name!=n && f->value==v); jet_rt_string_drop(n); return f;
+    assert(f->name==n && owners(n)==2 && f->value==v); jet_rt_string_drop(n); assert(owners(f->name)==1); return f;
 }
 static void watch_value(Value *v);
 static void watch_field(Field *f) { watch(f,16,8); watch_text(f->name); watch_value(f->value); }
@@ -140,22 +148,26 @@ static void reflections(void) {
     Field *extra=field("other",value("Int","root.other","7",jet_rt_record_seq_list_rec_jet_reflect_field_new(0)));
     watch(old,capacity*8,8); jet_rt_record_seq_list_rec_jet_reflect_field_push(rows,extra); done(); // reserve frees old buffer exactly once
     Value *root=value("Record","root","{x: 42}",rows), *clone=jet_rt_handle_clone_jet_reflect_value(root);
-    assert(root!=clone && root->type_name!=clone->type_name && root->fields!=clone->fields && root->fields->data!=clone->fields->data);
+    // A clone is a new record and field list whose texts share the source's by owner count.
+    assert(root!=clone && root->type_name==clone->type_name && owners(root->type_name)==2 && root->fields!=clone->fields && root->fields->data!=clone->fields->data);
     Field *copied=jet_rt_record_seq_list_rec_jet_reflect_field_get(clone->fields,0);
-    assert(copied!=f && copied->name!=f->name && copied->value!=leaf && copied->value->fields!=empty);
-    copied->value->display->data[0]='9'; assert(leaf->display->data[0]=='4'); copied->value->display->data[0]='4';
+    assert(copied!=f && copied->name==f->name && owners(f->name)==2 && copied->value!=leaf && copied->value->fields!=empty);
+    assert(copied->value->display==leaf->display && owners(leaf->display)==2);
     assert(jet_rt_record_get_jet_reflect_value_fields(root)==rows);
     Text *tn=jet_rt_record_get_jet_reflect_value_type_name(root), *p=jet_rt_record_get_jet_reflect_value_path(root), *d=jet_rt_record_get_jet_reflect_value_display(root), *name=jet_rt_record_get_jet_reflect_field_name(f);
-    assert(tn!=root->type_name && p!=root->path && d!=root->display && name!=f->name);
+    assert(tn==root->type_name && owners(tn)==3 && p==root->path && owners(p)==3 && d==root->display && owners(d)==3 && name==f->name && owners(name)==3);
     Value *got=jet_rt_record_get_jet_reflect_field_value(f); Field *fc=jet_rt_handle_clone_jet_reflect_field(f);
-    assert(got!=leaf && got->display!=leaf->display && fc!=f && fc->value!=leaf);
+    assert(got!=leaf && got->display==leaf->display && fc!=f && fc->value!=leaf && fc->name==f->name && owners(f->name)==4);
     owned_text_is(jet_rt_handle_show_jet_reflect_value(root),"Value(Record)");
-    owned_text_is(jet_rt_handle_display_jet_reflect_value(root),"{x: 42}");
+    Text *shown=jet_rt_handle_display_jet_reflect_value(root); // display lends the stored text as one more owner
+    text_is(shown,"{x: 42}"); assert(shown==d && owners(d)==4); jet_rt_string_drop(shown); assert(owners(d)==3);
     owned_text_is(jet_rt_handle_show_jet_reflect_field(f),"Field(x: 42)");
     watch_value(root); watch_value(clone); watch_value(got); watch_field(fc);
-    jet_rt_handle_drop_jet_reflect_value(root); jet_rt_handle_drop_jet_reflect_value(clone); jet_rt_handle_drop_jet_reflect_value(got); jet_rt_handle_drop_jet_reflect_field(fc); done();
+    jet_rt_handle_drop_jet_reflect_value(root); jet_rt_handle_drop_jet_reflect_value(clone); jet_rt_handle_drop_jet_reflect_value(got); jet_rt_handle_drop_jet_reflect_field(fc);
+    // The getters' owners outlive every record: their texts are not yet freed.
+    assert(owners(tn)==1 && owners(p)==1 && owners(d)==1 && owners(name)==1);
+    assert(!frees_of(tn) && !frees_of(p) && !frees_of(d) && !frees_of(name));
     text_is(tn,"Record"); text_is(p,"root"); text_is(d,"{x: 42}"); text_is(name,"x");
-    watch_text(tn); watch_text(p); watch_text(d); watch_text(name);
     jet_rt_string_drop(tn); jet_rt_string_drop(p); jet_rt_string_drop(d); jet_rt_string_drop(name); done();
     jet_rt_handle_drop_jet_reflect_value(NULL); jet_rt_handle_drop_jet_reflect_field(NULL);
 }

@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-typedef struct { unsigned char *data; int64_t length,capacity; } Text;
+typedef struct { unsigned char *data; int64_t length,capacity,cache; } Text;
 typedef struct { Text *operation,*address,*name,*message; int64_t present,code; } Detail;
 typedef struct { int64_t tag; Text *text; } DNS;
 typedef struct { int64_t tag; void *payload; } Error;
@@ -45,7 +45,7 @@ extern int64_t jet_rt_record_tag_jet_net_error(Error *);
 extern Text *jet_rt_handle_show_jet_net_error(Error *);
 extern Text *jet_rt_handle_display_jet_net_error(Error *);
 extern Text *jet_rt_handle_debug_jet_net_error(Error *);
-#define DETAIL_VARIANTS(X) X(InvalidInput) X(PermissionDenied) X(AddressInUse) X(AddressUnavailable) X(ConnectionRefused) X(ConnectionReset) X(NotConnected) X(Closed) X(Timeout) X(Cancelled) X(Unsupported) X(TLS) X(Protocol) X(Other)
+#define DETAIL_VARIANTS(X) X(invalid_input) X(permission_denied) X(address_in_use) X(address_unavailable) X(connection_refused) X(connection_reset) X(not_connected) X(closed) X(timeout) X(cancelled) X(unsupported) X(tls) X(protocol) X(other)
 #define DECLARE(NAME) extern Error *jet_rt_record_new_jet_net_error_##NAME(Detail *); extern Detail *jet_rt_record_get_jet_net_error_##NAME(Error *);
 DETAIL_VARIANTS(DECLARE)
 #undef DECLARE
@@ -69,36 +69,57 @@ static void observe_free(void *p,int64_t bytes,int64_t align) {
         assert(bytes==watched[i].bytes && align==watched[i].align && ++watched[i].frees==1);
     }
 }
+// Texts are shared by refcount, so carriers and their clones can name one text
+// block: it is watched once and must be freed exactly once.
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(p && watched_count<128);
-    for(size_t i=0;i<watched_count;++i) assert(watched[i].pointer!=p);
-    watched[watched_count].pointer=p; watched[watched_count].bytes=bytes; watched[watched_count++].align=align;
+    for(size_t i=0;i<watched_count;++i) if(watched[i].pointer==p) { assert(watched[i].bytes==bytes && watched[i].align==align); return; }
+    watched[watched_count].pointer=p; watched[watched_count].bytes=bytes; watched[watched_count].align=align; watched[watched_count++].frees=0;
 }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); }
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8) & 0x3fffffffffffffff; }
+static void watch_text(Text *t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); }
 static void watch_detail(Detail *d) { watch(d,48,8); watch_text(d->operation); if(d->address) watch_text(d->address); if(d->name) watch_text(d->name); watch_text(d->message); }
 static void watch_error(Error *e) { watch(e,16,8); if(e->tag==11) { DNS *d=e->payload; watch(d,16,8); watch_text(d->text); } else watch_detail(e->payload); }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
 static void text_is(Text *t,const char *s) { assert(t->length==(int64_t)strlen(s)); assert(!memcmp(t->data,s,(size_t)t->length)); }
-static void render(Error *e,const char *s) {
+// Swaps in an owned copy whose first byte differs and checks the probe fails.
+static void probe(Text **slot,bool (*differs)(void *,void *),void *a,void *b) {
+    Text *shared=*slot; char bytes[32]; assert(shared->length>0 && shared->length<=32);
+    memcpy(bytes,shared->data,(size_t)shared->length); bytes[0]^=1;
+    *slot=jet_rt_string_from_static(bytes,shared->length);
+    assert(*slot!=shared && owners(*slot)==1 && !memcmp((*slot)->data,bytes,(size_t)shared->length) && differs(a,b));
+    jet_rt_string_drop(*slot); *slot=shared;
+}
+static bool detail_differs(void *a,void *b) { return !jet_rt_handle_eq_jet_net_error_detail(a,b); }
+static bool error_differs(void *a,void *b) { return !jet_rt_handle_eq_jet_net_error(a,b); }
+static bool dns_differs(void *a,void *b) { return !jet_rt_handle_eq_jet_net_dns_error(a,b); }
+// Detail and DNS-failure renders retain the stored message; DNS not-found builds a new text.
+static void render(Error *e,const char *s,Text *shared) {
+    int64_t before=shared ? owners(shared) : 0;
     Text *a=jet_rt_handle_show_jet_net_error(e), *b=jet_rt_handle_display_jet_net_error(e), *c=jet_rt_handle_debug_jet_net_error(e);
-    assert(a!=b && b!=c && a!=c); text_is(a,s); text_is(b,s); text_is(c,s);
+    if(shared) assert(a==shared && b==shared && c==shared && owners(shared)==before+3);
+    else assert(a!=b && b!=c && a!=c && owners(a)==1 && owners(b)==1 && owners(c)==1);
+    text_is(a,s); text_is(b,s); text_is(c,s);
     jet_rt_string_drop(a); jet_rt_string_drop(b); jet_rt_string_drop(c);
+    if(shared) assert(owners(shared)==before);
 }
 static Detail *detail(const char *address,const char *name,const int64_t *code) {
     Text *op=text("connect"), *msg=text("failure λ"), *addr=address ? text(address) : NULL, *nm=name ? text(name) : NULL;
     Detail *d=jet_rt_record_new_jet_net_error_detail(op,(const Text **)(addr ? &addr : NULL),(const Text **)(nm ? &nm : NULL),msg,code);
-    assert(d->operation!=op && d->message!=msg);
-    if(addr) assert(d->address!=addr && d->address->data!=addr->data);
-    if(nm) assert(d->name!=nm && (nm->length==0 || d->name->data!=nm->data));
+    assert(d->operation==op && owners(op)==2 && d->message==msg && owners(msg)==2);
+    if(addr) assert(d->address==addr && owners(addr)==2); else assert(!d->address);
+    if(nm) assert(d->name==nm && owners(nm)==2); else assert(!d->name);
     jet_rt_string_drop(op); jet_rt_string_drop(msg); if(addr) jet_rt_string_drop(addr); if(nm) jet_rt_string_drop(nm);
+    assert(owners(d->operation)==1 && owners(d->message)==1);
     return d;
 }
 static void truth(void) {
     int64_t zero=jet_int_owned_from_i64(0);
     Detail *a=detail("address","name",&zero), *b=jet_rt_handle_clone_jet_net_error_detail(a);
     assert(jet_rt_handle_eq_jet_net_error_detail(a,a) && jet_rt_handle_eq_jet_net_error_detail(a,b));
-    Text *fields[]={b->operation,b->address,b->name,b->message};
-    for(size_t i=0;i<4;++i) { fields[i]->data[0]^=1; assert(!jet_rt_handle_eq_jet_net_error_detail(a,b)); fields[i]->data[0]^=1; }
+    assert(a->operation==b->operation && a->address==b->address && a->name==b->name && a->message==b->message);
+    Text **slots[]={&b->operation,&b->address,&b->name,&b->message};
+    for(size_t i=0;i<4;++i) { assert(owners(*slots[i])==2); probe(slots[i],detail_differs,a,b); }
     b->present=0; assert(!jet_rt_handle_eq_jet_net_error_detail(a,b)); b->present=1;
     b->code=1; assert(!jet_rt_handle_eq_jet_net_error_detail(a,b)); b->code=0;
     Text *saved=b->address; b->address=NULL; assert(!jet_rt_handle_eq_jet_net_error_detail(a,b)); b->address=saved;
@@ -121,24 +142,25 @@ static void all_variants(void) {
         assert(a->payload==d && jet_rt_record_tag_jet_net_error(a)==tags[i]);
         Error *b=jet_rt_handle_clone_jet_net_error(a); Detail *g=getters[i](a);
         assert(b!=a && b->payload!=d && g!=d && jet_rt_handle_eq_jet_net_error(a,b));
+        assert(((Detail *)b->payload)->message==d->message && g->message==d->message && owners(d->message)==3);
         assert(jet_rt_handle_eq_jet_net_error_detail(d,g));
         b->tag=(b->tag+1)%15; assert(!jet_rt_handle_eq_jet_net_error(a,b)); b->tag=tags[i];
-        ((Detail *)b->payload)->message->data[0]^=1; assert(!jet_rt_handle_eq_jet_net_error(a,b)); ((Detail *)b->payload)->message->data[0]^=1;
-        render(a,"failure λ"); jet_rt_handle_drop_jet_net_error(a); text_is(g->message,"failure λ");
-        render(b,"failure λ"); jet_rt_handle_drop_jet_net_error(b); jet_rt_handle_drop_jet_net_error_detail(g);
+        probe(&((Detail *)b->payload)->message,error_differs,a,b);
+        render(a,"failure λ",d->message); jet_rt_handle_drop_jet_net_error(a); assert(owners(g->message)==2); text_is(g->message,"failure λ");
+        render(b,"failure λ",g->message); jet_rt_handle_drop_jet_net_error(b); assert(owners(g->message)==1); jet_rt_handle_drop_jet_net_error_detail(g);
     }
     for(int64_t tag=0;tag<2;++tag) {
         Text *s=text(tag==0 ? "λ.example`" : "DNS failed λ");
         DNS *d=tag==0 ? jet_rt_record_new_jet_net_dns_error_not_found(s) : jet_rt_record_new_jet_net_dns_error_failure(s);
-        assert(d->text!=s && jet_rt_record_tag_jet_net_dns_error(d)==tag); jet_rt_string_drop(s);
-        DNS *copy=jet_rt_handle_clone_jet_net_dns_error(d); assert(copy!=d && copy->text!=d->text && jet_rt_handle_eq_jet_net_dns_error(copy,d));
+        assert(d->text==s && owners(s)==2 && jet_rt_record_tag_jet_net_dns_error(d)==tag); jet_rt_string_drop(s); assert(owners(d->text)==1);
+        DNS *copy=jet_rt_handle_clone_jet_net_dns_error(d); assert(copy!=d && copy->text==d->text && owners(d->text)==2 && jet_rt_handle_eq_jet_net_dns_error(copy,d));
         copy->tag^=1; assert(!jet_rt_handle_eq_jet_net_dns_error(copy,d)); copy->tag^=1;
-        copy->text->data[0]^=1; assert(!jet_rt_handle_eq_jet_net_dns_error(copy,d)); copy->text->data[0]^=1;
-        Text *g=tag==0 ? jet_rt_record_get_jet_net_dns_error_not_found(d) : jet_rt_record_get_jet_net_dns_error_failure(d); assert(g!=d->text); jet_rt_string_drop(g);
+        probe(&copy->text,dns_differs,copy,d);
+        Text *g=tag==0 ? jet_rt_record_get_jet_net_dns_error_not_found(d) : jet_rt_record_get_jet_net_dns_error_failure(d); assert(g==d->text && owners(g)==3); jet_rt_string_drop(g);
         Error *e=jet_rt_record_new_jet_net_error_dns(d); assert(e->payload==d && jet_rt_record_tag_jet_net_error(e)==11);
         DNS *payload=jet_rt_record_get_jet_net_error_dns(e); Error *clone=jet_rt_handle_clone_jet_net_error(e);
-        assert(payload!=d && jet_rt_handle_eq_jet_net_dns_error(payload,d) && jet_rt_handle_eq_jet_net_error(e,clone));
-        render(e,tag==0 ? "DNS name not found: `λ.example``" : "DNS failed λ");
+        assert(payload!=d && payload->text==d->text && jet_rt_handle_eq_jet_net_dns_error(payload,d) && jet_rt_handle_eq_jet_net_error(e,clone));
+        render(e,tag==0 ? "DNS name not found: `λ.example``" : "DNS failed λ",tag==0 ? NULL : d->text);
         jet_rt_handle_drop_jet_net_error(e); assert(jet_rt_handle_eq_jet_net_dns_error(payload,copy));
         jet_rt_handle_drop_jet_net_error(clone); jet_rt_handle_drop_jet_net_dns_error(payload); jet_rt_handle_drop_jet_net_dns_error(copy);
     }
@@ -166,12 +188,12 @@ int main(int argc,char **argv) {
     Error *b=jet_rt_handle_clone_jet_net_error(a); Detail *g=jet_rt_record_get_jet_net_error_other(a), *d=a->payload;
     Text *op=jet_rt_record_get_jet_net_error_detail_operation(g), *msg=jet_rt_record_get_jet_net_error_detail_message(g), *addr=NULL,*name=NULL;
     assert(jet_rt_record_get_jet_net_error_detail_address(g,&addr)==1 && jet_rt_record_get_jet_net_error_detail_name(g,&name)==1);
-    assert(op!=g->operation && msg!=g->message && addr!=g->address && name!=g->name);
+    assert(op==g->operation && msg==g->message && addr==g->address && name==g->name && owners(op)==4 && owners(msg)==4 && owners(addr)==4 && owners(name)==4);
     int64_t code=0,code2=0; assert(jet_rt_record_get_jet_net_error_detail_os_code(g,&code)==1 && jet_rt_record_get_jet_net_error_detail_os_code(g,&code2)==1);
     assert(code!=code2 && jet_int_owned_to_i64(code)==INT64_MIN && jet_int_owned_to_i64(code2)==INT64_MIN);
     jet_rt_int_drop(code); jet_rt_int_drop(code2);
-    assert(d!=g && d->operation!=g->operation && d->operation->data!=g->operation->data);
-    assert(d->address!=g->address && d->name!=g->name && d->message!=g->message);
+    assert(d!=g && d->operation==g->operation);
+    assert(d->address==g->address && d->name==g->name && d->message==g->message);
     Text *s=text("watched.example"); DNS *dns=jet_rt_record_new_jet_net_dns_error_not_found(s); jet_rt_string_drop(s);
     Error *dns_error=jet_rt_record_new_jet_net_error_dns(dns), *dns_clone=jet_rt_handle_clone_jet_net_error(dns_error);
     // No more allocations while these tracked owners are being destroyed.

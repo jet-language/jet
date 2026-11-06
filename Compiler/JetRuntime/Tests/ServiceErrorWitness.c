@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-typedef struct { const char *data; int64_t len, capacity; } Text;
+typedef struct { const char *data; int64_t len, capacity, cache; } Text;
 typedef struct { int64_t tag; Text *payload; } Error;
 _Static_assert(sizeof(Error) == 16, "canonical private Error16");
 extern void jet_rt_alloc_init(void);
@@ -13,21 +13,22 @@ extern Error *jet_rt_handle_clone_jet_service_error(const Error *);
 extern void jet_rt_handle_drop_jet_service_error(Error *);
 extern bool jet_rt_handle_eq_jet_service_error(const Error *, const Error *);
 extern Text *jet_rt_handle_show_jet_service_error(const Error *);
+extern Text *jet_rt_string_from_static(const void *, int64_t);
 extern int64_t jet_rt_record_tag_jet_service_error(const Error *);
 extern void jet_rt_string_drop(Text *);
 #define DECLARE(name) \
     extern Error *jet_rt_record_new_jet_service_error_##name(const Text *); \
     extern Text *jet_rt_record_get_jet_service_error_##name(const Error *);
-DECLARE(Full)
-DECLARE(Ambiguous)
-DECLARE(Unknown)
-DECLARE(NotStarted)
-DECLARE(Policy)
-DECLARE(Unavailable)
-DECLARE(Partitioned)
-DECLARE(Revoked)
-DECLARE(Stale)
-DECLARE(Expired)
+DECLARE(full)
+DECLARE(ambiguous)
+DECLARE(unknown)
+DECLARE(not_started)
+DECLARE(policy)
+DECLARE(unavailable)
+DECLARE(partitioned)
+DECLARE(revoked)
+DECLARE(stale)
+DECLARE(expired)
 #undef DECLARE
 static Error *(*const ctors[])(const Text *) = {
     jet_rt_record_new_jet_service_error_full, jet_rt_record_new_jet_service_error_ambiguous,
@@ -56,14 +57,16 @@ static void observe_free(void *pointer, int64_t bytes, int64_t align) {
         }
     }
 }
-static void drop(Error *value) {
+static int64_t owners(const Text *t) { return *(const int64_t *)((const char *)t - 8) & 0x3fffffffffffffff; }
+// The payload text is shared by refcount: only the last owner frees its block.
+static void drop(Error *value, bool last) {
     watched[0] = value; sizes[0] = 16;
-    watched[1] = value->payload; sizes[1] = 24;
-    watched[2] = (void *)value->payload->data; sizes[2] = value->payload->capacity;
+    watched[1] = (char *)value->payload - 8; sizes[1] = 40;
+    watched[2] = value->payload->capacity ? (void *)value->payload->data : NULL; sizes[2] = value->payload->capacity;
     memset(frees, 0, sizeof(frees));
     jet_rt_handle_drop_jet_service_error(value);
-    assert(frees[0] == 1 && frees[1] == 1);
-    if (sizes[2]) assert(frees[2] == 1);
+    assert(frees[0] == 1 && frees[1] == (unsigned)last);
+    if (sizes[2]) assert(frees[2] == (unsigned)last);
     memset(watched, 0, sizeof(watched));
 }
 static void text(const Text *value, const char *bytes, size_t length) {
@@ -78,10 +81,11 @@ int main(int argc, char **argv) {
             char mode[16];
             (void)snprintf(mode, sizeof(mode), "wrong-%u", i);
             if (strcmp(argv[1], mode) == 0) {
-                Text input = {"wrong", 5, 5};
-                Error *value = ctors[(i + 1) % 10](&input);
+                Text *input = jet_rt_string_from_static("wrong", 5);
+                Error *value = ctors[(i + 1) % 10](input);
+                jet_rt_string_drop(input);
                 Text *unexpected = getters[i](value);
-                jet_rt_string_drop(unexpected); drop(value);
+                jet_rt_string_drop(unexpected); drop(value, true);
                 return 99; // A valid run must stop before this, not fake a fatal result.
             }
         }
@@ -91,29 +95,30 @@ int main(int argc, char **argv) {
     static const char raw[] = "raw\0\"\\\n\xe9\x9b\xaa";
     for (unsigned variant = 0; variant < 10; ++variant) {
         for (unsigned empty = 0; empty < 2; ++empty) {
-            char input[sizeof(raw)]; memcpy(input, raw, sizeof(raw));
             size_t length = empty ? 0 : sizeof(raw) - 1;
-            Text borrowed = {input, (int64_t)length, (int64_t)length};
-            Error *value = ctors[variant](&borrowed);
+            Text *input = jet_rt_string_from_static(raw, (int64_t)length);
+            assert(owners(input) == 1);
+            Error *value = ctors[variant](input);
             assert(value->tag == (int64_t)variant && jet_rt_record_tag_jet_service_error(value) == (int64_t)variant);
-            assert(value->payload != &borrowed);
-            if (length) assert(value->payload->data != borrowed.data);
+            assert(value->payload == input && owners(input) == 2);
+            jet_rt_string_drop(input); assert(owners(value->payload) == 1);
             Error *clone = jet_rt_handle_clone_jet_service_error(value);
-            assert(clone != value && clone->payload != value->payload && jet_rt_handle_eq_jet_service_error(value, clone));
-            memset(input, 'x', sizeof(input));
-            text(value->payload, raw, length); text(clone->payload, raw, length);
+            assert(clone != value && clone->payload == value->payload && owners(value->payload) == 2 && jet_rt_handle_eq_jet_service_error(value, clone));
+            text(value->payload, raw, length);
             Text *getter = getters[variant](value), *show = jet_rt_handle_show_jet_service_error(value);
-            assert(getter != value->payload && show != value->payload && show != getter);
+            assert(getter == value->payload && show == value->payload && owners(value->payload) == 4);
             for (unsigned other = 0; other < 10; ++other) {
                 Error fixture = {(int64_t)other, clone->payload};
                 assert(jet_rt_handle_eq_jet_service_error(value, &fixture) == (variant == other));
             }
-            Text different = {"different", 9, 9};
-            Error fixture = {(int64_t)variant, &different};
+            Text *different = jet_rt_string_from_static("different", 9);
+            Error fixture = {(int64_t)variant, different};
             assert(!jet_rt_handle_eq_jet_service_error(value, &fixture));
-            drop(value);
+            jet_rt_string_drop(different);
+            drop(value, false);
+            assert(owners(getter) == 3);
             text(getter, raw, length); text(show, raw, length); text(clone->payload, raw, length);
-            jet_rt_string_drop(getter); jet_rt_string_drop(show); drop(clone);
+            jet_rt_string_drop(getter); jet_rt_string_drop(show); assert(owners(clone->payload) == 1); drop(clone, true);
         }
     }
     jet_rt_handle_drop_jet_service_error(NULL);

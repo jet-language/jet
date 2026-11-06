@@ -61,7 +61,7 @@ const front = [jetc0, jet], runtime = [object, provenance];
 
 modes('run-channel-fixtures', ['assemble','assemble-stm','assemble-sync','assemble-observe','assemble-publication','lower','link','link-stm','run-stm','link-sync','run-sync','link-observe','run-observe','link-publication','run-publication','link-weak','run-weak','run','fatal','perf'], front);
 for (const runner of ['run-atomic-fixtures','run-crypto-fixtures','run-parallel-fixtures','run-scheduler-fixtures','run-testsuite-fixtures']) modes(runner, ['assemble','lower','audit','link','run'], front);
-for (const runner of ['run-residue-fixtures','run-shared-source-fixtures']) modes(runner, ['assemble','lower','link','run'], front);
+modes('run-residue-fixtures', ['assemble','lower','link','run'], front);
 modes('run-host-fixtures', ['assemble','lower','audit','compile','link','run'], front);
 modes('run-thread-fixtures', ['assemble','lower','audit','link','run','shared-link','shared-run'], front);
 modes('run-world-sentry-fixtures', ['assemble','lower','audit','link','run','render'], front);
@@ -86,11 +86,8 @@ if (fs.existsSync(normalization)) {
 }
 add('run-native-text-normalize', [r('run-native-text-normalize', '--native', out('native-text-normalize'), object)], [...runtime,nfc], {JET_NFC_FROZEN_SCALARS:nfc});
 const ui = {
-  'accessibility-projection':'UiAccessibilityProjectionWitness','choices':'UiCarriersChoicesWitness',
-  'clipboard':'UiClipboardWitness','dialog-selection':'UiDialogSelectionWitness','drag':'UiDragWitness','events':'UiEventsWitness',
-  'file-dialog':'UiFileDialogWitness','form-action-error':'UiFormActionErrorWitness','host-error':'UiHostErrorWitness','ime':'UiImeWitness',
-  'key':'UiKeyWitness','raylib-metadata':'UiRaylibMetadataWitness','shortcut-binding':'UiShortcutBindingWitness',
-  'slice2':'UiCarriersSlice2Witness','slice3':'UiCarriersSlice3Witness','view-snapshots':'UiViewSnapshotsWitness',
+  'choices':'UiCarriersChoicesWitness','events':'UiEventsWitness','form-action-error':'UiFormActionErrorWitness',
+  'key':'UiKeyWitness','raylib-metadata':'UiRaylibMetadataWitness','view-snapshots':'UiViewSnapshotsWitness',
 };
 for (const [name, witness] of Object.entries(ui)) {
   const runner = `run-ui-${name}-witness`, args = name === 'key' ? [charOracle] : [];
@@ -102,10 +99,9 @@ add('run-io-witness',[r('run-io-witness',binary('IOWitness'))],[binary('IOWitnes
 add('run-execution-fixtures',[r('run-execution-fixtures',binary('execution-fixture'))],[binary('execution-fixture')]);
 
 // Generator runners operate only in fresh writable data copies outside W.
-for (const runner of ['generate-blake3-fixtures','generate-ed25519-headers','generate-rfc8032-fixtures']) {
+for (const runner of ['generate-ed25519-headers','generate-rfc8032-fixtures']) {
   const directory = path.join(D,'data',runner,'Compiler/JetRuntime/Tests'); fs.mkdirSync(directory,{recursive:true});
   for (const file of fs.readdirSync(path.join(W,T)).filter(file => /\.(?:mjs|json|h)$/.test(file))) fs.copyFileSync(path.join(W,T,file),path.join(directory,file));
-  if (runner==='generate-blake3-fixtures') fs.rmSync(path.join(directory,'CryptoBlake3Goldens.h'));
   if (runner==='generate-rfc8032-fixtures') fs.rmSync(path.join(directory,'Ed25519OfficialVectors.json'));
   const args = runner==='generate-rfc8032-fixtures' ? [out('rfc8032.txt')] : [];
   add(runner,[[node,path.join(directory,`${runner}.mjs`),...args]],args);
@@ -124,7 +120,7 @@ add('test-unit-runtime',[]);
 async function pool(tasks,width) {const queue=[...tasks];await Promise.all(Array.from({length:width},async()=>{while(queue.length)await queue.shift()();}));}
 const width=Number(process.env.S5_FIXTURE_WIDTH??6);
 if(!Number.isInteger(width)||width<2||width>6)throw Error('fixture width must be2..6 within declared20G');
-const cryptoWitnesses=['Sha256','CryptoX25519','CryptoEd25519','CryptoChaCha','CryptoAead','CryptoHkdf','CryptoArgon','AgeCodec','AgeV1','CryptoEntropy','CryptoHash','CryptoPbkdf2','CryptoSha3','CryptoBlake3','CryptoEd25519Signature','CryptoWipe','CryptoOsEntropy'].map(name=>`${name}Witness`);
+const cryptoWitnesses=['Sha256','CryptoX25519','CryptoEd25519','CryptoChaCha','CryptoAead','CryptoHkdf','AgeCodec','AgeV1','CryptoEntropy','CryptoHash','CryptoEd25519Signature','CryptoWipe','CryptoOsEntropy'].map(name=>`${name}Witness`);
 const ownedWitness=new Set(['CAbiDriver','DisplayWitness','RootStdioWitness','HostFilesTests','HostSpawnTests',...cryptoWitnesses]);
 const dedicated=new Set([...Object.values(ui),'RootCleanupWitness','DataTreeWitness','ScalarReflectWitness','DataEventWitness','TaskVariantPanicWitness','IOWitness']);
 const witnesses=fs.readdirSync(path.join(W,T)).filter(file=>/Witness\.c$/.test(file)).map(file=>file.slice(0,-2)).filter(name=>!ownedWitness.has(name));

@@ -59,12 +59,23 @@ static void observe_free(void *p,int64_t bytes,int64_t align) {
         assert(++watched[i].frees==1);
     }
 }
+// A block watched again before it is freed is another owner of the same
+// refcounted text: it stays one entry that must be freed exactly once.
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(count<256);
-    for(size_t i=0;i<count;++i) assert(watched[i].p!=p);
+    for(size_t i=0;i<count;++i) if(watched[i].p==p) { assert(!watched[i].frees && bytes==watched[i].bytes && align==watched[i].align); return; }
     watched[count].p=p; watched[count].bytes=bytes; watched[count].align=align; watched[count++].frees=0;
 }
-static void watch_text(Text *t) { if(t) { watch((char *)(t)-8,32,8); if(t->capacity) watch(t->data,t->capacity,1); } }
+static void watch_text(Text *t) { if(t) { watch((char *)(t)-8,40,8); if(t->capacity) watch(t->data,t->capacity,1); } }
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff); }
+// An owned copy of t whose first byte differs: clones share t's bytes, so a
+// differing field is a different text, never a write through a shared one.
+static Text *flipped(Text *t) {
+    char raw[64]; assert(t->len>0 && t->len<=64);
+    memcpy(raw,t->data,(size_t)t->len); raw[0]^=1;
+    return jet_rt_string_from_static(raw,t->len);
+}
 static void watch_list(List *list,bool pairs) {
     watch(list,24,8);
     if(list->capacity) watch(list->data,list->capacity*(pairs?16:8),8);
@@ -97,11 +108,15 @@ static void defaults(Spec *s) {
 static void clone_cases(void) {
     Spec *a=jet_std_process_cmd(NULL,0); defaults(a);
     Text *shown=jet_rt_handle_show_process_spec(a); bytes(shown,"ProcessSpec([])"); jet_rt_string_drop(shown);
-    Text *arg=text("run"), *cwd=text("/secret"), *name=text("TOKEN"), *value=text("credential");
-    Spec *b=jet_process_spec_arg(own(a),arg); defaults(a); assert(b!=a && b->cmd->len==1 && b->cmd->data[0]!=arg); bytes(b->cmd->data[0],"run");
-    replace(&b,jet_process_spec_cwd(b,cwd)); replace(&b,jet_process_spec_env(b,name,value));
-    replace(&b,jet_process_spec_env(b,name,arg)); assert(b->env_set->len==2); // duplicates preserve insertion order
-    replace(&b,jet_process_spec_env_remove(b,name)); replace(&b,jet_process_spec_env_clear(b)); replace(&b,jet_process_spec_detached(b));
+    Text *arg=text("run"), *cwd=text("/secret"), *name=text("TOKEN"), *value=text("credential"), *other=text("PATH"), *gone=text("GONE");
+    Spec *b=jet_process_spec_arg(own(a),arg); defaults(a); assert(b!=a && b->cmd->len==1 && b->cmd->data[0]==arg && owners(arg)==2); bytes(b->cmd->data[0],"run");
+    replace(&b,jet_process_spec_cwd(b,cwd)); replace(&b,jet_process_spec_env(b,name,arg)); replace(&b,jet_process_spec_env(b,gone,value));
+    // The last env for a name wins: its earlier row is forgotten and the new row is appended.
+    replace(&b,jet_process_spec_env(b,name,value)); assert(b->env_set->len==2 && b->env_set->data[0]==gone && b->env_set->data[2]==name && b->env_set->data[3]==value);
+    // env_remove forgets the earlier set row for its name.
+    replace(&b,jet_process_spec_env_remove(b,gone)); assert(b->env_set->len==1 && b->env_set->data[0]==name && b->env_remove->len==1 && b->env_remove->data[0]==gone);
+    replace(&b,jet_process_spec_env(b,other,arg)); assert(b->env_set->len==2 && b->env_set->data[2]==other && b->env_set->data[3]==arg);
+    replace(&b,jet_process_spec_env_clear(b)); replace(&b,jet_process_spec_detached(b));
     replace(&b,jet_process_spec_stdin(b,0)); replace(&b,jet_process_spec_stdout(b,1)); replace(&b,jet_process_spec_stderr(b,0));
     int64_t timeout=jet_int_owned_from_i64(1999999), cpu=jet_int_owned_from_i64(-1999999);
     replace(&b,jet_process_spec_timeout(b,timeout)); assert(*b->timeout==1);
@@ -113,16 +128,20 @@ static void clone_cases(void) {
     // Native owned wire fixture adds no constructor/export and is cloned/dropped normally.
     b->wire=text("hidden-policy");
     Spec *c=jet_rt_handle_clone_process_spec(b); assert(c!=b && jet_rt_handle_eq_process_spec(b,c));
-    assert(c->cmd!=b->cmd && c->cmd->data!=b->cmd->data && c->cmd->data[0]!=b->cmd->data[0]);
-    assert(c->cwd!=b->cwd && c->env_set->data[0]!=b->env_set->data[0] && c->env_set->data[1]!=b->env_set->data[1]);
-    assert(c->env_remove->data[0]!=b->env_remove->data[0] && c->in!=b->in && c->output!=b->output && c->terminal!=b->terminal && c->wire!=b->wire);
+    // The clone reallocates the record, lists and boxed words and shares every text by owner count.
+    assert(c->cmd!=b->cmd && c->cmd->data!=b->cmd->data && c->cmd->data[0]==b->cmd->data[0] && owners(arg)==5);
+    assert(c->cwd==b->cwd && owners(cwd)==3 && c->env_set->data[0]==b->env_set->data[0] && c->env_set->data[1]==b->env_set->data[1]);
+    assert(c->env_remove->data[0]==b->env_remove->data[0] && owners(name)==3 && owners(value)==3 && owners(other)==3 && owners(gone)==3);
+    assert(c->in!=b->in && c->output!=b->output && c->terminal!=b->terminal && c->wire==b->wire && owners(c->wire)==2);
     // Every stored field, including omitted secrets and optional presence, participates.
-    Text *texts[]={c->cmd->data[0],c->cwd,c->env_set->data[0],c->env_set->data[1],c->env_remove->data[0],c->wire};
-    for(size_t i=0;i<6;++i) { texts[i]->data[0]^=1; assert(!jet_rt_handle_eq_process_spec(b,c)); texts[i]->data[0]^=1; }
+    Text **slots[]={&c->cmd->data[0],&c->cwd,&c->env_set->data[0],&c->env_set->data[1],&c->env_remove->data[0],&c->wire};
+    for(size_t i=0;i<6;++i) { Text *kept=*slots[i],*diff=flipped(kept); *slots[i]=diff; assert(!jet_rt_handle_eq_process_spec(b,c)); *slots[i]=kept; jet_rt_string_drop(diff); }
+    // Rows keep insertion order: the same rows swapped are a different spec.
     Text *swap=c->env_set->data[0]; c->env_set->data[0]=c->env_set->data[2]; c->env_set->data[2]=swap;
-    // Same duplicate names: change values' order instead.
     swap=c->env_set->data[1]; c->env_set->data[1]=c->env_set->data[3]; c->env_set->data[3]=swap;
-    assert(!jet_rt_handle_eq_process_spec(b,c)); swap=c->env_set->data[1]; c->env_set->data[1]=c->env_set->data[3]; c->env_set->data[3]=swap;
+    assert(!jet_rt_handle_eq_process_spec(b,c));
+    swap=c->env_set->data[0]; c->env_set->data[0]=c->env_set->data[2]; c->env_set->data[2]=swap;
+    swap=c->env_set->data[1]; c->env_set->data[1]=c->env_set->data[3]; c->env_set->data[3]=swap;
     c->env_clear|=INT64_C(0x123400); c->detached|=INT64_C(0x567800);
     assert(jet_rt_handle_eq_process_spec(b,c)); // Byte-lending Bool slots ignore padding.
     Spec *normalized=jet_rt_handle_clone_process_spec(c);
@@ -136,9 +155,13 @@ static void clone_cases(void) {
     shown=jet_rt_handle_show_process_spec(c); bytes(shown,"ProcessSpec([\"run\"])"); jet_rt_string_drop(shown);
     watch_spec(a); watch_spec(b); watch_spec(c);
     jet_rt_handle_drop_process_spec(a); jet_rt_handle_drop_process_spec(b);
+    assert(owners(c->cwd)==2 && owners(c->wire)==1);
     bytes(c->cwd,"/secret"); bytes(c->env_set->data[1],"credential"); bytes(c->wire,"hidden-policy");
-    jet_rt_handle_drop_process_spec(c); done();
+    jet_rt_handle_drop_process_spec(c);
+    // Only the C owners remain; their releases free each text exactly once.
+    assert(owners(arg)==1 && owners(cwd)==1 && owners(name)==1 && owners(value)==1 && owners(other)==1 && owners(gone)==1);
     jet_rt_string_drop(arg); jet_rt_string_drop(cwd); jet_rt_string_drop(name); jet_rt_string_drop(value);
+    jet_rt_string_drop(other); jet_rt_string_drop(gone); done();
 }
 static void limits(void) {
     Spec *a=jet_std_process_cmd(NULL,0);
@@ -163,11 +186,11 @@ static void limits(void) {
 static void modes_and_debug(void) {
     static const unsigned char raw[]={'\0','\t','\n','\r','"','\\','\'',0xcc,0x81};
     Text *input=jet_rt_string_from_static(raw,(int64_t)sizeof(raw)); Text *plain=text("x"); Text *args[]={input,plain};
-    Spec *a=jet_std_process_cmd(args,2); assert(a->cmd->data[0]!=input);
+    Spec *a=jet_std_process_cmd(args,2); assert(a->cmd->data[0]==input && owners(input)==2);
     Text *shown=jet_rt_handle_show_process_spec(a);
     bytes(shown,"ProcessSpec([\"\\0\\t\\n\\r\\\"\\\\'\\u{301}\", \"x\"])"); jet_rt_string_drop(shown);
     Spec *extended=jet_process_spec_args_extend(own(a),args,2); assert(a->cmd->len==2 && extended->cmd->len==4);
-    assert(extended->cmd->data[0]!=extended->cmd->data[2]); jet_rt_handle_drop_process_spec(extended);
+    assert(extended->cmd->data[0]==input && extended->cmd->data[2]==input && owners(input)==4); jet_rt_handle_drop_process_spec(extended);
     extended=jet_process_spec_args_extend(own(a),NULL,9); assert(jet_rt_handle_eq_process_spec(a,extended)); jet_rt_handle_drop_process_spec(extended);
     extended=jet_process_spec_args_extend(own(a),args,-1); assert(jet_rt_handle_eq_process_spec(a,extended)); jet_rt_handle_drop_process_spec(extended);
     Spec *empty=jet_std_process_cmd(NULL,9); defaults(empty); jet_rt_handle_drop_process_spec(empty);

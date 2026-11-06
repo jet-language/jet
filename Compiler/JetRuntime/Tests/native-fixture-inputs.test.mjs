@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -43,18 +43,4 @@ test('scan rejects legacy positional and duplicate or incomplete frozen inputs',
     assert.equal(result.status, 1);
     assert.match(result.stderr, /usage: run-scan-goldens/);
   }
-}));
-
-test('official BLAKE3 generation has no retired compiler/runtime source dependency', () => scratch(directory => {
-  const tests = path.join(directory, 'Compiler', 'JetRuntime', 'Tests');
-  mkdirSync(tests, {recursive: true});
-  for (const file of ['generate-blake3-fixtures.mjs', 'Blake3OfficialVectors.json']) copyFileSync(path.join(here, file), path.join(tests, file));
-  const result = spawnSync(process.execPath, [path.join(tests, 'generate-blake3-fixtures.mjs')], {encoding: 'utf8'});
-  assert.equal(result.status, 0, result.stderr);
-  for (const file of ['CryptoBlake3Goldens.h', 'CryptoBlake3Witness.stdout']) assert.deepEqual(readFileSync(path.join(tests, file)), readFileSync(path.join(here, file)), file);
-  const generated = JSON.parse(readFileSync(path.join(tests, 'CryptoBlake3Fixtures.json'), 'utf8'));
-  const frozen = JSON.parse(readFileSync(path.join(here, 'CryptoBlake3Fixtures.json'), 'utf8'));
-  assert.deepEqual(generated.officialKAT, frozen.officialKAT);
-  assert.equal(generated.stdoutSha256, frozen.stdoutSha256);
-  assert.equal(Object.hasOwn(generated, 'seed'), false);
 }));

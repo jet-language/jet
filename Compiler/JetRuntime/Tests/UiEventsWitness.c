@@ -19,6 +19,7 @@ extern H jet_rt_alloc(H,H);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern H jet_rt_handle_clone_jet_input_event(H),jet_rt_handle_clone_jet_tui_event(H);
 extern Text *jet_rt_string_from_static(const void *,H);
+extern void jet_rt_string_drop(Text *);
 extern void jet_rt_handle_drop_jet_input_event(H),jet_rt_handle_drop_jet_tui_event(H);
 extern bool jet_rt_handle_eq_jet_input_event(H,H),jet_rt_handle_eq_jet_tui_event(H,H);
 static struct { H address,bytes,align; bool live; } ledger[512];
@@ -39,6 +40,15 @@ static void observe_free(H address,H bytes,H align) {
 }
 static void balanced(void) {assert(allocations==frees);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live);allocations=frees=0;}
 static H text(const char *s) {return (H)(uintptr_t)jet_rt_string_from_static(s,(H)strlen(s));}
+// Heap text is [count][data,len,cap,cache]; the owner count is the word before.
+static int64_t owners(Text *t) {return *(int64_t *)((char *)t-8)&INT64_C(0x3fffffffffffffff);}
+// An owned copy of t whose first byte differs: clones share t's bytes, so a
+// differing field is a different text, never a write through a shared one.
+static H flipped(Text *t) {
+    char raw[64];assert(t->len>0&&t->len<=64);
+    memcpy(raw,t->data,(size_t)t->len);raw[0]^=1;
+    return (H)(uintptr_t)jet_rt_string_from_static(raw,(H)t->len);
+}
 static Bytes *bytes(size_t n) {
     Bytes *b=(Bytes *)(uintptr_t)jet_rt_alloc(24,8);b->len=n;b->cap=n+3;
     b->data=(unsigned char *)(uintptr_t)jet_rt_alloc((H)(b->cap*DATA_TREE_U8_STRIDE),8);
@@ -63,8 +73,9 @@ static void cases(bool tui,H kind,size_t n) {
     Event *a=event(tui,kind,n),*b=(Event *)(uintptr_t)clone((H)(uintptr_t)a);H ah=(H)(uintptr_t)a,bh=(H)(uintptr_t)b;
     assert(a!=b&&eq(ah,bh));
     if(kind==0||(tui&&(kind==2||kind==3))) {
-        Text *x=(Text *)(uintptr_t)a->first,*y=(Text *)(uintptr_t)b->first;assert(x!=y&&x->data!=y->data);
-        unsigned char old=x->data[0];x->data[0]^=1;assert(!eq(ah,bh));x->data[0]=old;
+        // The clone shares the text by owner count; a differing text breaks equality.
+        Text *x=(Text *)(uintptr_t)a->first,*y=(Text *)(uintptr_t)b->first;assert(x==y&&owners(x)==2);
+        H kept=a->first;a->first=flipped(x);assert(!eq(ah,bh));jet_rt_string_drop((Text *)(uintptr_t)a->first);a->first=kept;
     }
     if(kind==1) {
         H old=a->first;a->first=(H)UINT64_C(0x7ff8000000000001);assert(!eq(ah,ah)&&!eq(ah,bh));a->first=old;

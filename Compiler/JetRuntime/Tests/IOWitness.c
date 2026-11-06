@@ -9,12 +9,12 @@
 #include <string.h>
 #include <limits.h>
 #include <inttypes.h>
-typedef struct { unsigned char *data; int64_t len,capacity; } Text;
+typedef struct { unsigned char *data; int64_t len,capacity,cache; } Text;
 typedef struct { int64_t operation; Text *resource; int64_t present,code; Text *cause; } Context;
 typedef struct { int64_t kind,operation; Text *resource; int64_t present,code; Text *cause; int64_t limit; } Error;
 _Static_assert(sizeof(Context)==40 && _Alignof(Context)==8 && offsetof(Context,cause)==32,"context ABI");
 _Static_assert(sizeof(Error)==56 && _Alignof(Error)==8 && offsetof(Error,resource)==16 && offsetof(Error,limit)==48,"error ABI");
-_Static_assert(sizeof(Text)==24 && _Alignof(Text)==8,"E4 ABI");
+_Static_assert(sizeof(Text)==32 && _Alignof(Text)==8,"refcounted text body behind its owner word");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
@@ -46,9 +46,9 @@ extern int64_t *jet_rt_handle_clone_io_operation(int64_t *);
 extern void jet_rt_handle_drop_io_operation(int64_t *);
 extern bool jet_rt_handle_eq_io_operation(int64_t *,int64_t *);
 #define VARIANT(name) extern Error *jet_rt_record_new_io_error_##name(Context *); extern Context *jet_rt_record_get_io_error_##name(Error *)
-VARIANT(InvalidInput); VARIANT(NotFound); VARIANT(PermissionDenied); VARIANT(TimedOut);
-VARIANT(Cancelled); VARIANT(Closed); VARIANT(Protocol); VARIANT(Other);
-VARIANT(AlreadyExists); VARIANT(Unsupported);
+VARIANT(invalid_input); VARIANT(not_found); VARIANT(permission_denied); VARIANT(timed_out);
+VARIANT(cancelled); VARIANT(closed); VARIANT(protocol); VARIANT(other);
+VARIANT(already_exists); VARIANT(unsupported);
 #undef VARIANT
 typedef Error *(*Ctor)(Context *);
 typedef Context *(*Get)(Error *);
@@ -61,11 +61,14 @@ static const char *const lower_ops[]={"read","write","flush","connect","accept",
 struct Watch { void *ptr; int64_t size,align; unsigned freed; };
 static struct Watch watched[32768];
 static size_t count,intercepted;
+// Texts are shared by refcount, so one live block can be reached from several
+// carriers; it keeps a single watch entry and must be freed exactly once.
 static void watch(void *ptr,int64_t size,int64_t align) {
     assert(ptr && count<sizeof(watched)/sizeof(watched[0]));
-    for(size_t i=0;i<count;++i) assert(watched[i].ptr!=ptr || watched[i].freed==1);
+    for(size_t i=0;i<count;++i) if(watched[i].ptr==ptr && !watched[i].freed) { assert(watched[i].size==size && watched[i].align==align); return; }
     watched[count++]=(struct Watch){ptr,size,align,0};
 }
+static int64_t owners(Text *t) { return *(int64_t *)((char *)t-8) & 0x3fffffffffffffff; }
 // The checked heap reports every free it accepts here, the runtime's own
 // included (jet_rt_alloc_check_observe), before it reclaims the block.
 static void observe_free(void *ptr,int64_t size,int64_t align) {
@@ -77,7 +80,7 @@ static void observe_free(void *ptr,int64_t size,int64_t align) {
 }
 static void text_watch(Text *text) {
     if(!text) return;
-    watch((char *)(text)-8,32,8);
+    watch((char *)(text)-8,40,8);
     if(text->capacity) watch(text->data,text->capacity,1);
 }
 static void context_watch(Context *c) { watch(c,40,8); text_watch(c->resource); text_watch(c->cause); }
@@ -87,10 +90,16 @@ static void expect(Text *got,const char *wanted) {
     assert(!memcmp(got->data,wanted,(size_t)got->len));
     text_watch(got); jet_rt_string_drop(got);
 }
-static void independent(Context *a,Context *b) {
-    assert(a!=b && a->resource!=b->resource && a->cause!=b->cause);
-    if(a->resource->len) assert(a->resource->data!=b->resource->data);
-    if(a->cause->len) assert(a->cause->data!=b->cause->data);
+static void shared_texts(Context *a,Context *b) {
+    assert(a!=b && a->resource==b->resource && a->cause==b->cause);
+}
+// Swaps in an owned copy whose first byte differs, probes equality, restores.
+static void probe_text(Context *a,Context *b,Text **slot) {
+    Text *shared=*slot; unsigned char bytes[8]; assert(shared->len<=8);
+    memcpy(bytes,shared->data,(size_t)shared->len); bytes[0]^=1;
+    *slot=jet_rt_string_from_static((const char *)bytes,shared->len);
+    assert(*slot!=shared && owners(*slot)==1 && !jet_rt_handle_eq_io_context(a,b));
+    jet_rt_string_drop(*slot); *slot=shared;
 }
 static void context_eq_fields(Context *a,Context *b) {
     assert(jet_rt_handle_eq_io_context(a,b));
@@ -99,8 +108,8 @@ static void context_eq_fields(Context *a,Context *b) {
     b->code^=1; assert(!jet_rt_handle_eq_io_context(a,b)); b->code^=1;
     Text *keep=b->resource; b->resource=NULL; assert(!jet_rt_handle_eq_io_context(a,b)); b->resource=keep;
     keep=b->cause; b->cause=NULL; assert(!jet_rt_handle_eq_io_context(a,b)); b->cause=keep;
-    if(b->resource->len) { b->resource->data[0]^=1; assert(!jet_rt_handle_eq_io_context(a,b)); b->resource->data[0]^=1; }
-    if(b->cause->len) { b->cause->data[0]^=1; assert(!jet_rt_handle_eq_io_context(a,b)); b->cause->data[0]^=1; }
+    if(b->resource->len) probe_text(a,b,&b->resource);
+    if(b->cause->len) probe_text(a,b,&b->cause);
     a->present=0; b->present=0; b->code^=1; assert(jet_rt_handle_eq_io_context(a,b)); b->code^=1;
     a->present=1; b->present=0x100; assert(jet_rt_handle_eq_io_context(a,b));
 }
@@ -145,17 +154,19 @@ int main(int argc,char **argv) {
         Context *c=jet_rt_record_new_io_context(op,mask&1 ? &resource : NULL,mask&2 ? &code : NULL,mask&4 ? &cause : NULL);
         context_watch(c);
         assert(jet_rt_record_get_io_context_operation(c)==op);
-        assert(!c->resource || c->resource!=resource); assert(!c->cause || c->cause!=cause);
+        if(mask&1) assert(c->resource==resource); else assert(!c->resource);
+        if(mask&4) assert(c->cause==cause); else assert(!c->cause);
+        assert(owners(resource)==1+(int64_t)(mask&1) && owners(cause)==1+(int64_t)((mask>>2)&1));
         Text *out=NULL; int64_t out_code=0;
         assert(jet_rt_record_get_io_context_resource(c,&out)==(int64_t)(mask&1));
-        if(mask&1) { assert(out!=c->resource); expect(out,texts[ti]); }
+        if(mask&1) { assert(out==c->resource && owners(out)==3); expect(out,texts[ti]); assert(owners(resource)==2); }
         assert(jet_rt_record_get_io_context_cause(c,&out)==(int64_t)((mask>>2)&1));
-        if(mask&4) { assert(out!=c->cause); expect(out,texts[ti]); }
+        if(mask&4) { assert(out==c->cause && owners(out)==3); expect(out,texts[ti]); assert(owners(cause)==2); }
         assert(jet_rt_record_get_io_context_os_code(c,&out_code)==(int64_t)((mask>>1)&1));
         if(mask&2) { assert(jet_int_owned_to_i64(out_code)==codes[ci]); jet_rt_int_drop(out_code); c->present=0x100; }
         Context *cc=jet_rt_handle_clone_io_context(c); context_watch(cc);
         assert(jet_rt_handle_eq_io_context(c,cc));
-        if(mask==7) { independent(c,cc); context_eq_fields(c,cc); }
+        if(mask==7) { shared_texts(c,cc); context_eq_fields(c,cc); }
         else if(!(mask&2)) { cc->code=INT64_MIN; assert(jet_rt_handle_eq_io_context(c,cc)); }
         char r[64],o[64],a[64],ctx[512],debug[640],show[256];
         snprintf(r,sizeof(r),mask&1 ? "Val(\"%s\")" : "None",texts[ti]);
@@ -168,7 +179,7 @@ int main(int argc,char **argv) {
         assert(e->resource==transferred_resource && e->cause==transferred_cause);
         assert(jet_rt_record_tag_io_error(e)==(int64_t)(v<8 ? v : v+1));
         Context *got=getters[v](e); context_watch(got); assert(jet_rt_handle_eq_io_context(cc,got));
-        if(mask==7) independent(cc,got);
+        if(mask==7) shared_texts(cc,got);
         Error *ec=jet_rt_handle_clone_io_error(e); error_watch(ec,true);
         assert(jet_rt_handle_eq_io_error(e,ec)); ec->kind^=1; assert(!jet_rt_handle_eq_io_error(e,ec)); ec->kind^=1;
         ec->operation^=1; assert(!jet_rt_handle_eq_io_error(e,ec)); ec->operation^=1;
