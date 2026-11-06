@@ -1,0 +1,11 @@
+package: { name: "run", authority: { allow: [Rand] } }
+// `use core.math.random` binds `random`, and the grouped member `uuid` keeps
+// its own final segment: neither import names a local.
+use core.math.random
+use core.crypto.[uuid]
+
+run: fn() {
+    rng := random.rng(7)
+    print(rng.int(1, 1))
+    print(uuid.parse("00000000-0000-0000-0000-000000000000") ?? "invalid")
+}
