@@ -94,19 +94,19 @@ s3_unicode_clean: fn(raw: String) -> String Never! {
 
 // Port of tests/text_unicode.rs:281-295: break-preserving word/sentence APIs,
 // NOT core.text.words/sentences, which filter/trim the boundaries.
-#Test s3_unicode_boundary_corpora: fn() {
-    word_data: s3_unicode_files.read_text("data/WordBreakTest.txt") ?? panic("missing word corpus")
+s3_unicode_boundary_corpora: fn() {
+    word_data: s3_unicode_files.read("data/WordBreakTest.txt") ?? panic("missing word corpus")
     word := 0
     loop raw in word_data.lines() {
         parsed: s3_unicode_break(s3_unicode_clean(raw)) ?? next
-        assert_eq(s3_unicode_text.word_segments(parsed.full), parsed.segments, "break mismatch: {raw}")
+        assert(s3_unicode_text.word_segments(parsed.full) == parsed.segments, "break mismatch: {raw}")
         word += 1
     }
-    sentence_data: s3_unicode_files.read_text("data/SentenceBreakTest.txt") ?? panic("missing sentence corpus")
+    sentence_data: s3_unicode_files.read("data/SentenceBreakTest.txt") ?? panic("missing sentence corpus")
     sentence := 0
     loop raw in sentence_data.lines() {
         parsed: s3_unicode_break(s3_unicode_clean(raw)) ?? next
-        assert_eq(s3_unicode_text.sentence_segments(parsed.full), parsed.segments, "break mismatch: {raw}")
+        assert(s3_unicode_text.sentence_segments(parsed.full) == parsed.segments, "break mismatch: {raw}")
         sentence += 1
     }
     assert(word > 500 && sentence > 100)

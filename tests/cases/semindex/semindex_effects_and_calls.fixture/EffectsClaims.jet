@@ -5,7 +5,12 @@ use {
 }
 
 s5f_member: fn(value: Dyn, name: String) -> Dyn {
-    if value == .Object(fields) -> return fields.get(name) ?? panic("missing JSON member {name}")
+    if value == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value
+        }
+        panic("missing JSON member {name}")
+    }
     panic("expected JSON object for {name}")
 }
 s5f_array: fn(value: Dyn) -> [Dyn] {

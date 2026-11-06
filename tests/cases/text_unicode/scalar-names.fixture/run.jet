@@ -93,8 +93,8 @@ s3_unicode_clean: fn(raw: String) -> String Never! {
 }
 
 // Port of tests/text_unicode.rs:431-451, preserving every scalar-name row.
-#Test s3_unicode_scalar_names: fn() {
-    unicode_data: s3_unicode_files.read_text("data/ucd/UnicodeData.txt") ?? panic("missing UnicodeData")
+s3_unicode_scalar_names: fn() {
+    unicode_data: s3_unicode_files.read("data/ucd/UnicodeData.txt") ?? panic("missing UnicodeData")
     checked := 0
     loop raw in unicode_data.lines() {
         fields: s3_unicode_parse.split(raw, ";")
@@ -110,7 +110,7 @@ s3_unicode_clean: fn(raw: String) -> String Never! {
         expected: "U+{hex} {name}"
         got: s3_unicode_text.inspect(scalar)
         assert(got.len() > 0, "scalar inspector must have first row")
-        assert_eq(got[0], expected, "name mismatch for U+{hex}")
+        assert(got[0] == expected, "name mismatch for U+{hex}")
         checked += 1
     }
     assert(checked > 30000, "pinned UnicodeData name rows unexpectedly low: {checked}")

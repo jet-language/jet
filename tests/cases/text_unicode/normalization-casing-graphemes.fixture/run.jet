@@ -93,8 +93,8 @@ s3_unicode_clean: fn(raw: String) -> String Never! {
 }
 
 // Port of tests/text_unicode.rs:184-295. Only include!/rustc machinery retires.
-#Test s3_full_unicode_corpora: fn() {
-    normalization: s3_unicode_files.read_text("data/NormalizationTest.txt") ?? panic("missing normalization corpus")
+s3_full_unicode_corpora: fn() {
+    normalization: s3_unicode_files.read("data/NormalizationTest.txt") ?? panic("missing normalization corpus")
     normalization_lines := 0
     loop raw in normalization.lines() {
         line: s3_unicode_clean(raw)
@@ -123,7 +123,7 @@ s3_unicode_clean: fn(raw: String) -> String Never! {
         }
         normalization_lines += 1
     }
-    folding: s3_unicode_files.read_text("data/ucd/CaseFolding.txt") ?? panic("missing folding corpus")
+    folding: s3_unicode_files.read("data/ucd/CaseFolding.txt") ?? panic("missing folding corpus")
     fold_lines := 0
     loop raw in folding.lines() {
         line: s3_unicode_clean(raw)
@@ -137,15 +137,15 @@ s3_unicode_clean: fn(raw: String) -> String Never! {
     }
     lower := [Int:String]{}
     upper := [Int:String]{}
-    unicode_data: s3_unicode_files.read_text("data/ucd/UnicodeData.txt") ?? panic("missing UnicodeData")
+    unicode_data: s3_unicode_files.read("data/ucd/UnicodeData.txt") ?? panic("missing UnicodeData")
     loop raw in unicode_data.lines() {
         fields: s3_unicode_parse.split(raw, ";")
         if fields.len() < 14 -> next
         cp: s3_unicode_parse.parse_int_base(fields[0], 16) ?? panic("invalid UnicodeData hex")
-        if fields[12] != "" -> upper.insert(cp, s3_unicode_cps(fields[12]))
-        if fields[13] != "" -> lower.insert(cp, s3_unicode_cps(fields[13]))
+        if fields[12] != "" -> upper[cp] = s3_unicode_cps(fields[12])
+        if fields[13] != "" -> lower[cp] = s3_unicode_cps(fields[13])
     }
-    special_casing: s3_unicode_files.read_text("data/ucd/SpecialCasing.txt") ?? panic("missing SpecialCasing")
+    special_casing: s3_unicode_files.read("data/ucd/SpecialCasing.txt") ?? panic("missing SpecialCasing")
     loop raw in special_casing.lines() {
         line: s3_unicode_clean(raw)
         if line == "" -> next
@@ -153,8 +153,8 @@ s3_unicode_clean: fn(raw: String) -> String Never! {
         if fields.len() < 5 -> next
         if fields[4].trim().copy() != "" -> next
         cp: s3_unicode_parse.parse_int_base(fields[0].trim().copy(), 16) ?? panic("invalid SpecialCasing hex")
-        lower.insert(cp, s3_unicode_cps(fields[1].trim().copy()))
-        upper.insert(cp, s3_unicode_cps(fields[3].trim().copy()))
+        lower[cp] = s3_unicode_cps(fields[1].trim().copy())
+        upper[cp] = s3_unicode_cps(fields[3].trim().copy())
     }
     casing_scalars := 0
     loop cp in 0..<0x110000 {
@@ -165,11 +165,11 @@ s3_unicode_clean: fn(raw: String) -> String Never! {
         casing_scalars += 1
     }
     assert_eq(s3_unicode_text.lower("ΟΣ"), "ος")
-    grapheme_data: s3_unicode_files.read_text("data/GraphemeBreakTest.txt") ?? panic("missing grapheme corpus")
+    grapheme_data: s3_unicode_files.read("data/GraphemeBreakTest.txt") ?? panic("missing grapheme corpus")
     grapheme := 0
     loop raw in grapheme_data.lines() {
         parsed: s3_unicode_break(s3_unicode_clean(raw)) ?? next
-        assert_eq(s3_unicode_text.graphemes(parsed.full), parsed.segments, "break mismatch: {raw}")
+        assert(s3_unicode_text.graphemes(parsed.full) == parsed.segments, "break mismatch: {raw}")
         grapheme += 1
     }
     assert(normalization_lines > 15000 && fold_lines > 1500)

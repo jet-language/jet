@@ -83,7 +83,7 @@ run: fn() {
         port: address.split(":").to_list()[1].copy()
         source: files.read("{work}/server/main.template") ?? panic("source")
         files.write("{work}/server/main.jet", source.replace("__PORT__", port)) ?? panic("stage")
-        runner: task { return subject(mode, "{work}/server/main.jet") }
+        runner: task { subject(mode, "{work}/server/main.jet") }
         started: time.instant()
         client := retry_connect(address, started)
         client.write_all("POST / HTTP/1.1{PEER_CRLF}Host: local{PEER_CRLF}Transfer-Encoding: chunked{PEER_CRLF}Trailer: X-Test{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}1{PEER_CRLF}x{PEER_CRLF}0{PEER_CRLF}".bytes()) ?? panic("chunked prefix")

@@ -43,7 +43,8 @@ publish: fn(listener: TCPListener, path: String) {
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
-    loop index in 0..<4 {
+    // One tier now (#5454 retired `jet run --interpret`): the simple get and the built request, one connection each.
+    loop index in 0..<2 {
         stream: listener.accept() ?? panic("accept")
         _: stream.write_all("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 67108865{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes())
         stream.close() ?? panic("close")
