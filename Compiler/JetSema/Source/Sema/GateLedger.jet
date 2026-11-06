@@ -1,7 +1,7 @@
 // One compile-time read model for source and policy gates.
 // Adapted from origin/port/compiler GateLedger.jet and current Rust writers.
 use {
-    jet_foundation.[GateLedger, GateEntry, GateDiagnostic, GateOperation, GateKind, GateSet, NameLedger, Program, Item, Func, Expr, Stmt, Span, CallArg, DeriveBodyItem, Marker, RuleSite, PolicyKey, PolicyValue, policy_key_name, policy_gate_forbidding, gate_kind_policy_key, gate_source_entry, gate_ledger_push, gate_ledger_sort, ast_visit_expr, ast_visit_statement]
+    jet_foundation.[GateLedger, GateEntry, GateDiagnostic, GateOperation, GateKind, GateSet, NameLedger, StructureFact, Program, Item, Func, Expr, Stmt, Span, CallArg, DeriveBodyItem, Marker, RuleSite, PolicyKey, PolicyValue, policy_key_name, policy_gate_forbidding, gate_kind_policy_key, gate_source_entry, gate_ledger_push, gate_ledger_sort, ast_visit_expr, ast_visit_statement]
     jet_foundation.[Diagnostic, Type, StrPart, ast_program, diagnostic_registry_row]
     jet_lexer.[Token]
     jet_parser.[jfmt_format_program_with_tokens]
@@ -31,7 +31,11 @@ sema_gate_ledger_collect: fn(modules: [SemaGateModule], names: NameLedger, gates
     loop entry in inspection.diagnostics {
         ledger.diagnostic_rows.push(GateDiagnostic{source: entry.source, diagnostic: entry.diagnostic})
     }
+    // The ledger is the given modules' own: a structure fact of any other
+    // loaded source (a Core module the caller left out) is not theirs.
+    owned := [String:Bool]{}
     loop row in modules {
+        owned[row.source] = true
         loop imported in row.program.imports {
             sema_gate_structure_name(row.source, imported.alias, imported.alias_span, ledger)
         }
@@ -46,7 +50,10 @@ sema_gate_ledger_collect: fn(modules: [SemaGateModule], names: NameLedger, gates
             gate_ledger_push(ledger, gate_source_entry(GateKind.LintAllow, "lint", scope, row.source, application.marker.span, "#Allow", reason, detail, if reason_expr != None -> "recorded" else -> "missing"))
         }
     }
-    sema_gate_append_structure(ledger, names)
+    loop fact in names.facts.structure_facts {
+        if owned.get(fact.source) == None -> next
+        sema_gate_push_structure(ledger, fact)
+    }
     // copy: the ledger owns its entries, while `external` is the caller's read-only gate list,
     // which it keeps for the next module's ledger.
     loop entry in external -> gate_ledger_push(ledger, entry.copy())
@@ -61,15 +68,17 @@ sema_gate_invocation: fn(ledger: &GateLedger, kind: GateKind, scope: String) Nev
 }
 
 sema_gate_append_structure: fn(ledger: &GateLedger, names: NameLedger) Never! {
-    loop fact in names.facts.structure_facts {
-        reason: fact.gate ?? next
-        scope: if fact.kind == {
-            .Liveness -> "liveness"
-            .Lifecycle -> "lifecycle"
-            .ImportEdge -> "import-edge"
-        }
-        gate_ledger_push(ledger, gate_source_entry(GateKind.Structure, "structure", scope, fact.source, fact.span, fact.subject, Val(reason), fact.detail, fact.status))
+    loop fact in names.facts.structure_facts -> sema_gate_push_structure(ledger, fact)
+}
+
+sema_gate_push_structure: fn(ledger: &GateLedger, fact: StructureFact) Never! {
+    reason: fact.gate ?? return
+    scope: if fact.kind == {
+        .Liveness -> "liveness"
+        .Lifecycle -> "lifecycle"
+        .ImportEdge -> "import-edge"
     }
+    gate_ledger_push(ledger, gate_source_entry(GateKind.Structure, "structure", scope, fact.source, fact.span, fact.subject, Val(reason), fact.detail, fact.status))
 }
 
 sema_gate_structure_name: fn(source: String, name: String, span: Span, ledger: &GateLedger) Never! {
