@@ -16,9 +16,9 @@ use {
     prove_crypto: core.crypto
     replay_base64: core.encoding.base64
     replay_random: core.crypto.random
-    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[
-        CanonicalJSON, CanonicalJSONField, CanonicalJSONParser, Effect, Expr, ImportDecl, Item, OrFallback, PatSlot, Pattern, Stmt,
+        BuildSettingOverride, CanonicalJSON, CanonicalJSONField, CanonicalJSONParser, Diagnostic, Effect, Expr, ImportDecl, Item, OrFallback, PatSlot, Pattern, Stmt,
         canonical_json_bytes, canonical_json_value, import_alias, import_walk_bindings,
     ]
     jet_parser.[parse_source]
@@ -356,7 +356,7 @@ jet_cli_replay_target_identity: fn(identity: JetCLIProveIdentity, members: [JetC
         jet_cli_replay_string("mir_identity", identity.mir_json),
         jet_cli_replay_string("mir_schema", JET_CLI_REPLAY_ADAPTER),
         jet_cli_replay_string("optimized_mir_hash", identity.mir_hash),
-        jet_cli_replay_string("profile", "dev"),
+        jet_cli_replay_string("profile", identity.profile),
         jet_cli_replay_string("semantic_mir_hash", identity.mir_hash),
         jet_cli_replay_string("source_digest", identity.source_digest),
         jet_cli_replay_string("target_triple", triple),
@@ -832,6 +832,86 @@ jet_cli_replay_capture_write: fn(identity: JetCLIProveIdentity, request: JetCLIP
     row: jet_cli_comparison_index_entry(index, record, "replay", id, indexed, bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, false) ?? return Err(jet_cli_replay_unfinalized(err.message))
     jet_cli_record_index_publish_and_store(index, root, row) ?? return Err(jet_cli_replay_unfinalized(err.message))
     Ok(indexed)
+}
+
+// `jet test --record=NAME` (Rust `begin_named_capture`): the safe, Time-only
+// capture of one run, published at `.jet/replays/NAME.jetproof-replay` and
+// indexed there as a protected replay. The run's programs read the recorded
+// clock through JET_CLI_REPLAY_TIME_ENV; nothing else is recorded, so no
+// sensitive-data preflight applies. The identity names the selected
+// `profile`, and its semantic hash binds the target's MIR identity to that
+// profile and to the `--set` writers the program compiled under, so a run
+// under other settings is a different recording.
+JetCLIReplayRecord: struct {
+    identity: JetCLIProveIdentity
+    name: String
+    run: JetCLIReplayRun
+}
+
+// Binds a recording of `file`, whose compile authorized `files`, before its
+// program builds: a refusal leaves no artifact.
+jet_cli_replay_record_begin: fn(file: String, files: [String], name: String, profile: String, settings: [BuildSettingOverride]) -> JetCLIReplayRecord JetCLIProveRefusal! {
+    if jet_cli_replay_name_problem(name) == .Val(problem) {
+        return Err(JetCLIProveRefusal{code: "E2104", what: "invalid replay name", why: problem, fix: "write `--record=NAME` with letters, digits, `-`, or `_`", exit_code: JET_DRIVER_EXIT_USAGE})
+    }
+    target: JetCLIProveTarget{kind: "file", root: file, members: [String]{file}}
+    members: jet_cli_prove_members(target) ?? return Err(err)
+    group: JetCLIProveGroup{entry: 0, diagnostics: [Diagnostic]{}, files: files, has_tests: true, sites: [JetCLIProveTestSite]{}, floor: None}
+    base: jet_cli_prove_identity(target, members, [JetCLIProveGroup]{group}) ?? return Err(err)
+    selected: if profile == "" -> "dev" else -> profile
+    fields := [JetCLIProveField]{jet_cli_prove_field("mir", base.mir_hash), jet_cli_prove_field("profile", selected)}
+    loop setting in settings -> fields.push(jet_cli_prove_field("set {setting.name}", setting.value))
+    mir_hash: jet_cli_prove_digest("jet-record-mir-v1", fields)
+    identity := base.copy()
+    identity.profile = selected.copy()
+    identity.mir_hash = mir_hash.copy()
+    identity.mir_json = jet_cli_prove_mir_json(mir_hash, members)
+    path: jet_cli_replay_record_path(name)
+    if cli_time.unix_ns() < 0 {
+        return Err(jet_cli_replay_refusal("E3629", "replay artifact could not be finalized", "the system clock is before the Unix epoch", "fix the system clock and record again"))
+    }
+    if cli_files.lexists(jet_cli_entry_join(identity.authority_root, path)) {
+        return Err(jet_cli_replay_refusal("E3629", "replay artifact could not be finalized", "the recording `{path}` already exists", "record under a new NAME, or remove the old recording"))
+    }
+    sites: jet_cli_replay_sites(members)
+    site_id: jet_cli_replay_site_id(identity, members, sites)
+    run: JetCLIReplayRun{
+        time_ms: jet_cli_replay_clock_ms(),
+        identity: jet_cli_replay_target_identity(identity, members, site_id),
+        site_id: site_id,
+        rand_site_id: jet_cli_replay_rand_site_id(identity, members, sites),
+        io_site_id: jet_cli_replay_io_site_id(identity, members, sites),
+        net_site_id: jet_cli_replay_net_site_id(identity, members, sites),
+        sensitive: false,
+        roots: [String]{"Time"},
+        replayed: None,
+    }
+    Ok(JetCLIReplayRecord{identity: identity, name: name, run: run})
+}
+
+jet_cli_replay_record_path: fn(name: String) -> String Never! {
+    ".jet/replays/{name}.jetproof-replay"
+}
+
+// Writes a recording once its run ended with `status`, then indexes it
+// (Rust `finish_named_capture`, `index_named_capture`); returns its path.
+// An index that can't take the row is E2105, as every record index update's is.
+jet_cli_replay_record_finish: fn(record: JetCLIReplayRecord, status: Int) -> String JetCLIProveRefusal! {
+    root: record.identity.authority_root
+    salt: replay_random.token_urlsafe(32) ?? return Err(jet_cli_replay_unfinalized("the OS gave no randomness for the privacy salt"))
+    bytes: jet_cli_replay_encode(record.run, [JetCLIReplayRead]{}, salt, status)
+    verified: jet_cli_replay_verify(bytes) ?? return Err(jet_cli_replay_capture_fault(err))
+    jet_cli_replay_publish(root, [String]{".jet", "replays"}, "{record.name}.jetproof-replay", bytes) ?? return Err(err)
+    path: jet_cli_replay_record_path(record.name)
+    index := jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_record_index_failed(err.message))
+    identity: JetCLIRecordIdentity{target_inputs_sha256: record.identity.input_sha256, tool_version: JET_CLI_VERSION, engine: "jet-prove-v1"}
+    row: jet_cli_comparison_index_entry(index, identity, "replay", verified.artifact_id, path, bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, true) ?? return Err(jet_cli_replay_record_index_failed(err.message))
+    jet_cli_record_index_publish_and_store(index, root, row) ?? return Err(jet_cli_replay_record_index_failed(err.message))
+    Ok(path)
+}
+
+jet_cli_replay_record_index_failed: fn(why: String) -> JetCLIProveRefusal Never! {
+    jet_cli_replay_refusal("E2105", "record index update failed", why, "make the project's `.jet/records` directory writable, then record again")
 }
 
 // --- the harness journal ------------------------------------------------------

@@ -1851,6 +1851,17 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
         listed: (loop test in native_tests -> "{test.name}\n").join("")
         return JetDriverVerbOutput{stdout: listed, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
+    // `record` binds its replay before the harness builds, so a refused
+    // recording leaves nothing behind (ProveReplay.jet jet_cli_replay_record_begin).
+    replay_record := JetCLIReplayRecord?{None}
+    if test_settings_get(options.settings, "record") == .Val(name) {
+        files := [String]{}
+        loop authorized in snapshot.roots {
+            loop authorized_file in authorized.files -> files.push(authorized_file.path)
+        }
+        begun: jet_cli_replay_record_begin(file, files, name, options.profile, options.build.settings) ?? return jet_cli_prove_refused(err, color, options.json)
+        replay_record = Val(begun)
+    }
     claims := jet_cli_test_claims(native_tests, plan.tests, doctests, file)
     check_names := [String]{}
     checks := [IROutputCheck]{}
@@ -1909,16 +1920,18 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     // Under `jet prove --capture-sensitive` the tests read the user's
     // terminal, and the runtime journals every stdin read.
     if cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) != None -> spec = spec.stdin(.Inherit)
+    // A recorded run's programs read the clock the recording holds.
+    if replay_record == .Val(recording) -> spec = spec.env(JET_CLI_REPLAY_TIME_ENV, "{recording.run.time_ms}")
     time_limit := Duration?{None}
     limit_setting: test_settings_time_limit_ms(options.settings)
     if limit_setting == .Val(limit_ms) -> time_limit = Val(Duration.milliseconds(limit_ms) ?? return jet_cli_ice("the test time limit of {limit_ms} ms is out of range"))
     // The children's outcome records stay in memory: no test writes the disk.
     records_path: "{jet_cli_native_test_records_dir(build_dir)}/{stem}.records"
     // A plain run goes through the test-result store (TestReuse.jet): a
-    // snapshot update, a measured or a code-suite run, or one `jet prove`
-    // captures always runs.
+    // snapshot update, a measured or a code-suite run, a recorded one, or one
+    // `jet prove` captures always runs.
     reuse := JetCLITestReuse?{None}
-    if !options.update_snapshots && measure == None && !code_suite && cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) == None {
+    if !options.update_snapshots && measure == None && !code_suite && replay_record == None && cli_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) == None {
         names: (loop test in native_tests -> test.key).join(",")
         settings: "{options.filter ?? "-"}\n{options.shuffle_seed ?? "-"}\n{options.serial}\n{options.trace_tiers}\n{options.capture}\n{options.project_root ?? "-"}\n{options.docs}\n{limit_setting ?? -1}\n{iterations ?? "-"}\n{generated_seed ?? "-"}\n{names}\n{check_names.join(",")}"
         reuse = jet_cli_test_reuse_at(root, binary, settings, records_path)
@@ -1967,6 +1980,11 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     passed: ran.receipt.success
     if how == .Logged && reuse == .Val(store) -> jet_cli_test_reuse_keep(store, run, passed)
     exit_code: if passed -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
+    recorded := ""
+    if replay_record == .Val(recording) {
+        path: jet_cli_replay_record_finish(recording, exit_code) ?? return jet_cli_prove_refused(err, color, options.json)
+        if !options.json -> recorded = "jet test: recorded replay `{path}`\n"
+    }
     show: options.capture == "all" || (!passed && options.capture == "failed")
     // The canonical report always prints; the children's own streams follow
     // the capture policy. A code suite's child runs no #Test, so its report
@@ -1983,7 +2001,7 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
             if written == .Val(problem) -> return jet_cli_build_failed(problem, jet_cli_why("E2105"), "name a writable `results` file", color)
         }
         plural: if wires.len() == 1 -> "" else -> "s"
-        notice: if how == .Reused && !options.json -> "jet test: reused {wires.len()} stored result{plural} (every read they recorded is unchanged; --fresh runs them)\n{persisted}" else -> persisted
+        notice: if how == .Reused && !options.json -> "jet test: reused {wires.len()} stored result{plural} (every read they recorded is unchanged; --fresh runs them)\n{persisted}" else -> "{persisted}{recorded}"
         below := ""
         if outcome.below == .Val(diagnostic) -> below = diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)
         floor_exit: if outcome.below != None && exit_code == JET_DRIVER_EXIT_OK -> JET_DRIVER_EXIT_USER_ERROR else -> exit_code

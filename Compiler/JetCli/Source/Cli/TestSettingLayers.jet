@@ -80,15 +80,18 @@ jet_cli_test_setting_source: fn(settings: [TestSetting], name: String) -> String
 
 // The combinations no run can carry out, refused before anything builds:
 // `list` runs nothing and a slice blesses only part of the rows, so neither
-// takes `update_snapshots`; a corpus-pool setting needs a corpus suite
-// (`corpus`: the run has one); `iterations` and `seed` steer the generated
-// grade, so each needs `grade`; a `cases` file must be readable and a
-// `results` file writable before any test runs.
+// takes `update_snapshots`, and `list` has no run to `record`; a corpus-pool
+// setting needs a corpus suite (`corpus`: the run has one); `iterations` and
+// `seed` steer the generated grade, so each needs `grade`; a `cases` file
+// must be readable and a `results` file writable before any test runs.
 jet_cli_test_settings_refusal: fn(settings: [TestSetting], corpus: Bool, color: Bool) -[FS]> JetCLIPlan? Never! {
     update: test_settings_on(settings, "update_snapshots")
     blessing: "`update_snapshots` ({jet_cli_test_setting_source(settings, "update_snapshots")})"
     if update && test_settings_on(settings, "list") {
         return Val(jet_cli_fail("E2104", "`list` ({jet_cli_test_setting_source(settings, "list")}) and {blessing} don't combine", jet_cli_why("E2104"), "drop one of them: `list` runs no test, so it blesses nothing", color, JET_DRIVER_EXIT_USAGE))
+    }
+    if test_settings_get(settings, "record") != None && test_settings_on(settings, "list") {
+        return Val(jet_cli_fail("E2104", "`list` ({jet_cli_test_setting_source(settings, "list")}) and `record` ({jet_cli_test_setting_source(settings, "record")}) don't combine", jet_cli_why("E2104"), "drop one of them: `list` runs no test, so it records nothing", color, JET_DRIVER_EXIT_USAGE))
     }
     if update && test_settings_shard_count(settings) > 1 {
         shard: test_settings_get(settings, "shard") ?? ""

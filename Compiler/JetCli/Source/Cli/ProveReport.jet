@@ -66,7 +66,8 @@ JetCLIProveField: struct {
 }
 
 // `resolve_target`'s identity: the canonical target inputs and the digests
-// every evidence row and derivation is bound to.
+// every evidence row and derivation is bound to. `profile` is the build
+// profile the target's programs compile under.
 JetCLIProveIdentity: struct {
     kind: String
     root: String
@@ -77,6 +78,7 @@ JetCLIProveIdentity: struct {
     lock_digest: String
     build_digest: String
     core_abi: String
+    profile: String
     mir_hash: String
     mir_json: String
 }
@@ -457,6 +459,7 @@ jet_cli_prove_identity: fn(target: JetCLIProveTarget, members: [JetCLIProveMembe
         lock_digest: lock_digest,
         build_digest: build_digest,
         core_abi: core_abi,
+        profile: "dev",
         mir_hash: mir_hash.copy(),
         mir_json: jet_cli_prove_mir_json(mir_hash, members),
     })
