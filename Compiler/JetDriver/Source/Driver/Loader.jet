@@ -1622,7 +1622,10 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
             relative_path: generated.relative_path,
             source_segments: jet_driver_unparsed_source_segments(path, generated.source.count_bytes(), SemaSourceOrigin.CompilerGenerated),
             source_origin: SemaSourceOrigin.CompilerGenerated,
-            in_namespace: packages[owner].manifest_path != None && !packages[owner].inline_package,
+            // A generated module shares its package's namespace; a package
+            // without a manifest (a lone build file) shares it with its entry
+            // file below.
+            in_namespace: !packages[owner].inline_package,
         })
     }
 
@@ -1643,6 +1646,23 @@ fn jet_driver_build_source_catalog(request: JetDriverCompileRequest) -> JetDrive
     } ?? false
     if !entry_unit_found {
         &diagnostics.push(jet_driver_diagnostic_without_span("E0603", "the entry file is not a Jet source in the selected package root", "compilation begins from one checked `.jet` file", "select a source file from the authorized package root"))
+    }
+    // Handwritten code uses what its `fn build` generates by name (spec
+    // "Programmable builds"): in a package without a manifest, the entry file
+    // joins the namespace of the modules generated for its package.
+    entry_generates :: loop generated in request.generated_modules {
+        if generated.package_identity == entry_package_identity -> break true
+    } ?? false
+    if entry_generates {
+        loop index in 0..<source_units.len() {
+            if source_units[index].path != entry_display || source_units[index].root_identity != snapshot.entry_root_identity || source_units[index].in_namespace -> next
+            root_row :: entry_root_index ?? -1
+            if root_row >= 0 && packages[root_row].manifest_path == None {
+                unit := source_units[index]
+                unit.in_namespace = true
+                source_units[index] = unit
+            }
+        }
     }
     JetDriverSourceCatalogResult{
         packages: packages,

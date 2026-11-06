@@ -3142,8 +3142,9 @@ fn jet_driver_lowering_inputs(request: JetDriverCompileRequest, keep_going: JetD
 
 // jet_driver_lowering_inputs of `request` with entry file `entry_path`,
 // selected function `selected_entry` and `mode`, the build ProgramInfo
-// captured when `capture_build_program`; the request is restored after.
-fn jet_driver_lowering_inputs_selection(request: &JetDriverCompileRequest, mode: JetDriverCompileMode, entry_path: ^String?, selected_entry: ^String?, capture_build_program: Bool) -> JetDriverLoweringInputsResult {
+// captured when `capture_build_program`, failures kept going past as
+// `keep_going` asks; the request is restored after.
+fn jet_driver_lowering_inputs_selection(request: &JetDriverCompileRequest, mode: JetDriverCompileMode, entry_path: ^String?, selected_entry: ^String?, capture_build_program: Bool, keep_going: JetDriverKeepGoing?) -> JetDriverLoweringInputsResult {
     saved := JetDriverCompileSelectionRestore{mode: request.mode, capture_build_program: request.capture_build_program, capture_build_nodes: request.capture_build_nodes, entry_path: None, selected_entry: None, restore_selected_entry: false}
     if ^entry_path == .Val(path) {
         // copy: `saved` keeps the request's original entry path to restore it; the field is
@@ -3160,7 +3161,7 @@ fn jet_driver_lowering_inputs_selection(request: &JetDriverCompileRequest, mode:
     request.mode = mode
     request.capture_build_program = capture_build_program
     request.capture_build_nodes = false
-    result := jet_driver_lowering_inputs(request, None)
+    result := jet_driver_lowering_inputs(request, keep_going)
     jet_driver_compile_selection_restore(&request, ^saved)
     result
 }
@@ -3867,7 +3868,14 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
             &module_sources.push(SemaCompilerModuleSource{module_identity: source_module.module_identity, source: jet_driver_source_text_at(load.source_files, source_positions, unit.path)})
         }
         &module_sources.push(SemaCompilerModuleSource{module_identity: canonical_effect_module_identity, source: request.canonical_effect_source})
+        // Under keep-going each failed function checked as a trap of its
+        // declared signature, so the program's declarations are whole: the
+        // staging build of a program that uses what `fn build` generates
+        // (jet_driver_query_build_plan) reads them before generation.
+        graph_complete :: checked_graph.complete
+        if kg.enabled -> checked_graph.complete = true
         info :: jet_eval_compiler_services_program_info(resolved_registration, checked_graph, jet_driver_source_text_at(load.source_files, source_positions, request.authorized_sources.entry_path), module_sources)
+        checked_graph.complete = graph_complete
         registration_graph = ^resolved_registration
         jet_driver_trace_step_end(request.trace_sink, "driver.prelower.build_program", module_sources.len())
         if info == {

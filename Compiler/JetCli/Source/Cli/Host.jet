@@ -42,6 +42,7 @@ use {
         JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode,
         JetDriverCompileRequest,
+        JetDriverGeneratedModule,
         JetDriverCompileResult,
         JetDriverDocModule,
         JetDriverForeignLinkFacts,
@@ -1340,13 +1341,25 @@ fn jet_cli_build_sbom(file: String, name: String, source: String, binary: String
     JetDriverVerbOutput{stdout: "sbom: {path}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// One build target of a package build: compile `file` into .jet/build/`name` and return,
-// so the package build continues with its next target.
-fn jet_cli_compile_target(file: String, name: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
-    compiled := jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
-    if ^compiled == {
+// One build target of a package build: compile `file`, with the modules the
+// package's `fn build` generated (`generated`) loaded beside its sources,
+// into .jet/build/`name` and return, so the package build continues with its
+// next target.
+fn jet_cli_compile_target(file: String, name: String, source: String, generated: [JetDriverGeneratedModule], color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
+    prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Program)
+    if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
+    if ^prepared == {
         .Refused(refusal) -> refusal
-        .Checked(result, inputs, snapshot) -> jet_cli_build_result(file, name, source, color, options, invocation, false, false, result, ^inputs, snapshot)
+        .Prepared(request, snapshot) -> {
+            with_generated := request
+            with_generated.generated_modules = generated
+            compiled := jet_cli_compile_executable(JetCLIPrepared.Prepared{request: ^with_generated, snapshot: snapshot}, None, options, None, trace_sink, color)
+            if ^compiled == {
+                .Refused(refusal) -> refusal
+                .Checked(result, inputs, checked_snapshot) -> jet_cli_build_result(file, name, source, color, options, invocation, false, false, result, ^inputs, checked_snapshot)
+            }
+        }
     }
 }
 

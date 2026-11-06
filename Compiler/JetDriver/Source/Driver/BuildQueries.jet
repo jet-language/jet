@@ -138,7 +138,7 @@ fn jet_driver_build_next_session_id(scope: &JetDriverBuildQueryScope) -> Int? Ne
 struct JetDriverBuildQueryResult {
     plan: BuildSessionPlan?
     graph: BuildGraph?
-    generated: [BuildSessionGeneratedModule]
+    generated: [JetDriverGeneratedModule]
     diagnostics: [Diagnostic]
     complete: Bool
     internal_problem: String?
@@ -152,6 +152,15 @@ struct JetDriverBuildQueryResponse {
 }
 fn jet_driver_build_query_empty(request: ^JetDriverCompileRequest, diagnostics: ^[Diagnostic], complete: Bool, problem: ^String?) -> JetDriverBuildQueryResponse Never! {
     {request: ^request, query: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: ^diagnostics, complete: complete, internal_problem: ^problem}}
+}
+// A build that failed: its own reports `ran` after the compile's `errors`,
+// or the staged reports alone when the staging check failed (`staged`).
+fn jet_driver_build_query_failed(request: ^JetDriverCompileRequest, errors: ^[Diagnostic], ran: ^[Diagnostic], staged: Bool) -> JetDriverBuildQueryResponse Never! {
+    reports := ^errors
+    if !staged {
+        loop error in ^ran -> &reports.push(error)
+    }
+    jet_driver_build_query_empty(^request, ^reports, false, None)
 }
 fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
     request := ^owned_request
@@ -200,13 +209,31 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     }
     // Input services resolve paths against the build file's own directory.
     base_dir :: jet_driver_parent_path(path)
-    selection := jet_driver_lowering_inputs_selection(&request, JetDriverCompileMode.RootRun, Val(^path), Val("build"), true)
+    // Handwritten code may use what `fn build` generates: build entries and
+    // generated modules share one checked expansion pass. A staging check
+    // that fails still evaluates `fn build`, with each failed function
+    // lowered as a typed trap (JetDriverKeepGoing); its reports (`staged`)
+    // stand only when the build itself fails, and the final checked compile
+    // with the generated modules reports what generation left unresolved.
+    selection := jet_driver_lowering_inputs_selection(&request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, None)
+    errors := [Diagnostic]{}
+    staged_failed :: selection.compile.internal_problem == None && jet_driver_has_errors(selection.compile.diagnostics)
+    if staged_failed {
+        errors = ^selection.compile.diagnostics
+        selection = jet_driver_lowering_inputs_selection(&request, JetDriverCompileMode.RootRun, Val(path.copy()), Val("build"), true, Val(JetDriverKeepGoing{skip: [String]{}}))
+    }
     compiled := ^selection.compile
-    if !compiled.complete || compiled.internal_problem != None -> return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, ^compiled.internal_problem)
-    program :: ^compiled.build_program ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its ProgramInfo"))
-    inputs :: ^selection.inputs ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("checked build invocation lost its checked functions"))
-    session_id :: jet_driver_build_next_session_id(&scope) ?? return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, Val("build invocation identity space exhausted"))
-    session := build_session_new(session_id, package, request.host_facts.compiler_identity ?? "", scope.policy)
+    if staged_failed {
+        // The trapped compile's reports restate the staged ones.
+        if compiled.internal_problem != None || compiled.build_program == None || selection.inputs == None -> return jet_driver_build_query_empty(^request, ^errors, false, None)
+    } else {
+        if !compiled.complete || compiled.internal_problem != None -> return jet_driver_build_query_empty(^request, ^compiled.diagnostics, false, ^compiled.internal_problem)
+        errors = ^compiled.diagnostics
+    }
+    program :: ^compiled.build_program ?? return jet_driver_build_query_empty(^request, ^errors, false, Val("checked build invocation lost its ProgramInfo"))
+    inputs :: ^selection.inputs ?? return jet_driver_build_query_empty(^request, ^errors, false, Val("checked build invocation lost its checked functions"))
+    session_id :: jet_driver_build_next_session_id(&scope) ?? return jet_driver_build_query_empty(^request, ^errors, false, Val("build invocation identity space exhausted"))
+    session := build_session_new(session_id, jet_driver_build_session_package(package, path), request.host_facts.compiler_identity ?? "", scope.policy)
     build_session_set_args(&session, request.build_args)
     config := jet_eval_runtime_config(request.eval_config)
     // copy: the evaluator's build adapter gets a session and the request's input handles of its
@@ -215,48 +242,58 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     config.build_host_adapter = Val(JetDriverBuildAdapter{session: session.copy(), inputs: request.build_inputs.copy(), http_inputs: request.build_http_inputs.copy(), network_declared: network_declared, base_dir: base_dir})
     config.compiler_query_host = Val(jet_driver_comptime_compiler_for(request))
     run := jet_driver_invocation_run(^inputs, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, config, span)
-    errors := ^compiled.diagnostics
+    // The build's own reports; after a failed staging check the staged
+    // reports stand alone when the build fails (a trap it reached restates
+    // them) and give way to the final checked compile when it runs.
+    ran := [Diagnostic]{}
     evaluated :: ^run.result ?? {
         build_session_abort(&session)
+        if staged_failed -> return jet_driver_build_query_empty(^request, ^errors, false, None)
         return jet_driver_build_query_empty(^request, ^errors, false, ^run.problem)
     }
-    // copy: `errors` owns the reported diagnostic, while `evaluated` keeps its error for the
+    // copy: `ran` owns the reported diagnostic, while `evaluated` keeps its error for the
     // internal_problem/complete checks below. `error` is a payload view, which cannot be moved.
-    if evaluated.error == .Val(error) -> &errors.push(error.diagnostic.copy())
+    if evaluated.error == .Val(error) -> &ran.push(error.diagnostic.copy())
     returned :: evaluated.value
     if evaluated.internal_problem != None || !evaluated.complete || returned == None {
         build_session_abort(&session)
+        if staged_failed -> return jet_driver_build_query_empty(^request, ^errors, false, None)
         // copy: the query result owns the problem text, but `internal` is a payload view of
         // `evaluated.internal_problem`, and Jet has no consuming match to move it out.
         problem :: if evaluated.internal_problem == .Val(internal) -> { Val(internal.message.copy()) } else -> { None }
+        loop error in ran -> &errors.push(error)
         return jet_driver_build_query_empty(^request, ^errors, false, ^problem)
     }
     if returned == .Val(data) && jet_eval_build_failed_diagnostic(data, span) == .Val(diagnostic) {
         build_session_abort(&session)
-        &errors.push(diagnostic)
-        return jet_driver_build_query_empty(^request, ^errors, false, None)
+        &ran.push(diagnostic)
+        return jet_driver_build_query_failed(^request, ^errors, ^ran, staged_failed)
     }
     value :: jet_eval_build_session_input(returned ?? panic("checked return lost its data")) ?? {
         build_session_abort(&session)
-        &errors.push(jet_driver_diagnostic_without_span("E3502", "`fn build` returns nothing", "a build is the graph its Build context describes", "remove the returned value; configure `b` instead"))
-        return jet_driver_build_query_empty(^request, ^errors, false, None)
+        &ran.push(jet_driver_diagnostic_without_span("E3502", "`fn build` returns nothing", "a build is the graph its Build context describes", "remove the returned value; configure `b` instead"))
+        return jet_driver_build_query_failed(^request, ^errors, ^ran, staged_failed)
     }
     finished :: build_session_finish(&session, value)
-    loop error in finished.diagnostics -> &errors.push(jet_eval_build_session_diagnostic(error))
-    plan :: ^finished.plan ?? return jet_driver_build_query_empty(^request, ^errors, false, None)
-    if jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(^request, ^errors, false, None)
-    generated :: build_plan_selected_generated(plan)
+    loop error in finished.diagnostics -> &ran.push(jet_eval_build_session_diagnostic(error))
+    plan :: ^finished.plan ?? return jet_driver_build_query_failed(^request, ^errors, ^ran, staged_failed)
+    if jet_driver_has_errors(ran) -> return jet_driver_build_query_failed(^request, ^errors, ^ran, staged_failed)
+    // The build ran: the final checked compile below replaces the staged reports.
+    if staged_failed -> errors = [Diagnostic]{}
+    loop error in ran -> &errors.push(error)
+    // The selected generated modules, owned by the build's package: the
+    // final checked bundle below and every target compile of the plan
+    // (the response's `generated`) load them beside the package's sources.
+    // copy: each row's texts are views of the plan, which stays whole.
+    generated :: loop generated_row in build_plan_selected_generated(plan) -> JetDriverGeneratedModule{package_identity: package.copy(), name: generated_row.name.copy(), relative_path: generated_row.path.copy(), source: generated_row.source.copy()}
     // The final ordinary checked bundle, not the staging build callable,
     // owns all source/generated identities, even when no output was generated.
     original_generated_count :: request.generated_modules.len()
     selected_outputs :: request.build_output_names.len() == 0
     if selected_outputs -> request.build_output_names = jet_driver_build_selected_output_names(plan)
-    loop generated_row in generated {
-        // copy: the request gets temporary generated-module rows for the checked recompile, popped
-        // right after. `generated` stays whole for the response, so each row needs its own texts
-        // (package is shared by every row).
-        &request.generated_modules.push(JetDriverGeneratedModule{package_identity: package.copy(), name: generated_row.name.copy(), relative_path: generated_row.path.copy(), source: generated_row.source.copy()})
-    }
+    // copy: the request gets temporary generated-module rows for the checked recompile, popped
+    // right after; `generated` stays whole for the response.
+    loop generated_row in generated -> &request.generated_modules.push(generated_row.copy())
     checked :: jet_driver_compile_selection(&request, JetDriverCompileMode.Doc, None, None, false, true)
     loop request.generated_modules.len() > original_generated_count -> _ :: &request.generated_modules.pop()
     if selected_outputs -> request.build_output_names = [String]{}
@@ -269,6 +306,15 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     jet_driver_build_install_nodes(plan, nodes.copy())
     graph :: build_plan_graph(plan)
     return JetDriverBuildQueryResponse{request: ^request, query: JetDriverBuildQueryResult{plan: Val(^plan), graph: Val(graph), generated: ^generated, nodes: ^nodes, diagnostics: ^errors, complete: true, internal_problem: None, authority_policy: ^compiled.authority_policy}}
+}
+// The package a build session spells its `.jet/generated/<package>/` and
+// contribution sources with: a manifest package's identity, or, for a build
+// file outside any manifest (a source-root package), the file's stem.
+fn jet_driver_build_session_package(package: String, entry_path: String) -> String Never! {
+    if !package.starts_with("source-root:") -> return package.copy()
+    parts := entry_path.split("/").to_list()
+    file_name :: &parts.pop() ?? entry_path
+    file_name.removesuffix(".jet")
 }
 // Whether the entry package declares a `fn build`, the build entry
 // jet_driver_query_build_plan evaluates, read from the loaded sources alone.

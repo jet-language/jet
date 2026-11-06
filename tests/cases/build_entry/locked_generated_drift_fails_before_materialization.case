@@ -1,7 +1,9 @@
 # Port of tests/build_entry.rs:2748-2776; sources verbatim.
 # KNOWN-FAILING #4833 (Jet build --locked not ported). PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.
+# Jet build writes generated sources to .jet/generated only under `--write-generated=on` (stock off, #5829).
 fixture: fixtures/locked_generated_drift_fails_before_materialization
-step: jet build main.jet
+artifact: app
+step: jet build main.jet --write-generated=on
 exit: 0
 copy: .jet/generated/main/value.jet before.generated
 copy: changed.jet main.jet

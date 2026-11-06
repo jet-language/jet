@@ -3,7 +3,7 @@ use {
     jet_driver.[
         JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
         JetDriverAuthorityPolicy, JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
-        JetDriverFailure, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_entry_package_has_build,
+        JetDriverFailure, JetDriverGeneratedModule, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_entry_package_has_build,
         jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
         jet_driver_report_problems, JET_DRIVER_EXIT_OK,
         JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
@@ -91,6 +91,8 @@ fn jet_cli_build_package_as(file: String, color: Bool, options: BuildOptions, bu
     execution := BuildPlanExecution?{None}
     policy := JetDriverAuthorityPolicy?{None}
     generated := [BuildSessionGeneratedModule]{}
+    // The modules every target compile loads beside the package's sources.
+    target_generated := [JetDriverGeneratedModule]{}
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
     if ^prepared == {
         .Refused(output) -> return output
@@ -111,6 +113,8 @@ fn jet_cli_build_package_as(file: String, color: Bool, options: BuildOptions, bu
             execution = Val(build_plan_execution(plan))
             policy = query.authority_policy
             generated = build_plan_generated(plan)
+            // copy: `query` is returned whole to report a failure above.
+            target_generated = query.generated.copy()
         }
     }
     selected :: selection ?? return jet_cli_ice("the completed build query has no plan")
@@ -151,7 +155,7 @@ fn jet_cli_build_package_as(file: String, color: Bool, options: BuildOptions, bu
     loop executable in selected.executables {
         source_path :: jet_cli_entry_join(root, executable.source)
         source :: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
-        built :: jet_cli_compile_target(source_path, executable.name, source, color, selected_options.copy(), threads, invocation, trace_sink)
+        built :: jet_cli_compile_target(source_path, executable.name, source, target_generated, color, selected_options.copy(), threads, invocation, trace_sink)
         if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     }
     loop library in selected.libraries {
@@ -164,7 +168,7 @@ fn jet_cli_build_package_as(file: String, color: Bool, options: BuildOptions, bu
     // program beside it, named after its file.
     if selected.executables.len() == 0 {
         source :: build_files.read(file) ?? ""
-        if jet_cli_top_level_function_lines(source, "run").len() > 0 -> return jet_cli_compile_target(file, jet_cli_stem(file), source, color, selected_options.copy(), threads, invocation, trace_sink)
+        if jet_cli_top_level_function_lines(source, "run").len() > 0 -> return jet_cli_compile_target(file, jet_cli_stem(file), source, target_generated, color, selected_options.copy(), threads, invocation, trace_sink)
     }
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
@@ -205,7 +209,7 @@ fn jet_cli_build_workspace_members(file: String, color: Bool, options: BuildOpti
         } else {
             source :: build_files.read(found.path) ?? next
             if jet_cli_top_level_function_lines(source, "run").len() == 0 -> next
-            built = jet_cli_compile_target(found.path, jet_cli_stem(found.path), source, color, options.copy(), threads, None, trace_sink)
+            built = jet_cli_compile_target(found.path, jet_cli_stem(found.path), source, [JetDriverGeneratedModule]{}, color, options.copy(), threads, None, trace_sink)
         }
         if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     }

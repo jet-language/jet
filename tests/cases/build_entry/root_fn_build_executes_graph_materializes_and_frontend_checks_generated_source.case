@@ -1,5 +1,6 @@
 # Port of tests/build_entry.rs:158-296; public acceptance/files and exact private BuildRun subclaims split.
 # PENDING-SAME-HEAD. No invented metrics/graph projection.
+# Jet build writes generated sources to .jet/generated only under `--write-generated=on` (stock off, #5829).
 fixture: fixtures/root_fn_build_executes_graph_materializes_and_frontend_checks_generated_source
 artifact: app
 mkdir: build
@@ -9,7 +10,7 @@ copy: preserve .jet-build/legacy-output
 mkdir: src/.jet
 copy: preserve src/.jet/legacy-output
 requires: tool:sh
-step: jet build main.jet --allow=Exec,FS
+step: jet build main.jet --allow=Exec,FS --write-generated=on
 exit: 0
 file: build/legacy-output = fixtures/root_fn_build_executes_graph_materializes_and_frontend_checks_generated_source/preserve
 entries: build = 1
