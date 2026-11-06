@@ -578744,6 +578744,47 @@
       "completedAt": "2026-11-02T22:58:06.530Z",
       "questions": [],
       "retiredAt": "2026-11-05T23:01:04.022Z"
+    },
+    {
+      "id": "c0hjv9e5",
+      "num": 6547,
+      "title": "The authority_denied golden expects a root-relative path, but a refused jet run now prints the full path",
+      "body": "Since IrTypes-45 (wave 28, which follows owner answer q07mphiy: a refused `jet run` keeps full paths), `jet run authority_denied.jet` prints '--> /abs/dir/authority_denied.jet:12:4'. Examples/features/expected/effects/authority_denied.err.out still expects '--> authority_denied.jet:12:4'. run-feature-examples strips the example directory (withoutExampleDirectory), so the wave golden compare passes. The testkit golden suite used by release-compiler.mjs does not strip it, and the a0_025 release run on 11cf095719 lost this row (PASS→FAIL, actual '{work}/authority_denied.jet'). Fix: one golden meaning for both runners. Either the expected file and the testkit golden suite agree on the full-path form, or the testkit applies the same directory normalization. Then no runner disagrees.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Examples/features/effects/authority_denied passes in both the run-feature-examples golden tier and the testkit golden suite (release-compiler.mjs), with one expected output in the full-path form that owner answer q07mphiy requires for a refused jet run.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed d30a5ec12e (Main-11, on Main-10 1a6e2765c3). authority_denied.err.out spells the full path a refused jet run prints as `--> {work}/authority_denied.jet:12:4` (owner answer q07mphiy keeps the full path; {work} is the folder jet ran in). On HEAD dbab4fb5fd with its published jet: testkit golden suite --filter Examples/features/effects/authority_denied 1 passed on o0, o1 and o2; run-feature-examples --filter effects/authority_denied passed 1 (summary 1 examples passed 1); node --test Tools/agent/run-feature-examples.test.mjs pass 22 fail 0; lane-check CHECK OK.",
+          "at": "2026-11-03T02:31:54.240Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-01T20:11:04.826Z",
+      "updated": "2026-11-03T02:31:56.126Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-03T02:31:56.126Z",
+      "questions": [],
+      "retiredAt": "2026-11-06T02:33:26.105Z"
     }
   ],
   "events": [
