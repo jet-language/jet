@@ -19,12 +19,12 @@ fn s3_guard_core_syntax_surfaces() {
     assert(variadic.contains("Variadic parameter"))
     spread :: files.read("tests/ui/spread_bad_call.stderr") ?? panic("read spread diagnostic")
     assert(spread.contains("E1312"))
-    assert(spread.contains("call spread"))
+    assert(spread.contains("doesn't accept a spread argument"))
     yielded :: files.read("tests/ui/yield_type_mismatch.stderr") ?? panic("read yield diagnostic")
     assert(yielded.contains("E0807"))
     assert(yielded.contains("Stream<Int"))
     policy :: files.read("tests/ui/user_policy_bad_args.stderr") ?? panic("read policy diagnostic")
-    assert(policy.contains("Policy `audit`"))
+    assert(policy.contains("This call to `audit` is missing `topic`"))
     assert(policy.contains("Fix:"))
 }
 
