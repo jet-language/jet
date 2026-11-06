@@ -293,9 +293,9 @@ fn provider_native_split_upstream(upstream: String) -> (base: String, selector: 
 }
 
 // An exact release tag, or None for a moving selector (`latest`, `main`,
-// `vN.x`).
+// `auto`, `vN.x`).
 fn provider_native_exact_tag(selector: String) -> String? Never! {
-    if selector == "" || selector == "latest" || selector == "main" || (selector.starts_with("v") && selector.ends_with(".x")) -> return None
+    if selector == "" || selector == REF_CHANNEL_LATEST || selector == REF_CHANNEL_MAIN || selector == REF_CHANNEL_AUTO || (selector.starts_with("v") && selector.ends_with(".x")) -> return None
     release_tag :: if selector.starts_with("v") -> selector else -> "v{selector}"
     if provider_native_valid_tag(release_tag) -> Val(release_tag) else -> None
 }

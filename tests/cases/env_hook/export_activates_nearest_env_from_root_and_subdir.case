@@ -1,8 +1,13 @@
 # Port of tests/env_hook.rs::export_activates_nearest_env_from_root_and_subdir.
-# PENDING-GRAMMAR: step cwd/unset and tool token.
+# A `module env.dev` env is typed, so the hook activates it only after an env
+# grant (trust law; same setup as export_runs_typed_lifecycle_jobs...).
 fixture: export_activates_nearest_env_from_root_and_subdir.fixture
 env: PATH=/usr/bin:/bin
+env: HOME={work}/home
+mkdir: home
 mkdir: src/inner
+step: jetpack trust grant env:{work} --scope user
+exit: 0
 step: jetpack env export bash
 unset: JET_ENV_DISABLE
 unset: JETPACK_ENV

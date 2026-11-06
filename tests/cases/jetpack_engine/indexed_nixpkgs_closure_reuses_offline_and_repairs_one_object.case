@@ -15,12 +15,12 @@ exit: 0
 spawn peer: built serve {work}/root {work}/peer.port {work}/nix-index-cache-nar-source
 await: file {work}/peer.port timeout 30s
 capture: port = text file {work}/peer.port
-step online-initial: jetpack env --no-color --trust -- rg --version
+step online-initial: jetpack env --no-color --trust -y -- rg --version
 isolate: no-nix network=enabled
 unset: JETPACK_FIXTURES
 exit: 0
 stdout: ~ "ripgrep 15.2.0" # original predicate: successful indexed package command
-step offline-reuse: jetpack env --no-color --trust --offline -- rg --version
+step offline-reuse: jetpack env --no-color --trust -y --offline -- rg --version
 isolate: no-nix network=disabled
 unset: JETPACK_FIXTURES
 exit: 0
@@ -63,13 +63,13 @@ chmod: root/hangar/objects/{cap:runtime_digest} 0777
 chmod: root/hangar/objects/{cap:runtime_digest}/share 0777
 chmod: root/hangar/objects/{cap:runtime_digest}/share/marker 0666
 remove: root/hangar/objects/{cap:runtime_digest}
-step offline-missing: jetpack env --no-color --trust --offline -- rg --version
+step offline-missing: jetpack env --no-color --trust -y --offline -- rg --version
 isolate: no-nix network=disabled
 unset: JETPACK_FIXTURES
 exit: 2
 stderr: ~ E1350 # original predicate: offline missing object is fail-closed
 stderr: ~ /nix/store/cccccccccccccccccccccccccccccccc-ripgrep-runtime-1.0 # original predicate: error names missing reference
-step online-repair: jetpack env --no-color --trust -- rg --version
+step online-repair: jetpack env --no-color --trust -y -- rg --version
 isolate: no-nix network=enabled
 unset: JETPACK_FIXTURES
 exit: 0
