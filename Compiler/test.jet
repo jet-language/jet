@@ -24,6 +24,10 @@ BUILD_OUTPUT: "Compiler/JetCli/.jet/build"
 // `full` runs them side by side.
 BUILD_LOCK: "Compiler/JetCli/.jet/test-build.lock"
 
+// Where selfhost keeps its s2 and s3 compilers, from the checkout: beside
+// BUILD_OUTPUT on the same file system, so each built `jet` moves by rename.
+SELFHOST_STAGES: "Compiler/JetCli/.jet/selfhost"
+
 // The SPEED-500K milestone column the self-compile is held to.
 PERF_COLUMN: "225K"
 
@@ -168,14 +172,17 @@ selfhost_rows: fn(rows: TestRows) {
         rows.fail("s2 builds", err.message)
         return
     }
-    scratch: files.temp_dir("jet-selfhost") ?? {
-        rows.fail("s2 builds", "couldn't create a scratch directory: {err}")
-        return
+    stages: files.join(setup.checkout, SELFHOST_STAGES)
+    if files.exists(stages) {
+        files.remove_all(stages) ?? {
+            rows.fail("s2 builds", "couldn't clear `{stages}`: {err}")
+            return
+        }
     }
     pack: files.join(files.dirname(setup.jet), "jet-runtime")
-    s2: compiler_stage(rows, setup, setup.jet, "s2", files.join(scratch.path, "s2"), pack) ?? return
+    s2: compiler_stage(rows, setup, setup.jet, "s2", files.join(stages, "s2"), pack) ?? return
     rows.pass("s2 builds")
-    s3: compiler_stage(rows, setup, s2, "s3", files.join(scratch.path, "s3"), pack) ?? return
+    s3: compiler_stage(rows, setup, s2, "s3", files.join(stages, "s3"), pack) ?? return
     rows.pass("s3 builds")
     if {
         same_build(s2, s3) -> rows.pass("fixed point")
