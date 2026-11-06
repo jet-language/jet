@@ -26,6 +26,10 @@ step: jet run
 cwd: duplicate
 env: NO_COLOR=1
 exit: 1
-stderr: ~ "Error [jet.DuplicatePackageName]" # original predicate
+# The Rust-era fixture had a `@run.jet` home beside `run.jet`, and the two
+# collided as package names (E0624). Under the plain homes (2f186e7366) the
+# home is `run.jet`, so `a.jet` and `b.jet` are two more package-scope
+# overrides: E3540 per D-CMDOVERRIDE1=A, as tests/ui/command_override_conflict.
+stderr: ~ "Error [jet.DuplicateCommandOverride]" # D-CMDOVERRIDE1=A: more than one command function in one scope
 stderr: ~ "Why:" # original predicate
 stderr: ~ "Fix:" # original predicate
