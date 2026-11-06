@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6610,
-    "rev": 93200,
+    "rev": 93225,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34,7 +34,7 @@
         "radar:e17"
       ]
     },
-    "completionCursor": "2026-11-06T16:18:21.936Z"
+    "completionCursor": "2026-11-06T17:08:11.924Z"
   },
   "epochs": [
     {
@@ -34248,21 +34248,26 @@
     {
       "id": "c0meo2tr",
       "num": 3452,
-      "title": "Make method write and take access visible at each call",
-      "body": "The owner requires write/take marks in signatures and calls. Ordinary named arguments already use &T/^T declarations and &value/^value calls. Receiver declarations use &self/^self, but methods can currently be called without receiver marks.\n\nD-SHAPE-PLACE1=A also already permits expression-level &place write windows and prefix receiver forms such as &values[0..1].sort(). Those windows may be bound and passed under checked lifetimes. Do not mistake them for a missing feature or prohibit their existing use.\n\nD-CAP-RECEIVER1 now compares three forms. A puts marks after the method dot. B keeps the receiver prefix. C uses receiver-adjacent call separators: `buf&.append(...)` and `buf^.seal()`. C is recommended because it scopes one mark to one call while keeping chains linear. All options preserve ordinary argument law and existing safe-window behavior.\n\nSource: binary_unary.rs:10-39,683-689 rewrites write prefixes to maximal receiver places. postfix.rs builds method calls; CheckerItems.rs and Collections.rs provide their receiver conventions. The #Root restriction applies to reversible free-function dot calls, not every method.\n\n#3143 owns callable contract preservation. #3321 owns its existing diagnostic investigation. No implementation or runtime proof ran during preparation.",
+      "title": "Call function values with an ordinary call, and give each function one call spelling",
+      "body": "Remaining scope after D-CALLSITE-MARK2=A (ratified 2026-11-06): memory marks live only in signatures and every call is plain, so the receiver and argument call-mark work this card was opened for (D-CAP-RECEIVER1=D, D-RECEIVER-MARK1=A) is superseded; that cutover, with its editor hints, jet audit writes and #Policy(writes: .Explicit), is on #6586.\n\nWhat remains is the ordinary call: a callable value (returned, local, grouped, method-returned or nested) is called with a plain postfix call, with no synthetic .call, and each function has one call spelling across Examples.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": "## Goal\nClose ratified D-CAP-RECEIVER1=D (\"mark the value, not the call\"). `&` or `^` sits on the written or taken place, whether receiver or argument (`&buf.append(\" world\")`, `^buf.seal()`, `&items[i].append(\"!\")`, `edit(&buf)`). A mark binds the maximal place and never a call result. Fresh receivers take no mark. `~` copy grouping and existing `&place` windows and their lifetimes are unchanged.\n\n## Current state (triage: shipped 2026-09-28)\n- AST, lexer, parser and sema are in place: the place-mark node (`Compiler/JetAst/Source/AST/Expressions.jet:193`), line-start rule `place_mark_starts_at` (`Compiler/JetLexer/Source/Lexer/Terminators.jet:398-401`), parser (`Compiler/JetParser/Source/Parser/Expressions.jet` around :399, :941, :1021), and sema checks E0224 missing, E0225 extra and E0226 wrong (`Compiler/JetSema/Source/Sema/Ownership/Checks.jet:1673-1722`).\n- Registry rows at `DiagnosticRows.jet` (E0224/5/6). The Rust bootstrap mirror is `crates/jet-sema/src/Sema/ReceiverMarks.rs:165-221`. `Syntax.rs:54`. The decision log `Docs/spec/syntax-decisions.md` records it as shipped 2026-09-28.\n- Tests: `tests/receiver_place_marks.rs` (line-start statement, spaced-operator continuation, formatter spacing). Goldens: `Examples/features/memory/receiver_marks.jet` and `Examples/features/effects/method_receivers.jet`, with `.out` files.\n- Gaps against the criteria:\n  - There is no UI fixture for E0224, E0225 or E0226 (`tests/ui` has none; criterion 2).\n  - The Jet and Rust E0224 texts differ: Jet says \"but it has no … mark\" and Rust says \"but `{place}` has no …\".\n  - No web-tier evidence yet (criterion 5).\n\n## Changes\n1. Add three UI fixtures (missing on a user method, extra on a fresh receiver, `&` where the method takes `^`) with `.fixed.jet` machine fixes, and bless them.\n2. Align the E0224 what/why text between `Ownership/Checks.jet` and `ReceiverMarks.rs` to the registry row.\n3. Run the append/seal goldens on every tier, including web where the surface applies. Confirm `jet devtools grammars` regenerates with no diff and that no unmarked write/take receiver path remains (grep the corpus for known write methods without a mark).\n\n## Proof\n- The added criterion.\n- `cargo test --test receiver_place_marks` passes.\n- `JET_GOLDEN_FILTER=memory/receiver_marks cargo test --test golden examples_compile_and_run` and `JET_GOLDEN_FILTER=effects/method_receivers cargo test --test golden examples_compile_and_run` pass on AOT and `jet run`, and `jet run --interpret` matches.\n- `jet devtools grammars` shows no diff.\n\n## Batch\n`batch-jetc-sema`: the remaining work is diagnostics parity and snapshots.\n\n## Dependencies\nNone. #3321 (method diagnostic finding) and #3143 (callable contracts) keep their own scopes.",
+      "plan": "1. Remove the synthetic `.call`: returned, local, grouped, method-returned and nested callable expressions are invoked with an ordinary postfix call; callee and arguments are evaluated exactly once.\n2. Migrate the syntax registry, callers, diagnostics and goldens (functions/returned_function_call, tests/ui/call_non_function) in one cutover. The retired `.call` gets no teaching diagnostic.\n3. Enforce one call spelling per function in Examples/ through fmt or a registered diagnostic.\n\nProof: the goldens above on o0, o1 and o2; the UI fixture matches its snapshot.",
       "checkSteps": "Planned proof only. Rebuild before smoke tests; use scripts/agent/jet-env and the shared bounded target.\n\nRun the existing narrow integration cases after migrating them:\nscripts/agent/jet-env cargo test --test tir_io_and_ownership plain_parameter_modes_match_tir_and_aot -- --exact\nscripts/agent/jet-env cargo test --test tir_collections_and_methods mut_self_method_body -- --exact\nscripts/agent/jet-env cargo test --test tir_collections_and_methods trait_impl_method_call_no_mangle -- --exact\nscripts/agent/jet-env cargo test --test tir_collections_and_methods static_constructor_and_self_getter -- --exact\n\nAdd focused receiver-capability witnesses only for uncertain boundaries: missing/extra marks, indexed place evaluated once, two-phase alias conflict, take invalidation, trait dispatch, and a temporary/chained receiver. Run the same Buffer append/seal source through AOT, default run, forced interpreter, and applicable web. Update affected registered UI snapshots and parser/formatter fixtures. No zero-test filter, skipped runtime, or generated-text assertion counts as behavior proof.\n\nAlso prove the selected form with a held write window, access after its last use, a mixed read/write/take chain, and receiver-marked calls nested inside ordinary read arguments. Under B, prove that ungrouped leading marks remain outer argument conventions and cannot silently mark the nested receiver. Prove both the named and fresh receiver cases exactly as D-CAP-RECEIVER1 specifies.",
       "probe": null,
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: D-CALLSITE-MARK2=A (calls carry no & or ^) and D-MOVE-SIGIL1=A supersede D-CAP-RECEIVER1=D and D-RECEIVER-MARK1=A. The call-mark criteria are removed; their surviving requirements (plain calls, editor hints, jet audit writes, #Policy(writes: .Explicit), unchanged safety checks) are criteria on #6586. c12 (ordinary call for callable values) and c13 (one call spelling) stay here. Removed as superseded: c1 \"D-CAP-RECEIVER1 is owner-ratified, and its chosen receiver form is the sole registered syntax for write/take method calls. Read calls and or…\"; c2 \"User methods, trait dispatch, and builtin receivers check the written mark against the resolved convention in sema, with registered diagnost…\"; c3 \"Named, field, indexed, nested, window, fresh, and chained receivers obey the selected spelling while preserving evaluation order, one place …\"; c4 \"Every affected caller, example, test, formatter, editor grammar, diagnostic suggestion, and explanation uses the chosen form. No old write/t…\"; c5 \"The same append/seal workload and negative boundary witnesses have exact native AOT, default run, forced-interpreter, and applicable web evi…\"; c6 \"Syntax.rs entry updated\"; c7 \"syntax-decisions.md log entry\"; c8 \"jet devtools grammars regenerated\"; c9 \"snapshots re-blessed\"; c10 \"A line starting with &name or ^name parses as a new statement, a continued bitwise-and or power line with a space after the operator still c…\"; c11 \"[retarget] Jet compiler proof (Rust freeze 2026-10-01): UI fixture tests/ui/receiver_mark_missing_e0224.jet, tests/ui/receiver_mark_missing_…\"; c14 \"D-RECEIVER-MARK1=A (supersedes D-CAP-RECEIVER1=D for receivers): a method that writes its receiver is called with no mark on a := value or &…\"."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -34345,105 +34350,6 @@
       ],
       "criteria": [
         {
-          "n": 1,
-          "text": "D-CAP-RECEIVER1 is owner-ratified, and its chosen receiver form is the sole registered syntax for write/take method calls. Read calls and ordinary argument conventions keep their existing meaning.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-16T01:42:57.695Z"
-        },
-        {
-          "n": 2,
-          "text": "User methods, trait dispatch, and builtin receivers check the written mark against the resolved convention in sema, with registered diagnostics and UI snapshots for missing, extra, or mismatched marks.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-16T01:42:57.695Z"
-        },
-        {
-          "n": 3,
-          "text": "Named, field, indexed, nested, window, fresh, and chained receivers obey the selected spelling while preserving evaluation order, one place evaluation, two-phase borrowing, and move checks. Existing &place windows and approved view lifetimes remain intact; no new borrow mechanism or standalone take expression is added.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-16T01:42:57.695Z"
-        },
-        {
-          "n": 4,
-          "text": "Every affected caller, example, test, formatter, editor grammar, diagnostic suggestion, and explanation uses the chosen form. No old write/take receiver spelling or compatibility path remains.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-16T01:42:57.695Z"
-        },
-        {
-          "n": 5,
-          "text": "The same append/seal workload and negative boundary witnesses have exact native AOT, default run, forced-interpreter, and applicable web evidence. Existing callable, constructor, label, and FFI behavior does not regress.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-16T01:42:57.695Z"
-        },
-        {
-          "n": 6,
-          "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-27T23:31:40.640Z"
-        },
-        {
-          "n": 7,
-          "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-27T23:31:40.640Z"
-        },
-        {
-          "n": 8,
-          "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-27T23:31:40.640Z"
-        },
-        {
-          "n": 9,
-          "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-27T23:31:40.640Z"
-        },
-        {
-          "n": 10,
-          "text": "A line starting with &name or ^name parses as a new statement, a continued bitwise-and or power line with a space after the operator still continues, and the formatter emits that space; parser fixtures cover both.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-27T23:32:02.698Z"
-        },
-        {
-          "n": 11,
-          "text": "[retarget] Jet compiler proof (Rust freeze 2026-10-01): UI fixture tests/ui/receiver_mark_missing_e0224.jet, tests/ui/receiver_mark_missing_e0224.jet pass when compiled by the Jet compiler (Compiler/ pipeline, for example the #670 compiler-diff candidate run or jetc0): goldens print their expected output on AOT and default run, UI fixtures match their snapshots; no Rust compiler change (a Core-library-only change may also be shown on the frozen Rust compiler as interim evidence). Replaces the Rust-compiler proof: \"`JET_UI_FILTER=tests/ui/receiver_mark_missing_e0224.jet`, `…/receiver_mark_extra_e0225.jet` and `…/receiver_mark_wrong_e0226.jet` each pass `cargo test --test diagnostic_snapshots ui_snapshots`, with the Jet and Rust what/why/fix text identical to the registry rows.\"",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-29T02:21:57.493Z"
-        },
-        {
           "n": 12,
           "text": "[#3399] Returned, local, grouped, method-returned and nested callable expressions are invoked with an ordinary postfix call. The synthetic `.call` is removed. Callee and arguments are evaluated exactly once. Syntax registry, callers, diagnostics and goldens migrate (functions/returned_function_call, tests/ui/call_non_function).",
           "status": "open",
@@ -34460,15 +34366,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-04T17:59:02.268Z"
-        },
-        {
-          "n": 14,
-          "text": "D-RECEIVER-MARK1=A (supersedes D-CAP-RECEIVER1=D for receivers): a method that writes its receiver is called with no mark on a := value or & parameter (c.bump()); a :: value stays an error; argument writes keep & (grow(&c)); the editor shows the filled-in & as an inlay hint; #Policy(writes: .Explicit) restores the required receiver & with E0224; tests/ui/receiver_mark_missing_write and every Examples/ caller migrate in one cutover",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T01:34:59.223Z"
         }
       ],
       "refs": [
@@ -34497,7 +34394,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-16T01:42:57.695Z",
-      "updated": "2026-11-06T02:04:48.098Z",
+      "updated": "2026-11-06T17:29:31.215Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -39896,8 +39793,8 @@
       "parentId": "c0v95zs3",
       "needsAcceptance": false,
       "created": "2026-09-27T23:27:03.232Z",
-      "updated": "2026-11-06T17:05:05.906Z",
-      "updatedBy": "agent",
+      "updated": "2026-11-06T17:14:03.303Z",
+      "updatedBy": "owner",
       "goals": [
         "G2"
       ]
@@ -40208,8 +40105,8 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.012Z",
-      "updated": "2026-11-06T17:05:47.895Z",
-      "updatedBy": "agent",
+      "updated": "2026-11-06T17:14:03.303Z",
+      "updatedBy": "owner",
       "goals": []
     },
     {
@@ -55589,7 +55486,7 @@
       "id": "c06m6abh",
       "num": 4723,
       "title": "Public-by-default visibility and local imports with declaration re-exports",
-      "body": "Owner directive, 2026-10-07, clarified in chat (Odin/GingerBill model adapted to Jet; a Jet module plays the role of an Odin package). Supersedes D-MOD3, D-VISDEFAULT2, D-PUBPKG1 and the #PubFile / priv-subtree rules.\n\nRules:\n(1) Everything is public by default. Declarations (fn, struct, enum, trait, const, type alias, and so on) never carry a visibility marker.\n(2) The only keyword is `priv`; `pub` is removed from the language.\n(3) A module may be marked private: `priv module name { ... }` (and the equivalent marker for a file module). Plain `priv` means its contents are usable only by its enclosing module and that module's other children. `priv(package)` means usable by any module of the same package and invisible to other packages.\n(4) Field exception: a struct or record field may be `priv`; it is readable and writable only by code in the type's own module (and its children). This keeps invariants for types like Secret, native handles and validated values.\n(5) Removed: `pub`, `pub(package)`, `#PubFile`, and `priv` on non-module declarations. Writing them is a compile error whose fix deletes the marker (UI snapshots).\n(6) Packages: no package-level privacy in this cutover (later, through the manifest).\n(7) D-VIS-REEXPORT1=A: imports stay local; bare paths to declarations re-export through name :: path; pub use retires. D-ALIAS-BIND2=B: retain alias for type expressions and type-valued recipe calls; generic-only restriction retires.\n\nCutover: parser and sema in both compiler halves, Syntax.rs registration and decision IDs, diagnostics with UI snapshots, the spec (Docs/spec/syntax-decisions.md S18 and the reference), and every in-repo Jet file (Compiler/, Core/, Jetpack/, Examples/, tests/) migrated in one commit by a re-runnable rewrite script, so in-flight branches can apply it too. Helpers that were private declarations move into `priv module`s or stay public; invariant-carrying fields become `priv` fields.\n\nAcceptance: no `pub` and no declaration-level `priv` anywhere in the repo; `priv module` and `priv(package) module` access rules and the `priv` field rule each have UI snapshots for the allowed and rejected cases; goldens and the compiler fixed point unchanged in behavior.\n\n\nCurrent application amendment (2026-10-07, #27 clarified by #29/#31; Sol writes / Opus reviews #28):\nD-VIS-REEXPORT1=A\nEvery original module/field privacy criterion retained; all pub use forms migrate to bare-path alias declarations, use stays local; final pub keyword removed; kind-resolved target casing and canonical identity preserve original home/privacy/generics/defaults/named args/effects/borrow/move/constructors/patterns/methods/traits; forward chains resolve and rootless cycles diagnose; pub-use/duplicate/parenthesized/private-module fixes exact; doc/API record lists target signatures and publication diffs; no pub/priv use remains in live source.\nPaths: Compiler/JetSema/Source/Sema/{Registration/Items,Scopes,Calls/Resolution}.jet declaration aliases, chains/cycles/target identity/case; parser removed pub use fix; Jet API/doc/semindex; Tools/agent/vis-cutover.mjs migration; Core/prelude/prelude.jet; Examples/features/modules/module_reexport; tests/ui/view_write_reexport\nRegistry/spec/UI/goldens: Legacy Syntax.rs KW_PUB/visibility row reference; Jet alias binding/visibility rows cite D-VIS-REEXPORT1=A; retire final pub keyword, preserve use local; no priv use introduced; update generated editor grammar; Docs/spec/syntax-decisions.md S18/D-MOD4 and module reference; public API record/Jetpack/Publication/Source/Diff.jet alias target signature; #4723 rule7 now settled; pub use -> per-name alias fixes; rootless chain cycle diagnostic; parenthesized path E0622 drop-parens note; duplicate use+alias fix removes use member; private module alias refusal lists members; private field through alias still errors; Prelude fourteen names from seven historical pub use lines; shapes.Path == core.files.Path nominal identity; defaults/named/effects/generics/move/traits/constructors preserved; chains any order; doc/API publication records correct; generic recipe NAME bare path alias\nTiming: UNDER #27 Jet-half-only implementation was permitted; latest #29 schedules NEW FEATURE delivery after port/Rust-exit feature resumption. Record docs/contracts/tests plan NOW; an independently justified MINIMAL seam required to port an existing row/layer/harness is PORT NOW and may mirror both halves with dies-at-cutover ledger. Do not let this feature block current port merely because its contract is ratified. Earlier #27 assessment: JET NOW, completing #4723 reexport slice. Existing VisCut5 pre-verifying Rust+Jet visibility cutover lands as written under #27(c); new generalized alias implementation Jet-only after that baseline, no new Rust mirror. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: Supersedes directive21 recorded lean priv use and #4723 undecided rule7, NOT public-default privacy law. Bare paths alias types WITHOUT alias even though D-ALIAS-BIND2=B. Existing vis branch deliberately retained pub use; add Jet-only slice, preserve prior pre-verifying proofs. #29 does not automatically authorize generalized reexport feature in both halves; minimal resolution seam only if needed to port a current consumer. Existing VisCut5 pre-verification preserved.\n\nD-ALIAS-BIND2=B\nKeep alias keyword and admit every type expression/type-valued recipe call, not only generic alias declarations; bare paths under VIS=A remain keyword-free; bare non-path type expression gets add-alias fix; aliases preserve identity/home/privacy and distinct protection; source name plus single expansion shown in hover/errors; forward chains cycle-diagnose rather than crash; alias constructor Type{...} works; generic spellings migrate to prep fn recipes and plain-refusal UI/fuzz cases become acceptance.\nPaths: Compiler/JetSema/Source/Sema/Registration/Items.jet remove E0324 generic-only restriction; type resolver aliases/cycle guard and constructor head; parser alias generic-to-recipe cutover; formatter alias roundtrip; Core numeric family aliases after generic recipes\nRegistry/spec/UI/goldens: KEEP alias in legacy Syntax.rs/Syntax/core_surface.rs and active Jetpack/Foundation/Source/Syntax.jet keyword projection, cite D-ALIAS-BIND2=B; E0324 generic-only admission retired/redefined with exact history; bare type-expression E0357/E0622 fix ADD alias. Do not use ballot checkInstructions for A.; Docs/spec/Core grammar and syntax-decisions D-TYPEALIAS1/D-ALIAS-OP1 amendments; alias identity/one expansion hover; D-GENERIC-TYPEFN1 recipes; #4723 coupled reexport law; alias Rows :: [[String]] accepted replacing type_alias_no_params stderr/fuzz twin; bare Rows :: [[String]] errors with alias insertion fix; unknown type E0107; cycles list chain not stack overflow; alias Type{...} accepted; distinct alias protection; Five historical generic alias sites become prep fn recipes; type_alias feature/UI/optional_lift_nested/parallel_function_worker/fuzz valid migrate; simple aliases retain identity/methods/traits/constructors/patterns/home; Core U8 :: Unsigned(8) must become alias U8 :: Unsigned(8)\nTiming: UNDER #27 Jet-half-only implementation was permitted; latest #29 schedules NEW FEATURE delivery after port/Rust-exit feature resumption. Record docs/contracts/tests plan NOW; an independently justified MINIMAL seam required to port an existing row/layer/harness is PORT NOW and may mirror both halves with dies-at-cutover ledger. Do not let this feature block current port merely because its contract is ratified. Earlier #27 assessment: JET NOW as #4723 alias slice; no Rust mirror. Generic recipe and constructor/cycle substrate admission required. Existing formatter #4746 fix remains Jet-half-only unless landing exception. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: OBSERVED current Items.jet:1617-1619 still rejects alias without parameters; DiagnosticRows:3757 generic-only rule stale. B retains keyword despite older owner scratch proposal remove alias. CheckInstructions incorrectly describes A only: NOT B acceptance. VIS=A bare-path exception intentional. Fix reported cycle crash and constructor bug as acceptance, no rerun to confirm.",
+      "body": "Owner directive, 2026-10-07, clarified in chat (Odin/GingerBill model adapted to Jet; a Jet module plays the role of an Odin package). Supersedes D-MOD3, D-VISDEFAULT2, D-PUBPKG1 and the #PubFile / priv-subtree rules.\n\nRules:\n(1) Everything is public by default. Declarations (fn, struct, enum, trait, const, type alias, and so on) never carry a visibility marker.\n(2) The only keyword is `priv`; `pub` is removed from the language.\n(3) A module may be marked private: `priv module name { ... }` (and the equivalent marker for a file module). Plain `priv` means its contents are usable only by its enclosing module and that module's other children. `priv(package)` means usable by any module of the same package and invisible to other packages.\n(4) Field exception: a struct or record field may be `priv`; it is readable and writable only by code in the type's own module (and its children). This keeps invariants for types like Secret, native handles and validated values.\n(5) Removed: `pub`, `pub(package)`, `#PubFile`, and `priv` on non-module declarations. They are no longer Jet syntax and get no teaching diagnostic (owner order: no teaching errors for old syntax).\n(6) Packages: no package-level privacy in this cutover (later, through the manifest).\n(7) D-VIS-REEXPORT1=A: imports stay local; bare paths to declarations re-export through name: path (D-DECL-COLON1=A); pub use retires. Aliases are written Rows: [[String]] (D-DECL-COLON1=A) and generic aliases Grid<T>: [[T]] (D-ALIAS-GENERIC1=A); the alias keyword of D-ALIAS-BIND2=B is superseded.\n\nCutover: parser and sema in both compiler halves, Syntax.rs registration and decision IDs, diagnostics with UI snapshots, the spec (Docs/spec/syntax-decisions.md S18 and the reference), and every in-repo Jet file (Compiler/, Core/, Jetpack/, Examples/, tests/) migrated in one commit by a re-runnable rewrite script, so in-flight branches can apply it too. Helpers that were private declarations move into `priv module`s or stay public; invariant-carrying fields become `priv` fields.\n\nAcceptance: no `pub` and no declaration-level `priv` anywhere in the repo; `priv module` and `priv(package) module` access rules and the `priv` field rule each have UI snapshots for the allowed and rejected cases; goldens and the compiler fixed point unchanged in behavior.\n\n\nCurrent application amendment (2026-10-07, #27 clarified by #29/#31; Sol writes / Opus reviews #28):\nD-VIS-REEXPORT1=A\nEvery original module/field privacy criterion retained; all pub use forms migrate to bare-path alias declarations, use stays local; final pub keyword removed; kind-resolved target casing and canonical identity preserve original home/privacy/generics/defaults/named args/effects/borrow/move/constructors/patterns/methods/traits; forward chains resolve and rootless cycles diagnose; pub-use/duplicate/parenthesized/private-module fixes exact; doc/API record lists target signatures and publication diffs; no pub/priv use remains in live source.\nPaths: Compiler/JetSema/Source/Sema/{Registration/Items,Scopes,Calls/Resolution}.jet declaration aliases, chains/cycles/target identity/case; parser removed pub use fix; Jet API/doc/semindex; Tools/agent/vis-cutover.mjs migration; Core/prelude/prelude.jet; Examples/features/modules/module_reexport; tests/ui/view_write_reexport\nRegistry/spec/UI/goldens: Legacy Syntax.rs KW_PUB/visibility row reference; Jet alias binding/visibility rows cite D-VIS-REEXPORT1=A; retire final pub keyword, preserve use local; no priv use introduced; update generated editor grammar; Docs/spec/syntax-decisions.md S18/D-MOD4 and module reference; public API record/Jetpack/Publication/Source/Diff.jet alias target signature; #4723 rule7 now settled; pub use -> per-name alias fixes; rootless chain cycle diagnostic; parenthesized path E0622 drop-parens note; duplicate use+alias fix removes use member; private module alias refusal lists members; private field through alias still errors; Prelude fourteen names from seven historical pub use lines; shapes.Path == core.files.Path nominal identity; defaults/named/effects/generics/move/traits/constructors preserved; chains any order; doc/API publication records correct; generic recipe NAME bare path alias\nTiming: UNDER #27 Jet-half-only implementation was permitted; latest #29 schedules NEW FEATURE delivery after port/Rust-exit feature resumption. Record docs/contracts/tests plan NOW; an independently justified MINIMAL seam required to port an existing row/layer/harness is PORT NOW and may mirror both halves with dies-at-cutover ledger. Do not let this feature block current port merely because its contract is ratified. Earlier #27 assessment: JET NOW, completing #4723 reexport slice. Existing VisCut5 pre-verifying Rust+Jet visibility cutover lands as written under #27(c); new generalized alias implementation Jet-only after that baseline, no new Rust mirror. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: Supersedes directive21 recorded lean priv use and #4723 undecided rule7, NOT public-default privacy law. Bare paths alias types WITHOUT alias even though D-ALIAS-BIND2=B. Existing vis branch deliberately retained pub use; add Jet-only slice, preserve prior pre-verifying proofs. #29 does not automatically authorize generalized reexport feature in both halves; minimal resolution seam only if needed to port a current consumer. Existing VisCut5 pre-verification preserved.\n\nD-ALIAS-BIND2=B\nKeep alias keyword and admit every type expression/type-valued recipe call, not only generic alias declarations; bare paths under VIS=A remain keyword-free; bare non-path type expression gets add-alias fix; aliases preserve identity/home/privacy and distinct protection; source name plus single expansion shown in hover/errors; forward chains cycle-diagnose rather than crash; alias constructor Type{...} works; generic spellings migrate to prep fn recipes and plain-refusal UI/fuzz cases become acceptance.\nPaths: Compiler/JetSema/Source/Sema/Registration/Items.jet remove E0324 generic-only restriction; type resolver aliases/cycle guard and constructor head; parser alias generic-to-recipe cutover; formatter alias roundtrip; Core numeric family aliases after generic recipes\nRegistry/spec/UI/goldens: KEEP alias in legacy Syntax.rs/Syntax/core_surface.rs and active Jetpack/Foundation/Source/Syntax.jet keyword projection, cite D-ALIAS-BIND2=B; E0324 generic-only admission retired/redefined with exact history; bare type-expression E0357/E0622 fix ADD alias. Do not use ballot checkInstructions for A.; Docs/spec/Core grammar and syntax-decisions D-TYPEALIAS1/D-ALIAS-OP1 amendments; alias identity/one expansion hover; D-GENERIC-TYPEFN1 recipes; #4723 coupled reexport law; alias Rows :: [[String]] accepted replacing type_alias_no_params stderr/fuzz twin; bare Rows :: [[String]] errors with alias insertion fix; unknown type E0107; cycles list chain not stack overflow; alias Type{...} accepted; distinct alias protection; Five historical generic alias sites become prep fn recipes; type_alias feature/UI/optional_lift_nested/parallel_function_worker/fuzz valid migrate; simple aliases retain identity/methods/traits/constructors/patterns/home; Core U8 :: Unsigned(8) must become alias U8 :: Unsigned(8)\nTiming: UNDER #27 Jet-half-only implementation was permitted; latest #29 schedules NEW FEATURE delivery after port/Rust-exit feature resumption. Record docs/contracts/tests plan NOW; an independently justified MINIMAL seam required to port an existing row/layer/harness is PORT NOW and may mirror both halves with dies-at-cutover ledger. Do not let this feature block current port merely because its contract is ratified. Earlier #27 assessment: JET NOW as #4723 alias slice; no Rust mirror. Generic recipe and constructor/cycle substrate admission required. Existing formatter #4746 fix remains Jet-half-only unless landing exception. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: OBSERVED current Items.jet:1617-1619 still rejects alias without parameters; DiagnosticRows:3757 generic-only rule stale. B retains keyword despite older owner scratch proposal remove alias. CheckInstructions incorrectly describes A only: NOT B acceptance. VIS=A bare-path exception intentional. Fix reported cycle crash and constructor bug as acceptance, no rerun to confirm.",
       "kind": "task",
       "track": "sidequest",
       "epoch": "e3",
@@ -55603,6 +55500,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: D-DECL-COLON1=A and D-ALIAS-GENERIC1=A (both 2026-11-06) supersede D-ALIAS-BIND2=B's alias keyword, and re-exports are written name: path. c5, c6 and the body now use the ratified spellings; removed pub/priv forms get no teaching diagnostic (owner order)."
+        },
         {
           "at": "2026-10-09",
           "by": "Pip",
@@ -55653,7 +55555,7 @@
         },
         {
           "n": 5,
-          "text": "D-VIS-REEXPORT1=A: Every original module/field privacy criterion retained; all pub use forms migrate to bare-path alias declarations, use stays local; final pub keyword removed; kind-resolved target casing and canonical identity preserve original home/privacy/generics/defaults/named args/effects/borrow/move/constructors/patterns/methods/traits; forward chains resolve and rootless cycles diagnose; pub-use/duplicate/parenthesized/private-module fixes exact; doc/API record lists target signatures and publication diffs; no pub/priv use remains in live source.",
+          "text": "D-VIS-REEXPORT1=A: Every original module/field privacy criterion retained; all pub use forms migrate to bare-path re-export declarations written name: path (clamp: core.math.clamp, D-DECL-COLON1=A); use stays local; the pub keyword is removed and gets no teaching diagnostic; kind-resolved target casing and canonical identity preserve original home/privacy/generics/defaults/named args/effects/borrow/move/constructors/patterns/methods/traits; forward chains resolve and rootless cycles diagnose; duplicate, parenthesized and private-module errors carry exact fixes; doc/API record lists target signatures and publication diffs; no pub/priv use remains in live source.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -55662,7 +55564,7 @@
         },
         {
           "n": 6,
-          "text": "D-ALIAS-BIND2=B: Keep alias keyword and admit every type expression/type-valued recipe call, not only generic alias declarations; bare paths under VIS=A remain keyword-free; bare non-path type expression gets add-alias fix; aliases preserve identity/home/privacy and distinct protection; source name plus single expansion shown in hover/errors; forward chains cycle-diagnose rather than crash; alias constructor Type{...} works; generic spellings migrate to prep fn recipes and plain-refusal UI/fuzz cases become acceptance.",
+          "text": "Aliases (D-DECL-COLON1=A and D-ALIAS-GENERIC1=A; supersedes D-ALIAS-BIND2=B's alias keyword): Rows: [[String]] aliases any type expression or type-valued recipe call, and a generic alias writes its parameters on its name (Grid<T>: [[T]]); aliases preserve identity/home/privacy and distinct protection; hover and errors show the source name plus a single expansion; forward chains cycle-diagnose rather than crash; the alias constructor Rows{…} works.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -55677,7 +55579,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-07T11:23:08.090Z",
-      "updated": "2026-10-28T11:32:04.565Z",
+      "updated": "2026-11-06T17:29:36.599Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -56035,6 +55937,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: superseded. D-DECL-COLON1=A (ratified 2026-11-06) writes every declaration name: value (Point: struct { … }, area: fn(…) { … }), which replaces this card's keyword-first rule (D-DECL-FORM2=A) and the name :: fn form (D-DECL-BINDING1=B). The cutover is #6586; unnamed record types are D-RECORD-BRACE1=A on #6251."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Superseded: D-DECL-BINDING1=B (2026-11-01) and D-DECL-COLON1=A replaced D-DECL-FORM2=A's keyword-first rule. Named declarations are now name-first (Point: struct { … }, area: fn(…) { … }), landed in 6b9210090e. Do not follow this card's 'keep keyword-first, no name-first codemod' plan."
         },
         {
@@ -56100,12 +56007,13 @@
       "tags": [
         "syntax",
         "owner-notes-2026-10-07",
-        "wayfinder:research"
+        "wayfinder:research",
+        "superseded"
       ],
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-07T14:24:51.467Z",
-      "updated": "2026-11-06T11:37:10.404Z",
+      "updated": "2026-11-06T17:29:17.039Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -68630,7 +68538,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:19:21.465Z",
-      "updated": "2026-11-06T17:06:09.270Z",
+      "updated": "2026-11-06T17:17:45.418Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -78296,6 +78204,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Owner direction 2026-11-06: the seven ratified syntax decisions on this card (D-ENUM-DOT1=B, D-ALIAS-GENERIC1=A, D-ALT-SUBSET1=A, D-RECORD-BRACE1=A, D-ALT-CASES1=A, D-BRACE-LAYOUT1=A, D-RECORD-ORDER1=A) are implemented by the owner's dedicated agent once #6586 (name: value, && take, call-site mark removal) lands; DeclColon keeps #6586 only."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Owner ratified D-ENUM-DOT1=B, D-ALIAS-GENERIC1=A, D-ALT-SUBSET1=A, D-RECORD-BRACE1=A; implementation routed to DeclColon's syntax-cutover queue. Criteria added."
         },
         {
@@ -78431,6 +78344,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-06T16:37:45.172Z"
+        },
+        {
+          "n": 14,
+          "text": "D-ALT-CASES1=A: a field lists named cases such as Celsius(Float) inline, written exactly as inside an enum; parses, checks and runs on o0/o1/o2 with a golden; a named case cannot reuse a type's name in the same union (ui snapshot)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T17:18:17.636Z"
+        },
+        {
+          "n": 15,
+          "text": "D-BRACE-LAYOUT1=A: commas separate data members, and method declarations with bodies (including trait and impl bodies) take none; parser, formatter and every in-repo file follow it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T17:18:18.432Z"
+        },
+        {
+          "n": 16,
+          "text": "D-RECORD-ORDER1=A: record member order is part of the type and determines comparison; goldens prove ordering and the type-identity rule on o0/o1/o2, and every in-repo record is migrated in one cutover",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T17:18:19.319Z"
         }
       ],
       "refs": [],
@@ -78439,8 +78379,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T20:27:37.698Z",
-      "updated": "2026-11-06T17:04:59.082Z",
-      "updatedBy": "agent"
+      "updated": "2026-11-06T17:18:19.319Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0ui9zol",
@@ -81628,7 +81568,7 @@
       "id": "c01vsb2c",
       "num": 6324,
       "title": "Make a := binding that is never reassigned an error",
-      "body": "Owner order (2026-10-30): a mutable binding (:=) that is never reassigned or mutated must be an error, so :: is the only spelling for a value that never changes. Design only until the owner asks for implementation.",
+      "body": "Owner order (2026-10-30): a mutable binding (:=) that is never reassigned or mutated must be an error, so name: value (D-DECL-COLON1=A) is the only spelling for a value that never changes. Design only until the owner asks for implementation.",
       "kind": "feature",
       "track": "sidequest",
       "epoch": null,
@@ -81641,7 +81581,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: restated in the spellings of D-DECL-COLON1=A (: replaces ::), D-CALLSITE-MARK2=A (no call-site marks) and D-MOVE-SIGIL1=A (x.move() replaces ^x)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -81663,7 +81609,7 @@
         },
         {
           "n": 3,
-          "text": "After ratification the error is registered with what/why/fix text, a jet fix that rewrites := to ::, UI snapshots per case, and every in-repo site migrated in one cutover; golden, UI and cases compares lose 0 rows.",
+          "text": "D-MUT-NEVER1=A, in the spellings of D-DECL-COLON1=A and D-CALLSITE-MARK2=A: a := name never written in its scope is a registered error with what/why/fix text and a Safe fix that rewrites := to : (name: value). A write is =, a compound assignment, a field or index write rooted at the name, passing it to a & parameter, or calling a method that takes &self; a write inside any lambda, branch, loop, ?? block or compile-time block counts even if it never runs. Reading, x.move(), passing by value and writing through Shared are not writes. UI snapshots per case; every in-repo site migrated in one cutover; golden, UI and cases compares lose 0 rows.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -81677,8 +81623,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:54.660Z",
-      "updated": "2026-10-30T18:10:39.049Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-06T17:29:42.363Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0r2eell",
@@ -82259,7 +82205,7 @@
         },
         {
           "n": 5,
-          "text": "D-TEXT-FIXED1=A is built: a := String or &String parameter is edited in place with &s.insert(at, text), &s.remove(from, to), &s.truncate(n), &s.reserve(n) and &s.try_push(x); String.with_capacity(n) and s.capacity() exist; positions count characters; :: names reject every edit with a registered diagnostic; examples with golden output on o0, o1 and o2, and a paired perf cell against building a new String.",
+          "text": "D-TEXT-FIXED1=A is built: a := String or &String parameter is edited in place with plain calls (D-CALLSITE-MARK2=A): s.insert(at, text), s.remove(from, to), s.truncate(n), s.reserve(n) and s.try_push(x); String.with_capacity(n) and s.capacity() exist; positions count characters; a name: value String (D-DECL-COLON1=A) rejects every edit with a registered diagnostic; examples with golden output on o0, o1 and o2, and a paired perf cell against building a new String.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -82282,7 +82228,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T17:30:09.329Z",
-      "updated": "2026-10-31T21:20:08.919Z",
+      "updated": "2026-11-06T17:29:44.152Z",
       "updatedBy": "Main"
     },
     {
@@ -93729,6 +93675,11 @@
         {
           "at": "2026-11-06",
           "by": "Main",
+          "text": "Owner deconfliction 2026-11-06: added the full ratified content of D-CALLSITE-MARK2, D-MOVE-SIGIL1 and D-DECL-COLON1 as criteria (c8-c11), including the requirements carried over from #3452's superseded call-mark criteria; c6 now follows the owner's no-teaching order."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
           "text": "Owner order (greenfield): retired spellings get no teaching diagnostics. After the one-time conversion, ::, &x/^x call marks and ^ take are simply not Jet, and fall through to the ordinary parse and type errors. There is no registered retired-form code, UI snapshot or jet fix rewrite. Codes that exist only to teach the old call marks are deleted. c6 is read as: the parser no longer accepts the old forms, with no dedicated diagnostic."
         },
         {
@@ -93805,7 +93756,7 @@
         },
         {
           "n": 6,
-          "text": "The parser no longer accepts a :: binding; the retired form is a registered error with What/Why/Fix, a UI snapshot and a Safe jet fix that rewrites it to name: value",
+          "text": "The parser no longer accepts a :: binding, a ^ mark, or a call-site & or ^ mark outside #Policy(writes: .Explicit). Per the owner's order these retired spellings get no registered diagnostic, snapshot or jet fix rule (the E0397 and E0435 teaching is removed); the in-repo conversion is the whole cutover.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
@@ -93820,6 +93771,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-06T02:14:14.109Z"
+        },
+        {
+          "n": 8,
+          "text": "D-CALLSITE-MARK2=A: every call is plain, with no & or && on arguments or receivers, and sema takes each argument's convention from the callee. E0202 and E0224 retire. The changeability error quotes the signature line; two overlapping inputs with one edited stay an error; a use after a call that took the value names that call, with the fix x.copy() or a reorder; a call never copies on its own; values.push(values.len()) stays legal; a part of a list passed to a writing parameter is a write window. Marks remain only on a named write window (edit: &values[2..3]), a writing match (if &shape == { … }) and a task that takes a name. UI snapshots for each error; goldens on o0, o1 and o2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T17:29:33.041Z"
+        },
+        {
+          "n": 9,
+          "text": "D-CALLSITE-MARK2=A tooling: the editor shows & and && as inlay hints at calls and the language server underlines a changed argument; jet audit writes lists every call that edits or takes a named value; #Policy(writes: .Explicit) requires the marks on arguments and receivers, with a Safe fix that inserts them (UI snapshot).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T17:29:33.041Z"
+        },
+        {
+          "n": 10,
+          "text": "D-MOVE-SIGIL1=A: && marks a taken input in parameter types, before self and after task (fn seal(&&self), file: &&GzFile, task &&job { … }, fn(&&Map)); value positions use x.move(); ^ has no meaning and stays an error under D-SIGIL-FREED2 with no teaching diagnostic; the registry's move sigil is &&, and the editor grammars colour the take mark apart from logical and.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T17:29:33.041Z"
+        },
+        {
+          "n": 11,
+          "text": "D-DECL-COLON1=A: every name-introducing form is name: value: constants, functions, struct, enum, trait and module, imports (use process: core.process), the package header (package: { … }) and instances (int_cache: cache<Int>(32)). Kind parameters go on the kind word (first: fn<T>(xs: [T]) -> T?, Box: struct<T> { … }). Inside struct, trait, enum and foreign-module braces, name: Type lists members. impl and #Test blocks keep their form; associated types are Output: type and Output: T; a name: fn binding may call itself; {x:Debug} is unchanged; a brace group of only name: value entries is a record; a file-level x: Int is an alias, and using it as a number is a registered error with the fix x: Int{0} (UI snapshot); a bodiless fn(…) at file level is a function type.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-06T17:29:33.041Z"
         }
       ],
       "refs": [],
@@ -93830,7 +93817,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T02:04:25.306Z",
-      "updated": "2026-11-06T11:42:59.931Z",
+      "updated": "2026-11-06T17:29:33.875Z",
       "updatedBy": "Main"
     },
     {
@@ -176109,8 +176096,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-06T14:25:29.061Z"
+      "status": "ratified",
+      "created": "2026-11-06T14:25:29.061Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06"
     },
     {
       "id": "D-LAYOUT2",
@@ -176280,8 +176269,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-06T14:25:31.416Z"
+      "status": "ratified",
+      "created": "2026-11-06T14:25:31.416Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06"
     },
     {
       "id": "D-MOBILE-UNDEFER1",
@@ -176808,8 +176799,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-06T14:25:39.049Z"
+      "status": "ratified",
+      "created": "2026-11-06T14:25:39.049Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06"
     },
     {
       "id": "D-ONEAPP-WEBOUT1",
@@ -176977,8 +176970,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-06T14:25:41.745Z"
+      "status": "ratified",
+      "created": "2026-11-06T14:25:41.745Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06"
     },
     {
       "id": "D-OTA1",
@@ -177118,8 +177113,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-06T14:25:44.290Z"
+      "status": "ratified",
+      "created": "2026-11-06T14:25:44.290Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06"
     },
     {
       "id": "D-PLATFORM-OVERRIDE1",
@@ -177287,8 +177284,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-06T14:25:46.781Z"
+      "status": "ratified",
+      "created": "2026-11-06T14:25:46.781Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06"
     },
     {
       "id": "D-RUN-DEVICE1",
@@ -177951,8 +177950,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-06T14:25:56.119Z"
+      "status": "ratified",
+      "created": "2026-11-06T14:25:56.119Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06"
     },
     {
       "id": "D-VIEW-SET1",
@@ -178468,8 +178469,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-06T14:26:03.511Z"
+      "status": "ratified",
+      "created": "2026-11-06T14:26:03.511Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06"
     },
     {
       "id": "D-ALT-SUBSET1",
@@ -178791,8 +178794,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-06T14:26:08.386Z"
+      "status": "ratified",
+      "created": "2026-11-06T14:26:08.386Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06"
     },
     {
       "id": "D-RECORD-BRACE1",
@@ -179139,8 +179144,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-06T14:26:14.697Z"
+      "status": "ratified",
+      "created": "2026-11-06T14:26:14.697Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06"
     },
     {
       "id": "D-PROCESS-EXEC1",
@@ -179285,8 +179292,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-06T14:53:09.823Z"
+      "status": "ratified",
+      "created": "2026-11-06T14:53:09.823Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06"
     },
     {
       "id": "D-CHANNEL-AUTO2",
@@ -179412,8 +179421,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-06T17:05:04.109Z"
+      "status": "ratified",
+      "created": "2026-11-06T17:05:04.109Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-06"
     }
   ],
   "questions": [
@@ -181522,7 +181533,7 @@
       "kind": "question",
       "text": "no clue what this means. rewrite in plain english",
       "status": "answered",
-      "answer": "Rewritten in plain English. The question is how a Jet screen shows a real system view, such as Apple Maps or the camera, inside it. A says one opt-in call, native.view(...), places the system's real view in the screen, with layout, focus and the screen reader working as for any view. Effects it can't support are refused at compile time. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "answer": "A explicitly places a real system view, such as Apple Maps, inside a Jet screen through native.view(...), joining layout, focus and accessibility. One cost remains: mixed screens add drawing work and cannot apply Jet pixel filters to the live host view; keep embedded regions small or use a drawn substitute where those effects matter. Unsupported combinations must be reported when a scene is built, including at runtime, because preview checks cannot cover every possible screen. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
       "created": "2026-11-06T15:33:39.084Z",
       "answeredAt": "2026-11-06",
       "answeredBy": "Main"
@@ -181535,7 +181546,7 @@
       "kind": "question",
       "text": "if experts want to match the look of a native system, then they should be able to use a library as opt in or something like that",
       "status": "answered",
-      "answer": "Yes, and A now does exactly that. Beginners get one Jet look with a typed theme, and back, menus and scrolling still behave like each system. Experts opt in to the native library: theme: native.theme() follows the system's font, colors and shapes, and native controls copy the system exactly where needed. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "answer": "A gives beginners one useful Jet design with typed app-wide and local overrides, while honoring live light, dark and accessibility settings. Experts can choose native.theme() for system-like styling through the same theme type; exact host controls use the separate native embedding path, not the theme preset. One cost remains: those presets are opt-in approximations and can lag a system redesign, so they do not guarantee an exact host appearance. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
       "created": "2026-11-06T15:36:12.819Z",
       "answeredAt": "2026-11-06",
       "answeredBy": "Main"
@@ -181548,7 +181559,7 @@
       "kind": "question",
       "text": "this is confusing and I dont know what is being asked. The code is inconsistent between options so it is hard to compare",
       "status": "answered",
-      "answer": "Redone against the no-dot ruling, with one program in every option: a settings record whose temp is Celsius(Float) or Fahrenheit(Float). The only question now is whether those named cases may be written inline in the field, exactly as inside an enum, instead of declaring an enum first. A says yes, and a bare name in a union always stays a type. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "answer": "A lets a field write Celsius(Float) | Fahrenheit(Float) directly, using the same dot-free case declarations as an enum; bare names remain types. One cost remains: a named empty state such as Off still needs a declared enum, while ? means absence only. C now offers a genuine alternative—an anonymous enum body in the field, including empty cases—rather than guessing whether a bare name is a type or a case. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
       "created": "2026-11-06T15:38:42.925Z",
       "answeredAt": "2026-11-06",
       "answeredBy": "Main"
@@ -181561,7 +181572,7 @@
       "kind": "question",
       "text": "with commas everywhere, it does make sense to have commas for all members but does not make sense that methods would also require commas",
       "status": "answered",
-      "answer": "Agreed, and the ballot now recommends exactly that: a comma after every field, enum case and value entry, on one line or many, and no comma after a method, because its closing brace already ends it. Rust and Kotlin follow the same split. The old one-line-only rule is now option C. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "answer": "A puts commas between data members and none after method declarations with bodies. A final comma is accepted in source, and the formatter writes it only for multiline lists; closure-valued fields are still data and do not get the method exemption. One cost remains: formatted multiline data declarations visibly carry commas, while ordinary code blocks stay unchanged. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
       "created": "2026-11-06T15:41:25.636Z",
       "answeredAt": "2026-11-06",
       "answeredBy": "Main"
@@ -181574,7 +181585,7 @@
       "kind": "question",
       "text": "what does python do? Would sorting alphabetically be the preferred behavior in most use cases? if we do go with the current recommendation, then we should have a way to sort alphabetically with a better api using jet's powerful api features",
       "status": "answered",
-      "answer": "Python compares tuples and ordered dataclasses field by field in written order, and refuses to compare dicts at all. Alphabetical order is not the better default: it would sort a {year, month, day} date by day first. The ballot keeps written order and adds guests.sort_by(.first, .last), so any order, including alphabetical, is one call. The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "answer": "Python tuples and ordered dataclasses compare in written order; dictionaries support equality but refuse ordering, so saying Python never compares dicts was wrong. A preserves member order in the record type and uses it for comparison, display and encoding; every option adds multi-key sort_by for other orders. One cost remains: moving members changes type identity and default sort/output order, so stable boundaries need fixed record types and stable sorts should name their keys. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
       "created": "2026-11-06T15:44:46.196Z",
       "answeredAt": "2026-11-06",
       "answeredBy": "Main"
@@ -181587,8 +181598,21 @@
       "kind": "question",
       "text": "engineer away downsides",
       "status": "answered",
-      "answer": "Both downsides are now designed out rather than listed. Every check runs and the target is opened before any cleanup, so a late failure is down to rare kernel resource limits, and Jet's temporary files that the new program names are kept instead of deleted. Experts who need the old behavior, where failures return and nothing is cleaned up, write .cleanup(.Skip). The reworked ballot text replaces the posted one once its Opus and Sol reviews finish.",
+      "answer": "These risks cannot honestly be called removed or measured as rare: checks before cleanup do not guarantee that a program will start afterward. A reuses normal cleanup, but one cost remains: it is irreversible, including deleted input files and late startup failures; explicit kept handles or .cleanup(.Skip) are the escape. I removed automatic temporary-file retention because guessing dependencies from argument strings misses real inputs and can leave files without an owner. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
       "created": "2026-11-06T15:45:14.476Z",
+      "answeredAt": "2026-11-06",
+      "answeredBy": "Main"
+    },
+    {
+      "id": "qcg2gigj",
+      "cardId": "c0u5tm84",
+      "decisionId": "D-GPU-UI1",
+      "by": "owner",
+      "kind": "question",
+      "text": "are you asking about measuring whether gpu acceleration should also be tested and implemented for desktop? Why wouldnt we do that??",
+      "status": "answered",
+      "answer": "Yes, desktops should be measured too; the ballot left them out for the wrong reason. Linux was set aside because D-RAYLIB-DRIVER-LOAD1=A keeps graphical Linux programs as one static file, and GPU drivers (Mesa, NVIDIA) are shared libraries a static program cannot load, so GPU on Linux was only an opt-in dynamic build. That is a real constraint, but one to engineer around, not to accept: the revision will test whether a static program can carry a small GPU helper started through the system loader only when a driver is present, keeping the single-file deploy. I am revising the ballot so A uses the graphics chip by default on every platform (Linux, macOS, Windows and phones), each only after its own paired measurement passes, with software fallback; how Linux loads the driver gets its own clear choice. The revised ballot goes through a fresh author, Opus and Sol review before I post it, and I will tell you when it is live.",
+      "created": "2026-11-06T17:09:11.574Z",
       "answeredAt": "2026-11-06",
       "answeredBy": "Main"
     }
@@ -182447,6 +182471,258 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-06T17:29:44.152Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l7lwif",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T17:29:42.363Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01vsb2c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:29:41.542Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01vsb2c",
+      "note": "criteria,body"
+    },
+    {
+      "at": "2026-11-06T17:29:36.599Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06m6abh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:29:35.785Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06m6abh",
+      "note": "criteria,body"
+    },
+    {
+      "at": "2026-11-06T17:29:33.875Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ofw8u4",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:29:33.041Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ofw8u4",
+      "note": "criteria"
+    },
+    {
+      "at": "2026-11-06T17:29:31.215Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0meo2tr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:29:30.405Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0meo2tr",
+      "note": "criteria,title,body,plan"
+    },
+    {
+      "at": "2026-11-06T17:29:17.039Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04j9ahx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:29:16.106Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04j9ahx",
+      "note": "addTags,tags"
+    },
+    {
+      "at": "2026-11-06T17:18:19.319Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rqt0kq",
+      "note": "#16 D-RECORD-ORDER1=A: record member order is part of the type a"
+    },
+    {
+      "at": "2026-11-06T17:18:18.432Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rqt0kq",
+      "note": "#15 D-BRACE-LAYOUT1=A: commas separate data members, and method "
+    },
+    {
+      "at": "2026-11-06T17:18:17.636Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rqt0kq",
+      "note": "#14 D-ALT-CASES1=A: a field lists named cases such as Celsius(Fl"
+    },
+    {
+      "at": "2026-11-06T17:18:12.184Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqt0kq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-06T17:17:45.418Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qcg2gigj",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T17:14:03.303Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CHANNEL-AUTO2",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-06T17:14:03.303Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PROCESS-EXEC1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-06T17:14:03.303Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-RECORD-ORDER1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-06T17:14:03.303Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BRACE-LAYOUT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-06T17:14:03.303Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ALT-CASES1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-06T17:14:03.303Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-THEME2",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-06T17:14:03.303Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PLATFORM-OVERRIDE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-06T17:14:03.303Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-OTA1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-06T17:14:03.303Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ONEAPP-WEBOUT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-06T17:14:03.303Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ONEAPP-RENDER1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-06T17:14:03.303Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LAYOUT2",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-06T17:14:03.303Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-I18N1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-06T17:09:11.574Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "qcg2gigj",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T17:08:11.924Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-06T17:08:11.924Z"
+    },
+    {
+      "at": "2026-11-06T17:06:15.285Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qbfobu0n",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T17:06:14.394Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qafz11do",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T17:06:13.519Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q9b2lokw",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T17:06:12.593Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q8k58yhf",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T17:06:11.687Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q7lo06nq",
+      "note": ""
+    },
+    {
+      "at": "2026-11-06T17:06:10.459Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q6z627du",
+      "note": ""
+    },
     {
       "at": "2026-11-06T17:06:09.270Z",
       "by": "Main",
@@ -185939,713 +186215,6 @@
       "action": "card.update",
       "ref": "c0pgowhn",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:33:13.698Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:32:46.700Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rqi33c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:32:46.026Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-05T23:32:44.584Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-05T23:32:43.815Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-05T23:31:48.443Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rqi33c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:29:19.674Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-05T23:27:51.171Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jwqaa5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-05T23:25:14.974Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c081c9o8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:25:14.299Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jfu2us",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-05T23:25:09.564Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:24:26.827Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:23:47.257Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vvaake",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-05T23:23:46.245Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vvaake",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-05T23:23:45.546Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0vvaake",
-      "note": "#1 The comptime reflection producer fills FieldInfo.index, and "
-    },
-    {
-      "at": "2026-11-05T23:23:40.409Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vvaake",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:22:47.728Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hn7w1n",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:22:46.822Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:19:56.138Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0ug03od",
-      "note": "Moving a handle field out of an aggregate (^x.f) does not transfer ownership"
-    },
-    {
-      "at": "2026-11-05T23:18:07.853Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-05T23:17:53.709Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-ENV-PATHDEP1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:17:52.777Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-DATA-ARROW-IPC1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:17:51.887Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-CORE-COVERAGE-RATCHET1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:17:51.016Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-NIX-INDEX-ROOT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:17:50.291Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-TEST-INVOKE1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:17:49.600Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-EXEC-RELAUNCH1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:17:48.816Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-EXEC-NOEXEC1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:17:47.917Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-OPT-LEDGER-IR1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:17:46.332Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-LSP-SESSION1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:17:45.457Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-GAME-PLATFORM1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:17:44.616Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-BUILD-TOOLCHAIN1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:17:36.223Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:17:35.508Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jwqaa5",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-05T23:14:53.292Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:14:19.321Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0max8v8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:14:18.371Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jwqaa5",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-05T23:14:16.883Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jwqaa5",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-05T23:14:16.188Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jwqaa5",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-05T23:14:15.061Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jwqaa5",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-05T23:11:10.348Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:09:57.039Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-EXEC-TIERUP1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-05T23:09:57.038Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-PERF-RUNCELL2",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-05T23:09:55.406Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#135"
-    },
-    {
-      "at": "2026-11-05T23:09:53.840Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#134"
-    },
-    {
-      "at": "2026-11-05T23:08:29.576Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ca4l7i",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-05T23:08:14.432Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "qihioell",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:08:02.193Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ca4l7i",
-      "note": "#5 A missing LLDB is a registered diagnostic with what/why/fix "
-    },
-    {
-      "at": "2026-11-05T23:08:00.311Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ca4l7i",
-      "note": "#4 A tests/cases row sets a breakpoint in a Jet source line and"
-    },
-    {
-      "at": "2026-11-05T23:07:58.811Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ca4l7i",
-      "note": "#3 JetLSP's debug tests build their fixtures natively, never wi"
-    },
-    {
-      "at": "2026-11-05T23:07:57.578Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ca4l7i",
-      "note": "#2 Canvas debugging (DebugSourceGit.jet and the other JetDevser"
-    },
-    {
-      "at": "2026-11-05T23:07:55.276Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ca4l7i",
-      "note": "#1 JetDebug drives LLDB on the native O0 image's DWARF (frames,"
-    },
-    {
-      "at": "2026-11-05T23:07:21.414Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:07:19.134Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "qh2zvbft",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:07:09.400Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T23:07:07.973Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#63"
-    },
-    {
-      "at": "2026-11-05T23:07:07.204Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#149"
-    },
-    {
-      "at": "2026-11-05T23:07:06.398Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#197"
-    },
-    {
-      "at": "2026-11-05T23:07:05.624Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#196"
-    },
-    {
-      "at": "2026-11-05T23:07:04.822Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#192"
-    },
-    {
-      "at": "2026-11-05T23:06:03.841Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0max8v8",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-05T23:05:47.901Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "qg66683h",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T23:04:12.241Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-05T23:04:12.241Z"
-    },
-    {
-      "at": "2026-11-05T23:04:07.901Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c08cndtc",
-      "note": "core process.run_all runs its specs nearly sequentially under jet script"
-    },
-    {
-      "at": "2026-11-05T23:01:03.861Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T22:56:23.335Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0t9jcat",
-      "note": "Port JetDevserver to Jet: jet check reports 0 problems"
-    },
-    {
-      "at": "2026-11-05T22:55:46.129Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#70"
-    },
-    {
-      "at": "2026-11-05T22:55:10.070Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rdxo6y",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-05T22:53:22.445Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T22:52:54.701Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wgdsj2",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-05T22:52:53.343Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wgdsj2",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-05T22:52:48.767Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wgdsj2",
-      "note": "#1 Char :Debug interpolation prints the quoted, escaped form on"
-    },
-    {
-      "at": "2026-11-05T22:44:53.259Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T22:41:56.347Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0iv7hyj",
-      "note": "Soundness: a struct holding a clone:false handle (WsConn) copies implicitly and double-drops (SIGSEGV)"
-    },
-    {
-      "at": "2026-11-05T22:41:38.134Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-05T22:40:11.753Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T22:37:00.296Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0iqh0og",
-      "note": "jet prove capture is slow: prove_replay_rejects_schema_and_identity_changes_as_typed_failures times out (first capture ~104 s)"
-    },
-    {
-      "at": "2026-11-05T22:36:59.477Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T22:36:00.141Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0vvaake",
-      "note": "Comptime ICE: compiler value FieldInfo lacks member index (JetSema Comptime/Reflection.jet:809)"
-    },
-    {
-      "at": "2026-11-05T22:35:58.872Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T22:32:31.246Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#141"
-    },
-    {
-      "at": "2026-11-05T22:30:16.856Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-ENV-PATHDEP1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-11-05T22:30:15.867Z",
-      "by": "Main",
-      "action": "decision.add",
-      "ref": "D-ENV-PATHDEP1",
-      "note": "Path dependencies run outside the project environment"
-    },
-    {
-      "at": "2026-11-05T22:29:43.306Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hn7w1n",
-      "note": "#141 jet run --no-prepare, jet dev and jet test refuse with E1355"
-    },
-    {
-      "at": "2026-11-05T22:22:21.290Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0rqi33c",
-      "note": "#73"
-    },
-    {
-      "at": "2026-11-05T22:22:20.400Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#68"
-    },
-    {
-      "at": "2026-11-05T22:22:01.408Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T22:21:56.744Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#147"
-    },
-    {
-      "at": "2026-11-05T22:21:55.809Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#148"
-    },
-    {
-      "at": "2026-11-05T22:21:54.943Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#146"
-    },
-    {
-      "at": "2026-11-05T22:21:54.102Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#145"
-    },
-    {
-      "at": "2026-11-05T22:21:53.051Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#144"
-    },
-    {
-      "at": "2026-11-05T22:21:52.032Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#143"
-    },
-    {
-      "at": "2026-11-05T22:21:50.783Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#142"
-    },
-    {
-      "at": "2026-11-05T22:21:49.424Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#141"
-    },
-    {
-      "at": "2026-11-05T22:21:48.555Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#136"
-    },
-    {
-      "at": "2026-11-05T22:18:11.799Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-TEST-INVOKE1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-05T22:14:16.124Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0tte6nb",
-      "note": "Unsafe-site baseline in safety.md is stale: 1127 recorded, 1335 actual on dev"
-    },
-    {
-      "at": "2026-11-05T22:14:15.268Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pgowhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-05T22:13:54.741Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0d0i1i1",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-05T22:13:43.743Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0d0i1i1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-05T22:11:13.646Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0zyuv5p",
-      "note": "jet test AOT batch: claims that set env or cwd ICE the batch with no failing-claim attribution"
     }
   ],
   "nextNum": 368,
