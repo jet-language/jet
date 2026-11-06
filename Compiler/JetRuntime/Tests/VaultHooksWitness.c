@@ -9,9 +9,11 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/wait.h>
-typedef struct { const unsigned char *data; int64_t length, capacity; } Text;
+// A text body is 32 bytes behind an 8-byte owner word; text() builds an
+// immortal view (cap 0 over a real buffer) that no clone or drop touches.
+typedef struct { const unsigned char *data; int64_t length, capacity, cache; } Text;
 typedef struct { int64_t refs; int64_t (*invoke)(void *, const Text *); int64_t (*release)(void *); int64_t answer; } Closure;
-_Static_assert(sizeof(Text) == 24 && sizeof(Closure) == 32, "native transport carrier geometry");
+_Static_assert(sizeof(Text) == 32 && sizeof(Closure) == 32, "native transport carrier geometry");
 extern void jet_rt_vault_test_hooks_defaults_fixture(const Text *, const Text *, const Text *);
 extern void jet_rt_alloc_init(void);
 extern void jet_rt_thread_init(void);
@@ -35,7 +37,7 @@ extern void jet_rt_vault_set_test_backup_barrier(const Text *, void *, void *);
 extern void jet_rt_vault_test_pause_after_backup(const Text *);
 static atomic_uint destroyed, released, completed;
 static _Thread_local unsigned this_thread_destroyed;
-static Text text(const char *s) { return (Text){(const unsigned char *)s, (int64_t)strlen(s), 0}; }
+static Text text(const char *s) { return (Text){(const unsigned char *)s, (int64_t)strlen(s), 0, 0}; }
 static int64_t destroy(void *closure, void *state) {
     assert(++this_thread_destroyed == 1);
     atomic_fetch_add(&destroyed, 1);

@@ -77,7 +77,8 @@ fn data_metadata_kind(target: I64, ordinal: I64) {
         && jet_rt_string_eq(encoding_word(wrapping(a + DATA_SOURCE_MEMBER)), encoding_word(wrapping(b + DATA_SOURCE_MEMBER)))
         && process_text_list_eq(encoding_word(wrapping(a + DATA_SOURCE_PARAMETERS)), encoding_word(wrapping(b + DATA_SOURCE_PARAMETERS)), false)
 }
-// Out is a borrowed, read/clone-only stack Text header.
+// Out receives a read-only view (data, len, cap) with no owner word of its own:
+// a caller copies the bytes to own the text, never clones or drops the view.
 #Export(c) fn jet_rt_handle_field_data_source_identity_locator(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + DATA_SOURCE_LOCATOR)), out, I64{24}) }
 #Export(c) fn jet_rt_handle_field_data_source_identity_member(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + DATA_SOURCE_MEMBER)), out, I64{24}) }
 #Export(c) fn jet_rt_handle_clone_data_provenance(value: I64) -> I64 {

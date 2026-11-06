@@ -15,7 +15,8 @@
 #include <string.h>
 #include <sys/types.h>
 
-typedef struct { unsigned char *data; int64_t len, capacity; } Text;
+// A heap text is this 32-byte body behind its 8-byte owner word.
+typedef struct { unsigned char *data; int64_t len, capacity, cache; } Text;
 typedef struct {
     int64_t kind, operation;
     Text *resource;
@@ -23,7 +24,7 @@ typedef struct {
     Text *cause;
     int64_t limit;
 } IOError;
-_Static_assert(sizeof(Text) == 24, "Text24");
+_Static_assert(sizeof(Text) == 32 && offsetof(Text, capacity) == 16, "refcounted text body");
 _Static_assert(sizeof(IOError) == 56 && offsetof(IOError, cause) == 40, "IOError56");
 
 typedef struct Spec Spec;

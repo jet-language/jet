@@ -725,7 +725,8 @@ fn files_texts_sort(data: I64, count: I64) {
     jet_rt_string_drop(path)
     jet_rt_free(owner, I64{16}, I64{8})
 }
-// Out is a borrowed read/clone-only stack Text header.
+// Out receives a read-only view (data, len, cap) with no owner word of its own:
+// a caller copies the bytes to own the path, never clones or drops the view.
 #Export(c) fn jet_rt_handle_field_jet_temp_file_owner_path(owner: I64, out: I64) { coll_copy(rt_text_word(wrapping(owner + I64{8})), out, I64{24}) }
 
 // (unix): -1 keeps an id, other ids must be u32; the range refusals precede the

@@ -129,7 +129,8 @@ fn zone_rows_equal(left: I64, right: I64, infos: Bool) -> Bool {
         zone_rows_equal(time_glue_word(wrapping(left + ZONE_INFOS)), time_glue_word(wrapping(right + ZONE_INFOS)), true)
 }
 #Export(c) fn jet_rt_handle_field_jet_zone_name(value: I64, out: I64) {
-    // CAbi13342-44 lends a read/clone-only E4 header, never an owner.
+    // Lends a read-only view (data, len, cap) with no owner word of its own:
+    // a caller copies the bytes to own the name, never clones or drops the view.
     text :: time_glue_word(wrapping(value + ZONE_NAME))
     time_glue_store(out, rt_text_data(text))
     time_glue_store(wrapping(out + I64{8}), rt_text_len(text))

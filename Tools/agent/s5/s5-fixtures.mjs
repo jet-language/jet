@@ -42,17 +42,14 @@ if (!P.ready) {
   P.runner('Compiler/JetBackend/Tests/test-native-test-host.mjs', ['fixtures-prerequisites'], parked.get('Compiler/JetBackend/Tests/test-native-test-host.mjs') ?? []);
   P.finish(); process.exit(process.exitCode);
 }
-let sealedInputs = false;
 if (!inputs || !fs.existsSync(path.join(inputs, 'manifest.json'))) blocked('frozen-inputs', 'immutable preserved input manifest absent');
 else try {
   const manifest = JSON.parse(fs.readFileSync(path.join(inputs, 'manifest.json'), 'utf8'));
-  if (manifest.head !== P.head || !Array.isArray(manifest.files) || manifest.files.length !== 14) throw Error('immutable preserved input census/pin mismatch');
+  if (manifest.head !== P.head || !Array.isArray(manifest.files) || manifest.files.length !== 12) throw Error('immutable preserved input census/pin mismatch');
   const changed = manifest.files.filter(file => !file.path || path.isAbsolute(file.path) || file.path.split(path.sep).includes('..') || !fs.existsSync(path.join(inputs, file.path)) || hash(path.join(inputs, file.path)) !== file.sha256);
-  if (changed.length || new Set(manifest.files.map(file => file.path)).size !== 14) throw Error('immutable preserved input digest/inventory mismatch');
-  sealedInputs = true; P.receipt('frozen-inputs', 'PASS', {manifest: path.join(inputs, 'manifest.json'), files: manifest.files.map(({path, sha256}) => ({path, sha256}))});
+  if (changed.length || new Set(manifest.files.map(file => file.path)).size !== 12) throw Error('immutable preserved input digest/inventory mismatch');
+  P.receipt('frozen-inputs', 'PASS', {manifest: path.join(inputs, 'manifest.json'), files: manifest.files.map(({path, sha256}) => ({path, sha256}))});
 } catch (error) { blocked('frozen-inputs', error.message); }
-const charOracle = inputs ? path.join(inputs, 'char-debug-goldens.bin') : out('absent-char-oracle');
-const fmtExpected = inputs ? path.join(inputs, 'fmt-expected.out') : out('absent-fmt-expected');
 const witnessDir = out('witnesses'); fs.mkdirSync(witnessDir);
 const binary = name => path.join(witnessDir, name);
 const add = (runner, commands, needs = [], extra = {}) => registry.set(`${runner}.mjs`, {commands, needs, extra});
@@ -73,7 +70,7 @@ add('run-main-fixtures', ['link','run'].map(mode => r('run-main-fixtures', out('
 add('check-object', [r('check-object', object, out('object-audit'))], runtime);
 add('check-runtime', [r('check-runtime', out('check-runtime'), '--assemble-only'), r('check-runtime', out('check-runtime-full'))], front);
 for (const runner of ['test-route-abi','test-native-route-handles','test-native-route-records']) add(runner, [r(runner)]);
-add('run-fmt-parity', [r('run-fmt-parity', 'prepare', out('fmt-parity'), fmtExpected), r('run-fmt-parity', 'compare', out('fmt-parity'), jet, fmtExpected)], [...front, fmtExpected]);
+add('run-fmt-parity', [r('run-fmt-parity', 'prepare', out('fmt-parity')), r('run-fmt-parity', 'compare', out('fmt-parity'), jet)], front);
 add('run-test-runtime', [r('run-test-runtime', out('test-runtime'), object, jet)], [...runtime, jet]);
 add('run-native-layout', [r('run-native-layout', '--native', out('native-layout'), object)], runtime);
 const nfc = out('nfc-expected.scalars');
@@ -90,8 +87,8 @@ const ui = {
   'key':'UiKeyWitness','raylib-metadata':'UiRaylibMetadataWitness','view-snapshots':'UiViewSnapshotsWitness',
 };
 for (const [name, witness] of Object.entries(ui)) {
-  const runner = `run-ui-${name}-witness`, args = name === 'key' ? [charOracle] : [];
-  add(runner, [r(runner, out(runner), binary(witness), ...args)], [binary(witness), ...args]);
+  const runner = `run-ui-${name}-witness`;
+  add(runner, [r(runner, out(runner), binary(witness))], [binary(witness)]);
 }
 for (const [runner,witness] of [['run-root-cleanup','RootCleanupWitness'],['run-data-sequence-stops','DataTreeWitness'],['run-scalar-reflect-stops','ScalarReflectWitness']]) add(runner,[r(runner,out(runner),binary(witness))],[binary(witness)]);
 add('run-record-variant-panic',[r('run-record-variant-panic',out('record-variant-panic'),...['DataTreeWitness','DataEventWitness','TaskVariantPanicWitness'].map(binary))],['DataTreeWitness','DataEventWitness','TaskVariantPanicWitness'].map(binary));
@@ -146,8 +143,7 @@ async function execute(file) {
     }
     const needs=definition.needs;
     const absent=needs.filter(file=>!fs.existsSync(file));
-    if((needs.includes(charOracle)||needs.includes(fmtExpected))&&!sealedInputs)blocked(name,'preserved frozen inputs absent or unsealed');
-    else if(absent.length)blocked(name,`required inputs absent: ${absent.join(', ')}`);
+    if(absent.length)blocked(name,`required inputs absent: ${absent.join(', ')}`);
     else await start(name,['timeout','--kill-after=10s','3000s',...argv],{...env,...definition.extra});
   }
 }

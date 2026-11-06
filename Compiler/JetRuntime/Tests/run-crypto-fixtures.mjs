@@ -40,11 +40,16 @@ if (mode === 'assemble') {
         });
         return `// [unit source: ${path}]\n${lines.join('\n')}`;
     });
-    writeFileSync(join(unit, 'Source/Fixture.jet'), [...imports, '', ...bodies].join('\n'));
+    const source = [...imports, '', ...bodies].join('\n');
+    writeFileSync(join(unit, 'Source/Fixture.jet'), source);
     writeFileSync(join(unit, 'package.jet'), readFileSync(join(root, 'Compiler/JetRuntime/package.jet')));
-    const entries = readFileSync(join(root, 'Compiler/JetRuntime/exports.list'), 'utf8').split('\n').filter(x => x && !x.startsWith('#'));
-    for (const name of fixtures) for (const match of readFileSync(join(root, `Compiler/JetRuntime/Tests/Fragments.fixture/${name}Tests.jet`), 'utf8').matchAll(/#Export\(c\)\s+fn\s+(\w+)\(/gu)) entries.push(match[1]);
-    writeFileSync(join(unit, 'exports.list'), entries.sort().join('\n') + '\n');
+    // The runtime's own exports and the fixtures' KAT exports, as
+    // run-residue-fixtures.mjs derives them from the same sources.
+    const names = [...source.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gmu)].map(match => match[1]);
+    if (new Set(names).size !== names.length) throw Error('duplicate fixture export');
+    const init = new Map([...source.matchAll(/^\/\/ runtime-init: (\d+)(?: when \S+)?\n#Export\(c\) fn (\w+)/gmu)].map(match => [match[2], match[1]]));
+    init.set('jet_rt_alloc_init', '0');
+    writeFileSync(join(unit, 'exports.list'), names.sort().map(name => name === 'jet_rt_panic_list_bounds' ? `${name} int-index-seam` : init.has(name) ? `${name} init ${init.get(name)}` : name).join('\n') + '\n');
     writeFileSync(join(out, 'sources.receipt.json'), JSON.stringify({paths}, null, 2) + '\n');
 } else if (mode === 'lower') {
     const prefix = join(unit, 'fixture');

@@ -6,7 +6,9 @@
 #include <string.h>
 #include <unistd.h>
 
-typedef struct { unsigned char *ptr; int64_t len, cap; } Text;
+// A heap text is this 32-byte body behind its 8-byte owner word; borrowed()
+// builds an immortal view (cap 0 over a real buffer) that no clone or drop touches.
+typedef struct { unsigned char *ptr; int64_t len, cap, cache; } Text;
 typedef struct { int64_t len, cap; uint8_t *data; } Bytes;
 typedef struct {
     int64_t operation;
@@ -22,7 +24,7 @@ typedef struct {
     Text *cause;
     int64_t limit;
 } IOError;
-_Static_assert(sizeof(Text) == 24 && sizeof(Bytes) == 24, "carrier sizes");
+_Static_assert(sizeof(Text) == 32 && sizeof(Bytes) == 24, "carrier sizes");
 _Static_assert(sizeof(IOError) == 56, "IOError size");
 typedef struct { int64_t kind, has_os_code, os_code; Text *message; } ResolveError;
 _Static_assert(sizeof(ResolveError) == 32, "ResolveError size");
@@ -71,7 +73,7 @@ static void check_text(Text *value, const char *expected) {
     assert(memcmp(value->ptr, expected, (size_t)value->len) == 0);
 }
 static Text borrowed(const char *value) {
-    return (Text){(unsigned char *)value, (int64_t)strlen(value), 0};
+    return (Text){(unsigned char *)value, (int64_t)strlen(value), 0, 0};
 }
 
 int main(void) {

@@ -1,20 +1,22 @@
 #!/usr/bin/env node
-// Jet source-body comparison against saved formatter oracle bytes.
-// Preparation preserves every case without invoking a live Rust reference.
+// Jet source-body comparison against the frozen formatter bytes committed as
+// FmtParityExpected.out (sha256 f7c9a211…). Preparation runs no reference.
 // This is not native selector lowering or runtime-pack admission proof.
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-const [mode, output, checker, frozenExpected] = process.argv.slice(2);
+const here = dirname(fileURLToPath(import.meta.url));
+const root = resolve(here, '../../..');
+const frozenExpected = join(here, 'FmtParityExpected.out');
+const [mode, output, checker] = process.argv.slice(2);
 if (mode === 'reference') {
   console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
   process.exit(0);
 }
-if (!['prepare', 'compare'].includes(mode) || !output || (mode === 'compare' && !checker))
-  throw Error('usage: run-fmt-parity.mjs prepare OUT [FROZEN_EXPECTED] | compare OUT CHECKER [FROZEN_EXPECTED]');
+if (!['prepare', 'compare'].includes(mode) || !output || (mode === 'compare' ? !checker || process.argv.length !== 5 : process.argv.length !== 4))
+  throw Error('usage: run-fmt-parity.mjs prepare OUT | compare OUT CHECKER');
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
 const i = value => ({ kind: 'int', value: String(value) });
@@ -64,19 +66,19 @@ if (mode === 'prepare') {
   writeFileSync(join(out, 'cases.json'), JSON.stringify(cases, null, 2) + '\n');
   writeFileSync(join(out, 'source.jet'), jet);
   writeFileSync(join(out, 'fmt_source.jet'), readFileSync(join(root, 'Core/Text/Fmt.jet')));
-  writeFileSync(join(out, 'package.jet'), 'name: "fmt_source_parity"\nversion: "0.0.1"\nedition: "2028"\n');
+  writeFileSync(join(out, 'package.jet'), 'name: "fmt_source_parity"\nversion: "0.0.1"\nedition: "2026"\n');
   console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
-  if (checker) writeFileSync(join(out, 'expected.out'), readFileSync(resolve(checker)));
-  console.log(`fmt parity prepared: kernels=${kernels.length} cases=${cases.length}; expected bytes must be supplied frozen; source/native comparison NOT RUN`);
+  writeFileSync(join(out, 'expected.out'), readFileSync(frozenExpected));
+  console.log(`fmt parity prepared: kernels=${kernels.length} cases=${cases.length}; expected bytes are the frozen FmtParityExpected.out; source/native comparison NOT RUN`);
 } else {
   // Refresh the source body after Core parity fixes without regenerating or
-  // weakening the saved Rust oracle bytes.
+  // weakening the frozen expected bytes.
   writeFileSync(join(out, 'fmt_source.jet'), readFileSync(join(root, 'Core/Text/Fmt.jet')));
   writeFileSync(join(out, 'source.jet'), jet);
   const checkerPath = realpathSync(resolve(checker));
   const checkerSha256 = createHash('sha256').update(readFileSync(checkerPath)).digest('hex');
   const actual = run(resolve(checker), ['run', '--release', join(out, 'source.jet')], 'source-run');
-  const expected = readFileSync(frozenExpected ? resolve(frozenExpected) : join(out, 'expected.out'), 'utf8');
+  const expected = readFileSync(frozenExpected, 'utf8');
   function blocks(text) {
     const result = new Map();
     for (const row of cases) {

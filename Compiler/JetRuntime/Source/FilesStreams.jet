@@ -52,7 +52,8 @@ fn files_writer_path(writer: I64) -> I64 { fd_word(writer, I64{24}) }
 
 #Export(c) fn jet_rt_handle_drop_jet_file_writer(writer: I64) { jet_fd_drop_raw(writer) }
 #Export(c) fn jet_std_file_writer_path(writer: I64) -> I64 { jet_fd_path_raw(writer) }
-// The Rust original handle field: out is a borrowed read/clone-only Text header.
+// Out receives a read-only view (data, len, cap) with no owner word of its own:
+// a caller copies the bytes to own the path, never clones or drops the view.
 #Export(c) fn jet_rt_handle_field_jet_file_writer_path(writer: I64, out: I64) { coll_copy(files_writer_path(writer), out, I64{24}) }
 
 FILES_WRITE_WHOLE_ZERO :: I64{-4097}

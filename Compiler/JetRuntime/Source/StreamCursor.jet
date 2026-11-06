@@ -40,8 +40,8 @@ fn stream_clone(handle: I64) -> I64 {
 #Export(c) fn jet_rt_handle_clone_jet_cursor(handle: I64) -> I64 { stream_clone(handle) }
 #Export(c) fn jet_rt_handle_clone_jet_reader(handle: I64) -> I64 { stream_clone(handle) }
 #Export(c) fn jet_rt_handle_field_jet_cursor_buf(handle: I64, output: I64) {
-    // G1 field projection is a borrowed read/clone-only E4 stack header, not an
-    // owner. The caller must neither grow nor drop this temporary view.
+    // Lends a read-only view (data, len, cap) with no owner word of its own:
+    // the caller must neither grow, clone nor drop it; copy the bytes to own them.
     rt_text_store(output, rt_text_data(handle))
     rt_text_store(wrapping(output + I64{8}), rt_text_len(handle))
     rt_text_store(wrapping(output + I64{16}), rt_text_word(wrapping(handle + I64{16})))

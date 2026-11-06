@@ -8,7 +8,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 typedef intptr_t W;
-typedef struct { char *data; W length, capacity; } Text;
+typedef struct { char *data; W length, capacity, cache; } Text;
+_Static_assert(sizeof(Text)==32,"Text body: data, length, capacity, cache");
 typedef struct { W length, capacity; void *data; } List;
 typedef struct { Text *function, *file; W line,column; Text *note; W count; Text *source; } Hop;
 typedef struct { Hop *origin; List hops; } Journey;
@@ -25,7 +26,6 @@ extern void jet_journey_reset(void);
 extern Journey *jet_journey_take_hops(void);
 extern void jet_journey_adopt(Journey *);
 extern void jet_rt_native_journey_drop(Journey *);
-extern Text *jet_journey_report(Text *);
 extern Text *jet_error_report(Err *);
 extern void jet_report_use_wire(void);
 extern void jet_entry_error_exit_jet(Err *);
@@ -92,7 +92,7 @@ static void live_environment(void) {
     jet_rt_logical_env_unset(no);
     assert(!jet_rt_logical_env_set(force,empty));
     assert(fixture_journey_auto_color_raw(false));
-    char invalid[]={ (char)0xff }; Text os_bytes={invalid,1,0};
+    char invalid[]={ (char)0xff }; Text os_bytes={invalid,1,0,0};
     assert(!jet_rt_logical_env_set(no,&os_bytes));
     assert(!fixture_journey_auto_color_raw(false));
     assert(jet_rt_logical_env_unset(no)==1);
@@ -129,16 +129,17 @@ int main(int argc,char **argv) {
     assert(parent && parent->origin->line==4 && !jet_journey_take_hops());
     plant("discard.jet","discard",1);
     jet_journey_adopt(parent); // TAKES carry and discards handled origin
-    Text *root=text("Error: failed\n\n");
-    equal(jet_journey_report(root),"Error: failed\n  failed here: parent (parent.jet:4)\n");
-    jet_rt_string_drop(root);
+    Text *root=text("failed\n\n");
+    Err *rooted=jet_err_from_message(root); jet_rt_string_drop(root);
+    equal(jet_error_report(rooted),"Error: failed\n  failed here: parent (parent.jet:4)\n");
+    jet_rt_handle_drop_jet_err(rooted);
     assert(!jet_journey_take_hops());
     plant("handled.jet","handled",2); jet_journey_reset();
     Journey *empty=jet_journey_take_hops(); assert(empty && !empty->origin && !empty->hops.length);
     jet_rt_native_journey_drop(empty);
     assert(jet_rt_program_allocator_fact(2)==baseline);
     jet_rt_program_allocator_restore(mode,cap);
-    entry(0,0,"Error: failed\n"); entry(1,0,"Error: failed\n"); entry(2,0,"failed\n");
+    entry(0,0,"Error: failed\n"); entry(1,0,"Error: failed\n"); entry(2,0,"Error: failed\n");
     entry(2,1,"{\"schema\":\"jet.err/v1\",\"message\":\"failed\",\"code\":null,\"cause\":null}\n");
     live_environment();
     puts("Journey TLS: isolated threads, destructor, take/adopt/reset, ledger balance, entry status1 bytes");
