@@ -311,7 +311,8 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("retired selector forms do not fall back to canonical parsers") {
-    loop raw in [String]{"#auto omp@releases", "omp#v18.0.4@releases"} {
+    refs :: [String]{"#auto omp@releases", "omp#v18.0.4@releases"}
+    loop raw in refs {
         assert_eq(pkg_test_ref_error(raw), RefError.Malformed(raw))
         assert_eq(pkg_test_provider_ref_error(raw), RefError.Malformed(raw))
     }
