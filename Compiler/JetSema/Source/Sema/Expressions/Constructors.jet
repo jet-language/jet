@@ -1268,7 +1268,6 @@ fn sema_expression_typed_literal_printable(ty: Type, environment: SemaScopeEnvir
         }
         .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Measure(_) -> return false
         .Named(name) -> {
-            if name == "Unit" -> return true
             if program.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None -> return true
             loop row in sema_scope_checked_type_name_rows(environment, program, name) {
                 if program.checked_types[row].single_use -> return false

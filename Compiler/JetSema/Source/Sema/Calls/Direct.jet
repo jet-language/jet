@@ -517,11 +517,11 @@ fn sema_call_ambient_record_io(api: String, result_type: Type, span: Span, envir
     }, &diagnostics)
 }
 
-// Rust `is_printable || is_displayable`, plus Unit and Never.
+// Rust `is_printable || is_displayable`, plus `Never`. Rust's `is_unit_type`
+// there is a measurement-unit family (sema_expression_displayable), so the
+// `Unit` value of a function without `->` has no display.
 fn sema_call_ambient_printable(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if ty == .Named(name) {
-        if name == "Unit" || name == "Never" -> return true
-    }
+    if ty == (Type.Named{name: "Never"}) -> return true
     sema_expression_typed_literal_printable(ty, environment, program) || sema_expression_displayable(ty, environment, program)
 }
 

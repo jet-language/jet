@@ -1177,7 +1177,7 @@ fn sema_expression_displayable(ty: Type, environment: SemaScopeEnvironment, prog
     if ty == {
         .Named(name) -> {
             if program.registration_graph == None -> return true
-            if sema_call_reflection_leaf_name(name) == "Unit" || sema_call_reflection_named_displayable(name, ty, environment, program) -> return true
+            if sema_call_reflection_named_displayable(name, ty, environment, program) -> return true
             return sema_expr_unit_fact(ty, environment, program) != None || sema_expression_interpolation_derived(ty, environment, program)
         }
         .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> return sema_expression_displayable(inner, environment, program)

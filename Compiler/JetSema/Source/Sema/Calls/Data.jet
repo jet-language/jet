@@ -1305,6 +1305,48 @@ fn sema_data_is_db_decode(target: SemaCallDirectTarget, environment: SemaScopeEn
     target.symbol.name == "decode" && sema_call_core_module_identity(environment, program, "core.db") == (Val(target.symbol.module_name))
 }
 
+// `csv.to_string(rows)` takes explicit row arrays, typed records, or the
+// row-array `Dyn` tree `csv.parse` returns (Docs/spec/reference/core-library.md
+// `csv.to_string`); any other Encode value is E0112 (Rust `core_call` csv
+// `to_string`). The checked call carries the inferred `T` of `rows`.
+fn sema_data_csv_check_rows(args: [CallArg], checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if args.len() != 1 -> return true
+    rows :: if checked.kind == {
+        .Call(_, inferred, _) -> {
+            if inferred.len() != 1 -> return true
+            inferred[0]
+        }
+        else -> { return true }
+    }
+    if sema_data_csv_rows_admissible(rows, environment, program) -> return true
+    &diagnostics.push(sema_error("E0112", expr_source_span(args[0].expr), "`to_string` wants [[String]] rows or a list of #Codable records for argument 1, but this is {sema_type_show(rows)}", "CSV output accepts string rows or typed records", "use [[String]] rows or a list of #Codable records here"))
+    false
+}
+
+fn sema_data_csv_rows_admissible(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    rows :: sema_expr_unwrap_tag(ty)
+    if rows == {
+        .List(element) | .FixedList(element, _) -> {
+            row :: sema_expr_unwrap_tag(element)
+            if row == {
+                .List(_) | .FixedList(_, _) -> return true
+                .Named(name) -> return sema_data_csv_generic_param(name, environment) || sema_http_route_find_struct(environment, program, row, environment.module_identity) != None
+                .Apply(_, _) -> return sema_http_route_find_struct(environment, program, row, environment.module_identity) != None
+                else -> return false
+            }
+        }
+        .Named(name) -> return sema_call_reflection_leaf_name(name) == "Dyn" || sema_data_csv_generic_param(name, environment)
+        else -> return false
+    }
+}
+
+fn sema_data_csv_generic_param(name: String, environment: SemaScopeEnvironment) -> Bool Never! {
+    loop param in environment.generic_params {
+        if param.name == name -> return true
+    }
+    false
+}
+
 // `db.decode<T>(row)` passes the column renames of T's fields after the row
 // (sema_data_db_names).
 fn sema_data_db_decode_args(args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [CallArg]? {
