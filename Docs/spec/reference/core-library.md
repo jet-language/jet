@@ -3177,7 +3177,7 @@ fn run() {
 | `sum(values)` / `mean(values)` | `Float !DataError` | Reduce finite numeric values. |
 | `min(values)` / `max(values)` | `Float !DataError` | Select finite numeric extrema. |
 | `variance(values)` / `stddev(values)` | `Float !DataError` | Compute finite numeric dispersion. |
-| `median(values)` / `quantile(values, q)` | `Float !DataError` | Compute bounded order statistics. |
+| `median(values)` / `quantile(values, q)` | `Float !DataError` | Compute bounded order statistics by worst-case linear rank selection on a copy; the caller's list is unchanged. |
 | `rolling_mean(values, window)` | `[Float] !DataError` | Compute a bounded rolling mean. |
 | `query(rows)` | `Query<T>` | Start a deterministic query plan. |
 | `inner_join(left, right, left -> key, right -> key)` | `[DataJoin<T, U>] !DataError` | Preserve duplicate matches. |

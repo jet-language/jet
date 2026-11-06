@@ -2032,15 +2032,23 @@ fn quantile(values: [Float], q: Float) -> Float DataError! {
     loop value in values {
         if nonfinite(value) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "quantile"))
     }
-    sorted := sort_floats(values)
-    pos := q * Float{sorted.len() - 1}
+    work := [Float]{}
+    loop value in values -> &work.push(value)
+    pos := q * Float{work.len() - 1}
     lo := Int.from_float(pos) ?? panic("quantile position must be finite")
     hi := lo
     if (Float{lo}) < pos -> hi = lo + 1
-    if hi >= sorted.len() -> hi = sorted.len() - 1
-    if lo == hi -> return Ok(normalize_zero(sorted[lo]))
+    if hi >= work.len() -> hi = work.len() - 1
+    low :: select_rank(&work, 0, work.len(), lo)
+    if lo == hi -> return Ok(normalize_zero(low))
+    // Selection leaves every value after rank `lo` at or above it, so the
+    // next rank is their minimum.
+    high := work[hi]
+    loop index in hi..<work.len() {
+        if work[index] < high -> high = work[index]
+    }
     frac := pos - Float{lo}
-    result := sorted[lo] * (Float{1.0} - frac) + sorted[hi] * frac
+    result := low * (Float{1.0} - frac) + high * frac
     if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while interpolating quantile", "quantile"))
     Ok(normalize_zero(result))
 }
@@ -2645,14 +2653,105 @@ fn snapshot_from_rows<T>(rows: [T]) -> DataSnapshot<[T]> Never! {
     }
 }
 
-// Callers pass finite values (quantile refuses the rest), where list sort's
-// total order differs from `<` only between -0.0 and 0.0, which the callers
-// normalize: the native O(n log n) merge sort gives the same results.
-fn sort_floats(values: [Float]) -> [Float] Never! {
-    out := [Float]{}
-    loop value in values -> &out.push(value)
-    &out.sort()
-    out
+// Rank selection over values[lo..<hi]: the value at index `rank` of their
+// sorted order, in worst-case linear time (the pivot is the median of the
+// medians of five). Callers pass finite values, where `<` is a total order up
+// to -0.0 and 0.0, which the callers normalize. On return every value after
+// `rank` in the range is at or above the answer.
+fn select_rank(values: &[Float], lo: Int, hi: Int, rank: Int) -> Float Never! {
+    start := lo
+    end := hi
+    loop {
+        if end - start <= 5 {
+            sort_float_range(&values, start, end)
+            return values[rank]
+        }
+        pivot :: median_of_medians(&values, start, end)
+        // [start, less) < pivot, [less, more) == pivot, [more, end) > pivot.
+        less := start
+        index := start
+        more := end
+        loop index < more {
+            value :: values[index]
+            if value < pivot {
+                values[index] = values[less]
+                values[less] = value
+                less = less + 1
+                index = index + 1
+            } else if pivot < value {
+                more = more - 1
+                values[index] = values[more]
+                values[more] = value
+            } else {
+                index = index + 1
+            }
+        }
+        if rank < less {
+            end = less
+        } else if rank >= more {
+            start = more
+        } else {
+            return pivot
+        }
+    }
+}
+
+// Gathers the median of each group of five at the front of the range and
+// selects the median of those medians.
+fn median_of_medians(values: &[Float], lo: Int, hi: Int) -> Float Never! {
+    count := 0
+    start := lo
+    loop start < hi {
+        end := start + 5
+        if end > hi -> end = hi
+        sort_float_range(&values, start, end)
+        middle :: start + (end - start - 1) /% 2
+        median :: values[middle]
+        values[middle] = values[lo + count]
+        values[lo + count] = median
+        count = count + 1
+        start = end
+    }
+    select_rank(&values, lo, lo + count, lo + (count - 1) /% 2)
+}
+
+// Insertion sort of a range of at most five values.
+fn sort_float_range(values: &[Float], lo: Int, hi: Int) Never! {
+    loop i in lo + 1..<hi {
+        j := i
+        loop j > lo {
+            if !(values[j] < values[j - 1]) -> break
+            current :: values[j]
+            values[j] = values[j - 1]
+            values[j - 1] = current
+            j = j - 1
+        }
+    }
+}
+
+#Test("rank selection matches the sorted order at every rank") {
+    cases := [[Float]]{
+        [Float]{3.0},
+        [Float]{2.0, 1.0},
+        [Float]{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0},
+        [Float]{13.0, 12.0, 11.0, 10.0, 9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0},
+        [Float]{4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0},
+    }
+    mixed := [Float]{}
+    seed := 7
+    loop index in 0..<61 {
+        seed = (seed * 1103515245 + 12345 + index) %% 2147483648
+        &mixed.push(Float{seed %% 17} - Float{8.0})
+    }
+    &cases.push(mixed)
+    loop values in cases {
+        sorted := values.copy()
+        &sorted.sort()
+        loop rank in 0..<values.len() {
+            work := values.copy()
+            assert_eq(select_rank(&work, 0, work.len(), rank), sorted[rank])
+        }
+    }
 }
 
 fn render_bar_text(labels: [String], values: [Float]) -> String Never! {
